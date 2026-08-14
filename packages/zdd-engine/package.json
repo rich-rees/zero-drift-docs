@@ -1,0 +1,36 @@
+{
+  "name": "@rich-rees/zdd-engine",
+  "version": "0.2.0",
+  "description": "Zero-Drift Docs engine: derive codebase metadata, render the agent + human indexes, and run the drift checks — deterministic, stdlib-only, no LLM. Consumed by both CI (npx, no Claude Code) and the zdd Claude Code plugin.",
+  "type": "module",
+  "bin": {
+    "zdd-engine": "bin/zdd-engine.mjs"
+  },
+  "files": [
+    "bin",
+    "src",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\""
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rich-rees/zero-drift-docs.git",
+    "directory": "packages/zdd-engine"
+  },
+  "homepage": "https://github.com/rich-rees/zero-drift-docs",
+  "author": "Rich Rees (https://github.com/rich-rees)",
+  "license": "MIT",
+  "keywords": [
+    "documentation",
+    "zero-drift",
+    "adr",
+    "glossary",
+    "agent-index",
+    "claude-code"
+  ]
+}
