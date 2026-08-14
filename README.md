@@ -4,9 +4,12 @@ A documentation architecture for repos built by **human + agent pairs**. ZDD kee
 seven documentation artifacts *at most one PR behind the code* — and makes drift in
 the machine-generated ones **un-mergeable**.
 
-> **Status: v0.1, scaffold.** The plugin skeleton installs and the SessionStart
-> hook works. The deriver/renderer **engine** is not yet extracted into this repo
-> (the skills mark those steps `TODO(engine)`). Not production-ready yet.
+> **Status: v0.2, engine extracted.** The plugin installs, the SessionStart hook
+> works, and `packages/zdd-engine` holds the real deriver/renderer/checks with a
+> green test suite. The skills and CI template call the engine as
+> `npx @rich-rees/zdd-engine` — **npm publish is still pending**, so until that
+> lands the `npx` invocations resolve only from a local checkout/link. Not
+> public-ready yet.
 
 ## The idea in one screen
 
@@ -47,8 +50,9 @@ first thing you document with ZDD is the choice to use ZDD). Opt out if you'd
 rather start from real work.
 
 Contents: three skills (`bootstrap`, `orient`, `update`), a SessionStart hook, the
-engine + stack adapters *(coming)*, and templates (CLAUDE.md snippet, CI workflow,
-config schema, and the seed ADR-0001).
+engine + `nextjs-supabase` adapter (`packages/zdd-engine`, also the npm package
+`@rich-rees/zdd-engine`), and templates (CLAUDE.md snippet, CI workflow, config
+schema + example, and the seed ADR-0001).
 
 ## Install
 
@@ -92,19 +96,22 @@ plugins/zdd/
   templates/
     claude-md-snippet.md
     zdd.yml                             # CI check (the with-CI path)
-    config.schema.json
+    config.schema.json  config.example.json
     adr-0001-adopt-zero-drift-docs.md   # seeded as the adopter's first ADR
-packages/zdd-engine/                # deriver / renderer / checks + adapters (coming)
+packages/zdd-engine/                # deriver / renderer / checks + adapters + viewer
+  bin/zdd-engine.mjs                # the CLI (derive / render / lint / freshness)
+  src/  test/fixture/               # engine source + the miniature proving repo
 LICENSE   CONTRIBUTING.md   README.md
 ```
 
 ## Roadmap
 
-- [ ] Extract the engine (`derive` / `render` / checks + `nextjs-supabase` adapter)
-      from the PressPlay proving instance into `packages/zdd-engine`.
-- [ ] Decide engine distribution: npm package (single source for CI + skills) vs
-      bundled scripts.
-- [ ] Wire the skills' `TODO(engine)` steps to the real invocations.
+- [x] Extract the engine (`derive` / `render` / checks + `nextjs-supabase` adapter)
+      from the PressPlay proving instance into `packages/zdd-engine` *(v0.2)*.
+- [x] Decide engine distribution: **npm package** — `@rich-rees/zdd-engine` is the
+      single source both CI (npx, no Claude Code) and the skills call *(v0.2)*.
+- [x] Wire the skills' `TODO(engine)` steps to the real invocations *(v0.2)*.
+- [ ] Publish `@rich-rees/zdd-engine` to npm (the `npx` invocations go live).
 - [ ] Expose the graph as a first-class data-model artifact (nodes + edges JSON),
       then make **viewers pluggable** via a registry — so contributed visualizations
       ship as selectable options (the output-end counterpart to adapters).
@@ -118,10 +125,9 @@ sync), and marked with a matching git tag (`vX.Y.Z`).
 
 - **`0.x` — private, pre-release.** Building and proving against the PressPlay
   instance. The API (skill names, config shape, engine CLI) may change freely.
-  This scaffold is **`0.1.0`**.
-- **`1.0.0` — first public release.** Cut when the engine is extracted, the
-  `TODO(engine)` steps are wired, and a clean repo can adopt ZDD end-to-end.
-  From here, breaking changes bump the major.
+  `0.1.0` was the scaffold; **`0.2.0`** adds the extracted engine.
+- **`1.0.0` — first public release.** Cut when the engine is on npm and a clean
+  repo can adopt ZDD end-to-end. From here, breaking changes bump the major.
 
 ## Contributing
 

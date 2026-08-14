@@ -1,0 +1,29 @@
+{
+  "$comment": "Example zdd/config.json for a Next.js + Supabase repo. Values only — nothing here is required beyond 'adapter'; every path shown under 'paths' is already the default.",
+  "adapter": "nextjs-supabase",
+  "name": "My App",
+  "repoBase": "https://github.com/my-org/my-app/tree/main/",
+  "baseBranch": "main",
+  "adapterOptions": {
+    "appDir": "src/app",
+    "apiPrefix": "/api",
+    "middlewarePath": "src/middleware.ts",
+    "authPatterns": [
+      { "includes": "verifySignature", "auth": "hmac" },
+      { "includes": "CRON_SECRET", "auth": "cron-secret" }
+    ],
+    "migrationNamespaces": [
+      { "name": "db", "dir": "supabase/migrations" }
+    ],
+    "externalBuckets": [],
+    "refs": {
+      "roots": ["src"],
+      "extensions": [".ts", ".tsx"],
+      "excludeDirs": ["node_modules", ".next", "dist", "build", "__tests__", "coverage"],
+      "excludeSuffixes": [".test.ts", ".test.tsx", ".spec.ts", ".d.ts"]
+    }
+  },
+  "agentIndex": {
+    "summary": "One-line orientation for an agent landing in this repo."
+  }
+}
