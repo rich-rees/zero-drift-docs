@@ -13,15 +13,25 @@ redirect where it writes — into `zdd/`, not the upstream defaults.
 ## Step 0 — precondition check (do this first, always)
 
 This skill runs `mattpocock-skills:grilling` + `mattpocock-skills:domain-modeling`.
-Confirm they're on disk before anything else — glob for them:
+Confirm they're installed before anything else. Claude Code loads skills from more
+than one place, so **check all of them — a hit in any one is enough** (the
+`domain-modeling` skill is the one that must be present; it's the writer):
 
 ```
-~/.claude/plugins/cache/*/mattpocock-skills/*/skills/*/grilling/SKILL.md
+# 1. Plugin install (the usual route). Cached in your HOME dir regardless of
+#    whether the plugin is enabled globally or per-project — so global-vs-local
+#    enablement doesn't change this path.
 ~/.claude/plugins/cache/*/mattpocock-skills/*/skills/*/domain-modeling/SKILL.md
+
+# 2. User-scoped skill (pre-plugin / manual install).
+~/.claude/skills/domain-modeling/SKILL.md
+
+# 3. Project-scoped skill (vendored into this repo).
+<repo>/.claude/skills/domain-modeling/SKILL.md
 ```
 
-- **Both found** → continue to Step 1.
-- **Not found** → stop and tell the user, then do nothing else:
+- **Found in any location** → continue to Step 1.
+- **Found nowhere** → stop and tell the user, then do nothing else:
   > `zdd:grill` needs the **mattpocock-skills** plugin, which isn't installed.
   > Two ways forward: install it (`/plugin marketplace add …` then
   > `/plugin install mattpocock-skills@…`) and re-run me — or skip grilling
