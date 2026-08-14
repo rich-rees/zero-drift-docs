@@ -5,9 +5,6 @@ description: Adopt Zero-Drift Docs in a repo. Scaffold an empty zdd/ folder and 
 
 # zdd:bootstrap — day one in a repo
 
-> **Scaffold (v0.1).** The shape below is final. The deriver/renderer steps call
-> the ZDD engine, which is not yet extracted into this plugin — see the TODOs.
-
 Run once when a repo adopts ZDD. **Idempotent:** if `zdd/` already exists, detect
 what's present and offer to repair the missing pieces — never overwrite curated
 content.
@@ -26,19 +23,25 @@ fill up through normal work (the ritual). Scaffold:
    It's the adopter's *own* decision, not ZDD's design history (the plugin ships no
    ADRs of its own). Default on; opt out if you'd rather start from real work.
 3. **`zdd/map/`** — empty feature/service directories.
-4. **`zdd/config.json`** — from `templates/config.schema.json`; pick the adapter
-   (e.g. `nextjs-supabase`) and set the source paths for this repo.
+4. **`zdd/config.json`** — start from `templates/config.example.json`, validate
+   against `templates/config.schema.json`; pick the adapter (e.g.
+   `nextjs-supabase`) and set `name`, `repoBase`, `baseBranch`, and the
+   adapter's source paths for this repo.
 
 ## Then
 
-5. **Run the deriver** — produces `zdd/metadata/` from source.
-   `TODO(engine): npx @rich-rees/zdd-engine derive`
+5. **Run the deriver** — produces `zdd/metadata/` from source:
+   ```
+   npx -y @rich-rees/zdd-engine derive
+   ```
 6. **Mapping session** (the only LLM-heavy step, paid once) — scan the code with
    the glossary + ADRs loaded, propose feature groupings, and **ask** wherever
    evidence is thin. Answers route by kind: verdicts → ADRs, vocabulary →
    glossary, pure connective fact → the map.
-7. **Render** — `zdd/agent-index.md` + `zdd/human-index.html`.
-   `TODO(engine): npx @rich-rees/zdd-engine render`
+7. **Render** — the agent index, ADR index, and human index:
+   ```
+   npx -y @rich-rees/zdd-engine render
+   ```
 8. **Print the setup steps the adopter must do themselves** (no tool can):
    - Paste `templates/claude-md-snippet.md` into their CLAUDE.md.
    - (With CI) copy `templates/zdd.yml` into `.github/workflows/` and set branch

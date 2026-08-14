@@ -5,9 +5,6 @@ description: Load the ZDD artifacts for the area you are about to work in — re
 
 # zdd:orient — the declared load
 
-> **Scaffold (v0.1).** The procedure below is final; it uses only file reads, so
-> it works today without the engine. Nothing here is a stub.
-
 Run this before building or designing in an area. The SessionStart hook has
 already injected `zdd/agent-index.md`; this skill does the deeper, task-scoped
 read the index can't.

@@ -4,13 +4,28 @@
   "title": "ZDD repo config (zdd/config.json)",
   "description": "Per-repo ZDD configuration: which adapter to run, where the artifacts live, and adapter-specific source paths. Artifact CONTENTS never live here — this is the small, portable config tier only.",
   "type": "object",
-  "required": ["adapter", "paths"],
+  "required": ["adapter"],
   "additionalProperties": true,
   "properties": {
     "adapter": {
       "type": "string",
       "description": "Name of the deriver adapter to run (selected by name from the engine's static registry — never a path).",
       "examples": ["nextjs-supabase"]
+    },
+    "name": {
+      "type": "string",
+      "default": "Codebase",
+      "description": "Display name for the indexes (agent-index heading, human-index title)."
+    },
+    "repoBase": {
+      "type": "string",
+      "default": "",
+      "description": "GitHub tree URL prefix for source links in the human index, e.g. https://github.com/org/repo/tree/main/. Empty = relative links."
+    },
+    "baseBranch": {
+      "type": "string",
+      "default": "main",
+      "description": "The branch PRs merge into. Freshness diffs and the renderer's changed-set highlight key on origin/<baseBranch>."
     },
     "paths": {
       "type": "object",
@@ -23,13 +38,30 @@
         "metadataDir": { "type": "string", "default": "zdd/metadata" },
         "agentIndex": { "type": "string", "default": "zdd/agent-index.md" },
         "adrIndex": { "type": "string", "default": "zdd/adr-index.md" },
-        "humanIndex": { "type": "string", "default": "zdd/human-index.html" }
+        "humanIndex": { "type": "string", "default": "zdd/human-index.html" },
+        "bundleDir": {
+          "type": "string",
+          "default": "zdd",
+          "description": "The folder graph node ids are relative to — the zdd/ folder itself."
+        }
       }
     },
     "adapterOptions": {
       "type": "object",
-      "description": "Adapter-specific source configuration (shape depends on the chosen adapter). For nextjs-supabase: appDir, apiPrefix, middlewarePath, migrationNamespaces, etc.",
+      "description": "Adapter-specific source configuration (shape depends on the chosen adapter). For nextjs-supabase: appDir, apiPrefix, middlewarePath, authPatterns, migrationNamespaces, externalBuckets, refs, srcAliasRoot (where the tsconfig @/ alias points; default appDir's parent).",
       "additionalProperties": true
+    },
+    "render": {
+      "type": "object",
+      "description": "Renderer behaviour toggles.",
+      "additionalProperties": true,
+      "properties": {
+        "storeChanges": {
+          "type": "boolean",
+          "default": true,
+          "description": "Set false to render with no git dependency — drops the 'what just changed' highlight from the human index."
+        }
+      }
     },
     "agentIndex": {
       "type": "object",

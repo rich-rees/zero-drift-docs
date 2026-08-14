@@ -5,11 +5,6 @@ description: The Zero-Drift Docs PR-finish ritual. Curate the changed artifacts 
 
 # zdd:update — the PR-finish ritual
 
-> **Scaffold (v0.1).** Steps 1 and 4 are final. Steps 2–3 call the ZDD engine,
-> which is not yet extracted into this plugin — see the TODO. Until then, in a
-> repo still carrying the scripts in-tree, run `node zdd/scripts/derive.mjs` and
-> `node zdd/scripts/render.mjs` directly.
-
 Run this as the definition of done for every PR, in the session that did the
 work — it holds maximal context, and capturing at that moment is the whole trick.
 
@@ -22,10 +17,14 @@ work — it holds maximal context, and capturing at that moment is the whole tri
    - **Code comments** — new non-obvious constraints, at the code site. A gotcha
      spanning multiple sites becomes an ADR instead.
    - **Semantic map** — feature / edge / blessing changes.
-2. **Run the deriver.** Regenerates the codebase metadata from source.
-   `TODO(engine): invoke the bundled engine, e.g. npx @rich-rees/zdd-engine derive`
-3. **Run the renderer.** Rebuilds the agent index + human index.
-   `TODO(engine): npx @rich-rees/zdd-engine render`
+2. **Run the deriver.** Regenerates the codebase metadata from source:
+   ```
+   npx -y @rich-rees/zdd-engine derive
+   ```
+3. **Run the renderer.** Rebuilds the agent index, ADR index, and human index:
+   ```
+   npx -y @rich-rees/zdd-engine render
+   ```
 4. **Commit all of it in the PR.** Code and docs merge atomically; the doc delta
    is reviewed alongside the code delta.
 
