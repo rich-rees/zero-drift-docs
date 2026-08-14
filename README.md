@@ -94,6 +94,9 @@ packages/zdd-engine/                # deriver / renderer / checks + adapters (co
 - [ ] Decide engine distribution: npm package (single source for CI + skills) vs
       bundled scripts.
 - [ ] Wire the skills' `TODO(engine)` steps to the real invocations.
+- [ ] Expose the graph as a first-class data-model artifact (nodes + edges JSON),
+      then make **viewers pluggable** via a registry — so contributed visualizations
+      ship as selectable options (the output-end counterpart to adapters).
 - [ ] Conceptual reference doc (`spec.md`) for readers/contributors — repo-only,
       never installed into an adopter repo.
 
