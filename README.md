@@ -97,6 +97,18 @@ packages/zdd-engine/                # deriver / renderer / checks + adapters (co
 - [ ] Conceptual reference doc (`spec.md`) for readers/contributors — repo-only,
       never installed into an adopter repo.
 
+## Versioning
+
+Semver, tracked in `plugins/zdd/plugin.json` and the marketplace entry (kept in
+sync), and marked with a matching git tag (`vX.Y.Z`).
+
+- **`0.x` — private, pre-release.** Building and proving against the PressPlay
+  instance. The API (skill names, config shape, engine CLI) may change freely.
+  This scaffold is **`0.1.0`**.
+- **`1.0.0` — first public release.** Cut when the engine is extracted, the
+  `TODO(engine)` steps are wired, and a clean repo can adopt ZDD end-to-end.
+  From here, breaking changes bump the major.
+
 ## Licence
 
 MIT.
