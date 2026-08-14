@@ -109,6 +109,13 @@ sync), and marked with a matching git tag (`vX.Y.Z`).
   `TODO(engine)` steps are wired, and a clean repo can adopt ZDD end-to-end.
   From here, breaking changes bump the major.
 
+## Contributing
+
+Forks and pull requests welcome — the architecture is built for it. The prize
+contribution is a **new stack adapter** (FastAPI, Rails, Go…): the engine is
+generic, and an adapter is the only per-stack code. See
+[CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Licence
 
-MIT.
+MIT — see [LICENSE](LICENSE).
