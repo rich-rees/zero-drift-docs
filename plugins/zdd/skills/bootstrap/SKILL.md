@@ -19,10 +19,12 @@ fill up through normal work (the ritual). Scaffold:
 
 1. **`zdd/glossary.md`** — a header and no terms. (Offer to seed it via a
    glossary/grilling session — the one genuinely content-producing step.)
-2. **`zdd/adr/0001-adopt-zero-drift-docs.md`** — the adopter's *own* first
-   decision: "we adopt ZDD." A real record + a format example to copy. This is
-   the adopter's ADR corpus starting, not ZDD's design history — the plugin ships
-   no ADRs of its own. Opt-out if you'd rather start the corpus from real work.
+2. **`zdd/adr/0001-adopt-zero-drift-docs.md`** — copied from
+   `templates/adr-0001-adopt-zero-drift-docs.md` (fill in `<DATE>`). This is the
+   corpus's first entry *and* a worked example of the ADR format — self-
+   demonstrating: the first thing documented with ZDD is the decision to use ZDD.
+   It's the adopter's *own* decision, not ZDD's design history (the plugin ships no
+   ADRs of its own). Default on; opt out if you'd rather start from real work.
 3. **`zdd/map/`** — empty feature/service directories.
 4. **`zdd/config.json`** — from `templates/config.schema.json`; pick the adapter
    (e.g. `nextjs-supabase`) and set the source paths for this repo.
