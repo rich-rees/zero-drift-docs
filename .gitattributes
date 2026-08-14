@@ -1,0 +1,6 @@
+# Normalise line endings to LF across platforms — the plugin runs on macOS,
+# Linux and Windows, and the .mjs hook script must stay LF.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.gif binary

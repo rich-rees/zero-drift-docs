@@ -1,0 +1,48 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/rich-rees/zero-drift-docs/config.schema.json",
+  "title": "ZDD repo config (zdd/config.json)",
+  "description": "Per-repo ZDD configuration: which adapter to run, where the artifacts live, and adapter-specific source paths. Artifact CONTENTS never live here — this is the small, portable config tier only.",
+  "type": "object",
+  "required": ["adapter", "paths"],
+  "additionalProperties": true,
+  "properties": {
+    "adapter": {
+      "type": "string",
+      "description": "Name of the deriver adapter to run (selected by name from the engine's static registry — never a path).",
+      "examples": ["nextjs-supabase"]
+    },
+    "paths": {
+      "type": "object",
+      "description": "Where each artifact lives. Defaults are the self-contained zdd/* layout; point elsewhere only if adopting an existing glossary/ADR directory.",
+      "additionalProperties": false,
+      "properties": {
+        "glossary": { "type": "string", "default": "zdd/glossary.md" },
+        "adrDir": { "type": "string", "default": "zdd/adr" },
+        "mapDir": { "type": "string", "default": "zdd/map" },
+        "metadataDir": { "type": "string", "default": "zdd/metadata" },
+        "agentIndex": { "type": "string", "default": "zdd/agent-index.md" },
+        "adrIndex": { "type": "string", "default": "zdd/adr-index.md" },
+        "humanIndex": { "type": "string", "default": "zdd/human-index.html" }
+      }
+    },
+    "adapterOptions": {
+      "type": "object",
+      "description": "Adapter-specific source configuration (shape depends on the chosen adapter). For nextjs-supabase: appDir, apiPrefix, middlewarePath, migrationNamespaces, etc.",
+      "additionalProperties": true
+    },
+    "agentIndex": {
+      "type": "object",
+      "description": "Renderer options for the agent index (e.g. the blockquote summary line).",
+      "additionalProperties": true,
+      "properties": {
+        "summary": { "type": "string" }
+      }
+    },
+    "viewer": {
+      "type": "object",
+      "description": "Human-index viewer options (focus, auth hubs, non-area tags).",
+      "additionalProperties": true
+    }
+  }
+}

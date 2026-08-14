@@ -1,0 +1,18 @@
+{
+  "description": "ZDD — inject the repo's agent index into context at session start (read-on-open).",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/inject-agent-index.mjs"],
+            "timeout": 30,
+            "statusMessage": "Loading ZDD agent index"
+          }
+        ]
+      }
+    ]
+  }
+}
