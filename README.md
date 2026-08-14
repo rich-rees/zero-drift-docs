@@ -4,12 +4,13 @@ A documentation architecture for repos built by **human + agent pairs**. ZDD kee
 seven documentation artifacts *at most one PR behind the code* — and makes drift in
 the machine-generated ones **un-mergeable**.
 
-> **Status: v0.2, engine extracted.** The plugin installs, the SessionStart hook
-> works, and `packages/zdd-engine` holds the real deriver/renderer/checks with a
-> green test suite. The skills and CI template call the engine as
-> `npx @rich-rees/zdd-engine` — **npm publish is still pending**, so until that
-> lands the `npx` invocations resolve only from a local checkout/link. Not
-> public-ready yet.
+> **Status: v0.2, engine extracted and published.** The plugin installs, the
+> SessionStart hook works, and `packages/zdd-engine` holds the real
+> deriver/renderer/checks with a green test suite —
+> [published to npm](https://www.npmjs.com/package/@rich-rees/zdd-engine) as
+> `@rich-rees/zdd-engine`, so the skills' and CI template's `npx` invocations
+> resolve for real. Remaining before 1.0: the graph/viewers refactor and
+> `spec.md`.
 
 ## The idea in one screen
 
@@ -111,7 +112,8 @@ LICENSE   CONTRIBUTING.md   README.md
 - [x] Decide engine distribution: **npm package** — `@rich-rees/zdd-engine` is the
       single source both CI (npx, no Claude Code) and the skills call *(v0.2)*.
 - [x] Wire the skills' `TODO(engine)` steps to the real invocations *(v0.2)*.
-- [ ] Publish `@rich-rees/zdd-engine` to npm (the `npx` invocations go live).
+- [x] Publish `@rich-rees/zdd-engine` to npm — live at 0.2.0, verified end-to-end
+      via `npx` against the fixture *(2026-08-14)*.
 - [ ] Expose the graph as a first-class data-model artifact (nodes + edges JSON),
       then make **viewers pluggable** via a registry — so contributed visualizations
       ship as selectable options (the output-end counterpart to adapters).
@@ -126,8 +128,9 @@ sync), and marked with a matching git tag (`vX.Y.Z`).
 - **`0.x` — private, pre-release.** Building and proving against the PressPlay
   instance. The API (skill names, config shape, engine CLI) may change freely.
   `0.1.0` was the scaffold; **`0.2.0`** adds the extracted engine.
-- **`1.0.0` — first public release.** Cut when the engine is on npm and a clean
-  repo can adopt ZDD end-to-end. From here, breaking changes bump the major.
+- **`1.0.0` — first public release.** Cut when a clean repo can adopt ZDD
+  end-to-end (engine is on npm as of 0.2.0). From here, breaking changes bump
+  the major.
 
 ## Contributing
 
