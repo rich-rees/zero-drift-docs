@@ -1,0 +1,40 @@
+# Zero-Drift Docs — blocking CI check.
+#
+# Copy into the adopter repo's .github/workflows/ and require it in branch
+# protection (plus "require branches up to date before merge"). This is what
+# turns zero-drift from a habit into a gate: it re-runs the deriver and renderer
+# in --check mode and fails if the committed artifacts don't match source.
+#
+# No LLM in CI, by design — this job is deterministic and secret-free.
+#
+# TODO(engine): replace the placeholder invocation once the engine is published.
+# Until then, a repo carrying the scripts in-tree runs them directly:
+#   node zdd/scripts/derive.mjs --check
+#   node zdd/scripts/render.mjs --check
+
+name: zdd
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  zero-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Codebase metadata matches source
+        run: npx @rich-rees/zdd-engine derive --check
+        # placeholder → node zdd/scripts/derive.mjs --check
+
+      - name: Indexes match their inputs
+        run: npx @rich-rees/zdd-engine render --check
+        # placeholder → node zdd/scripts/render.mjs --check
+
+      - name: Store lints (supersession symmetry, etc.)
+        run: npx @rich-rees/zdd-engine lint
+        # placeholder → node zdd/scripts/lint-stores.mjs

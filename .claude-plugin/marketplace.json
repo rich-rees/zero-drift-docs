@@ -1,0 +1,15 @@
+{
+  "name": "zero-drift-docs",
+  "owner": {
+    "name": "Rich Rees",
+    "url": "https://github.com/rich-rees"
+  },
+  "plugins": [
+    {
+      "name": "zdd",
+      "source": "./plugins/zdd",
+      "description": "Zero-Drift Docs — seven documentation artifacts kept at most one PR behind the code.",
+      "version": "0.1.0"
+    }
+  ]
+}

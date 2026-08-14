@@ -1,0 +1,15 @@
+{
+  "name": "zdd",
+  "version": "0.1.0",
+  "displayName": "Zero-Drift Docs",
+  "description": "Zero-Drift Docs: keep a repo's seven documentation artifacts at most one PR behind the code — glossary, ADRs, comments, semantic map, and generated metadata + indexes.",
+  "author": {
+    "name": "Rich Rees",
+    "url": "https://github.com/rich-rees"
+  },
+  "homepage": "https://github.com/rich-rees/zero-drift-docs",
+  "repository": "https://github.com/rich-rees/zero-drift-docs",
+  "license": "MIT",
+  "keywords": ["documentation", "zero-drift", "adr", "glossary", "agent-index", "docs"],
+  "hooks": "./hooks/hooks.json"
+}
