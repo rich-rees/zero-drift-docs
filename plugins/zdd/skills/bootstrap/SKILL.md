@@ -14,8 +14,9 @@ content.
 Nothing is copied from any other repo. The adopter's artifacts start empty and
 fill up through normal work (the ritual). Scaffold:
 
-1. **`zdd/glossary.md`** — a header and no terms. (Offer to seed it via a
-   glossary/grilling session — the one genuinely content-producing step.)
+1. **`zdd/glossary.md`** — a header and no terms. (Offer to seed it — the one
+   genuinely content-producing step: `/zdd:grill` if the mattpocock-skills plugin
+   is installed, otherwise a plan-mode pass following [authoring.md](../authoring.md).)
 2. **`zdd/adr/0001-adopt-zero-drift-docs.md`** — copied from
    `templates/adr-0001-adopt-zero-drift-docs.md` (fill in `<DATE>`). This is the
    corpus's first entry *and* a worked example of the ADR format — self-
@@ -36,8 +37,8 @@ fill up through normal work (the ritual). Scaffold:
    ```
 6. **Mapping session** (the only LLM-heavy step, paid once) — scan the code with
    the glossary + ADRs loaded, propose feature groupings, and **ask** wherever
-   evidence is thin. Answers route by kind: verdicts → ADRs, vocabulary →
-   glossary, pure connective fact → the map.
+   evidence is thin. Answers route by kind, per [authoring.md](../authoring.md):
+   verdicts → ADRs, vocabulary → glossary, pure connective fact → the map.
 7. **Render** — the agent index, ADR index, and human index:
    ```
    npx -y @rich-rees/zdd-engine render
