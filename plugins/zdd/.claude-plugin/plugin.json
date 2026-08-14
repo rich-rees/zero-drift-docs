@@ -1,6 +1,6 @@
 {
   "name": "zdd",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "displayName": "Zero-Drift Docs",
   "description": "Zero-Drift Docs: keep a repo's seven documentation artifacts at most one PR behind the code — glossary, ADRs, comments, semantic map, and generated metadata + indexes.",
   "author": {

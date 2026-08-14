@@ -10,10 +10,12 @@ work — it holds maximal context, and capturing at that moment is the whole tri
 
 ## Steps
 
-1. **Diff → curated artifacts.** Walk the diff and update, at the site:
+1. **Diff → curated artifacts.** Walk the diff and update, at the site — follow
+   the discipline in [authoring.md](../authoring.md) (glossary/ADR formats, the
+   ADR-worthiness three-test, supersession both ways):
    - **Glossary** — new or sharpened vocabulary.
    - **ADRs** — decisions crystallised (written when decided, not after merge);
-     supersession points both ways.
+     offer them only when hard-to-reverse *and* surprising *and* a real trade-off.
    - **Code comments** — new non-obvious constraints, at the code site. A gotcha
      spanning multiple sites becomes an ADR instead.
    - **Semantic map** — feature / edge / blessing changes.
@@ -36,3 +38,7 @@ work — it holds maximal context, and capturing at that moment is the whole tri
   regenerate. The CI check (if wired) will fail otherwise.
 - Read back any working file (`TEMPSTATE.md`) and delete it before merge —
   durable residue moves to an artifact first.
+- The curated half is judgment CI can't gate — [authoring.md](../authoring.md) is
+  the discipline that stands in for a gate. Prefer to have driven the decisions out
+  with `/zdd:grill` (if the mattpocock-skills plugin is installed) or plan mode;
+  by PR-finish this step is capture, not fresh design.

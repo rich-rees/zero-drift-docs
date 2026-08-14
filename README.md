@@ -4,13 +4,14 @@ A documentation architecture for repos built by **human + agent pairs**. ZDD kee
 seven documentation artifacts *at most one PR behind the code* — and makes drift in
 the machine-generated ones **un-mergeable**.
 
-> **Status: v0.2, engine extracted and published.** The plugin installs, the
-> SessionStart hook works, and `packages/zdd-engine` holds the real
-> deriver/renderer/checks with a green test suite —
+> **Status: v0.3, self-sufficient with an optional grilling companion.** The
+> plugin installs, the SessionStart hook works, and `packages/zdd-engine` is
 > [published to npm](https://www.npmjs.com/package/@rich-rees/zdd-engine) as
-> `@rich-rees/zdd-engine`, so the skills' and CI template's `npx` invocations
-> resolve for real. Remaining before 1.0: the graph/viewers refactor and
-> `spec.md`.
+> `@rich-rees/zdd-engine` with a green test suite, so the `npx` invocations
+> resolve for real. v0.3 makes the curated half self-sufficient — the skills
+> carry their own authoring discipline — and adds an optional `zdd:grill`
+> that wraps Matt Pocock's grilling when his plugin is installed. Remaining
+> before 1.0: the graph/viewers refactor and `spec.md`.
 
 ## The idea in one screen
 
@@ -50,10 +51,25 @@ corpus's first entry *and* a worked example of the format (self-demonstrating: t
 first thing you document with ZDD is the choice to use ZDD). Opt out if you'd
 rather start from real work.
 
-Contents: three skills (`bootstrap`, `orient`, `update`), a SessionStart hook, the
-engine + `nextjs-supabase` adapter (`packages/zdd-engine`, also the npm package
-`@rich-rees/zdd-engine`), and templates (CLAUDE.md snippet, CI workflow, config
-schema + example, and the seed ADR-0001).
+Contents: four skills (`bootstrap`, `orient`, `update`, `grill`), a shared authoring
+guide, a SessionStart hook, the engine + `nextjs-supabase` adapter
+(`packages/zdd-engine`, also the npm package `@rich-rees/zdd-engine`), and templates
+(CLAUDE.md snippet, CI workflow, config schema + example, and the seed ADR-0001).
+
+### Producing decisions — ZDD stands alone, grilling makes it sharper
+
+ZDD *captures* decisions; how you *produce* them is your choice. The `update` and
+`bootstrap` skills carry their own compact authoring discipline
+([`skills/authoring.md`](plugins/zdd/skills/authoring.md) — the ADR-worthiness test,
+the glossary/ADR formats, capture-at-crystallization), so ZDD writes decent
+glossary entries and ADRs on its own, from plan-mode work or plain thinking.
+
+For a sharper way to drive decisions out, install
+[Matt Pocock's skills](https://github.com/mattpocock/skills) (`mattpocock-skills`)
+and use **`/zdd:grill`** — a relentless design interview that writes the glossary
+and ADRs as it goes, redirected into your `zdd/` folder. It self-checks: with the
+plugin absent it points you at the install or at plan-mode + `/zdd:update`, and ZDD
+keeps working. **Recommended, never required.**
 
 ## Install
 
@@ -93,7 +109,8 @@ plugins/zdd/
   .claude-plugin/plugin.json
   hooks/hooks.json                  # SessionStart → inject the agent index
   scripts/inject-agent-index.mjs
-  skills/{bootstrap,orient,update}/SKILL.md
+  skills/{bootstrap,orient,update,grill}/SKILL.md
+  skills/authoring.md               # shared curated-docs authoring discipline
   templates/
     claude-md-snippet.md
     zdd.yml                             # CI check (the with-CI path)
@@ -127,7 +144,9 @@ sync), and marked with a matching git tag (`vX.Y.Z`).
 
 - **`0.x` — private, pre-release.** Building and proving against the PressPlay
   instance. The API (skill names, config shape, engine CLI) may change freely.
-  `0.1.0` was the scaffold; **`0.2.0`** adds the extracted engine.
+  `0.1.0` was the scaffold; `0.2.0` added the extracted + published engine;
+  **`0.3.0`** makes the curated half self-sufficient and adds the optional
+  `zdd:grill` companion.
 - **`1.0.0` — first public release.** Cut when a clean repo can adopt ZDD
   end-to-end (engine is on npm as of 0.2.0). From here, breaking changes bump
   the major.
