@@ -35,14 +35,20 @@ auto-injected index) and **update before you finish** (`/zdd:update`).
 
 ## What the plugin is (and is not)
 
-It ships the **machine that makes `zdd/` folders** — never anyone's docs. No glossary
-terms, no ADRs, no map, no rationale for *why* ZDD is designed this way. An adopter
-consumes it as a finished tool; the "why" is not needed to use it and is not shipped.
-`/zdd:bootstrap` scaffolds a fresh, empty `zdd/` in your repo.
+It ships the **machine that makes `zdd/` folders** — never anyone's docs. It carries
+no glossary terms, no map, and **none of ZDD's own ADRs**: the rationale for *why*
+ZDD is designed this way is baked into the mechanism, not shipped as decisions. An
+adopter consumes it as a finished tool.
+
+`/zdd:bootstrap` scaffolds a fresh `zdd/` in your repo — empty curated artifacts,
+plus one seeded **ADR-0001** recording *your* decision to adopt ZDD. That's the
+corpus's first entry *and* a worked example of the format (self-demonstrating: the
+first thing you document with ZDD is the choice to use ZDD). Opt out if you'd
+rather start from real work.
 
 Contents: three skills (`bootstrap`, `orient`, `update`), a SessionStart hook, the
-engine + stack adapters *(coming)*, and templates (CI workflow, CLAUDE.md snippet,
-config schema).
+engine + stack adapters *(coming)*, and templates (CLAUDE.md snippet, CI workflow,
+config schema, and the seed ADR-0001).
 
 ## Install
 
@@ -83,8 +89,13 @@ plugins/zdd/
   hooks/hooks.json                  # SessionStart → inject the agent index
   scripts/inject-agent-index.mjs
   skills/{bootstrap,orient,update}/SKILL.md
-  templates/{claude-md-snippet.md, zdd.yml, config.schema.json}
+  templates/
+    claude-md-snippet.md
+    zdd.yml                             # CI check (the with-CI path)
+    config.schema.json
+    adr-0001-adopt-zero-drift-docs.md   # seeded as the adopter's first ADR
 packages/zdd-engine/                # deriver / renderer / checks + adapters (coming)
+LICENSE   CONTRIBUTING.md   README.md
 ```
 
 ## Roadmap
@@ -114,9 +125,10 @@ sync), and marked with a matching git tag (`vX.Y.Z`).
 
 ## Contributing
 
-Forks and pull requests welcome — the architecture is built for it. The prize
-contribution is a **new stack adapter** (FastAPI, Rails, Go…): the engine is
-generic, and an adapter is the only per-stack code. See
+Forks and pull requests welcome — the architecture is built for it, with a plug-in
+point at **both ends**: **adapters** feed data in (a new stack — FastAPI, Rails,
+Go…), and **viewers** render it out (a new visualization of the human index). The
+engine and the graph data model sit stable in the middle. See
 [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Licence
