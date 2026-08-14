@@ -1,0 +1,32 @@
+{
+  "name": "Fixture App",
+  "repoBase": "https://github.com/example/fixture/tree/main/",
+  "baseBranch": "main",
+  "adapter": "nextjs-supabase",
+  "render": {
+    "storeChanges": false
+  },
+  "adapterOptions": {
+    "appDir": "src/app",
+    "apiPrefix": "/api",
+    "middlewarePath": "src/middleware.ts",
+    "authPatterns": [
+      { "includes": "verifySignature", "auth": "hmac" }
+    ],
+    "migrationNamespaces": [
+      { "name": "db", "dir": "migrations" }
+    ],
+    "externalBuckets": [
+      { "name": "cdn-assets", "namespace": "db" }
+    ],
+    "refs": {
+      "roots": ["src"],
+      "extensions": [".ts", ".tsx"],
+      "excludeDirs": ["node_modules"],
+      "excludeSuffixes": [".test.ts"]
+    }
+  },
+  "agentIndex": {
+    "summary": "Fixture app — a tiny things catalogue used to prove the ZDD engine."
+  }
+}

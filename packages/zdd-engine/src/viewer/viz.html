@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>__BUNDLE_TITLE__</title>
+<script>
+(() => {
+  // Light is the design baseline and the default; dark is opt-in via the
+  // toggle (persisted per browser).
+  let t = null;
+  try { t = localStorage.getItem("wiki-theme"); } catch {}
+  document.documentElement.dataset.theme = t === "dark" ? "dark" : "light";
+})();
+</script>
+<script>/*__CYTOSCAPE_JS__*/</script>
+<script>/*__MARKED_JS__*/</script>
+<style>
+/*__VIZ_CSS__*/
+</style>
+</head>
+<body>
+<header>
+  <div class="title">
+    <strong id="bundle-name"></strong>
+    <span class="muted">codebase map</span>
+  </div>
+  <div class="controls">
+    <input id="search" type="search" placeholder="Search title / id / tag">
+    <select id="filter-type">
+      <option value="">All types</option>
+    </select>
+    <select id="view">
+      <option value="lanes">Architecture (lanes)</option>
+      <option value="columns">Area coupling (columns)</option>
+      <option value="explorer">Explorer (focus)</option>
+      <option value="force">Force (fallback)</option>
+    </select>
+    <label class="spacing-control" id="zoom-control"><span class="muted">Zoom</span>
+      <input id="zoom" type="range" min="0" max="1" step="0.01" value="0.5">
+    </label>
+    <button id="btn-glossary" title="zdd/glossary.md — the ubiquitous-language glossary">Glossary</button>
+    <button id="btn-adrs" title="zdd/adr/ — the decision record">ADRs</button>
+    <a class="hdr-link" href="harness.html" title="zdd/harness.html — the workflow harness map">Harness</a>
+    <a class="hdr-link" href="harness-flow.html" title="zdd/harness-flow.html — coding-agents harness flow diagram">Harness flow</a>
+    <button id="theme-toggle" title="Toggle dark mode">◐</button>
+    <button id="reset">Reset view</button>
+  </div>
+</header>
+
+<div id="subbar">
+  <span id="legend" hidden></span>
+  <span id="crumbs" hidden></span>
+</div>
+
+<main>
+  <aside id="index-panel" hidden>
+    <div id="index-list"></div>
+  </aside>
+  <section id="graph-wrap">
+    <div id="graph"></div>
+    <div id="overlay"></div>
+    <div id="tooltip" hidden></div>
+  </section>
+  <!-- Slide-out panels (DIO-149): hidden by default so the graph gets the full
+       viewport; node click / Glossary / ADRs slide one in from the right. -->
+  <section id="detail" class="slideout">
+    <button class="panel-close" id="detail-close" title="Close" aria-label="Close">✕</button>
+    <article id="detail-content" hidden>
+      <header class="detail-header">
+        <span class="type-chip" id="detail-type"></span>
+        <h1 id="detail-title"></h1>
+        <div class="muted" id="detail-id"></div>
+      </header>
+      <div id="detail-auth" hidden></div>
+      <dl class="frontmatter">
+        <dt>Description</dt><dd id="detail-description"></dd>
+        <dt>Resource</dt><dd id="detail-resource"></dd>
+        <dt>Tags</dt><dd id="detail-tags"></dd>
+      </dl>
+      <hr>
+      <div id="detail-body"></div>
+      <section id="detail-backlinks" hidden>
+        <h2>Cited by</h2>
+        <ul id="backlinks-list"></ul>
+      </section>
+    </article>
+  </section>
+  <section id="docs" class="slideout">
+    <button class="panel-close" id="docs-close" title="Close" aria-label="Close">✕</button>
+    <article>
+      <header class="detail-header">
+        <button id="docs-back" class="docs-back" hidden>← All ADRs</button>
+        <h1 id="docs-title"></h1>
+        <div class="muted" id="docs-source"></div>
+      </header>
+      <div id="docs-body" class="doc-md"></div>
+    </article>
+  </section>
+</main>
+
+<script>
+window.BUNDLE_NAME = __BUNDLE_NAME__;
+window.BUNDLE = __BUNDLE_DATA__;
+document.getElementById("bundle-name").textContent = window.BUNDLE_NAME;
+</script>
+<script>
+/*__VIZ_JS__*/
+</script>
+</body>
+</html>
