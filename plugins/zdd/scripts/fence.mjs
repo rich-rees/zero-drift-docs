@@ -60,8 +60,11 @@ function tokens(command) {
 }
 
 // The real path of a target that may not exist yet: realpath of the nearest
-// existing ancestor plus the remaining segments.
-function canonical(abs) {
+// existing ancestor plus the remaining segments. Only a path lexically inside
+// the checkout is ever probed — a UNC, device or remote path named in a
+// command is compared as text and never touched (CR-052).
+function canonical(abs, root) {
+  if (root && !(samePath(abs, root) || isUnder(abs, root))) return abs;
   let probe = abs;
   const rest = [];
   while (!existsSync(probe)) {
@@ -121,7 +124,7 @@ function main() {
   const hit = (candidate, base) => {
     // Compared by REAL path, so an alias link to the artifact or its parent
     // still matches (CR-004).
-    const abs = canonical(isAbsolute(candidate) ? resolve(candidate) : resolve(base, candidate));
+    const abs = canonical(isAbsolute(candidate) ? resolve(candidate) : resolve(base, candidate), root);
     for (const g of generated) {
       if (samePath(abs, g.abs) || (g.kind === "dir" && isUnder(abs, g.abs))) return g.rel;
     }

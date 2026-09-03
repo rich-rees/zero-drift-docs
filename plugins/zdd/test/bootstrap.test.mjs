@@ -123,7 +123,7 @@ test("detect: several migration dirs get distinct namespace names; symlinked dir
   try {
     symlinkSync(join(outside, "api"), join(repo, "linked"), "junction");
   } catch {
-    return t.diagnostic("symlink creation not permitted here — symlink case skipped");
+    return t.skip("symlink creation not permitted here");
   }
   const j2 = JSON.parse(bootstrap(repo, ["detect", "--json"]));
   assert.ok(!j2.proposals.some((p) => p.name === "fastapi"), "code behind a link is not inventoried");
@@ -265,7 +265,7 @@ test("apply on an empty repo with the greenfield stack: extractors at the future
 
 test("dedupe never collides with a raw name already in the set (CR-047), and a second stack entry for the same extractor adds its path (CR-042)", () => {
   const repo = fresh("dedupe");
-  bootstrap(repo, ["apply", `--answers=${answersFile("dd", { stack: ["FastAPI", { name: "FastAPI", path: "workers" }, { name: "Supabase", path: "db/a/migrations" }, { name: "Supabase", path: "db/b/migrations" }], apps: ["foo-2", "foo", "foo"] })}`]);
+  bootstrap(repo, ["apply", `--answers=${answersFile("dd", { stack: ["FastAPI", { name: "FastAPI", path: "workers" }, { name: "Supabase", path: "db/a/migrations" }, { name: "Supabase", path: "db/b/migrations" }], apps: ["foo", "foo", "foo-2"] })}`]);
   const config = JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8"));
   assert.deepEqual(config.extractorOptions.fastapi.roots, ["api", "workers"]);
   assert.deepEqual(config.extractorOptions.supabase.migrationNamespaces.map((m) => m.name), ["db", "db-2"]);
@@ -273,6 +273,8 @@ test("dedupe never collides with a raw name already in the set (CR-047), and a s
   const conflict = fresh("dedupe-conflict");
   assert.match(bootstrapFails(conflict, ["apply", `--answers=${answersFile("dc", { stack: [{ name: "Next.js", path: "app" }, { name: "Next.js", path: "src/app" }] })}`]), /different nextjs\.appDir/);
   assert.deepEqual(readdirSync(conflict), [], "nothing written");
+  bootstrap(conflict, ["apply", `--answers=${answersFile("dc2", { stack: [{ name: "Next.js", path: "src/app" }, { name: "Next.js", path: "src\\app/" }] })}`]);
+  assert.equal(JSON.parse(readFileSync(join(conflict, "zdd", "config.json"), "utf8")).extractorOptions.nextjs.appDir, "src/app", "equivalent spellings are one path");
 });
 
 test("stack entries may carry their future path; app names are YAML-safe and slugs never collide", () => {
