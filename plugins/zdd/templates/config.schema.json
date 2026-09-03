@@ -114,6 +114,7 @@
         "agentIndex": { "type": "string", "default": "zdd/agent-index.md" },
         "adrIndex": { "type": "string", "default": "zdd/adr-index.md" },
         "humanIndex": { "type": "string", "default": "zdd/human-index.html" },
+        "graph": { "type": "string", "default": "zdd/graph.json", "description": "The graph artifact (schema zdd-graph/1) the human index is rendered from — generated, checked by render --check." },
         "bundleDir": {
           "type": "string",
           "default": "zdd",
@@ -142,9 +143,21 @@
       }
     },
     "viewer": {
-      "type": "object",
-      "description": "Human-index viewer options (focus, auth hubs, non-area tags).",
-      "additionalProperties": true
+      "description": "Which viewer renders the human index from the graph artifact, and its options. A name (built-in: cytoscape, minimal) or an object whose `name` selects the viewer and whose other keys are its options — for cytoscape: defaultFocus, authHubs, nonAreaTags. An object without `name` (the pre-registry shape) means cytoscape.",
+      "oneOf": [
+        { "type": "string", "enum": ["cytoscape", "minimal"] },
+        {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "name": { "type": "string", "default": "cytoscape" },
+            "defaultFocus": { "type": "string", "description": "cytoscape: node id the explorer view opens on." },
+            "authHubs": { "type": "array", "items": { "type": "string" }, "description": "cytoscape: node ids whose edges to ordinary session-auth endpoints are stated, not drawn." },
+            "nonAreaTags": { "type": "array", "items": { "type": "string" }, "description": "Tags that are properties rather than product areas (also read by the renderer when a record inherits its area from a feature)." }
+          }
+        }
+      ],
+      "examples": ["minimal", { "name": "cytoscape", "defaultFocus": "map/features/things" }]
     }
   }
 }
