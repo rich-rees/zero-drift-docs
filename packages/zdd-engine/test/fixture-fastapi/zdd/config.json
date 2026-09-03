@@ -1,0 +1,14 @@
+{
+  "name": "Fixture FastAPI",
+  "baseBranch": "main",
+  "extractors": ["supabase", "fastapi"],
+  "render": { "storeChanges": false },
+  "extractorOptions": {
+    "supabase": {
+      "migrationNamespaces": [{ "name": "db", "dir": "supabase/migrations" }]
+    },
+    "fastapi": {
+      "roots": ["main.py", "api"]
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "kind": "surface",
+  "id": "surface:/_layout",
+  "title": "/_layout",
+  "description": "Root layout — nav shell around every page.",
+  "resource": [
+    "src/app/layout.tsx"
+  ],
+  "refs": [],
+  "facts": {
+    "file": "layout",
+    "routeGroups": [],
+    "dynamicSegments": []
+  }
+}
