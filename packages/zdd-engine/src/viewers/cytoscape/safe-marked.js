@@ -8,7 +8,9 @@
 //   - raw HTML (block or inline) is emitted escaped, as literal text;
 //   - links keep only http(s)/mailto, relative and in-page targets — any
 //     other scheme (javascript:, data:, vbscript:…) renders as plain text;
-//   - images are the same test, and a refused image renders as its alt text.
+//   - images never render: an <img> fires a network request the moment the
+//     panel opens, and the hosted page promises none (a tracking pixel in a
+//     docstring would beacon every reader — CR-006). The alt text stands in.
 // Plain script (no module syntax) so it inlines into viz.html and can be
 // loaded in a Node test with the vendored marked (test/viewers.test.mjs).
 const safeMarked = (() => {
@@ -39,11 +41,8 @@ const safeMarked = (() => {
         return `<a href="${escapeHtml(href)}"${attr(title)}>${text}</a>`;
       },
       image(token) {
-        const href = typeof token === "string" ? token : token.href;
-        const title = typeof token === "string" ? arguments[1] : token.title;
         const text = typeof token === "string" ? arguments[2] : token.text;
-        if (!safeHref(href)) return escapeHtml(text || "");
-        return `<img src="${escapeHtml(href)}" alt="${escapeHtml(text || "")}"${attr(title)}>`;
+        return escapeHtml(text || "");
       },
     },
   });
