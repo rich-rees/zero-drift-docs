@@ -13,8 +13,13 @@ can't.
 ## Step 0 — engine skew (always first)
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/scripts/check-skew.mjs"
+node "$PLUGIN/scripts/check-skew.mjs"
 ```
+
+`$PLUGIN` is this plugin's root — two directories up from this SKILL.md
+(`<plugin>/skills/load/SKILL.md` → `<plugin>/scripts/check-skew.mjs`); resolve
+it from the path you read this file from. (`$CLAUDE_PLUGIN_ROOT` /
+`$env:CLAUDE_PLUGIN_ROOT` holds the same directory when the host sets it.)
 
 It compares the plugin's version with every engine pin in the repo
 (`zdd/config.json` `engine`, the CI workflow, the pre-push hook). If a pin is
