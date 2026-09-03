@@ -34,5 +34,10 @@
   },
   "agentIndex": {
     "summary": "One-line orientation for an agent landing in this repo."
+  },
+  "viewer": {
+    "$comment": "Which viewer renders human-index.html from graph.json; omit for cytoscape with no options, or write \"viewer\": \"minimal\".",
+    "name": "cytoscape",
+    "nonAreaTags": []
   }
 }
