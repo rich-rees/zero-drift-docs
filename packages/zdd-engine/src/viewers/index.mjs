@@ -11,7 +11,9 @@
 // where `graph` is exactly what render wrote to graph.json, `docs` is
 // { glossary, adrs } (embedded store copies), `changed` is the latest-store-
 // change highlight ({ adrs, glossaryTerms }), and `options` is the adopter's
-// viewer object minus `name`. Output must be deterministic (byte-identical for
+// viewer object minus `name`, plus `nonAreaTags` (the resolved top-level list)
+// whenever it is non-empty — a viewer's area model must exclude the same tags
+// the graph's inheritance did. Output must be deterministic (byte-identical for
 // identical inputs) and safe to host: no network calls, no secrets, and
 // source-derived text never reaches innerHTML unsanitised (CR-007).
 

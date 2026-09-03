@@ -159,6 +159,11 @@ test("graph.json is viewer-independent: nonAreaTags shapes it from the top level
   // Same bytes whichever viewer renders it.
   assert.equal(graphWith({ ...base, nonAreaTags: ["react-flow"], viewer: "minimal" }), excluded);
   assert.equal(graphWith({ ...base, nonAreaTags: ["react-flow"], viewer: { name: "cytoscape", defaultFocus: "map/features/things" } }), excluded);
+  // …and the cytoscape viewer receives the same list for its own area model
+  // (verification CR-026), whether it came from the top level or the legacy key.
+  assert.deepEqual(readBundle(repo).viewer, { defaultFocus: "map/features/things", nonAreaTags: ["react-flow"] });
+  graphWith({ ...base, viewer: { nonAreaTags: ["react-flow"] } });
+  assert.deepEqual(readBundle(repo).viewer, { nonAreaTags: ["react-flow"] });
   rmSync(repo, { recursive: true, force: true });
 });
 
@@ -210,11 +215,16 @@ test("hostile inputs: the renderer refuses scheme-shaped resource and repoBase; 
   run(repo, ["derive"]);
   const things = join(repo, "zdd", "map", "features", "things.md");
   const original = readFileSync(things, "utf8");
-  writeFileSync(things, original.replace("resource: src/components", "resource: javascript:alert(1)"));
-  let out = spawnSync(process.execPath, [BIN, "render"], { cwd: repo, encoding: "utf8" });
-  assert.notEqual(out.status, 0);
-  assert.match(out.stderr, /map\/features\/things: resource 'javascript:alert\(1\)' must be repo-relative/);
+  // Scheme, and scheme hidden behind whitespace/control characters that a
+  // browser would strip (verification of CR-002).
+  for (const bad of ["javascript:alert(1)", "\"\\tjavascript:alert(1)\"", "\"java\\nscript:alert(1)\"", "\" javascript:alert(1)\""]) {
+    writeFileSync(things, original.replace("resource: src/components", `resource: ${bad}`));
+    const out = spawnSync(process.execPath, [BIN, "render"], { cwd: repo, encoding: "utf8" });
+    assert.notEqual(out.status, 0, bad);
+    assert.match(out.stderr, /map\/features\/things: resource .* must be repo-relative/, bad);
+  }
   writeFileSync(things, original);
+  let out;
   writeConfig(repo, { ...readConfig(repo), repoBase: "javascript:alert(1)//" });
   out = spawnSync(process.execPath, [BIN, "render"], { cwd: repo, encoding: "utf8" });
   assert.notEqual(out.status, 0);
@@ -227,6 +237,7 @@ test("hostile inputs: the renderer refuses scheme-shaped resource and repoBase; 
     graph: { schema: "zdd-graph/1", nodes: [
       { id: "map/x", layer: "map", type: "<b>T</b>", title: "<img src=x onerror=alert(1)>", description: "\"><script>alert(2)</script>", resource: "javascript:alert(3)", tags: [], body: "" },
       { id: "map/y", layer: "map", type: "Feature", title: "ok", description: "", resource: "src/a.ts", tags: [], body: "" },
+      { id: "map/z", layer: "map", type: "Feature", title: "ws", description: "", resource: "\tjavascript:alert(6)", tags: [], body: "" },
     ], edges: [{ source: "map/x", target: "map/y" }] },
     docs: { glossary: "", adrs: [] }, changed: { adrs: [], glossaryTerms: [] }, options: {},
     bundleName: "<svg onload=alert(4)>", repoBase: "javascript:alert(5)//",
