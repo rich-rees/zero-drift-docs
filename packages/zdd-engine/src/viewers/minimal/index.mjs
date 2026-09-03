@@ -8,8 +8,13 @@
 
 const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
+// The renderer refuses a non-http(s) repoBase and a scheme-shaped resource
+// before any viewer runs; this is the viewer's own belt (CR-002) — a link is
+// only emitted for a bare relative path under an http(s) or empty base.
 function href(repoBase, resource) {
-  if (!resource) return "";
+  if (!resource) return null;
+  if (!/^(https?:\/\/\S*)?$/i.test(repoBase)) return null;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(resource) || resource.startsWith("/")) return null;
   const isFile = /\.[A-Za-z0-9]+$/.test(resource.split("/").pop());
   const path = resource.replace(/\[/g, "%5B").replace(/\]/g, "%5D");
   return (isFile ? repoBase.replace("/tree/", "/blob/") : repoBase) + path;
@@ -31,7 +36,8 @@ export function render({ graph, bundleName, repoBase }) {
   for (const [type, nodes] of [...byType.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
     lines.push(`<h2>${esc(type)} <span class="muted">(${nodes.length})</span></h2>`, "<ul>");
     for (const n of [...nodes].sort((a, b) => (a.title < b.title ? -1 : a.title > b.title ? 1 : 0))) {
-      const link = n.resource ? ` — <a href="${esc(href(repoBase, n.resource))}">${esc(n.resource)}</a>` : "";
+      const target = href(repoBase, n.resource);
+      const link = n.resource ? (target === null ? ` — ${esc(n.resource)}` : ` — <a href="${esc(target)}">${esc(n.resource)}</a>`) : "";
       const desc = n.description ? ` <span class="muted">${esc(n.description)}</span>` : "";
       lines.push(`<li id="${esc(n.id)}"><b>${esc(n.title)}</b> <code>${esc(n.id)}</code>${link}${desc}</li>`);
     }

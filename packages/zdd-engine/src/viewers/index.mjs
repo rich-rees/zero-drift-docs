@@ -23,7 +23,8 @@ export const DEFAULT_VIEWER = "cytoscape";
 
 export async function loadViewer(name) {
   if (!Object.hasOwn(VIEWERS, name)) {
-    throw new Error(`Unknown viewer '${name}' (registered: ${Object.keys(VIEWERS).sort().join(", ")})`);
+    // JSON-quoted: the name is config-controlled and goes to a CI log (CR-013).
+    throw new Error(`Unknown viewer ${JSON.stringify(name)} (registered: ${Object.keys(VIEWERS).sort().join(", ")})`);
   }
   const mod = await import(VIEWERS[name]);
   if (typeof mod.render !== "function") throw new Error(`Viewer '${name}' exports no render()`);

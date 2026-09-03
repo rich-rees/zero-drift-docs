@@ -45,7 +45,9 @@ function toBundle(graph, docs, changed, options, repoBase) {
       resource: n.resource,
       tags: n.tags,
       ...(n.auth ? { auth: n.auth } : {}),
-      color: TYPE_PALETTE[n.type] ?? DEFAULT_NODE_COLOR,
+      // hasOwn: a map `type: __proto__` must fall to the default colour, not
+      // to Object.prototype (CR-010).
+      color: Object.hasOwn(TYPE_PALETTE, n.type) ? TYPE_PALETTE[n.type] : DEFAULT_NODE_COLOR,
       size: 30 + Math.min(60, Math.floor(n.body.length / 200)),
     },
   }));
