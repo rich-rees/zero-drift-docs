@@ -17,7 +17,57 @@
     },
     "extractorOptions": {
       "type": "object",
-      "description": "Per-extractor source configuration, keyed by extractor name. supabase: migrationNamespaces [{name, dir}], externalBuckets [{name, namespace}]. nextjs: appDir, apiPrefix, middlewarePath, authPatterns, refs {roots, extensions, excludeDirs, excludeSuffixes}, srcAliasRoot. fastapi: roots, excludeDirs, appVar. generic: none.",
+      "description": "Per-extractor source configuration, keyed by extractor name. Built-ins are described below; a local extractor's options are whatever its module documents. Every path is repo-relative POSIX — absolute paths and '..' are refused at runtime.",
+      "properties": {
+        "supabase": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "migrationNamespaces": {
+              "type": "array",
+              "description": "One entry per database: SQL migrations under `dir` (non-recursive) replay into namespace `name`.",
+              "items": { "type": "object", "required": ["name", "dir"], "additionalProperties": false, "properties": { "name": { "type": "string" }, "dir": { "type": "string" } } }
+            },
+            "externalBuckets": {
+              "type": "array",
+              "description": "Storage buckets that exist but were never created by a migration here.",
+              "items": { "type": "object", "required": ["name", "namespace"], "additionalProperties": false, "properties": { "name": { "type": "string" }, "namespace": { "type": "string" } } }
+            }
+          }
+        },
+        "nextjs": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "appDir": { "type": "string", "default": "src/app" },
+            "apiPrefix": { "type": "string", "default": "/api" },
+            "middlewarePath": { "type": "string", "description": "middleware.ts whose config.matcher decides session auth." },
+            "authPatterns": { "type": "array", "items": { "type": "object", "required": ["includes", "auth"], "properties": { "includes": { "type": "string" }, "auth": { "type": "string" } } } },
+            "srcAliasRoot": { "type": "string", "description": "Where the tsconfig @/ alias points; default appDir's parent." },
+            "refs": {
+              "type": "object",
+              "description": "Source files scanned for outbound references. Any omitted field takes its default.",
+              "additionalProperties": false,
+              "properties": {
+                "roots": { "type": "array", "items": { "type": "string" } },
+                "extensions": { "type": "array", "items": { "type": "string" }, "default": [".ts", ".tsx"] },
+                "excludeDirs": { "type": "array", "items": { "type": "string" }, "default": ["node_modules"] },
+                "excludeSuffixes": { "type": "array", "items": { "type": "string" }, "default": [".test.ts", ".test.tsx", ".d.ts"] }
+              }
+            }
+          }
+        },
+        "fastapi": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "roots": { "type": "array", "items": { "type": "string" }, "default": ["."], "description": "Files or directories scanned for .py handlers." },
+            "excludeDirs": { "type": "array", "items": { "type": "string" } },
+            "appVar": { "type": "string", "default": "app" }
+          }
+        },
+        "generic": { "type": "object", "additionalProperties": false }
+      },
       "additionalProperties": { "type": "object" }
     },
     "localExtractorDir": {
