@@ -20,21 +20,22 @@
 // cannot change the outputs. Repos that want no git dependency at all set
 // config `render.storeChanges: false`.
 
-import { readFileSync, writeFileSync, readdirSync, statSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync, lstatSync, realpathSync, existsSync } from "node:fs";
+import { insideRepo, repoRelative } from "./lib/paths.mjs";
 import { join, dirname, resolve, relative } from "node:path";
 import { execFileSync } from "node:child_process";
 import { parseFrontmatter } from "./lib/frontmatter.mjs";
 import { changedTerms, parseNameStatus } from "./lib/store-changes.mjs";
 import { refreshOriginBase } from "./lib/fetch-freshness.mjs";
 import { buildAdrIndex } from "./lib/adr-index.mjs";
-import { loadConfig, resolveViewer } from "./lib/config.mjs";
+import { loadConfig, resolveViewer, resolveNonAreaTags, validateRepoBase } from "./lib/config.mjs";
 import { loadViewer, DEFAULT_VIEWER } from "./viewers/index.mjs";
 
 // Per-run state, set by run() from the adopter's config: repo root, artifact
 // paths, the bundle folder node ids are relative to (the zdd/ folder), the
 // display name, the GitHub base URL for source links, and the base branch.
 let REPO, CONFIG, PATHS, BUNDLE, SEMANTIC, DERIVED, OUT_HTML, OUT_INDEX, OUT_ADR_INDEX, OUT_GRAPH;
-let BUNDLE_NAME, REPO_BASE, BASE_BRANCH, VIEWER;
+let BUNDLE_NAME, REPO_BASE, BASE_BRANCH, VIEWER, NON_AREA_TAGS;
 
 // Record kind -> the graph's display type. These names are the graph
 // vocabulary viewers key on (lanes, palettes, legends); map concepts bring
@@ -51,14 +52,33 @@ const KIND_DISPLAY = {
 
 const posixify = (p) => p.split(/[\\/]/).join("/");
 
+// Symlinks are skipped, never followed (lstat): a checked-in link named
+// `0001-x.md` pointing at a credentials file would otherwise be embedded in
+// the hosted page as an ADR, and a directory link to `.` would recurse until
+// the stack blew (CR-014 / CR-016). Symlinks inside an adopter's tree are
+// theirs to have; they are just not documentation.
 function walk(dir, ext, out = []) {
   if (!existsSync(dir)) return out;
   for (const name of readdirSync(dir).sort()) {
     const p = join(dir, name);
-    if (statSync(p).isDirectory()) walk(p, ext, out);
+    const st = lstatSync(p);
+    if (st.isSymbolicLink()) continue;
+    if (st.isDirectory()) walk(p, ext, out);
     else if (name.endsWith(ext)) out.push(p);
   }
   return out;
+}
+
+// Outputs are written through a real, in-repo parent and never onto a
+// symlink: a symlinked graph.json (or a symlinked zdd/ directory) would carry
+// the write anywhere the invoking user can reach (CR-015).
+function safeOutputPath(path) {
+  const parent = dirname(path);
+  if (!existsSync(parent)) throw new Error(`output directory ${parent} does not exist`);
+  const real = realpathSync(parent);
+  insideRepo(realpathSync(REPO), real, `output directory ${parent}`);
+  if (existsSync(path) && lstatSync(path).isSymbolicLink()) throw new Error(`refusing to write through symlink ${path}`);
+  return path;
 }
 
 // Frontmatter parsing lives in lib/frontmatter.mjs (CRLF-tolerant, DIO-148) —
@@ -282,6 +302,16 @@ function buildConcepts() {
       continue;
     }
     const nodeId = posixify(relative(BUNDLE, path)).replace(/\.md$/, "");
+    // A concept's resource is a repo path that viewers turn into a link —
+    // `javascript:…` or an absolute path is refused here, once, so no
+    // viewer has to know (CR-002).
+    if (parsed.frontmatter.resource) {
+      try {
+        repoRelative(String(parsed.frontmatter.resource), `${nodeId}: resource`);
+      } catch (e) {
+        problems.push(e.message);
+      }
+    }
     semantic.push({ ...parsed, nodeId, path });
   }
 
@@ -314,16 +344,20 @@ function buildConcepts() {
   // tag that is a product area (viewer.nonAreaTags excludes tech/property
   // tags like react-flow, DIO-149); inheriting an excluded tag would strand
   // the node in "Other".
-  // Read from the viewer options: it is the viewer's area model the tag
-  // feeds, so it lives with the viewer's other knobs rather than growing a
-  // top-level key of its own.
-  const NON_AREA = new Set(VIEWER.options.nonAreaTags ?? []);
+  // Top-level config, resolved in run(): the tag lands in graph.json, so it
+  // must not depend on which viewer is selected (CR-003).
+  const NON_AREA = new Set(NON_AREA_TAGS);
   const inheritedTag = (feature) =>
     feature.tags.find((t) => !NON_AREA.has(t)) ?? feature.tags[0];
-  // Unclaimed routes bucket by URL path — the first segment after whatever
-  // leading segments EVERY route in the bundle shares (a Next.js `/api`, a
-  // FastAPI `/v1`, or nothing). Stack-neutral by construction: no framework's
-  // prefix is named here (DIO-310; the old rule assumed `/api/<area>`).
+  // Unclaimed routes bucket by URL path — the first static segment after
+  // whatever leading segments EVERY route in the bundle shares (a Next.js
+  // `/api`, a FastAPI `/v1`, or nothing). Stack-neutral by construction: no
+  // framework's prefix is named here (DIO-310; the old rule assumed
+  // `/api/<area>`). Two guards keep the area an area (CR-004): the shared
+  // prefix never eats the shortest route whole, so `/jobs` + `/jobs/{id}`
+  // both bucket as `jobs`; and a dynamic segment (`{id}`, `[id]`, `*`) is
+  // never the answer — the nearest static segment before it is.
+  const isDynamic = (s) => /^[\[{]/.test(s) || s === "*";
   const routeSegs = derivedRecords
     .filter(({ record }) => record.kind === "route")
     .map(({ record }) => record.id.replace(/^route:/, "").split("/").filter(Boolean));
@@ -333,10 +367,13 @@ function buildConcepts() {
     while (i < commonRoute.length && i < segs.length && commonRoute[i] === segs[i]) i++;
     commonRoute = commonRoute.slice(0, i);
   }
+  const shortest = Math.min(...routeSegs.map((s) => s.length), Infinity);
+  if (commonRoute.length >= shortest) commonRoute = commonRoute.slice(0, Math.max(0, shortest - 1));
   const routeArea = (record) => {
     const segs = record.id.replace(/^route:/, "").split("/").filter(Boolean);
-    const own = segs.length > commonRoute.length ? segs.slice(commonRoute.length) : segs.slice(-1);
-    return own[0] ?? "root";
+    const own = segs.slice(commonRoute.length);
+    const first = own.find((s) => !isDynamic(s)) ?? [...segs].reverse().find((s) => !isDynamic(s));
+    return first ?? "root";
   };
   const fallbackTag = (record) => {
     if (record.kind === "route") return routeArea(record);
@@ -429,13 +466,16 @@ function buildGraph(concepts) {
     body: c.body,
   }));
   const edges = [];
-  const seen = new Set();
+  // Dedupe on the (source, target) pair itself — a joined-string key would
+  // let two distinct edges collide on ids that happen to contain the joiner,
+  // which bundle paths can (CR-005).
+  const seen = new Map();
   for (const c of concepts) {
     for (const target of c.linksTo) {
       if (target === c.id || !ids.has(target)) continue;
-      const key = `${c.id}__${target}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
+      if (!seen.has(c.id)) seen.set(c.id, new Set());
+      if (seen.get(c.id).has(target)) continue;
+      seen.get(c.id).add(target);
       edges.push({ source: c.id, target });
     }
   }
@@ -563,6 +603,18 @@ export async function run(args) {
     console.error(VIEWER.error);
     process.exit(1);
   }
+  const baseError = validateRepoBase(CONFIG.repoBase);
+  if (baseError) {
+    console.error(baseError);
+    process.exit(1);
+  }
+  const nonArea = resolveNonAreaTags(CONFIG, VIEWER.options);
+  if (nonArea.error) {
+    console.error(nonArea.error);
+    process.exit(1);
+  }
+  NON_AREA_TAGS = nonArea.tags;
+  for (const d of nonArea.diagnostics) console.error(d);
   // Refuse an unknown viewer before any store is read: the error names the
   // registry so the fix is a config edit, not a source dig.
   try {
@@ -598,6 +650,12 @@ export async function run(args) {
     }
     console.log(`renderings in sync (${counts.concepts} concepts, ${counts.edges} edges, ${counts.features} features, viewer ${VIEWER.name})`);
   } else {
+    try {
+      for (const [, path] of outputs) safeOutputPath(path);
+    } catch (e) {
+      console.error(e.message);
+      process.exit(1);
+    }
     for (const [, path, content] of outputs) writeFileSync(path, content);
     console.log(`Wrote ${counts.concepts} concepts, ${counts.edges} edges -> graph.json + human-index.html (viewer ${VIEWER.name}); ${counts.features} feature sections -> agent-index.md; ${counts.adrs} ADRs -> adr-index.md`);
   }
