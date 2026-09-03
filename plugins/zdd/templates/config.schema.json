@@ -78,7 +78,7 @@
     "adapter": {
       "type": "string",
       "deprecated": true,
-      "description": "DEPRECATED (pre-1.0): the single monolithic adapter. Still honoured — `nextjs-supabase` expands to extractors [supabase, nextjs] with adapterOptions split by key — but prints a deprecation note on every derive telling you how to migrate (a future `bootstrap --upgrade` will do it for you).",
+      "description": "DEPRECATED (pre-1.0): the single monolithic adapter. Still honoured — `nextjs-supabase` expands to extractors [supabase, nextjs] with adapterOptions split by key — but prints a deprecation note on every derive; `bootstrap --upgrade` migrates it for you.",
       "examples": ["nextjs-supabase"]
     },
     "adapterOptions": {
@@ -86,6 +86,21 @@
       "deprecated": true,
       "description": "DEPRECATED (pre-1.0): options for the single `adapter`. Use extractorOptions.",
       "additionalProperties": true
+    },
+    "engine": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+",
+      "description": "The @rich-rees/zdd-engine version this repo was bootstrapped for — written by bootstrap, rewritten by bootstrap --upgrade, compared against the plugin by load (skew warning). Mirrors the pin in the CI workflow / pre-push hook so a repo without CI still has one.",
+      "examples": ["0.4.0"]
+    },
+    "hooks": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The hook opt-ins recorded by bootstrap. The plugin's hooks.json registers both hooks for every repo and each script reads this block to decide whether to act, so opting in or out is a config change, not a host-settings change.",
+      "properties": {
+        "autoLoad": { "type": "boolean", "default": true, "description": "SessionStart: inject the agent index. Absent means on (pre-opt-in repos keep loading)." },
+        "fence": { "type": "boolean", "default": false, "description": "PreToolUse: refuse hand edits (Write/Edit and write-shaped shell) to the generated artifacts at their configured paths. Only an explicit true fences." }
+      }
     },
     "name": {
       "type": "string",

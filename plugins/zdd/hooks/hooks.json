@@ -1,5 +1,5 @@
 {
-  "description": "ZDD — inject the repo's agent index into context at session start (read-on-open).",
+  "description": "ZDD hooks. SessionStart injects the adopter repo's agent index (the auto-load); PreToolUse fences the generated artifacts against hand edits. Both are opt-ins recorded by `bootstrap` in the adopter's zdd/config.json (`hooks.autoLoad`, `hooks.fence`) and both are silent no-ops in a repo that has not opted in. Scripts are reached via ${CLAUDE_PLUGIN_ROOT} only — Codex sets the same variable — so this one file serves both hosts.",
   "hooks": {
     "SessionStart": [
       {
@@ -10,6 +10,20 @@
             "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/inject-agent-index.mjs"],
             "timeout": 30,
             "statusMessage": "Loading ZDD agent index"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/fence.mjs"],
+            "timeout": 10,
+            "statusMessage": "ZDD generated-artifact fence"
           }
         ]
       }
