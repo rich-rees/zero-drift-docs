@@ -88,12 +88,14 @@ test("fence: a symlinked artifact is dropped on its own, the rest stay fenced; a
     symlinkSync(join(scratch, "elsewhere.md"), join(linked, "zdd", "adr-index.md"), "file");
     symlinkSync(join(linked, "zdd"), join(linked, "alias"), "junction");
   } catch {
-    return t.diagnostic("symlink creation not permitted here — case skipped");
+    return t.skip("symlink creation not permitted here");
   }
   const r = (file_path) => runHook(FENCE, { tool_name: "Write", tool_input: { file_path } }, { projectDir: linked });
   blocked(r(join(linked, "zdd", "graph.json")), "the other artifacts stay fenced (CR-051)");
   blocked(r(join(linked, "alias", "graph.json")), "alias link to the artifact's parent (CR-004)");
-  assert.equal(r(join(linked, "zdd", "adr-index.md")).status, 0, "the symlinked one is not vouched for");
+  silent(r(join(linked, "zdd", "adr-index.md")), "the symlinked one is not vouched for");
+  // A path outside the checkout is compared as text, never probed (CR-052).
+  silent(runHook(FENCE, { tool_name: "Bash", tool_input: { command: "rm \\\\\\\\nowhere.invalid\\\\share\\\\zdd\\\\graph.json" } }, { projectDir: linked }), "UNC path");
 });
 
 // --- fence: shell ------------------------------------------------------------
@@ -200,7 +202,7 @@ test("session-start is silent with no config, malformed config, no index, an esc
   try {
     symlinkSync(join(scratch, "outside.md"), join(empty, "zdd", "agent-index.md"), "file");
   } catch {
-    return t.diagnostic("symlink creation not permitted here — symlink case skipped");
+    return t.skip("symlink creation not permitted here");
   }
   silent(runHook(INJECT, undefined, { projectDir: empty }), "symlinked index");
 });

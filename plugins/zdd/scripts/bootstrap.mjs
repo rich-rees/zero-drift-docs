@@ -144,10 +144,15 @@ function namespaceNames(dirs) {
 // Unique names, checked against the whole set: a raw `foo-2` sitting next to
 // two `foo`s cannot be collided into (review CR-047).
 function dedupe(names) {
-  const taken = new Set();
+  const taken = new Set(names); // every raw name is reserved before any suffix is minted
+  const seen = new Set();
   return names.map((n) => {
-    let candidate = n;
-    for (let i = 2; taken.has(candidate); i++) candidate = `${n}-${i}`;
+    if (!seen.has(n)) {
+      seen.add(n);
+      return n;
+    }
+    let candidate;
+    for (let i = 2; taken.has((candidate = `${n}-${i}`)); i++);
     taken.add(candidate);
     return candidate;
   });
@@ -254,7 +259,7 @@ function fromStack(stack = []) {
   const apps = [];
   for (const entry of stack) {
     const name = typeof entry === "string" ? entry : entry.name;
-    const path = typeof entry === "string" ? undefined : entry.path;
+    const path = typeof entry === "string" || entry.path === undefined ? undefined : repoRelative(entry.path, `stack entry ${name} path`);
     const rule = STACK_RULES.find((r) => r.match.test(name));
     if (!rule) {
       apps.push(name);
