@@ -42,7 +42,7 @@ version:
 
 | Key | Default | What it is |
 |---|---|---|
-| `extractors` | *(required)* | Extractors to run, composed per convention: `supabase`, `nextjs`, `fastapi`, `generic` (built-in), or a name from `localExtractorDir`. Names only, never paths |
+| `extractors` | *(required, unless legacy `adapter`)* | Extractors to run, composed per convention: `supabase`, `nextjs`, `fastapi`, `generic` (built-in), or a name from `localExtractorDir`. Names only, never paths |
 | `extractorOptions` | — | Per-extractor source layout, keyed by name — `supabase`: `migrationNamespaces`, `externalBuckets`; `nextjs`: `appDir`, `apiPrefix`, `middlewarePath`, `authPatterns`, `refs`, `srcAliasRoot`; `fastapi`: `roots`, `excludeDirs`, `appVar` |
 | `localExtractorDir` | — | Repo-relative folder of repo-local extractors (`<name>.mjs` or `<name>/index.mjs`) — the one place config may point at code |
 | `adapter` / `adapterOptions` | *(deprecated)* | The pre-1.0 single adapter; `nextjs-supabase` still expands to `[supabase, nextjs]` with a deprecation note |

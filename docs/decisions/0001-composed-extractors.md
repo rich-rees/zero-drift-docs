@@ -19,6 +19,10 @@ v0.3.1 shipped one monolithic adapter, `nextjs-supabase`, selected by a single `
 - Facts key orders merge per kind in config order, so two extractors emitting the same kind (both `nextjs` and `fastapi` emit `route`) share one filename space and one serializer. A record id or filename minted twice is a hard error, not a guess.
 - `route` matching is one matcher for every convention: `[x]`, `{x}`, `*` eat one segment; `[...x]`, `{x:path}` eat one or more. The most specific pattern wins, ties by id.
 - Engine version 0.2.0 → 0.3.0: additive config change, old config still valid, so a minor bump. Removing `adapter` would be the major.
+- An unqualified `?function:` / `?bucket:` / `?from:` name that several namespaces share is **dropped with a diagnostic**, never resolved first-wins; an extractor that knows the namespace qualifies the ref (`?function:db/save`). Table names shared across namespaces are an error outright, as before.
+- Every path in config — artifact paths, `localExtractorDir`, extractor path options, record `resource`s — must be repo-relative: no absolute path, no `..`. Refused up front rather than discovered as a read of a sibling checkout (review CR-003..006). Symlinks inside the repo are the adopter's own.
+- Missing configured roots are still "nothing to inventory" but always say so in diagnostics; the committed metadata is what makes a mistaken prune visible (as deletions in the PR diff), so the engine does not try to guess "missing" from "not yet".
+- Known ceilings, deliberately not engineered around at 0.3.0: route resolution is O(unresolved route refs × routes) and function-to-table refs are O(functions × tables × body length). Milliseconds at today's scale; index them when an adopter reports otherwise.
 - Deferred to foodbank's first use: `react-router` and `expo-router` extractors; FastAPI auth derivation (dependencies are not readable without import resolution — the map says who may call what).
 
 ## Rejected
