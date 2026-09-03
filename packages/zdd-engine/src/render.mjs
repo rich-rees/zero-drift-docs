@@ -5,7 +5,11 @@
 //   zdd-engine render --check   # exit 1 if any is stale
 //
 // Renders the semantic map + codebase metadata join into the machine products:
-//   - human index  — the hosted graph view
+//   - graph        — the join itself as a viewer-neutral artifact (graph.json,
+//                    schema zdd-graph/1): nodes = records + map concepts, edges
+//                    = refs + map links, every node carrying its resource
+//   - human index  — the graph rendered by a VIEWER picked from the registry
+//                    (src/viewers/index.mjs) by config `viewer`
 //   - agent index  — llms.txt-shaped, feature-first, budget ~2k tokens
 //   - ADR index    — one orientation line per ADR
 // Renderings carry no facts of their own and are never edited; if one looks
@@ -16,39 +20,26 @@
 // cannot change the outputs. Repos that want no git dependency at all set
 // config `render.storeChanges: false`.
 
-import { readFileSync, writeFileSync, readdirSync, statSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync, lstatSync, realpathSync, existsSync } from "node:fs";
+import { insideRepo, repoRelative } from "./lib/paths.mjs";
 import { join, dirname, resolve, relative } from "node:path";
-import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import { parseFrontmatter } from "./lib/frontmatter.mjs";
 import { changedTerms, parseNameStatus } from "./lib/store-changes.mjs";
 import { refreshOriginBase } from "./lib/fetch-freshness.mjs";
 import { buildAdrIndex } from "./lib/adr-index.mjs";
-import { loadConfig } from "./lib/config.mjs";
-
-const HERE = dirname(fileURLToPath(import.meta.url));
+import { loadConfig, resolveViewer, resolveNonAreaTags, validateRepoBase } from "./lib/config.mjs";
+import { loadViewer, DEFAULT_VIEWER } from "./viewers/index.mjs";
 
 // Per-run state, set by run() from the adopter's config: repo root, artifact
 // paths, the bundle folder node ids are relative to (the zdd/ folder), the
 // display name, the GitHub base URL for source links, and the base branch.
-let REPO, CONFIG, PATHS, BUNDLE, SEMANTIC, DERIVED, OUT_HTML, OUT_INDEX, OUT_ADR_INDEX;
-let BUNDLE_NAME, REPO_BASE, BASE_BRANCH;
+let REPO, CONFIG, PATHS, BUNDLE, SEMANTIC, DERIVED, OUT_HTML, OUT_INDEX, OUT_ADR_INDEX, OUT_GRAPH;
+let BUNDLE_NAME, REPO_BASE, BASE_BRANCH, VIEWER, NON_AREA_TAGS;
 
-// Palette keys are the v1 display-type names on purpose (legends and the
-// dark-mode fold in viz.js key on them). Module / Database Function /
-// Storage Bucket got their own entries under DIO-149 — they previously all
-// collapsed into the fallback grey and were indistinguishable across views.
-const TYPE_PALETTE = {
-  "API Endpoint": "#2a78d6",
-  "Table": "#008300",
-  "UI Surface": "#e87ba4",
-  "Feature": "#4a3aa7",
-  "External Service": "#eda100",
-  "Database Function": "#0d9488",
-  "Storage Bucket": "#b45309",
-  "Module": "#64748b",
-};
-const DEFAULT_NODE_COLOR = "#94a3b8";
+// Record kind -> the graph's display type. These names are the graph
+// vocabulary viewers key on (lanes, palettes, legends); map concepts bring
+// their own (`Feature`, `Application`, `External Service`, ...).
 const KIND_DISPLAY = {
   route: "API Endpoint",
   table: "Table",
@@ -61,14 +52,33 @@ const KIND_DISPLAY = {
 
 const posixify = (p) => p.split(/[\\/]/).join("/");
 
+// Symlinks are skipped, never followed (lstat): a checked-in link named
+// `0001-x.md` pointing at a credentials file would otherwise be embedded in
+// the hosted page as an ADR, and a directory link to `.` would recurse until
+// the stack blew (CR-014 / CR-016). Symlinks inside an adopter's tree are
+// theirs to have; they are just not documentation.
 function walk(dir, ext, out = []) {
   if (!existsSync(dir)) return out;
   for (const name of readdirSync(dir).sort()) {
     const p = join(dir, name);
-    if (statSync(p).isDirectory()) walk(p, ext, out);
+    const st = lstatSync(p);
+    if (st.isSymbolicLink()) continue;
+    if (st.isDirectory()) walk(p, ext, out);
     else if (name.endsWith(ext)) out.push(p);
   }
   return out;
+}
+
+// Outputs are written through a real, in-repo parent and never onto a
+// symlink: a symlinked graph.json (or a symlinked zdd/ directory) would carry
+// the write anywhere the invoking user can reach (CR-015).
+function safeOutputPath(path) {
+  const parent = dirname(path);
+  if (!existsSync(parent)) throw new Error(`output directory ${parent} does not exist`);
+  const real = realpathSync(parent);
+  insideRepo(realpathSync(REPO), real, `output directory ${parent}`);
+  if (existsSync(path) && lstatSync(path).isSymbolicLink()) throw new Error(`refusing to write through symlink ${path}`);
+  return path;
 }
 
 // Frontmatter parsing lives in lib/frontmatter.mjs (CRLF-tolerant, DIO-148) —
@@ -292,6 +302,16 @@ function buildConcepts() {
       continue;
     }
     const nodeId = posixify(relative(BUNDLE, path)).replace(/\.md$/, "");
+    // A concept's resource is a repo path that viewers turn into a link —
+    // `javascript:…` or an absolute path is refused here, once, so no
+    // viewer has to know (CR-002).
+    if (parsed.frontmatter.resource) {
+      try {
+        repoRelative(String(parsed.frontmatter.resource), `${nodeId}: resource`);
+      } catch (e) {
+        problems.push(e.message);
+      }
+    }
     semantic.push({ ...parsed, nodeId, path });
   }
 
@@ -300,6 +320,7 @@ function buildConcepts() {
     const fm = s.frontmatter;
     concepts.push({
       id: s.nodeId,
+      layer: "map",
       type: String(fm.type || "Unknown"),
       title: String(fm.title || s.nodeId),
       description: String(fm.description || ""),
@@ -323,11 +344,39 @@ function buildConcepts() {
   // tag that is a product area (viewer.nonAreaTags excludes tech/property
   // tags like react-flow, DIO-149); inheriting an excluded tag would strand
   // the node in "Other".
-  const NON_AREA = new Set(CONFIG.viewer?.nonAreaTags ?? []);
+  // Top-level config, resolved in run(): the tag lands in graph.json, so it
+  // must not depend on which viewer is selected (CR-003).
+  const NON_AREA = new Set(NON_AREA_TAGS);
   const inheritedTag = (feature) =>
     feature.tags.find((t) => !NON_AREA.has(t)) ?? feature.tags[0];
+  // Unclaimed routes bucket by URL path — the first static segment after
+  // whatever leading segments EVERY route in the bundle shares (a Next.js
+  // `/api`, a FastAPI `/v1`, or nothing). Stack-neutral by construction: no
+  // framework's prefix is named here (DIO-310; the old rule assumed
+  // `/api/<area>`). Two guards keep the area an area (CR-004): the shared
+  // prefix never eats the shortest route whole, so `/jobs` + `/jobs/{id}`
+  // both bucket as `jobs`; and a dynamic segment (`{id}`, `[id]`, `*`) is
+  // never the answer — the nearest static segment before it is.
+  const isDynamic = (s) => /^[\[{]/.test(s) || s === "*";
+  const routeSegs = derivedRecords
+    .filter(({ record }) => record.kind === "route")
+    .map(({ record }) => record.id.replace(/^route:/, "").split("/").filter(Boolean));
+  let commonRoute = routeSegs.length ? [...routeSegs[0]] : [];
+  for (const segs of routeSegs) {
+    let i = 0;
+    while (i < commonRoute.length && i < segs.length && commonRoute[i] === segs[i]) i++;
+    commonRoute = commonRoute.slice(0, i);
+  }
+  const shortest = Math.min(...routeSegs.map((s) => s.length), Infinity);
+  if (commonRoute.length >= shortest) commonRoute = commonRoute.slice(0, Math.max(0, shortest - 1));
+  const routeArea = (record) => {
+    const segs = record.id.replace(/^route:/, "").split("/").filter(Boolean);
+    const own = segs.slice(commonRoute.length);
+    const first = own.find((s) => !isDynamic(s)) ?? [...segs].reverse().find((s) => !isDynamic(s));
+    return first ?? "root";
+  };
   const fallbackTag = (record) => {
-    if (record.kind === "route") return record.id.split("/")[2] ?? "api";
+    if (record.kind === "route") return routeArea(record);
     if (record.kind === "surface") return record.title.split("/").filter(Boolean)[0] ?? "root";
     if (record.facts.namespace) return record.facts.namespace;
     return record.kind;
@@ -343,6 +392,8 @@ function buildConcepts() {
   const tagOfNode = new Map();
   const derivedConcept = ({ record, nodeId }, tags) => ({
     id: nodeId,
+    layer: "metadata",
+    recordId: record.id,
     type: KIND_DISPLAY[record.kind] ?? record.kind,
     title: record.title,
     description: record.description,
@@ -394,49 +445,41 @@ function buildConcepts() {
 }
 
 // ---------------------------------------------------------------------------
-// Rendering 1: the graph (viz.html)
+// Rendering 1: the graph artifact (graph.json, schema zdd-graph/1).
+// Viewer-neutral on purpose: no colours, sizes, layouts or embedded docs —
+// those are a viewer's business (src/viewers/). Node ids are bundle-relative
+// paths minus extension, so a node links back to the file it was built from;
+// `resource` links it to the source. Edges are deduped and self-refs dropped.
 // ---------------------------------------------------------------------------
-function buildGraph(concepts, docs) {
+function buildGraph(concepts) {
   const ids = new Set(concepts.map((c) => c.id));
   const nodes = concepts.map((c) => ({
-    data: {
-      id: c.id,
-      label: c.title,
-      type: c.type,
-      description: c.description,
-      resource: c.resource,
-      tags: c.tags,
-      ...(c.auth ? { auth: c.auth } : {}),
-      color: TYPE_PALETTE[c.type] ?? DEFAULT_NODE_COLOR,
-      size: 30 + Math.min(60, Math.floor(c.body.length / 200)),
-    },
+    id: c.id,
+    layer: c.layer,
+    ...(c.recordId ? { recordId: c.recordId } : {}),
+    type: c.type,
+    title: c.title,
+    description: c.description,
+    resource: c.resource,
+    tags: c.tags,
+    ...(c.auth ? { auth: c.auth } : {}),
+    body: c.body,
   }));
   const edges = [];
-  const seen = new Set();
+  // Dedupe on the (source, target) pair itself — a joined-string key would
+  // let two distinct edges collide on ids that happen to contain the joiner,
+  // which bundle paths can (CR-005).
+  const seen = new Map();
   for (const c of concepts) {
     for (const target of c.linksTo) {
       if (target === c.id || !ids.has(target)) continue;
-      const key = `${c.id}__${target}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      edges.push({ data: { id: key, source: c.id, target } });
+      if (!seen.has(c.id)) seen.set(c.id, new Set());
+      if (seen.get(c.id).has(target)) continue;
+      seen.get(c.id).add(target);
+      edges.push({ source: c.id, target });
     }
   }
-  const bodies = Object.fromEntries(concepts.map((c) => [c.id, c.body]));
-  const types = [...new Set(concepts.map((c) => c.type))].sort();
-  return {
-    nodes,
-    edges,
-    bodies,
-    types,
-    palette: TYPE_PALETTE,
-    repoBase: REPO_BASE,
-    viewer: CONFIG.viewer ?? {},
-    // Glossary + ADR corpus, embedded whole (ADR-0021): the hosted wiki's
-    // audience has no checkout, so stores 1–2 ride along as read-only
-    // projections. ~21KB + the ADRs, trivial next to the vendored libs.
-    docs,
-  };
+  return { schema: "zdd-graph/1", name: BUNDLE_NAME, repoBase: REPO_BASE, nodes, edges };
 }
 
 // ---------------------------------------------------------------------------
@@ -515,23 +558,23 @@ function buildAgentIndex(concepts, features, adrs) {
 }
 
 // ---------------------------------------------------------------------------
-const embed = (value) => JSON.stringify(value).replace(/</g, "\\u003c");
-const escapeHtml = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-
-function render() {
+async function render() {
   const { concepts, features } = buildConcepts();
   const docs = loadDocs();
-  docs.changed = computeStoreChanges(docs.glossary);
-  const graph = buildGraph(concepts, docs);
-  const viewer = join(HERE, "viewer");
-  const html = readFileSync(join(viewer, "viz.html"), "utf8")
-    .replace("/*__CYTOSCAPE_JS__*/", () => readFileSync(join(viewer, "vendor", "cytoscape.min.js"), "utf8"))
-    .replace("/*__MARKED_JS__*/", () => readFileSync(join(viewer, "vendor", "marked.min.js"), "utf8"))
-    .replace("/*__VIZ_CSS__*/", () => readFileSync(join(viewer, "viz.css"), "utf8"))
-    .replace("/*__VIZ_JS__*/", () => readFileSync(join(viewer, "viz.js"), "utf8"))
-    .replace("__BUNDLE_TITLE__", () => escapeHtml(`${BUNDLE_NAME} Wiki`))
-    .replace("__BUNDLE_NAME__", () => embed(BUNDLE_NAME))
-    .replace("__BUNDLE_DATA__", () => embed(graph));
+  const changed = computeStoreChanges(docs.glossary);
+  const graph = buildGraph(concepts);
+  const viewer = await loadViewer(VIEWER.name);
+  // The viewer gets the resolved nonAreaTags alongside its own options: its
+  // area model must exclude the same tags the graph's inheritance did, and
+  // the top-level key is otherwise invisible to it (verification CR-026).
+  // Only added when set, so a config without it keeps the v0.3.1 bytes.
+  const options = NON_AREA_TAGS.length ? { ...VIEWER.options, nonAreaTags: NON_AREA_TAGS } : VIEWER.options;
+  const html = viewer.render({ graph, docs, changed, options, bundleName: BUNDLE_NAME, repoBase: REPO_BASE });
+  if (typeof html !== "string") {
+    console.error(`Viewer '${VIEWER.name}' must return the human index as a string`);
+    process.exit(1);
+  }
+  const graphJson = JSON.stringify(graph, null, 2) + "\n";
   const agentIndex = buildAgentIndex(concepts, features, docs.adrs);
   // ADR index (DIO-180, ADR-0035): the always-load-whole orientation summary of
   // the ADR corpus — one line per ADR, so full bodies are drill-in-when-cited.
@@ -542,10 +585,10 @@ function render() {
   if (approxTokens > 2000) {
     console.error(`WARNING: agent index ≈${approxTokens} tokens (budget ~2000) — trim semantic feature links`);
   }
-  return { html, agentIndex, adrIndex, counts: { concepts: concepts.length, edges: graph.edges.length, features: features.length, adrs: docs.adrs.length } };
+  return { html, graphJson, agentIndex, adrIndex, counts: { concepts: concepts.length, edges: graph.edges.length, features: features.length, adrs: docs.adrs.length } };
 }
 
-export function run(args) {
+export async function run(args) {
   const resolved = loadConfig(args);
   REPO = resolved.repoRoot;
   CONFIG = resolved.config;
@@ -556,41 +599,69 @@ export function run(args) {
   OUT_HTML = resolve(REPO, PATHS.humanIndex);
   OUT_INDEX = resolve(REPO, PATHS.agentIndex);
   OUT_ADR_INDEX = resolve(REPO, PATHS.adrIndex);
+  OUT_GRAPH = resolve(REPO, PATHS.graph);
   BUNDLE_NAME = CONFIG.name ?? "Codebase";
   REPO_BASE = CONFIG.repoBase ?? "";
   BASE_BRANCH = resolved.baseBranch;
-
-  const { html, agentIndex, adrIndex, counts } = render();
-  const norm = (s) => s.replace(/\r\n/g, "\n");
-  if (args.includes("--check")) {
-  const stale = [];
-  try {
-    if (norm(readFileSync(OUT_HTML, "utf8")) !== norm(html)) stale.push("human-index.html");
-  } catch {
-    stale.push("human-index.html");
-  }
-  try {
-    if (norm(readFileSync(OUT_INDEX, "utf8")) !== norm(agentIndex)) stale.push("agent-index.md");
-  } catch {
-    stale.push("agent-index.md");
-  }
-  try {
-    if (norm(readFileSync(OUT_ADR_INDEX, "utf8")) !== norm(adrIndex)) stale.push("adr-index.md");
-  } catch {
-    stale.push("adr-index.md");
-  }
-  if (stale.length) {
-    console.error(
-      `${stale.join(" + ")} out of sync with semantic map + metadata inputs.\n` +
-        "Run `zdd-engine render` and commit the result.",
-    );
+  VIEWER = resolveViewer(CONFIG, DEFAULT_VIEWER);
+  if (VIEWER.error) {
+    console.error(VIEWER.error);
     process.exit(1);
   }
-  console.log(`renderings in sync (${counts.concepts} concepts, ${counts.edges} edges, ${counts.features} features)`);
+  const baseError = validateRepoBase(CONFIG.repoBase);
+  if (baseError) {
+    console.error(baseError);
+    process.exit(1);
+  }
+  const nonArea = resolveNonAreaTags(CONFIG, VIEWER.options);
+  if (nonArea.error) {
+    console.error(nonArea.error);
+    process.exit(1);
+  }
+  NON_AREA_TAGS = nonArea.tags;
+  for (const d of nonArea.diagnostics) console.error(d);
+  // Refuse an unknown viewer before any store is read: the error names the
+  // registry so the fix is a config edit, not a source dig.
+  try {
+    await loadViewer(VIEWER.name);
+  } catch (e) {
+    console.error(e.message);
+    process.exit(1);
+  }
+
+  const { html, graphJson, agentIndex, adrIndex, counts } = await render();
+  const norm = (s) => s.replace(/\r\n/g, "\n");
+  const outputs = [
+    ["graph.json", OUT_GRAPH, graphJson],
+    ["human-index.html", OUT_HTML, html],
+    ["agent-index.md", OUT_INDEX, agentIndex],
+    ["adr-index.md", OUT_ADR_INDEX, adrIndex],
+  ];
+  if (args.includes("--check")) {
+    const stale = [];
+    for (const [label, path, content] of outputs) {
+      try {
+        if (norm(readFileSync(path, "utf8")) !== norm(content)) stale.push(label);
+      } catch {
+        stale.push(label);
+      }
+    }
+    if (stale.length) {
+      console.error(
+        `${stale.join(" + ")} out of sync with semantic map + metadata inputs.\n` +
+          "Run `zdd-engine render` and commit the result.",
+      );
+      process.exit(1);
+    }
+    console.log(`renderings in sync (${counts.concepts} concepts, ${counts.edges} edges, ${counts.features} features, viewer ${VIEWER.name})`);
   } else {
-    writeFileSync(OUT_HTML, html);
-    writeFileSync(OUT_INDEX, agentIndex);
-    writeFileSync(OUT_ADR_INDEX, adrIndex);
-    console.log(`Wrote ${counts.concepts} concepts, ${counts.edges} edges -> human-index.html; ${counts.features} feature sections -> agent-index.md; ${counts.adrs} ADRs -> adr-index.md`);
+    try {
+      for (const [, path] of outputs) safeOutputPath(path);
+    } catch (e) {
+      console.error(e.message);
+      process.exit(1);
+    }
+    for (const [, path, content] of outputs) writeFileSync(path, content);
+    console.log(`Wrote ${counts.concepts} concepts, ${counts.edges} edges -> graph.json + human-index.html (viewer ${VIEWER.name}); ${counts.features} feature sections -> agent-index.md; ${counts.adrs} ADRs -> adr-index.md`);
   }
 }

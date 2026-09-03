@@ -95,7 +95,15 @@
     "repoBase": {
       "type": "string",
       "default": "",
-      "description": "GitHub tree URL prefix for source links in the human index, e.g. https://github.com/org/repo/tree/main/. Empty = relative links."
+      "pattern": "^(https?://.+)?$",
+      "description": "GitHub tree URL prefix for source links in the human index, e.g. https://github.com/org/repo/tree/main/. Empty = relative links. Must be http(s) — the renderer refuses anything else, since it becomes every source link's scheme."
+    },
+    "nonAreaTags": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": [],
+      "description": "Tags that are properties rather than product areas (tech tags like react-flow, rls-disabled). A metadata record inherits its area from the first tag of its claiming feature that is NOT listed here — this shapes graph.json, which is why it is top-level and not a viewer option. The pre-0.4 home, viewer.nonAreaTags, is still read with a deprecation note.",
+      "examples": [["react-flow", "rls-disabled"]]
     },
     "baseBranch": {
       "type": "string",
@@ -114,6 +122,7 @@
         "agentIndex": { "type": "string", "default": "zdd/agent-index.md" },
         "adrIndex": { "type": "string", "default": "zdd/adr-index.md" },
         "humanIndex": { "type": "string", "default": "zdd/human-index.html" },
+        "graph": { "type": "string", "default": "zdd/graph.json", "description": "The graph artifact (schema zdd-graph/1) the human index is rendered from — generated, checked by render --check." },
         "bundleDir": {
           "type": "string",
           "default": "zdd",
@@ -142,9 +151,21 @@
       }
     },
     "viewer": {
-      "type": "object",
-      "description": "Human-index viewer options (focus, auth hubs, non-area tags).",
-      "additionalProperties": true
+      "description": "Which viewer renders the human index from the graph artifact, and its options. A name (built-in: cytoscape, minimal) or an object whose `name` selects the viewer and whose other keys are its options — for cytoscape: defaultFocus, authHubs, nonAreaTags. An object without `name` (the pre-registry shape) means cytoscape.",
+      "oneOf": [
+        { "type": "string", "enum": ["cytoscape", "minimal"] },
+        {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "name": { "type": "string", "default": "cytoscape" },
+            "defaultFocus": { "type": "string", "description": "cytoscape: node id the explorer view opens on." },
+            "authHubs": { "type": "array", "items": { "type": "string" }, "description": "cytoscape: node ids whose edges to ordinary session-auth endpoints are stated, not drawn." },
+            "nonAreaTags": { "type": "array", "items": { "type": "string" }, "deprecated": true, "description": "DEPRECATED (pre-0.4 home): move to the top-level nonAreaTags key — it shapes graph.json, not just this viewer. Still honoured with a note." }
+          }
+        }
+      ],
+      "examples": ["minimal", { "name": "cytoscape", "defaultFocus": "map/features/things" }]
     }
   }
 }

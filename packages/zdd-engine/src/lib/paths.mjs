@@ -9,10 +9,18 @@
 
 export function repoRelative(value, label) {
   const bad = () => {
-    throw new Error(`${label} '${value}' must be repo-relative (no absolute path, drive letter, backslash or '..')`);
+    throw new Error(`${label} '${value}' must be repo-relative (no absolute path, drive letter, URL scheme, backslash or '..')`);
   };
   if (typeof value !== "string" || !value.length) bad();
+  // No whitespace or control characters anywhere: browsers strip them when
+  // parsing a URL, so " javascript:x" or "java\nscript:x" would read as a
+  // scheme after passing a naive test (CR-002 verification).
+  if (/[\s\x00-\x1f\x7f]/.test(value)) bad();
   if (value.includes("\\") || value.startsWith("/") || /^[A-Za-z]:/.test(value)) bad();
+  // A URL scheme is not a path either: `javascript:alert(1)` as a map
+  // resource would become a clickable source link in the hosted index
+  // (DIO-310 review CR-002). A first segment containing ':' is refused.
+  if (/^[A-Za-z][A-Za-z0-9+.-]*:/.test(value)) bad();
   const segs = value.split("/").filter((s) => s !== "" && s !== ".");
   if (segs.some((s) => s === "..")) bad();
   return segs.length ? segs.join("/") : ".";

@@ -8,12 +8,20 @@
 # No LLM in CI, by design — this job is deterministic and secret-free. It calls
 # the same @rich-rees/zdd-engine the plugin's skills call, so CI and the agent
 # can never disagree about what "fresh" means.
+#
+# The engine version is PINNED (one place, below): an unpinned npx would pick up
+# a newer engine that expects a generated file your branch does not have yet
+# (0.4 added zdd/graph.json) and fail every PR until you regenerate. Bump the
+# pin deliberately, run `render` and commit the result in the same PR.
 
 name: zdd
 
 on:
   pull_request:
   workflow_dispatch:
+
+env:
+  ZDD_ENGINE: "@rich-rees/zdd-engine@0.4.0"
 
 jobs:
   zero-drift:
@@ -29,13 +37,13 @@ jobs:
           node-version: "20"
 
       - name: Codebase metadata matches source
-        run: npx -y @rich-rees/zdd-engine derive --check
+        run: npx -y "$ZDD_ENGINE" derive --check
 
       - name: Indexes match their inputs
-        run: npx -y @rich-rees/zdd-engine render --check
+        run: npx -y "$ZDD_ENGINE" render --check
 
       - name: Store lints (supersession symmetry, etc.)
-        run: npx -y @rich-rees/zdd-engine lint
+        run: npx -y "$ZDD_ENGINE" lint
 
       - name: Semantic-map freshness (advisory)
-        run: npx -y @rich-rees/zdd-engine freshness >> "$GITHUB_STEP_SUMMARY"
+        run: npx -y "$ZDD_ENGINE" freshness >> "$GITHUB_STEP_SUMMARY"

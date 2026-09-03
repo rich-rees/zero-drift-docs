@@ -1,6 +1,10 @@
 (() => {
   const bundle = window.BUNDLE;
-  const nodeIndex = {};
+  // Every dictionary keyed by a source-derived string (node ids, types, ADR
+  // numbers, tags) is prototype-free: a map file with `type: __proto__` or
+  // `constructor` must index a slot, not Object.prototype (CR-010).
+  const dict = () => Object.create(null);
+  const nodeIndex = dict();
   for (const n of bundle.nodes) nodeIndex[n.data.id] = n.data;
 
   // Friendly display names, derived from the concept-id slug (endpoints carry
@@ -15,19 +19,36 @@
   // Module titles are full repo paths — captions show the basename (or the
   // last two segments where basenames collide, e.g. bank/BankTable.tsx); the
   // full path stays in the tooltip, detail header and resource link.
-  const baseCounts = {};
+  const baseCounts = dict();
   for (const n of bundle.nodes) {
     if (n.data.type !== "Module") continue;
     const b = n.data.label.split("/").pop();
     baseCounts[b] = (baseCounts[b] || 0) + 1;
   }
+  // Endpoint labels are URL paths ("/api/journeys/[id]") — humanize them for
+  // the map, dropping whatever leading segments EVERY endpoint shares (a
+  // Next.js "/api", a FastAPI "/v1", nothing at all) rather than keying on any
+  // one framework's convention; the exact path stays in the tooltip. The
+  // shared prefix never eats a route whole: at least one segment of the
+  // shortest route stays, so "/jobs" + "/jobs/{id}" caption as "Jobs" and
+  // "Jobs {id}", not "Jobs" and "{id}" (CR-004; same rule as the renderer).
+  const routeSegs = bundle.nodes.filter((n) => n.data.type === "API Endpoint")
+    .map((n) => n.data.label.split("/").filter(Boolean));
+  let commonRoute = routeSegs.length ? [...routeSegs[0]] : [];
+  for (const segs of routeSegs) {
+    let i = 0;
+    while (i < commonRoute.length && i < segs.length && commonRoute[i] === segs[i]) i++;
+    commonRoute = commonRoute.slice(0, i);
+  }
+  const shortest = Math.min(...routeSegs.map((s) => s.length), Infinity);
+  if (commonRoute.length >= shortest) commonRoute = commonRoute.slice(0, Math.max(0, shortest - 1));
   for (const n of bundle.nodes) {
     const d = n.data;
-    // Endpoint labels are URL paths ("/api/journeys/[id]") — humanize the
-    // post-/api/ segments for the map; the exact path stays in the tooltip.
     if (d.type === "API Endpoint") {
-      d.display = d.label.split("/").filter((s) => s && s !== "api")
-        .map((w) => (/^\[.*\]$/.test(w) ? w : w.charAt(0).toUpperCase() + w.slice(1))).join(" ");
+      const segs = d.label.split("/").filter(Boolean);
+      const own = segs.length > commonRoute.length ? segs.slice(commonRoute.length) : segs.slice(-1);
+      d.display = own
+        .map((w) => (/^[\[{].*[\]}]$/.test(w) ? w : w.charAt(0).toUpperCase() + w.slice(1))).join(" ");
     } else if (d.type === "Module") {
       const segs = d.label.split("/");
       d.display = segs.slice(baseCounts[segs[segs.length - 1]] > 1 ? -2 : -1).join("/");
@@ -38,15 +59,15 @@
     // "/settings/environment" -> SE rather than falling into the raw-slice
     // fallback ("/SE") that path-shaped titles used to hit. The single-word
     // fallback slices the word, not the raw display, so "/bank" -> BAN.
-    const words = d.display.replace(/[^A-Za-z0-9 _\-\[\]/]/g, "").split(/[\s_\-/]+/)
-      .filter((w) => w && !w.startsWith("[")); // all dynamic segments, not just [id]
+    const words = d.display.replace(/[^A-Za-z0-9 _\-\[\]{}/]/g, "").split(/[\s_\-/]+/)
+      .filter((w) => w && !/^[\[{]/.test(w)); // all dynamic segments ([id], {id}), not just [id]
     d.acr = (words.length >= 2 ? words.map((w) => w[0]).join("") : (words[0] || d.display).slice(0, 3))
       .toUpperCase().slice(0, 4);
   }
 
   // Backlinks reflect the full bundle truth (including edges the graph
   // suppresses as cross-cutting) — the detail panel never hides a relationship.
-  const backlinks = {};
+  const backlinks = dict();
   for (const e of bundle.edges) {
     const { source, target } = e.data;
     (backlinks[target] ||= []).push(source);
@@ -62,12 +83,13 @@
     "UI Surface": 0, "Feature": 1, "API Endpoint": 2,
     "Table": 3, "Storage Bucket": 3, "Database Function": 4,
   };
-  const layerOf = (id) => LANE_BY_TYPE[nodeIndex[id]?.type] ?? "rail";
+  const own = (table, key) => (Object.hasOwn(table, key) ? table[key] : undefined); // CR-010: static tables, source keys
+  const layerOf = (id) => own(LANE_BY_TYPE, nodeIndex[id]?.type) ?? "rail";
 
   // Auth mode is the deriver's facts.auth, carried on node data — mechanical
   // truth from the middleware matcher, never a hand-maintained list or a
   // prose parse.
-  const authMode = {};
+  const authMode = dict();
   for (const n of bundle.nodes) {
     if (n.data.type === "API Endpoint") authMode[n.data.id] = n.data.auth || "session";
   }
@@ -92,7 +114,7 @@
   };
   const visEdges = bundle.edges.filter((e) => !isSuppressed(e));
 
-  const degree = {};
+  const degree = dict();
   for (const e of visEdges) {
     degree[e.data.source] = (degree[e.data.source] || 0) + 1;
     degree[e.data.target] = (degree[e.data.target] || 0) + 1;
@@ -112,7 +134,7 @@
     for (const t of d.tags || []) if (!NON_AREA_TAGS.has(t)) return t;
     return null;
   };
-  const areaCounts = {};
+  const areaCounts = dict();
   for (const n of bundle.nodes) {
     const a = rawArea(n.data);
     if (a) areaCounts[a] = (areaCounts[a] || 0) + 1;
@@ -136,7 +158,7 @@
     "#4a3aa7": "#94a3b8", "#008300": "#008300",
     "#0d9488": "#14b8a6", "#b45309": "#d97706",
   };
-  const themedColor = (d) => (theme() === "dark" ? (DARK_NODE[d.color] || d.color) : d.color);
+  const themedColor = (d) => (theme() === "dark" ? (own(DARK_NODE, d.color) || d.color) : d.color);
   const THEMES = {
     light: { ink: "#0f172a", halo: "#f8fafc", border: "#0f172a", authx: "#c98500",
              sel: "#f59e0b", edge: "#94a3b8", cross: "#475569", lit: "#1c5cab" },
@@ -334,7 +356,7 @@
     }
     // Order within a lane: 3 barycenter sweeps against neighbour positions,
     // seeded by area so related nodes start adjacent; then wrap into rows.
-    const adj = {};
+    const adj = dict();
     for (const e of visEdges) {
       (adj[e.data.source] ||= []).push(e.data.target);
       (adj[e.data.target] ||= []).push(e.data.source);
@@ -346,7 +368,7 @@
     });
     for (let sweep = 0; sweep < 3; sweep++) {
       lanes.forEach((ids) => {
-        const score = {};
+        const score = dict();
         for (const id of ids) {
           const ns = (adj[id] || []).map((o) => xIndex.get(o)).filter((v) => v !== undefined);
           score[id] = ns.length ? ns.reduce((a, b) => a + b, 0) / ns.length : xIndex.get(id);
@@ -366,7 +388,7 @@
       laneY.push(yCursor);
       yCursor += Math.ceil(ids.length / PER_ROW) * ROW_H + LANE_PAD;
     });
-    const pos = {};
+    const pos = dict();
     lanes.forEach((ids, li) => {
       const order = [...ids].sort((a, b) => xIndex.get(a) - xIndex.get(b));
       const off = (maxW - laneW(order.length)) / 2;
@@ -395,10 +417,11 @@
   }
 
   function viewColumns() {
-    const cols = Object.fromEntries(AREAS.map((a) => [a, []]));
+    const cols = dict();
+    for (const a of AREAS) cols[a] = [];
     for (const n of bundle.nodes) cols[areaOf(n.data)].push(n.data.id);
     const GAPX = 340, GAPY = 46;
-    const pos = {}, colOf = {};
+    const pos = dict(), colOf = dict();
     AREAS.forEach((area, ci) => {
       const ids = cols[area];
       ids.sort((a, b) => {
@@ -453,26 +476,53 @@
     renderDetail(id);
     indexEl.querySelectorAll(".item").forEach((el) => el.classList.toggle("on", el.dataset.id === id));
     crumbsEl.hidden = false;
-    crumbsEl.innerHTML = "Path: " + crumbs.map((c, i) => `<button data-i="${i}">${nodeIndex[c].display}</button>`).join(" › ");
-    crumbsEl.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
-      crumbs = crumbs.slice(0, +b.dataset.i + 1);
-      focusNode(crumbs[crumbs.length - 1], true);
-    }));
+    // DOM construction, never innerHTML: titles are source-derived (CR-001).
+    crumbsEl.textContent = "Path: ";
+    crumbs.forEach((c, i) => {
+      if (i) crumbsEl.appendChild(document.createTextNode(" › "));
+      const b = document.createElement("button");
+      b.textContent = nodeIndex[c].display;
+      b.addEventListener("click", () => {
+        crumbs = crumbs.slice(0, i + 1);
+        focusNode(crumbs[crumbs.length - 1], true);
+      });
+      crumbsEl.appendChild(b);
+    });
     cy.on("tap", "node", (e) => { if (e.target.id() !== id) focusNode(e.target.id()); });
   }
   function viewExplorer() {
     indexEl.hidden = false;
-    const byType = {};
+    const byType = dict();
     for (const n of bundle.nodes) (byType[n.data.type] ||= []).push(n.data);
     const listEl = document.getElementById("index-list");
-    listEl.innerHTML = Object.keys(byType).sort().map((t) =>
-      `<details open><summary>${t} (${byType[t].length})</summary>` +
-      byType[t].sort((a, b) => a.display.localeCompare(b.display))
-        .map((d) => `<button class="item" data-id="${d.id}">${d.display}</button>`).join("") +
-      "</details>").join("");
-    listEl.querySelectorAll(".item").forEach((el) => el.addEventListener("click", () => focusNode(el.dataset.id)));
+    listEl.textContent = "";
+    // Built with DOM nodes: type, id and display title all come from the
+    // repo and must land as text (CR-001).
+    for (const t of Object.keys(byType).sort()) {
+      const details = document.createElement("details");
+      details.open = true;
+      const summary = document.createElement("summary");
+      summary.textContent = `${t} (${byType[t].length})`;
+      details.appendChild(summary);
+      for (const d of byType[t].sort((a, b) => a.display.localeCompare(b.display))) {
+        const btn = document.createElement("button");
+        btn.className = "item";
+        btn.dataset.id = d.id;
+        btn.textContent = d.display;
+        btn.addEventListener("click", () => focusNode(d.id));
+        details.appendChild(btn);
+      }
+      listEl.appendChild(details);
+    }
     legendEl.hidden = true;
     crumbs = [];
+    // A greenfield bundle has no nodes yet — say so instead of throwing on
+    // nodes[0] (CR-011).
+    if (!bundle.nodes.length) {
+      crumbsEl.hidden = false;
+      crumbsEl.textContent = "No nodes yet — the map and metadata are empty.";
+      return;
+    }
     // Default focus comes from zdd.config.json via the renderer.
     const focus = bundle.viewer && bundle.viewer.defaultFocus;
     focusNode(focus && nodeIndex[focus] ? focus : bundle.nodes[0].data.id);
@@ -499,8 +549,16 @@
   // while accepting the percent-encoded form — parens like (app) are fine
   // raw, so encode only the brackets (DIO-182; verified logged-in: raw → 404,
   // %5Bid%5D → renders). Extension on the last segment = file.
+  // The renderer already refuses a repoBase that is not http(s) and a
+  // resource that is not a bare repo-relative path; this is the viewer's own
+  // belt (CR-002): anything scheme-shaped renders as a dead, text-only link.
+  const SAFE_BASE = /^(https?:\/\/[^\s]*)?$/i;
+  // Whitespace/control anywhere is refused outright: a browser strips them
+  // from a URL, so " javascript:x" would parse as a scheme (CR-002).
+  const safeResource = (r) => !/[\s\x00-\x1f\x7f]/.test(r) && !/^[a-z][a-z0-9+.-]*:/i.test(r) && !r.startsWith("//") && !r.startsWith("/");
   function githubHref(resource) {
     const base = bundle.repoBase || "";
+    if (!SAFE_BASE.test(base) || !safeResource(resource)) return null;
     const isFile = /\.[A-Za-z0-9]+$/.test(resource.split("/").pop());
     const path = resource.replace(/\[/g, "%5B").replace(/\]/g, "%5D");
     return (isFile ? base.replace("/tree/", "/blob/") : base) + path;
@@ -527,14 +585,14 @@
   // ---------- docs panel (glossary + ADR corpus, ADR-0021) ----------
   // bundle.docs is a read-only render projection of the glossary (zdd/glossary.md) + zdd/adr/ —
   // single-sourced by render.mjs, proven in sync by `render --check`.
-  const ADR_BY_NUM = {};
+  const ADR_BY_NUM = dict();
   for (const a of (bundle.docs && bundle.docs.adrs) || []) ADR_BY_NUM[a.num] = a;
   // Latest store change (DIO-164, ADR-0034): which entries the most recent
   // store-touching push changed — highlighted so a reader sees "what just
   // changed"; the moment someone else merges store-touching commits, the
   // highlight moves to theirs.
   const CHANGED = (bundle.docs && bundle.docs.changed) || { adrs: [], glossaryTerms: [] };
-  const CHANGED_ADR = {};
+  const CHANGED_ADR = dict();
   for (const c of CHANGED.adrs) CHANGED_ADR[c.file] = c.status;
   const CHANGED_TERMS = new Set(CHANGED.glossaryTerms);
   function changedBadge(status) {
@@ -550,7 +608,8 @@
   const docsBack = document.getElementById("docs-back");
 
   function renderDocMarkdown(md, baseDir, opts = {}) {
-    docsBody.innerHTML = marked.parse(md || "", { breaks: false, gfm: true });
+    // safeMarked, never marked.parse: store text is source-derived (CR-007).
+    docsBody.innerHTML = safeMarked.parse(md || "");
     // Glossary entries are `**Term**: description` paragraphs — promote the
     // defined term to a block title (underlined via .term) so it reads apart
     // from bold cross-references inside descriptions.
@@ -586,7 +645,9 @@
       const parts = (baseDir + "/" + href).split("/").filter((s) => s !== ".");
       const stack = [];
       for (const p of parts) p === ".." ? stack.pop() : stack.push(p);
-      a.setAttribute("href", githubHref(stack.join("/")));
+      const target = githubHref(stack.join("/"));
+      if (target === null) { a.removeAttribute("href"); return; }
+      a.setAttribute("href", target);
       a.target = "_blank";
       a.rel = "noopener";
     });
@@ -697,25 +758,33 @@
     if (!am) { authEl.hidden = true; }
     else {
       authEl.hidden = false;
-      authEl.className = "auth-note" + (AUTH_LABELS[am] ? " auth-exception" : "");
-      authEl.innerHTML =
-        am === "session" ? "🔒 Session auth (Entra middleware) — the norm; stated here rather than drawn as an edge." :
-        am === "is-auth" ? "This <em>is</em> the auth endpoint." :
-        `<span class="authdot"></span> <b>Auth exception:</b> ${AUTH_LABELS[am]} — not behind the session middleware.`;
+      const label = Object.hasOwn(AUTH_LABELS, am) ? AUTH_LABELS[am] : am; // am is facts.auth — source-derived
+      authEl.className = "auth-note" + (Object.hasOwn(AUTH_LABELS, am) ? " auth-exception" : "");
+      authEl.textContent = "";
+      if (am === "session") {
+        authEl.textContent = "🔒 Session auth (middleware) — the norm; stated here rather than drawn as an edge.";
+      } else if (am === "is-auth") {
+        authEl.append("This ", Object.assign(document.createElement("em"), { textContent: "is" }), " the auth endpoint.");
+      } else {
+        const dot = document.createElement("span");
+        dot.className = "authdot";
+        authEl.append(dot, " ", Object.assign(document.createElement("b"), { textContent: "Auth exception:" }), ` ${label} — not behind the session middleware.`);
+      }
     }
 
     const resourceEl = document.getElementById("detail-resource");
     resourceEl.innerHTML = "";
-    if (data.resource) {
+    const href = data.resource ? githubHref(data.resource) : null;
+    if (href !== null && data.resource) {
       const a = document.createElement("a");
-      a.href = githubHref(data.resource);
+      a.href = href;
       a.textContent = data.resource;
       a.title = "Open the source on GitHub";
       a.target = "_blank";
       a.rel = "noopener";
       a.className = "external";
       resourceEl.appendChild(a);
-    } else resourceEl.textContent = "—";
+    } else resourceEl.textContent = data.resource || "—";
 
     const tagsEl = document.getElementById("detail-tags");
     tagsEl.innerHTML = "";
@@ -729,7 +798,7 @@
     } else tagsEl.textContent = "—";
 
     const bodyEl = document.getElementById("detail-body");
-    bodyEl.innerHTML = marked.parse(bundle.bodies[conceptId] || "", { breaks: false, gfm: true });
+    bodyEl.innerHTML = safeMarked.parse(bundle.bodies[conceptId] || "");
     rewriteInternalLinks(bodyEl);
     linkifyAdrMentions(bodyEl);
 
@@ -806,7 +875,7 @@
     document.getElementById("view").value = v;
     closePanels();
     VIEWS[v]();
-    cy.on("zoom", syncZoomSlider);
+    if (cy) cy.on("zoom", syncZoomSlider); // explorer on an empty graph builds no cy (CR-011)
     syncZoomSlider();
     try { history.replaceState(null, "", "?view=" + v); } catch { /* file:// */ }
   }

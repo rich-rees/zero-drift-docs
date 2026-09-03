@@ -33,15 +33,16 @@ fill up through normal work (the ritual). Scaffold:
 
 5. **Run the deriver** — produces `zdd/metadata/` from source:
    ```
-   npx -y @rich-rees/zdd-engine derive
+   npx -y @rich-rees/zdd-engine@0.4.0 derive
    ```
 6. **Mapping session** (the only LLM-heavy step, paid once) — scan the code with
    the glossary + ADRs loaded, propose feature groupings, and **ask** wherever
    evidence is thin. Answers route by kind, per [authoring.md](../authoring.md):
    verdicts → ADRs, vocabulary → glossary, pure connective fact → the map.
-7. **Render** — the agent index, ADR index, and human index:
+7. **Render** — the graph artifact (`zdd/graph.json`), agent index, ADR index,
+   and human index (all generated; commit them, never edit them):
    ```
-   npx -y @rich-rees/zdd-engine render
+   npx -y @rich-rees/zdd-engine@0.4.0 render
    ```
 8. **Print the setup steps the adopter must do themselves** (no tool can):
    - Paste `templates/claude-md-snippet.md` into their CLAUDE.md.

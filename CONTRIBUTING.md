@@ -8,9 +8,9 @@ graph in the middle.
 
 > **Pre-1.0 note.** ZDD is `0.x`: private and still being proved against its first
 > real codebases. The engine (`packages/zdd-engine`, on npm as
-> `@rich-rees/zdd-engine`) is real and the extractor contract below is what it
-> runs; the viewer registry is still on the roadmap. Once `1.0.0` ships this
-> becomes a public on-ramp. Issues and discussion are welcome now.
+> `@rich-rees/zdd-engine`) is real, and both contracts below — extractors and
+> viewers — are what it runs. Once `1.0.0` ships this becomes a public on-ramp.
+> Issues and discussion are welcome now.
 
 ## The shape of a contribution
 
@@ -79,36 +79,66 @@ minimal worked example.
 ## The other prize: writing a viewer
 
 The **human index** (`zdd/human-index.html`) is a rendering of the same graph the
-extractors produce — nodes (metadata records + semantic concepts) and edges (the
-references between them), each node carrying a `resource` path that becomes a
-link back to the source on GitHub. It is *a* rendering, never *the* one: the spec
-treats it as a machine product, and better visualizations are exactly the
-extensibility the design reserved.
+extractors produce. `render` first writes that graph as its own artifact —
+**`zdd/graph.json`, schema `zdd-graph/1`** — and then hands it to a **viewer**,
+which produces the page. It is *a* rendering, never *the* one: the spec treats it
+as a machine product, and better visualizations are exactly the extensibility the
+design reserved.
 
-A **viewer** consumes the graph data model and produces a view. Because the boring
-plumbing — node identity, edges, the GitHub source-links — is defined once in the
-graph, viewers inherit all of it for free and compete purely on the visualization.
+The graph artifact is the whole input. `nodes` are the metadata records and the
+semantic-map concepts, each with `id` (bundle-relative path minus extension),
+`layer` (`metadata` | `map`), `type` (the display type — `API Endpoint`, `Table`,
+`Feature`, …), `title`, `description`, `resource` (the repo-relative source path
+that becomes the GitHub link), `tags` (the product-area bucket — shaped by the
+top-level `nonAreaTags` config, never by a viewer option, so the artifact is the
+same bytes whichever viewer renders it), a markdown
+`body`, `recordId` on metadata nodes and `auth` on routes that carry it. `edges`
+are `{ source, target }` pairs — every resolved ref and every map link, deduped,
+no self-edges. Because the boring plumbing — node identity, edges, source links —
+is defined once in the graph, viewers inherit all of it for free and compete
+purely on the visualization.
 
-A viewer is a good contribution when it honours the viewer contract (the
-equivalent of "determinism" for extractors):
+A viewer is one module exporting
+`render({ graph, docs, changed, options, bundleName, repoBase })` and returning
+the page as a string. `graph` is exactly what was written to `graph.json`; `docs`
+is `{ glossary, adrs }` (the store text, for viewers that embed it); `changed` is
+the latest-store-change highlight; `options` is whatever the adopter put in
+`viewer` besides `name`, plus the resolved top-level `nonAreaTags` whenever it
+is non-empty (your area model should exclude the same tags the graph did). A viewer is a good contribution when it honours the
+viewer contract (the equivalent of "determinism" for extractors):
 
 - **Self-contained and safe to publish.** The human index gets *hosted* — a single
   self-contained file, no external network calls, and **no secrets**, safe to leak
   regardless of who sees it. A viewer that phones home or embeds a key is
-  disqualified.
-- **Consumes the documented graph schema** — it reads the published node/edge model,
-  and never reaches around it into engine internals.
+  disqualified. **Source-derived text is untrusted**: descriptions, bodies and the
+  store text come from code comments, docstrings and markdown anyone with commit
+  access wrote, so it is escaped or sanitised before it reaches the DOM — the
+  reference viewer routes every markdown parse through `safe-marked.js` and
+  builds every other source-derived string as a DOM text node, and the
+  `minimal` viewer escapes everything it prints. "No network calls" includes
+  images: an `<img>` in a docstring is a request the moment the panel opens, so
+  markdown images render as their alt text. Source links are built only from an
+  http(s) `repoBase` and a bare relative `resource` — the renderer refuses
+  anything else up front, and a viewer still treats both as untrusted.
+- **Deterministic** — identical inputs produce byte-identical output. No dates, no
+  random ids, no environment-dependent values; the blocking `render --check` in
+  CI compares bytes.
+- **Consumes the documented graph schema** — it reads the published node/edge model
+  above, and never reaches around it into engine internals.
 - **License-compatible libraries.** The reference viewer vendors its libraries with a
   license notice; anything you bring (D3, a framework, …) must carry a compatible
-  licence and its notice.
+  licence and its notice. The `cytoscape` viewer is Apache-2.0-derived and kept
+  in its own folder for that reason; the engine outside `src/viewers/cytoscape/`
+  is MIT and stays that way.
 
 How a viewer becomes part of the product: like extractors, viewers are selected by
-config, so a merged viewer ships as a **selectable option** in the registry — a
-minor version bump, live for everyone on the next marketplace update.
-
-> As with the engine, the graph-data-model artifact and the viewer registry are on
-> the roadmap (they land with the engine extraction). The *contract* above is
-> stable; propose a viewer via an issue first and we'll pin the schema together.
+config (`"viewer": "minimal"`, or `{ "name": "cytoscape", ...options }`), so a
+merged viewer ships as a **selectable option** in the registry —
+`packages/zdd-engine/src/viewers/index.mjs`, one line per viewer — a minor version
+bump, live for everyone on the next marketplace update. Model yours on
+`src/viewers/minimal/` (the smallest honest viewer: no libraries, nodes grouped by
+type, edges listed) and read `src/viewers/cytoscape/index.mjs` for how a viewer
+builds its own private data shape from the graph.
 
 ## Other welcome contributions
 
