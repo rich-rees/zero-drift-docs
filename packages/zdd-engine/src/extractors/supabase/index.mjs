@@ -14,6 +14,9 @@
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { replayMigrations, sortMigrations } from "./sql-replay.mjs";
+import { repoRelative } from "../../lib/paths.mjs";
+
+const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 export const FACTS_KEY_ORDER = {
   table: ["namespace", "columns", "createdIn", "renamedFrom"],
@@ -24,13 +27,17 @@ export const FACTS_KEY_ORDER = {
 export function derive({ repoRoot, options }) {
   const diagnostics = [];
   const { migrationNamespaces = [], externalBuckets = [] } = options;
+  if (!Array.isArray(migrationNamespaces)) throw new Error(`supabase: 'migrationNamespaces' must be an array of { name, dir }`);
+  if (!Array.isArray(externalBuckets)) throw new Error(`supabase: 'externalBuckets' must be an array of { name, namespace }`);
 
   // ---- Schema replay (per namespace, independent) ----
   const schemas = new Map(); // ns -> { tables, functions, buckets, triggers }
-  for (const { name: ns, dir } of migrationNamespaces) {
+  for (const { name: ns, dir: dirOpt } of migrationNamespaces) {
+    if (typeof ns !== "string" || !ns) throw new Error(`supabase: every migrationNamespaces entry needs a string 'name'`);
+    const dir = repoRelative(dirOpt, `supabase.migrationNamespaces[${ns}].dir`);
     const abs = join(repoRoot, dir);
     if (!existsSync(abs)) {
-      diagnostics.push(`[supabase:${ns}] ${dir} not found — nothing to inventory`);
+      diagnostics.push(`${ns}: ${dir} not found — nothing to inventory`);
       continue;
     }
     const files = sortMigrations(
@@ -38,7 +45,7 @@ export function derive({ repoRoot, options }) {
     ).map((f) => ({ name: `${dir}/${f}`, text: readFileSync(join(abs, f), "utf8") }));
     const replayed = replayMigrations(files);
     for (const s of replayed.skipped) {
-      diagnostics.push(`[sql-replay:${ns}] unrecognized schema-like statement in ${s.file}: ${s.statement}`);
+      diagnostics.push(`${ns}: unrecognized schema-like statement in ${s.file}: ${s.statement}`);
     }
     schemas.set(ns, replayed);
   }
@@ -92,7 +99,7 @@ export function derive({ repoRoot, options }) {
       // CREATE TRIGGER attachments contribute edges + facts.triggers too.
       const refs = new Set();
       for (const [tName, tNs] of tableNs) {
-        if (tNs === ns && new RegExp(`\\b${tName}\\b`).test(f.body)) refs.add(`table:${ns}/${tName}`);
+        if (tNs === ns && new RegExp(`\\b${escapeRegex(tName)}\\b`).test(f.body)) refs.add(`table:${ns}/${tName}`);
       }
       const attached = triggers.filter((t) => t.fn === name && tables.has(t.table));
       const facts = { namespace: ns, signature: f.signature, returns: f.returns, language: f.language };

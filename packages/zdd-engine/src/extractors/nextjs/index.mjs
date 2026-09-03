@@ -16,10 +16,12 @@
 // after the merge (src/lib/resolve-refs.mjs). A missing appDir or middleware
 // file is "nothing to inventory" (greenfield), never an error.
 
-import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { walkSourceFiles, scanFiles } from "./refs.mjs";
+import { walkSourceFiles, scanFiles, DEFAULT_REFS } from "./refs.mjs";
 import { slugify } from "../../lib/slug.mjs";
+import { repoRelative } from "../../lib/paths.mjs";
+import { walkDir } from "../../lib/walk.mjs";
 
 export { slugify };
 
@@ -38,12 +40,7 @@ export const FACTS_KEY_ORDER = {
 // ---------------------------------------------------------------------------
 
 function walkTree(dir, out = []) {
-  if (!existsSync(dir)) return out;
-  for (const name of readdirSync(dir).sort()) {
-    const p = join(dir, name);
-    if (statSync(p).isDirectory()) walkTree(p, out);
-    else out.push(p);
-  }
+  walkDir(dir, (p) => out.push(p));
   return out;
 }
 
@@ -170,23 +167,31 @@ function deriveAuth(urlPath, routeText, matchers, authPatterns, apiPrefix) {
 export function derive({ repoRoot, options }) {
   const diagnostics = [];
   const {
-    appDir = "src/app",
+    appDir: appDirOpt = "src/app",
     apiPrefix = "/api",
-    middlewarePath,
+    middlewarePath: middlewareOpt,
     authPatterns = [],
     // Where the tsconfig `@/` path alias points, repo-relative. Default: the
     // Next.js convention of appDir's parent (`src/app` -> `src`).
-    srcAliasRoot = appDir.replace(/\/app$/, ""),
-    refs: refsOptions = {
-      roots: [srcAliasRoot],
-      extensions: [".ts", ".tsx"],
-      excludeDirs: ["node_modules"],
-      excludeSuffixes: [".test.ts", ".test.tsx", ".d.ts"],
-    },
+    srcAliasRoot: srcAliasOpt,
+    refs: refsOpt = {},
   } = options;
+  // Every path option stays inside the repo (CR-005); a partial `refs` object
+  // is completed field by field, not replaced wholesale (CR-017).
+  const appDir = repoRelative(appDirOpt, "nextjs.appDir");
+  const middlewarePath = middlewareOpt ? repoRelative(middlewareOpt, "nextjs.middlewarePath") : undefined;
+  const srcAliasRoot = repoRelative(srcAliasOpt ?? appDir.replace(/\/app$/, ""), "nextjs.srcAliasRoot");
+  if (typeof refsOpt !== "object" || Array.isArray(refsOpt)) throw new Error(`nextjs: 'refs' must be an object`);
+  if (!Array.isArray(authPatterns)) throw new Error(`nextjs: 'authPatterns' must be an array`);
+  const refsOptions = { ...DEFAULT_REFS, roots: [srcAliasRoot], ...refsOpt };
+  for (const k of ["roots", "extensions", "excludeDirs", "excludeSuffixes"]) {
+    if (!Array.isArray(refsOptions[k])) throw new Error(`nextjs: 'refs.${k}' must be an array`);
+  }
+  refsOptions.roots = refsOptions.roots.map((r) => repoRelative(r, "nextjs.refs.roots"));
 
   // ---- Route & surface trees ----
   const appAbs = join(repoRoot, appDir);
+  if (!existsSync(appAbs)) diagnostics.push(`${appDir} not found — nothing to inventory`);
   const appFiles = walkTree(appAbs).map((p) => posixify(p.slice(repoRoot.length + 1)));
   const apiDirRel = posixify(join(appDir, apiPrefix.replace(/^\//, "")));
 
@@ -205,7 +210,7 @@ export function derive({ repoRoot, options }) {
   }
 
   // ---- Refs scan ----
-  const sourceFiles = walkSourceFiles(repoRoot, refsOptions);
+  const sourceFiles = walkSourceFiles(repoRoot, refsOptions, diagnostics);
   const scans = scanFiles(repoRoot, sourceFiles);
 
   // Attribution: nearest enclosing route dir wins; else nearest page (then
@@ -237,7 +242,7 @@ export function derive({ repoRoot, options }) {
     for (const name of scan.rpcNames) refs.add(`?function:${name}`);
     for (const url of scan.fetchUrls) refs.add(`?route:${url}`);
     for (const ident of scan.unresolvedFromIdents) {
-      diagnostics.push(`[refs] ${rel}: .from(${ident}) — identifier not resolvable file-locally`);
+      diagnostics.push(`${rel}: .from(${ident}) — identifier not resolvable file-locally`);
     }
     return refs;
   };
@@ -269,7 +274,7 @@ export function derive({ repoRoot, options }) {
   let matchers = [];
   if (middlewarePath) {
     if (existsSync(join(repoRoot, middlewarePath))) matchers = loadMiddlewareMatchers(repoRoot, middlewarePath);
-    else diagnostics.push(`[nextjs] ${middlewarePath} not found — no middleware auth derived`);
+    else diagnostics.push(`${middlewarePath} not found — no middleware auth derived`);
   }
 
   for (const r of routes) {
@@ -314,7 +319,7 @@ export function derive({ repoRoot, options }) {
           .map((ext) => base + ext)
           .find((p) => existsSync(join(repoRoot, p)));
         if (hit) resource.unshift(hit);
-        else diagnostics.push(`[wrapper] ${s.rel}: wrapper import '${target}' resolves to no file — page kept as primary resource`);
+        else diagnostics.push(`${s.rel}: wrapper import '${target}' resolves to no file — page kept as primary resource`);
       }
     }
     records.push({
