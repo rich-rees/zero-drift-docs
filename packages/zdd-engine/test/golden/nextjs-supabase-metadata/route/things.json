@@ -1,0 +1,20 @@
+{
+  "kind": "route",
+  "id": "route:/api/things",
+  "title": "/api/things",
+  "description": "List (GET) and create (POST) things.",
+  "resource": [
+    "src/app/api/things/route.ts"
+  ],
+  "refs": [
+    "table:db/things"
+  ],
+  "facts": {
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "dynamicSegments": [],
+    "auth": "session"
+  }
+}

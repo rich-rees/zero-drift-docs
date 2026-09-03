@@ -17,7 +17,7 @@ npx @rich-rees/zdd-engine lint [--tempstate]
 npx @rich-rees/zdd-engine freshness [--base <ref>]
 ```
 
-- **derive** — run the configured stack adapter over the repo and write
+- **derive** — run the configured extractors over the repo and write
   `zdd/metadata/` (one JSON record per route / surface / table / function /
   bucket / module). `--check` verifies instead of writing: stale, missing, or
   orphaned records exit 1. This is the blocking CI check for artifact #5.
@@ -42,12 +42,14 @@ version:
 
 | Key | Default | What it is |
 |---|---|---|
-| `adapter` | *(required)* | Stack adapter name, from the engine's static registry (`nextjs-supabase` today) |
+| `extractors` | *(required, unless legacy `adapter`)* | Extractors to run, composed per convention: `supabase`, `nextjs`, `fastapi`, `generic` (built-in), or a name from `localExtractorDir`. Names only, never paths |
+| `extractorOptions` | — | Per-extractor source layout, keyed by name — `supabase`: `migrationNamespaces`, `externalBuckets`; `nextjs`: `appDir`, `apiPrefix`, `middlewarePath`, `authPatterns`, `refs`, `srcAliasRoot`; `fastapi`: `roots`, `excludeDirs`, `appVar` |
+| `localExtractorDir` | — | Repo-relative folder of repo-local extractors (`<name>.mjs` or `<name>/index.mjs`) — the one place config may point at code |
+| `adapter` / `adapterOptions` | *(deprecated)* | The pre-1.0 single adapter; `nextjs-supabase` still expands to `[supabase, nextjs]` with a deprecation note |
 | `name` | `"Codebase"` | Display name for the indexes |
 | `repoBase` | `""` | GitHub `/tree/<branch>/` URL prefix for source links in the human index |
 | `baseBranch` | `"main"` | The branch PRs merge into — freshness diffs and the changed-set highlight key on `origin/<baseBranch>` |
 | `paths.*` | `zdd/…` | Where each artifact lives (glossary, adrDir, mapDir, metadataDir, agentIndex, adrIndex, humanIndex, bundleDir) |
-| `adapterOptions` | — | Adapter-specific source layout (for `nextjs-supabase`: `appDir`, `apiPrefix`, `middlewarePath`, `authPatterns`, `migrationNamespaces`, `externalBuckets`, `refs`, `srcAliasRoot`) |
 | `render.storeChanges` | `true` | Set `false` to render with no git dependency (drops the "what just changed" highlight) |
 | `agentIndex.summary` | `""` | The blockquote summary line at the top of the agent index |
 
@@ -59,13 +61,18 @@ paths, and the changed-set highlight is a pure function of the *store files'*
 git history only. `test/determinism.test.mjs` is the guard; the blocking
 `--check` CI tier depends on this property.
 
-## Adapters
+## Extractors
 
-An adapter is one module implementing `derive({ repoRoot, options })` →
-`{ records, diagnostics }` (see `src/adapters/nextjs-supabase/`). Adapters are
-selected by name from a static registry in `src/derive.mjs` — never by path, so
-config can't import arbitrary code. To contribute one, see the repo's
-[CONTRIBUTING.md](https://github.com/rich-rees/zero-drift-docs/blob/main/CONTRIBUTING.md).
+An extractor is one module implementing `derive({ repoRoot, options })` →
+`{ records, diagnostics }` plus a `FACTS_KEY_ORDER` map, keyed to **one
+convention** (see `src/extractors/`). Config lists the extractors in use and the
+deriver merges their records, then resolves cross-extractor refs — a record
+emits `?from:<name>` / `?function:<name>` / `?route:<url>` for a target another
+convention owns, and the deriver turns those into ids after the merge. Missing
+source roots are "nothing to inventory", so a greenfield repo derives clean.
+Extractors are selected by name from a static registry in `src/derive.mjs` or
+from the declared `localExtractorDir` — never by path. To contribute one, see the
+repo's [CONTRIBUTING.md](https://github.com/rich-rees/zero-drift-docs/blob/main/CONTRIBUTING.md).
 
 ## Tests
 
@@ -75,4 +82,7 @@ npm test        # node --test "test/*.test.mjs"
 
 Pure-logic units plus end-to-end canaries and determinism checks against
 `test/fixture/` — a miniature Next.js + Supabase repo exercising renames, FK
-sweeps, triggers, wrapper pages, middleware auth, buckets, and module records.
+sweeps, triggers, wrapper pages, middleware auth, buckets, and module records —
+`test/fixture-fastapi/` (FastAPI + Supabase) and `test/fixture-greenfield/`
+(config only). `test/golden/` pins the v0.3.1 adapter's output: the composed
+`[supabase, nextjs]` pair must reproduce it byte for byte.

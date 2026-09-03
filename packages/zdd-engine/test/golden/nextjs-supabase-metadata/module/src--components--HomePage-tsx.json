@@ -1,0 +1,13 @@
+{
+  "kind": "module",
+  "id": "module:src/components/HomePage.tsx",
+  "title": "src/components/HomePage.tsx",
+  "description": "Client-side things list — fetches the catalogue and renders it.",
+  "resource": [
+    "src/components/HomePage.tsx"
+  ],
+  "refs": [
+    "route:/api/things"
+  ],
+  "facts": {}
+}

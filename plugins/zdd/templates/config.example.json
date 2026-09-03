@@ -1,26 +1,35 @@
 {
-  "$comment": "Example zdd/config.json for a Next.js + Supabase repo. Values only — nothing here is required beyond 'adapter'; every path shown under 'paths' is already the default.",
-  "adapter": "nextjs-supabase",
+  "$comment": "Example zdd/config.json for a Next.js + Supabase repo. Values only — nothing here is required beyond 'extractors'; every path shown under 'paths' is already the default. Compose extractors per convention: a FastAPI + Supabase repo lists [\"supabase\", \"fastapi\"]; a stack with no extractor yet lists [\"generic\"].",
+  "extractors": ["supabase", "nextjs"],
   "name": "My App",
   "repoBase": "https://github.com/my-org/my-app/tree/main/",
   "baseBranch": "main",
-  "adapterOptions": {
-    "appDir": "src/app",
-    "apiPrefix": "/api",
-    "middlewarePath": "src/middleware.ts",
-    "authPatterns": [
-      { "includes": "verifySignature", "auth": "hmac" },
-      { "includes": "CRON_SECRET", "auth": "cron-secret" }
-    ],
-    "migrationNamespaces": [
-      { "name": "db", "dir": "supabase/migrations" }
-    ],
-    "externalBuckets": [],
-    "refs": {
-      "roots": ["src"],
-      "extensions": [".ts", ".tsx"],
-      "excludeDirs": ["node_modules", ".next", "dist", "build", "__tests__", "coverage"],
-      "excludeSuffixes": [".test.ts", ".test.tsx", ".spec.ts", ".d.ts"]
+  "extractorOptions": {
+    "supabase": {
+      "migrationNamespaces": [
+        { "name": "db", "dir": "supabase/migrations" }
+      ],
+      "externalBuckets": []
+    },
+    "nextjs": {
+      "appDir": "src/app",
+      "apiPrefix": "/api",
+      "middlewarePath": "src/middleware.ts",
+      "authPatterns": [
+        { "includes": "verifySignature", "auth": "hmac" },
+        { "includes": "CRON_SECRET", "auth": "cron-secret" }
+      ],
+      "refs": {
+        "roots": ["src"],
+        "extensions": [".ts", ".tsx"],
+        "excludeDirs": ["node_modules", ".next", "dist", "build", "__tests__", "coverage"],
+        "excludeSuffixes": [".test.ts", ".test.tsx", ".spec.ts", ".d.ts"]
+      }
+    },
+    "fastapi": {
+      "$comment": "Only read when 'fastapi' is listed above.",
+      "roots": ["main.py", "api"],
+      "appVar": "app"
     }
   },
   "agentIndex": {

@@ -1,0 +1,32 @@
+{
+  "kind": "table",
+  "id": "table:db/things",
+  "title": "things (db)",
+  "description": "the widget catalogue",
+  "resource": [
+    "migrations/00001_init.sql",
+    "migrations/00002_things.sql"
+  ],
+  "refs": [],
+  "facts": {
+    "namespace": "db",
+    "columns": [
+      {
+        "name": "id",
+        "type": "uuid"
+      },
+      {
+        "name": "title",
+        "type": "text"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamptz"
+      }
+    ],
+    "createdIn": "00001_init.sql",
+    "renamedFrom": [
+      "widgets"
+    ]
+  }
+}

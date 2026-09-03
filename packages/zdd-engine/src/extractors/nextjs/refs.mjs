@@ -1,4 +1,4 @@
-// Static reference scanner for the nextjs-supabase ZDD adapter.
+// Static reference scanner for the nextjs ZDD extractor.
 //
 // Finds outbound references in TS/TSX source: Supabase table/bucket access
 // (`.from('name')`), RPC calls (`.rpc('name')`) and internal API calls
@@ -7,39 +7,47 @@
 // own module record rather than propagating to callers: mechanically true,
 // boring, and honest about what a grep can know.
 
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { walkDir } from "../../lib/walk.mjs";
 
 const posixify = (p) => p.split(/[\\/]/).join("/");
+
+export const DEFAULT_REFS = {
+  roots: null, // filled from srcAliasRoot by the caller
+  extensions: [".ts", ".tsx"],
+  excludeDirs: ["node_modules"],
+  excludeSuffixes: [".test.ts", ".test.tsx", ".d.ts"],
+};
 
 // Default-deny walk: only configured extensions, minus excluded dirs/suffixes.
 // Test files are excluded on purpose — integration tests reference tables
 // wholesale for setup/assertions; those edges describe the harness, not
-// production data flow.
-export function walkSourceFiles(repoRoot, { roots, extensions, excludeDirs, excludeSuffixes }) {
+// production data flow. A missing root is reported, never fatal (CR-002);
+// symlink cycles are cut by the shared walker (CR-016).
+export function walkSourceFiles(repoRoot, { roots, extensions, excludeDirs, excludeSuffixes }, diagnostics = []) {
   const out = [];
-  const visit = (dir) => {
-    let names;
-    try {
-      names = readdirSync(dir).sort();
-    } catch {
-      return;
+  const seen = new Set();
+  for (const root of roots) {
+    const abs = join(repoRoot, root);
+    if (!existsSync(abs)) {
+      diagnostics.push(`refs root ${root} not found — nothing to scan`);
+      continue;
     }
-    for (const name of names) {
-      const p = join(dir, name);
-      const rel = posixify(p.slice(repoRoot.length + 1));
-      const st = statSync(p);
-      if (st.isDirectory()) {
-        if (!excludeDirs.some((d) => rel === d || rel.endsWith(`/${d}`) || name === d)) visit(p);
-      } else if (
-        extensions.some((e) => name.endsWith(e)) &&
-        !excludeSuffixes.some((s) => name.endsWith(s))
-      ) {
-        out.push(rel);
-      }
-    }
-  };
-  for (const root of roots) visit(join(repoRoot, root));
+    walkDir(
+      abs,
+      (p, name) => {
+        if (extensions.some((e) => name.endsWith(e)) && !excludeSuffixes.some((s) => name.endsWith(s))) {
+          out.push(posixify(p.slice(repoRoot.length + 1)));
+        }
+      },
+      seen,
+      (p, name) => {
+        const rel = posixify(p.slice(repoRoot.length + 1));
+        return !excludeDirs.some((d) => rel === d || rel.endsWith(`/${d}`) || name === d);
+      },
+    );
+  }
   return out;
 }
 
@@ -51,9 +59,9 @@ export function normalizeFetchUrl(raw) {
   return url;
 }
 
-// Scan one file's text. Returns raw candidate names; the caller resolves them
-// against known table/bucket/function sets (name-set membership is the whole
-// disambiguation strategy — receivers vary too much to be a signal).
+// Scan one file's text. Returns raw candidate names; the deriver resolves them
+// against every extractor's records after the merge (name-set membership is
+// the whole disambiguation strategy — receivers vary too much to be a signal).
 export function scanFileText(text) {
   const fromNames = new Set();
   const rpcNames = new Set();
@@ -80,25 +88,6 @@ export function scanFileText(text) {
   }
 
   return { fromNames, rpcNames, fetchUrls, unresolvedFromIdents };
-}
-
-// Build a matcher for a route URL: `[x]` eats one segment, `[...x]` eats one
-// or more trailing segments. Fetch-side `${expr}` was normalized to `*`,
-// which also eats exactly one segment.
-export function makeRouteMatcher(routePath) {
-  const segs = routePath.split("/").filter(Boolean);
-  return (url) => {
-    const uSegs = url.split("/").filter(Boolean);
-    let i = 0;
-    for (; i < segs.length; i++) {
-      const s = segs[i];
-      if (/^\[\.\.\..+\]$/.test(s)) return uSegs.length - i >= 1; // catch-all: 1+ trailing
-      if (uSegs.length <= i) return false;
-      if (/^\[.+\]$/.test(s)) continue; // dynamic: any single segment (incl. *)
-      if (s !== uSegs[i] && uSegs[i] !== "*") return false;
-    }
-    return uSegs.length === segs.length;
-  };
 }
 
 export function scanFiles(repoRoot, files) {

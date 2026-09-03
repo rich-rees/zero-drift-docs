@@ -1,0 +1,19 @@
+{
+  "kind": "surface",
+  "id": "surface:/things/[id]",
+  "title": "/things/[id]",
+  "description": "Thing detail — loads one thing and renders it inline (real logic, no wrapper).",
+  "resource": [
+    "src/app/things/[id]/page.tsx"
+  ],
+  "refs": [
+    "route:/api/things/[id]"
+  ],
+  "facts": {
+    "file": "page",
+    "routeGroups": [],
+    "dynamicSegments": [
+      "id"
+    ]
+  }
+}

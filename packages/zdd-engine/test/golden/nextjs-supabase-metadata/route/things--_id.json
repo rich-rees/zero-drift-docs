@@ -1,0 +1,24 @@
+{
+  "kind": "route",
+  "id": "route:/api/things/[id]",
+  "title": "/api/things/[id]",
+  "description": "Read (GET), save (PUT), and delete (DELETE) one thing.",
+  "resource": [
+    "src/app/api/things/[id]/route.ts"
+  ],
+  "refs": [
+    "function:db/save_thing",
+    "table:db/things"
+  ],
+  "facts": {
+    "methods": [
+      "GET",
+      "PUT",
+      "DELETE"
+    ],
+    "dynamicSegments": [
+      "id"
+    ],
+    "auth": "session"
+  }
+}

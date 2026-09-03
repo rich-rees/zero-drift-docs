@@ -25,9 +25,9 @@ fill up through normal work (the ritual). Scaffold:
    ADRs of its own). Default on; opt out if you'd rather start from real work.
 3. **`zdd/map/`** — empty feature/service directories.
 4. **`zdd/config.json`** — start from `templates/config.example.json`, validate
-   against `templates/config.schema.json`; pick the adapter (e.g.
-   `nextjs-supabase`) and set `name`, `repoBase`, `baseBranch`, and the
-   adapter's source paths for this repo.
+   against `templates/config.schema.json`; list the extractors (e.g.
+   `["supabase", "nextjs"]`) and set `name`, `repoBase`, `baseBranch`, and each
+   extractor's source paths for this repo (`extractorOptions`).
 
 ## Then
 
