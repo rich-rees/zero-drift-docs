@@ -71,3 +71,45 @@ export function loadConfig(args, cwd = process.cwd()) {
     bundleDir: resolve(repoRoot, paths.bundleDir),
   };
 }
+
+// ---------------------------------------------------------------------------
+// Extractor selection. The 1.0 shape is `extractors: [names]` + per-extractor
+// `extractorOptions: { <name>: {...} }` — one extractor per convention,
+// composed by config, so a stack combination never needs a bespoke adapter
+// (docs/decisions/0001). The pre-1.0 `adapter` + `adapterOptions` pair still
+// works: it expands to the extractors it was a bundle of, with the old option
+// keys routed to the extractor that owns them, and prints a deprecation note.
+// `bootstrap --upgrade` rewrites the config; the engine never does.
+// ---------------------------------------------------------------------------
+export const LEGACY_ADAPTERS = {
+  "nextjs-supabase": {
+    extractors: ["supabase", "nextjs"],
+    split(options = {}) {
+      const { migrationNamespaces = [], externalBuckets = [], ...nextjs } = options;
+      return { supabase: { migrationNamespaces, externalBuckets }, nextjs };
+    },
+  },
+};
+
+export function resolveExtractors(config) {
+  const diagnostics = [];
+  if (Array.isArray(config.extractors)) {
+    const options = config.extractorOptions ?? {};
+    return {
+      extractors: config.extractors.map((name) => ({ name, options: options[name] ?? {} })),
+      diagnostics,
+    };
+  }
+  if (config.adapter !== undefined) {
+    const legacy = LEGACY_ADAPTERS[config.adapter];
+    if (!legacy) {
+      return { error: `Unknown adapter '${config.adapter}' — 'adapter' is deprecated; use "extractors": [...] (known legacy adapters: ${Object.keys(LEGACY_ADAPTERS).join(", ")})` };
+    }
+    diagnostics.push(
+      `[config] 'adapter' is deprecated — use "extractors": ${JSON.stringify(legacy.extractors)} with "extractorOptions" (bootstrap --upgrade migrates this)`,
+    );
+    const split = legacy.split(config.adapterOptions);
+    return { extractors: legacy.extractors.map((name) => ({ name, options: split[name] ?? {} })), diagnostics };
+  }
+  return { error: `zdd/config.json names no extractors — add "extractors": ["supabase", "nextjs", ...] (or "generic" for a map-only bundle)` };
+}

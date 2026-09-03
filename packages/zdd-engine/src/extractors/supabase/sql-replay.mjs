@@ -1,4 +1,4 @@
-// Migration replay engine for the nextjs-supabase ZDD adapter.
+// Migration replay engine for the supabase ZDD extractor.
 //
 // Replays a directory of SQL migrations IN ORDER into a mutable schema model
 // (tables, functions, buckets), so the derived layer reflects the schema as it

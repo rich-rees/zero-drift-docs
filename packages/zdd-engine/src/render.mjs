@@ -85,7 +85,10 @@ function walk(dir, ext, out = []) {
 // ---------------------------------------------------------------------------
 const normEol = (s) => s.replace(/\r\n/g, "\n");
 function loadDocs() {
-  const glossary = normEol(readFileSync(resolve(REPO, PATHS.glossary), "utf8"));
+  // A greenfield bundle may not have a glossary yet — render it as empty
+  // rather than failing; the stores fill in as the mapping session runs.
+  const glossaryPath = resolve(REPO, PATHS.glossary);
+  const glossary = existsSync(glossaryPath) ? normEol(readFileSync(glossaryPath, "utf8")) : "";
   const adrDir = resolve(REPO, PATHS.adrDir);
   const adrs = [];
   for (const path of walk(adrDir, ".md")) {
@@ -228,7 +231,7 @@ function synthesizeBody(record, idOfRef) {
   const f = record.facts;
   if (record.kind === "route") {
     lines.push(`# Methods`, "", f.methods.length ? f.methods.map((m) => `- \`${m}\``).join("\n") : "_(none exported)_", "");
-    lines.push(`# Auth`, "", f.auth, "");
+    if (f.auth) lines.push(`# Auth`, "", f.auth, "");
   }
   if (record.kind === "table") {
     lines.push(`# Columns (${f.namespace})`, "", "| column | type |", "| --- | --- |");

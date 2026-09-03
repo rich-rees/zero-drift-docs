@@ -1,4 +1,4 @@
-// Static reference scanner for the nextjs-supabase ZDD adapter.
+// Static reference scanner for the nextjs ZDD extractor.
 //
 // Finds outbound references in TS/TSX source: Supabase table/bucket access
 // (`.from('name')`), RPC calls (`.rpc('name')`) and internal API calls
@@ -80,25 +80,6 @@ export function scanFileText(text) {
   }
 
   return { fromNames, rpcNames, fetchUrls, unresolvedFromIdents };
-}
-
-// Build a matcher for a route URL: `[x]` eats one segment, `[...x]` eats one
-// or more trailing segments. Fetch-side `${expr}` was normalized to `*`,
-// which also eats exactly one segment.
-export function makeRouteMatcher(routePath) {
-  const segs = routePath.split("/").filter(Boolean);
-  return (url) => {
-    const uSegs = url.split("/").filter(Boolean);
-    let i = 0;
-    for (; i < segs.length; i++) {
-      const s = segs[i];
-      if (/^\[\.\.\..+\]$/.test(s)) return uSegs.length - i >= 1; // catch-all: 1+ trailing
-      if (uSegs.length <= i) return false;
-      if (/^\[.+\]$/.test(s)) continue; // dynamic: any single segment (incl. *)
-      if (s !== uSegs[i] && uSegs[i] !== "*") return false;
-    }
-    return uSegs.length === segs.length;
-  };
 }
 
 export function scanFiles(repoRoot, files) {
