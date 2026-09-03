@@ -23,8 +23,25 @@ export const DEFAULT_PATHS = {
   agentIndex: "zdd/agent-index.md",
   adrIndex: "zdd/adr-index.md",
   humanIndex: "zdd/human-index.html",
+  graph: "zdd/graph.json",
   bundleDir: "zdd",
 };
+
+// Viewer selection (DIO-310). `viewer` is a name (`"minimal"`) or an object
+// whose `name` picks the viewer and whose other keys are its options —
+// `{ defaultFocus, authHubs, nonAreaTags }` for cytoscape. An object with no
+// `name` (every pre-registry config) means the default viewer, so no adopter
+// config changes meaning. The name is validated against the registry by the
+// renderer, which owns the list.
+export function resolveViewer(config, defaultName) {
+  const v = config.viewer;
+  if (v === undefined || v === null) return { name: defaultName, options: {} };
+  if (typeof v === "string") return { name: v, options: {} };
+  if (typeof v !== "object" || Array.isArray(v)) return { error: `'viewer' must be a name or an object with a 'name'` };
+  const { name = defaultName, ...options } = v;
+  if (typeof name !== "string") return { error: `'viewer.name' must be a string` };
+  return { name, options };
+}
 
 function argValue(args, name) {
   const hit = args.find((a) => a.startsWith(`--${name}=`));

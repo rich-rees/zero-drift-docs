@@ -21,13 +21,25 @@
     const b = n.data.label.split("/").pop();
     baseCounts[b] = (baseCounts[b] || 0) + 1;
   }
+  // Endpoint labels are URL paths ("/api/journeys/[id]") — humanize them for
+  // the map, dropping whatever leading segments EVERY endpoint shares (a
+  // Next.js "/api", a FastAPI "/v1", nothing at all) rather than keying on any
+  // one framework's convention; the exact path stays in the tooltip.
+  const routeSegs = bundle.nodes.filter((n) => n.data.type === "API Endpoint")
+    .map((n) => n.data.label.split("/").filter(Boolean));
+  let commonRoute = routeSegs.length ? [...routeSegs[0]] : [];
+  for (const segs of routeSegs) {
+    let i = 0;
+    while (i < commonRoute.length && i < segs.length && commonRoute[i] === segs[i]) i++;
+    commonRoute = commonRoute.slice(0, i);
+  }
   for (const n of bundle.nodes) {
     const d = n.data;
-    // Endpoint labels are URL paths ("/api/journeys/[id]") — humanize the
-    // post-/api/ segments for the map; the exact path stays in the tooltip.
     if (d.type === "API Endpoint") {
-      d.display = d.label.split("/").filter((s) => s && s !== "api")
-        .map((w) => (/^\[.*\]$/.test(w) ? w : w.charAt(0).toUpperCase() + w.slice(1))).join(" ");
+      const segs = d.label.split("/").filter(Boolean);
+      const own = segs.length > commonRoute.length ? segs.slice(commonRoute.length) : segs.slice(-1);
+      d.display = own
+        .map((w) => (/^[\[{].*[\]}]$/.test(w) ? w : w.charAt(0).toUpperCase() + w.slice(1))).join(" ");
     } else if (d.type === "Module") {
       const segs = d.label.split("/");
       d.display = segs.slice(baseCounts[segs[segs.length - 1]] > 1 ? -2 : -1).join("/");
@@ -38,8 +50,8 @@
     // "/settings/environment" -> SE rather than falling into the raw-slice
     // fallback ("/SE") that path-shaped titles used to hit. The single-word
     // fallback slices the word, not the raw display, so "/bank" -> BAN.
-    const words = d.display.replace(/[^A-Za-z0-9 _\-\[\]/]/g, "").split(/[\s_\-/]+/)
-      .filter((w) => w && !w.startsWith("[")); // all dynamic segments, not just [id]
+    const words = d.display.replace(/[^A-Za-z0-9 _\-\[\]{}/]/g, "").split(/[\s_\-/]+/)
+      .filter((w) => w && !/^[\[{]/.test(w)); // all dynamic segments ([id], {id}), not just [id]
     d.acr = (words.length >= 2 ? words.map((w) => w[0]).join("") : (words[0] || d.display).slice(0, 3))
       .toUpperCase().slice(0, 4);
   }
@@ -550,7 +562,8 @@
   const docsBack = document.getElementById("docs-back");
 
   function renderDocMarkdown(md, baseDir, opts = {}) {
-    docsBody.innerHTML = marked.parse(md || "", { breaks: false, gfm: true });
+    // safeMarked, never marked.parse: store text is source-derived (CR-007).
+    docsBody.innerHTML = safeMarked.parse(md || "");
     // Glossary entries are `**Term**: description` paragraphs — promote the
     // defined term to a block title (underlined via .term) so it reads apart
     // from bold cross-references inside descriptions.
@@ -699,7 +712,7 @@
       authEl.hidden = false;
       authEl.className = "auth-note" + (AUTH_LABELS[am] ? " auth-exception" : "");
       authEl.innerHTML =
-        am === "session" ? "🔒 Session auth (Entra middleware) — the norm; stated here rather than drawn as an edge." :
+        am === "session" ? "🔒 Session auth (middleware) — the norm; stated here rather than drawn as an edge." :
         am === "is-auth" ? "This <em>is</em> the auth endpoint." :
         `<span class="authdot"></span> <b>Auth exception:</b> ${AUTH_LABELS[am]} — not behind the session middleware.`;
     }
@@ -729,7 +742,7 @@
     } else tagsEl.textContent = "—";
 
     const bodyEl = document.getElementById("detail-body");
-    bodyEl.innerHTML = marked.parse(bundle.bodies[conceptId] || "", { breaks: false, gfm: true });
+    bodyEl.innerHTML = safeMarked.parse(bundle.bodies[conceptId] || "");
     rewriteInternalLinks(bodyEl);
     linkifyAdrMentions(bodyEl);
 
