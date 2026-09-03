@@ -42,5 +42,5 @@ Run this as the definition of done for every unit of work — the spoken form is
   durable residue moves to an artifact first.
 - The curated half is judgment CI can't gate — [authoring.md](../authoring.md) is
   the discipline that stands in for a gate. Prefer to have driven the decisions out
-  with `/zdd:grill` (if the mattpocock-skills plugin is installed) or plan mode;
+  with `grill` (if the mattpocock-skills plugin is installed) or plan mode;
   by PR-finish this step is capture, not fresh design.

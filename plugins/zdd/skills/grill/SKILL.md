@@ -26,8 +26,12 @@ than one place, so **check all of them — a hit in any one is enough** (the
 # 2. User-scoped skill (pre-plugin / manual install).
 ~/.claude/skills/domain-modeling/SKILL.md
 
-# 3. Project-scoped skill (vendored into this repo).
+# 3. Project-scoped skill (vendored into this repo — note this one is
+#    whatever the repo's last commit put there; say so when it is the hit).
 <repo>/.claude/skills/domain-modeling/SKILL.md
+
+# 4. Codex user skill.
+~/.codex/skills/domain-modeling/SKILL.md
 ```
 
 - **Found in any location** → continue to Step 1.
@@ -35,8 +39,8 @@ than one place, so **check all of them — a hit in any one is enough** (the
   > `zdd:grill` needs the **mattpocock-skills** plugin, which isn't installed.
   > Two ways forward: install it (`/plugin marketplace add …` then
   > `/plugin install mattpocock-skills@…`) and re-run me — or skip grilling
-  > entirely: work the decisions out in plan mode, then run `/zdd:update`. ZDD
-  > works fine without grilling; `/zdd:update` carries the same authoring
+  > entirely: work the decisions out in plan mode, then "update ZDD". ZDD
+  > works fine without grilling; `update` carries the same authoring
   > discipline (see [authoring.md](../authoring.md)).
 
   **Never improvise a substitute interview** — a hand-rolled grilling breaks the
@@ -62,10 +66,10 @@ homes are different:
   must stamp the old one `Superseded [in part] by ADR-NNNN`, both directions.
 
 The authoring discipline — when a decision is ADR-worthy, and the glossary/ADR
-formats — is in [authoring.md](../authoring.md), the *same* reference `/zdd:update`
+formats — is in [authoring.md](../authoring.md), the *same* reference `update`
 uses, so grilled docs and PR-finish docs come out identical.
 
 ## After
 
-The decisions now live in `zdd/`. Build the feature, then run `/zdd:update` at
-PR-finish to capture anything else and regenerate the indexes.
+The decisions now live in `zdd/`. Build the feature, then "update ZDD" at
+the finish to capture anything else and regenerate the indexes.

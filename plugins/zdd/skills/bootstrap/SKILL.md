@@ -8,16 +8,23 @@ description: Adopt Zero-Drift Docs in a repo — the install runbook. Detects th
 You are the conversation; **`scripts/bootstrap.mjs` is the only thing that
 reads the stack and writes into the adopter's repo.** Never hand-write a file
 this script writes, and never ask a question the detection already answered —
-show the evidence and ask for confirmation instead. The script lives in this
-plugin: `${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.mjs` (Codex sets the same
-variable). Run it from the adopter's repo root, or pass `--root=<dir>`.
+show the evidence and ask for confirmation instead.
+
+**Where the script is.** It lives in this plugin at `scripts/bootstrap.mjs` —
+two directories up from this SKILL.md (`<plugin>/skills/bootstrap/SKILL.md` →
+`<plugin>/scripts/bootstrap.mjs`). Resolve `<plugin>` from the path you read
+this file from; the commands below write it as `$PLUGIN`. In a POSIX shell
+`$CLAUDE_PLUGIN_ROOT` holds the same directory when the host sets it; in
+PowerShell that is `$env:CLAUDE_PLUGIN_ROOT`, and the hosts do not promise the
+variable to skill-driven shells, so the SKILL.md path is the reliable source.
+Run from the adopter's repo root, or pass `--root=<dir>`.
 
 If invoked with **`--upgrade`**, skip to [Upgrade](#upgrade).
 
 ## Step 1 — detect
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.mjs" detect
+node "$PLUGIN/scripts/bootstrap.mjs" detect
 ```
 
 It prints one of two modes, plus whether the `mattpocock-skills` plugin is
@@ -40,7 +47,9 @@ installed (used in step 4):
   a path the user didn't state gets the convention's default and is said aloud.
 
 If `zdd/` already exists the script reports **repair** mode: it will fill only
-what is missing. Say so, and skip the stack questions unless config is absent.
+what is missing, and an opt-in you do not answer keeps its current state —
+only an explicit answer changes it. Say so, and skip the stack questions
+unless config is absent.
 
 ## Step 2 — the opt-ins (yes/no, defaults **on**)
 
@@ -77,18 +86,24 @@ omitted keys take the detection / the defaults):
 ```
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.mjs" apply --answers=<file>
+node "$PLUGIN/scripts/bootstrap.mjs" apply --answers=<file>
 ```
 
-It narrates every file as **wrote / kept / skipped** and writes:
+It validates the whole answer set first and stops before writing anything if
+a value is malformed; it also stops if a `zdd/config.json` exists but cannot
+be read (it never replaces a config it cannot parse — fix or remove it by
+hand). Then it narrates every file as **wrote / kept / skipped** and writes:
 
 - `zdd/config.json` (extractors + options, `engine` pin, `hooks` opt-ins),
   `zdd/glossary.md` (a header, no terms), `zdd/map/{features,apps,services}/`
   (empty, plus one Application per declared app), `zdd/adr/0001-…` (dated
   today), `zdd/metadata/` (empty until derive).
 - `.github/workflows/zdd.yml` **or** `.githooks/pre-push` (+ `git config
-  core.hooksPath .githooks` — run for you when `.git` exists, printed
-  otherwise).
+  core.hooksPath .githooks` — run for you when `.git` exists and the setting
+  is free; an existing hook manager's path is left alone and the composition
+  step printed). Both files carry a "Managed by Zero-Drift Docs" header: only
+  files with that header are ever rewritten later, and a same-named file
+  without it is kept and called out.
 - The instruction block into `CLAUDE.md` and, for Codex users, `AGENTS.md` —
   one tool-neutral block between `<!-- zdd:begin -->` / `<!-- zdd:end -->`
   markers, leading with the two spoken verbs. Existing content is kept.
@@ -135,7 +150,7 @@ adoption. Updating the plugin never touches the repo by itself; this does, and
 narrates every file:
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.mjs" upgrade
+node "$PLUGIN/scripts/bootstrap.mjs" upgrade
 ```
 
 - `zdd/config.json`: the pre-1.0 `adapter` → `extractors` + `extractorOptions`
@@ -143,8 +158,13 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.mjs" upgrade
   `viewer.nonAreaTags` → top-level `nonAreaTags`, `engine` pin → this plugin.
 - `.github/workflows/zdd.yml` and `.githooks/pre-push`: engine pin rewritten
   (a managed pre-push is rewritten from the template).
-- `CLAUDE.md` / `AGENTS.md`: the marked block refreshed; a pre-0.4 unmarked
-  snippet is replaced by the marked one.
+- `CLAUDE.md` / `AGENTS.md`: the marked block refreshed (exactly one
+  well-formed `<!-- zdd:begin -->` / `<!-- zdd:end -->` pair; anything else is
+  refused and named); a pre-0.4 unmarked snippet is replaced only when it is
+  recognisably ours — a customised section under that heading is left alone
+  and a fresh block appended.
+- A config holding both `adapter` and `extractors` is refused — keep one by
+  hand first, as the engine demands.
 - **Never** the glossary, ADRs, map, or metadata.
 
 If the engine pin moved, run `render` and commit the regenerated artifacts in
