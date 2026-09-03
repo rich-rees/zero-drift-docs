@@ -142,10 +142,15 @@ builds its own private data shape from the graph.
 
 ## Other welcome contributions
 
-- **Skills** — improvements to `orient` / `update` / `bootstrap`, or new ones that
+- **Skills** — improvements to `load` / `update` / `bootstrap`, or new ones that
   serve the ritual (not project-specific workflow — ZDD ships mechanism, not
   opinions about how *your* team plans work).
 - **Engine** — determinism fixes, better ref resolution, the renderer, the checks.
+- **The runbook** — a new detection probe in `plugins/zdd/scripts/bootstrap.mjs`
+  (one per extractor convention: what evidence it looks for, what options that
+  implies). Every probe is proven at the file seam: `plugins/zdd/test/` drives
+  the script with a scripted answer set against a fixture and asserts what
+  landed on disk.
 - **Docs** — clearer setup, worked examples, fixing anything that misled you.
 
 ## What ZDD deliberately does *not* want
