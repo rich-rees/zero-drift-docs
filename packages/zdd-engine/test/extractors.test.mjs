@@ -100,14 +100,98 @@ test("fastapi + supabase: prefix-aware router routes, app routes, tables from mi
   rmSync(repo, { recursive: true, force: true });
 });
 
-test("greenfield: config only, no source dirs — derive/render and both --checks exit 0, metadata empty", () => {
+test("greenfield: config only, no source dirs — derive/render/lint and both --checks exit 0, metadata empty, roots reported", () => {
   const repo = mkRepo(FIXTURE_GREENFIELD);
-  assert.match(run(repo, ["derive"]), /0 records/);
+  const { status, stdout, stderr } = spawnSync(process.execPath, [BIN, "derive", "--verbose"], { cwd: repo, encoding: "utf8" });
+  assert.equal(status, 0, stderr);
+  assert.match(stdout, /0 records/);
+  // Missing roots are "nothing to inventory" — but always said (CR-002).
+  assert.match(stderr, /\[supabase\] db: supabase\/migrations not found — nothing to inventory/);
+  assert.match(stderr, /\[fastapi\] api not found — nothing to inventory/);
   assert.match(run(repo, ["derive", "--check"]), /in sync \(0 records\)/);
   run(repo, ["render"]);
   assert.match(run(repo, ["render", "--check"]), /in sync/);
+  assert.match(run(repo, ["lint"]), /store lints passed/); // --tempstate needs git; fixture copies have none
   assert.equal(tree(join(repo, "zdd", "metadata")).size, 0);
   assert.match(readFileSync(join(repo, "zdd", "agent-index.md"), "utf8"), /^# Greenfield/m);
+  rmSync(repo, { recursive: true, force: true });
+});
+
+test("config guards through the CLI: empty list, mixed legacy+new, escaping paths all fail before touching metadata (CR-001/004/005/006/019)", () => {
+  const repo = mkRepo(FIXTURE);
+  run(repo, ["derive"]);
+  const before = tree(join(repo, "zdd", "metadata"));
+  const legacy = readConfig(repo);
+  const cases = [
+    [{ ...composedConfig(legacy), extractors: [] }, /lists nothing/],
+    [{ ...legacy, extractors: ["supabase", "nextjs"] }, /both 'adapter' and 'extractors'/],
+    [{ ...composedConfig(legacy), localExtractorDir: "../elsewhere" }, /localExtractorDir '\.\.\/elsewhere' must be repo-relative/],
+    [{ ...composedConfig(legacy), paths: { humanIndex: "../package.json" } }, /paths\.humanIndex .* must be repo-relative/],
+    [(() => { const c = composedConfig(legacy); c.extractorOptions.supabase.migrationNamespaces = [{ name: "db", dir: "../fixture/migrations" }]; return c; })(), /supabase\.migrationNamespaces\[db\]\.dir .* must be repo-relative/],
+    [(() => { const c = composedConfig(legacy); c.extractorOptions.nextjs.appDir = "/etc"; return c; })(), /nextjs\.appDir .* must be repo-relative/],
+  ];
+  for (const [config, re] of cases) {
+    writeConfig(repo, config);
+    assert.match(runFail(repo, ["derive"]), re);
+    assertTreesEqual(tree(join(repo, "zdd", "metadata")), before, "metadata untouched after refused config");
+  }
+  rmSync(repo, { recursive: true, force: true });
+});
+
+test("record guards: a local extractor cannot write outside metadataDir via kind, nor name a '..' resource (CR-003/005)", () => {
+  const repo = mkRepo(FIXTURE_GREENFIELD);
+  mkdirSync(join(repo, "zdd", "extractors"), { recursive: true });
+  const base = { ...readConfig(repo), localExtractorDir: "zdd/extractors", extractors: ["evil"] };
+  writeConfig(repo, base);
+  const evil = (record) => `export function derive() { return { records: [${record}], diagnostics: [] }; }`;
+  writeFileSync(join(repo, "zdd", "extractors", "evil.mjs"), evil(`{ kind: "..", id: "x:1", title: "x", description: "", resource: [], refs: [], facts: {}, filename: "config.json" }`));
+  assert.match(runFail(repo, ["derive"]), /bad kind '\.\.'/);
+  assert.match(readFileSync(join(repo, "zdd", "config.json"), "utf8"), /Greenfield/, "config.json not overwritten");
+  writeFileSync(join(repo, "zdd", "extractors", "evil.mjs"), evil(`{ kind: "job", id: "job:1", title: "x", description: "", resource: ["../secret.sql"], refs: [], facts: {}, filename: "x.json" }`));
+  assert.match(runFail(repo, ["derive"]), /resource '\.\.\/secret\.sql' must be repo-relative/);
+  rmSync(repo, { recursive: true, force: true });
+});
+
+test("two extractors emitting one kind: facts orders merge in config order; duplicate ids and case-variant filenames fail (CR-023)", () => {
+  const repo = mkRepo(FIXTURE_GREENFIELD);
+  mkdirSync(join(repo, "zdd", "extractors"), { recursive: true });
+  const ext = (id, filename, facts, order) =>
+    `export const FACTS_KEY_ORDER = { job: ${JSON.stringify(order)} };\nexport function derive() { return { records: [{ kind: "job", id: ${JSON.stringify(id)}, title: "t", description: "", resource: [], refs: [], facts: ${JSON.stringify(facts)}, filename: ${JSON.stringify(filename)} }], diagnostics: [] }; }`;
+  writeFileSync(join(repo, "zdd", "extractors", "one.mjs"), ext("job:a", "a.json", { zeta: 1, alpha: 2 }, ["zeta"]));
+  writeFileSync(join(repo, "zdd", "extractors", "two.mjs"), ext("job:b", "b.json", { alpha: 1, zeta: 2, beta: 3 }, ["alpha", "beta"]));
+  const base = { ...readConfig(repo), localExtractorDir: "zdd/extractors" };
+  writeConfig(repo, { ...base, extractors: ["one", "two"] });
+  assert.match(run(repo, ["derive"]), /Wrote 2 records/);
+  // Merged order is zeta, alpha, beta for both records regardless of emitter.
+  assert.deepEqual(Object.keys(JSON.parse(readFileSync(join(repo, "zdd", "metadata", "job", "b.json"), "utf8")).facts), ["zeta", "alpha", "beta"]);
+  writeFileSync(join(repo, "zdd", "extractors", "two.mjs"), ext("job:a", "b.json", {}, []));
+  assert.match(runFail(repo, ["derive"]), /Duplicate record id 'job:a'/);
+  writeFileSync(join(repo, "zdd", "extractors", "two.mjs"), ext("job:b", "A.json", {}, []));
+  assert.match(runFail(repo, ["derive"]), /Filename collision \(case-insensitive\): job\/a\.json/);
+  rmSync(repo, { recursive: true, force: true });
+});
+
+test("a local extractor named like an Object.prototype property loads from the local dir (CR-022)", () => {
+  const repo = mkRepo(FIXTURE_GREENFIELD);
+  mkdirSync(join(repo, "zdd", "extractors"), { recursive: true });
+  writeFileSync(join(repo, "zdd", "extractors", "constructor.mjs"), DEMO_EXTRACTOR);
+  writeConfig(repo, { ...readConfig(repo), localExtractorDir: "zdd/extractors", extractors: ["constructor"] });
+  assert.match(run(repo, ["derive"]), /Wrote 1 records/);
+  rmSync(repo, { recursive: true, force: true });
+});
+
+test("render tolerates a third-party route record with foreign facts (CR-014)", () => {
+  const repo = mkRepo(FIXTURE_GREENFIELD);
+  mkdirSync(join(repo, "zdd", "extractors"), { recursive: true });
+  writeFileSync(
+    join(repo, "zdd", "extractors", "rails.mjs"),
+    `export function derive() { return { records: [{ kind: "route", id: "route:/posts", title: "/posts", description: "", resource: ["config/routes.rb"], refs: [], facts: { controller: "posts#index" }, filename: "posts.json" }], diagnostics: [] }; }`,
+  );
+  writeConfig(repo, { ...readConfig(repo), localExtractorDir: "zdd/extractors", extractors: ["rails"] });
+  run(repo, ["derive"]);
+  run(repo, ["render"]);
+  const html = readFileSync(join(repo, "zdd", "human-index.html"), "utf8");
+  assert.ok(!html.includes("# Auth\\n\\nundefined"), "no undefined auth section");
   rmSync(repo, { recursive: true, force: true });
 });
 
@@ -170,7 +254,7 @@ test("unknown extractor name lists the known names: registry + local dir", () =>
   rmSync(repo, { recursive: true, force: true });
 });
 
-test("determinism: derive + render twice on every fixture is byte-identical across zdd/", () => {
+test("determinism: derive + render on two fresh copies of every fixture, and twice on one copy, is byte-identical across zdd/", () => {
   const cases = [
     ["nextjs-supabase composed", FIXTURE, (r) => writeConfig(r, composedConfig(readConfig(r)))],
     ["fastapi", FIXTURE_FASTAPI, () => {}],
@@ -186,6 +270,10 @@ test("determinism: derive + render twice on every fixture is byte-identical acro
       run(r, ["render"]);
     }
     assertTreesEqual(tree(join(a, "zdd")), tree(join(b, "zdd")), label);
+    const once = tree(join(a, "zdd"));
+    run(a, ["derive"]);
+    run(a, ["render"]);
+    assertTreesEqual(tree(join(a, "zdd")), once, `${label} (idempotent)`);
     rmSync(a, { recursive: true, force: true });
     rmSync(b, { recursive: true, force: true });
   }

@@ -23,6 +23,7 @@ import { join, dirname, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { loadConfig, resolveExtractors } from "./lib/config.mjs";
 import { resolveRefs } from "./lib/resolve-refs.mjs";
+import { insideRepo } from "./lib/paths.mjs";
 
 const EXTRACTORS = {
   supabase: "./extractors/supabase/index.mjs",
@@ -34,6 +35,9 @@ const NAME_RE = /^[a-z][a-z0-9-]*$/;
 
 const RECORD_KEYS = ["kind", "id", "title", "description", "resource", "refs", "facts"];
 const FILENAME_RE = /^[A-Za-z0-9._~()\[\]-]+\.json$/;
+// `kind` is a directory name under metadataDir — a record with kind `..`
+// would write outside it (CR-003).
+const KIND_RE = /^[a-z][a-z0-9_-]*$/;
 
 function fail(msg) {
   console.error(msg);
@@ -87,6 +91,7 @@ function validateRecords(records) {
     if (typeof r.description !== "string") fail(`Record ${r.id}: description must be a string`);
     if (!Array.isArray(r.resource)) fail(`Record ${r.id}: resource must be an array`);
     if (!Array.isArray(r.refs)) fail(`Record ${r.id}: refs must be an array`);
+    if (!KIND_RE.test(r.kind)) fail(`Record ${r.id}: bad kind '${r.kind}' (lowercase name, it becomes a directory)`);
     if (!FILENAME_RE.test(r.filename)) fail(`Record ${r.id}: bad filename '${r.filename}'`);
     if (ids.has(r.id)) fail(`Duplicate record id '${r.id}' (two extractors minted it?)`);
     ids.add(r.id);
@@ -95,8 +100,8 @@ function validateRecords(records) {
     if (filenamesLower.has(fileKey)) fail(`Filename collision (case-insensitive): ${fileKey}`);
     filenamesLower.add(fileKey);
     for (const res of r.resource) {
-      if (res.includes("\\") || res.startsWith("/") || /^[A-Za-z]:/.test(res)) {
-        fail(`Record ${r.id}: resource '${res}' must be repo-relative POSIX`);
+      if (res.includes("\\") || res.startsWith("/") || /^[A-Za-z]:/.test(res) || res.split("/").includes("..")) {
+        fail(`Record ${r.id}: resource '${res}' must be repo-relative POSIX (no '..')`);
       }
     }
   }
@@ -115,7 +120,9 @@ function validateRecords(records) {
 function localExtractors(repoRoot, dir) {
   const found = new Map();
   if (!dir) return found;
-  const abs = resolve(repoRoot, dir);
+  // loadConfig already refused absolute / `..` values; this is the belt
+  // behind those braces (CR-004).
+  const abs = insideRepo(repoRoot, resolve(repoRoot, dir), "localExtractorDir");
   if (!existsSync(abs)) return found;
   for (const name of readdirSync(abs).sort()) {
     const p = join(abs, name);
@@ -134,7 +141,8 @@ async function loadExtractor(name, repoRoot, config) {
     );
   }
   const local = localExtractors(repoRoot, localDir);
-  if (EXTRACTORS[name]) {
+  // hasOwn: a local extractor called `constructor` must not hit Object.prototype (CR-022).
+  if (Object.hasOwn(EXTRACTORS, name)) {
     if (local.has(name)) fail(`Local extractor '${name}' shadows the built-in of the same name — rename it`);
     return import(EXTRACTORS[name]);
   }
@@ -156,7 +164,13 @@ export async function deriveRecords({ repoRoot, config }) {
   for (const { name, options } of selection.extractors) {
     const extractor = await loadExtractor(name, repoRoot, config);
     if (typeof extractor.derive !== "function") fail(`Extractor '${name}' exports no derive()`);
-    const out = extractor.derive({ repoRoot, options });
+    let out;
+    try {
+      out = extractor.derive({ repoRoot, options });
+    } catch (e) {
+      fail(`Extractor '${name}' failed: ${e.message}`);
+    }
+    if (!out || !Array.isArray(out.records) || !Array.isArray(out.diagnostics)) fail(`Extractor '${name}' must return { records: [], diagnostics: [] }`);
     records.push(...out.records);
     diagnostics.push(...out.diagnostics.map((d) => `[${name}] ${d}`));
     // Facts key orders merge per kind in config order: first extractor's keys
@@ -234,12 +248,12 @@ export async function run(args) {
     console.log(`codebase metadata in sync (${records.length} records)`);
   } else {
     for (const [rel, content] of expected) {
-      const p = join(metadataDir, rel);
+      const p = insideRepo(metadataDir, join(metadataDir, rel), `metadata path ${rel}`);
       mkdirSync(dirname(p), { recursive: true });
       writeFileSync(p, content);
     }
     for (const rel of existing.keys()) {
-      if (!expected.has(rel)) rmSync(join(metadataDir, rel));
+      if (!expected.has(rel)) rmSync(insideRepo(metadataDir, join(metadataDir, rel), `metadata path ${rel}`));
     }
     const byKind = {};
     for (const r of records) byKind[r.kind] = (byKind[r.kind] ?? 0) + 1;
