@@ -2,15 +2,40 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://github.com/rich-rees/zero-drift-docs/config.schema.json",
   "title": "ZDD repo config (zdd/config.json)",
-  "description": "Per-repo ZDD configuration: which adapter to run, where the artifacts live, and adapter-specific source paths. Artifact CONTENTS never live here — this is the small, portable config tier only.",
+  "description": "Per-repo ZDD configuration: which extractors to run, where the artifacts live, and per-extractor source paths. Artifact CONTENTS never live here — this is the small, portable config tier only.",
   "type": "object",
-  "required": ["adapter"],
+  "anyOf": [{ "required": ["extractors"] }, { "required": ["adapter"] }],
   "additionalProperties": true,
   "properties": {
+    "extractors": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+      "minItems": 1,
+      "uniqueItems": true,
+      "description": "Extractors to run, composed: one per convention in the stack (built-in: supabase, nextjs, fastapi, generic). Selected by NAME from the engine's registry or from localExtractorDir — never by path. Records from every extractor are merged and cross-extractor refs resolved after the merge.",
+      "examples": [["supabase", "nextjs"], ["supabase", "fastapi"], ["generic"]]
+    },
+    "extractorOptions": {
+      "type": "object",
+      "description": "Per-extractor source configuration, keyed by extractor name. supabase: migrationNamespaces [{name, dir}], externalBuckets [{name, namespace}]. nextjs: appDir, apiPrefix, middlewarePath, authPatterns, refs {roots, extensions, excludeDirs, excludeSuffixes}, srcAliasRoot. fastapi: roots, excludeDirs, appVar. generic: none.",
+      "additionalProperties": { "type": "object" }
+    },
+    "localExtractorDir": {
+      "type": "string",
+      "description": "Repo-relative directory holding repo-local extractors (<name>.mjs or <name>/index.mjs), each selectable by name in `extractors`. The one place config may point at code; a one-off convention lives here instead of in a fork. Local names may not shadow built-ins.",
+      "examples": ["zdd/extractors"]
+    },
     "adapter": {
       "type": "string",
-      "description": "Name of the deriver adapter to run (selected by name from the engine's static registry — never a path).",
+      "deprecated": true,
+      "description": "DEPRECATED (pre-1.0): the single monolithic adapter. Still honoured — `nextjs-supabase` expands to extractors [supabase, nextjs] with adapterOptions split by key — but prints a deprecation note on every derive. `bootstrap --upgrade` migrates it.",
       "examples": ["nextjs-supabase"]
+    },
+    "adapterOptions": {
+      "type": "object",
+      "deprecated": true,
+      "description": "DEPRECATED (pre-1.0): options for the single `adapter`. Use extractorOptions.",
+      "additionalProperties": true
     },
     "name": {
       "type": "string",
@@ -45,11 +70,6 @@
           "description": "The folder graph node ids are relative to — the zdd/ folder itself."
         }
       }
-    },
-    "adapterOptions": {
-      "type": "object",
-      "description": "Adapter-specific source configuration (shape depends on the chosen adapter). For nextjs-supabase: appDir, apiPrefix, middlewarePath, authPatterns, migrationNamespaces, externalBuckets, refs, srcAliasRoot (where the tsconfig @/ alias points; default appDir's parent).",
-      "additionalProperties": true
     },
     "render": {
       "type": "object",

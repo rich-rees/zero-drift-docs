@@ -52,7 +52,7 @@ first thing you document with ZDD is the choice to use ZDD). Opt out if you'd
 rather start from real work.
 
 Contents: four skills (`bootstrap`, `orient`, `update`, `grill`), a shared authoring
-guide, a SessionStart hook, the engine + `nextjs-supabase` adapter
+guide, a SessionStart hook, the engine + composed extractors
 (`packages/zdd-engine`, also the npm package `@rich-rees/zdd-engine`), and templates
 (CLAUDE.md snippet, CI workflow, config schema + example, and the seed ADR-0001).
 
@@ -81,7 +81,7 @@ keeps working. **Recommended, never required.**
 (Works from a private repo — install uses your git credentials.) Then:
 
 1. Paste `plugins/zdd/templates/claude-md-snippet.md` into your repo's CLAUDE.md.
-2. Run `/zdd:bootstrap` — scaffolds `zdd/`, picks an adapter, runs the first derive.
+2. Run `/zdd:bootstrap` — scaffolds `zdd/`, lists the extractors for your stack, runs the first derive.
 
 ### …with CI — the real guarantee
 
@@ -116,7 +116,7 @@ plugins/zdd/
     zdd.yml                             # CI check (the with-CI path)
     config.schema.json  config.example.json
     adr-0001-adopt-zero-drift-docs.md   # seeded as the adopter's first ADR
-packages/zdd-engine/                # deriver / renderer / checks + adapters + viewer
+packages/zdd-engine/                # deriver / renderer / checks + extractors + viewer
   bin/zdd-engine.mjs                # the CLI (derive / render / lint / freshness)
   src/  test/fixture/               # engine source + the miniature proving repo
 LICENSE   CONTRIBUTING.md   README.md
@@ -131,9 +131,13 @@ LICENSE   CONTRIBUTING.md   README.md
 - [x] Wire the skills' `TODO(engine)` steps to the real invocations *(v0.2)*.
 - [x] Publish `@rich-rees/zdd-engine` to npm — live at 0.2.0, verified end-to-end
       via `npx` against the fixture *(2026-08-14)*.
+- [x] **Composed extractors** — the `nextjs-supabase` adapter split into `supabase`
+      + `nextjs` (byte-identical output), plus `fastapi` and `generic`; a declared
+      repo-local extractor directory; greenfield repos derive clean *(engine 0.3.0,
+      DIO-309; [decision 0001](docs/decisions/0001-composed-extractors.md))*.
 - [ ] Expose the graph as a first-class data-model artifact (nodes + edges JSON),
       then make **viewers pluggable** via a registry — so contributed visualizations
-      ship as selectable options (the output-end counterpart to adapters).
+      ship as selectable options (the output-end counterpart to extractors).
 - [ ] Conceptual reference doc (`spec.md`) for readers/contributors — repo-only,
       never installed into an adopter repo.
 
@@ -154,8 +158,8 @@ sync), and marked with a matching git tag (`vX.Y.Z`).
 ## Contributing
 
 Forks and pull requests welcome — the architecture is built for it, with a plug-in
-point at **both ends**: **adapters** feed data in (a new stack — FastAPI, Rails,
-Go…), and **viewers** render it out (a new visualization of the human index). The
+point at **both ends**: **extractors** feed data in (a new convention — Rails,
+Go, a router…), and **viewers** render it out (a new visualization of the human index). The
 engine and the graph data model sit stable in the middle. See
 [CONTRIBUTING.md](CONTRIBUTING.md).
 
