@@ -1,13 +1,26 @@
 ---
-name: orient
-description: Load the ZDD artifacts for the area you are about to work in — read the glossary whole, the ADR index whole, the ADRs your task cites, and the agent-index sections for the feature, then read the code fresh. Use before designing or building in a repo that uses Zero-Drift Docs.
+name: load
+description: "load ZDD" — the declared load. Read the glossary whole, the ADR index whole, the ADRs your task cites, and the agent-index sections for the feature, say what you loaded, then read the code fresh. First checks the adopter's engine pin against the plugin and warns on skew. Use before designing or building in a repo that uses Zero-Drift Docs; triggers on "load ZDD".
 ---
 
-# zdd:orient — the declared load
+# zdd:load — the declared load
 
-Run this before building or designing in an area. The SessionStart hook has
-already injected `zdd/agent-index.md`; this skill does the deeper, task-scoped
-read the index can't.
+Run this before building or designing in an area — the spoken form is
+**"load ZDD"**. The SessionStart hook has already injected `zdd/agent-index.md`
+(if the repo opted in); this skill does the deeper, task-scoped read the index
+can't.
+
+## Step 0 — engine skew (always first)
+
+```
+node "${CLAUDE_PLUGIN_ROOT}/scripts/check-skew.mjs"
+```
+
+It compares the plugin's version with every engine pin in the repo
+(`zdd/config.json` `engine`, the CI workflow, the pre-push hook). If a pin is
+behind, **its one line is the first line of your reply** — it names
+`bootstrap --upgrade`, which rewrites every pin. Silent when they match; do not
+mention it then.
 
 ## Steps
 
@@ -23,11 +36,12 @@ read the index can't.
    wrong selection is then visible immediately.
 5. **Read the code fresh.** The artifacts orient you; they never replace reading
    the source. Where prose and code disagree, the code wins — and the prose is a
-   ritual finding to fix (see `/zdd:update`).
+   ritual finding to fix (see `update`).
 
 ## Why this is a skill, not just the hook
 
 The hook keeps every session lightly oriented (the ~2k-token index). The full
 load — whole glossary, whole ADR index, cited ADR bodies — is heavier and
 task-shaped, so it runs on demand here rather than being forced into every
-session's context.
+session's context. Both work with any coding agent: the skill is a convenience,
+the reading is the contract.

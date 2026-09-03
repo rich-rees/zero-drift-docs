@@ -42,9 +42,9 @@ than one place, so **check all of them — a hit in any one is enough** (the
   **Never improvise a substitute interview** — a hand-rolled grilling breaks the
   point of wrapping the real one.
 
-## Step 1 — orient before the first question
+## Step 1 — load before the first question
 
-Run `/zdd:orient` first (or at minimum read `zdd/glossary.md` whole and the ADRs
+Run `load` ("load ZDD") first (or at minimum read `zdd/glossary.md` whole and the ADRs
 cited by the agent-index sections you're about to touch). Grilling on top of an
 unread glossary produces questions the stores already answer.
 
