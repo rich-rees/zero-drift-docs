@@ -78,7 +78,7 @@
     "adapter": {
       "type": "string",
       "deprecated": true,
-      "description": "DEPRECATED (pre-1.0): the single monolithic adapter. Still honoured — `nextjs-supabase` expands to extractors [supabase, nextjs] with adapterOptions split by key — but prints a deprecation note on every derive. `bootstrap --upgrade` migrates it.",
+      "description": "DEPRECATED (pre-1.0): the single monolithic adapter. Still honoured — `nextjs-supabase` expands to extractors [supabase, nextjs] with adapterOptions split by key — but prints a deprecation note on every derive telling you how to migrate (a future `bootstrap --upgrade` will do it for you).",
       "examples": ["nextjs-supabase"]
     },
     "adapterOptions": {
