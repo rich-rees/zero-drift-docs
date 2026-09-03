@@ -89,7 +89,7 @@
     },
     "engine": {
       "type": "string",
-      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?(\\+[0-9A-Za-z.-]+)?$",
       "description": "The @rich-rees/zdd-engine version this repo was bootstrapped for — written by bootstrap, rewritten by bootstrap --upgrade, compared against the plugin by load (skew warning). Mirrors the pin in the CI workflow / pre-push hook so a repo without CI still has one.",
       "examples": ["0.4.0"]
     },
