@@ -34,7 +34,10 @@ than one place, so **check all of them — a hit in any one is enough** (the
 ~/.codex/skills/domain-modeling/SKILL.md
 ```
 
-- **Found in any location** → continue to Step 1.
+- **Found in any location** → continue to Step 1 — except when the *only*
+  hit is the project-scoped one (location 3): that file is whatever the repo's
+  last commit put there, not a plugin you installed. Say so, show its path, and
+  ask before running it; on a "no", treat it as not installed.
 - **Found nowhere** → stop and tell the user, then do nothing else:
   > `zdd:grill` needs the **mattpocock-skills** plugin, which isn't installed.
   > Two ways forward: install it (`/plugin marketplace add …` then

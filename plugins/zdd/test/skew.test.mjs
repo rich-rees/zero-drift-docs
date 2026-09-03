@@ -78,6 +78,10 @@ test("a malformed pin is reported in one fixed line, never echoed", () => {
   assert.ok(!out.includes("IGNORE"));
   config({ extractors: ["generic"], engine: 42 });
   assert.match(run(), /not a well-formed version/);
+  for (const v of ["01.2.3", "1.2.3-", "1.2.3-01", "1.2", "v1.2.3", "1.2.3\n"]) {
+    config({ extractors: ["generic"], engine: v });
+    assert.match(run(), /not a well-formed version/, JSON.stringify(v));
+  }
 });
 
 test("exit 0 and silent when pins are unreadable: a directory at the workflow path, malformed config, no pins", () => {

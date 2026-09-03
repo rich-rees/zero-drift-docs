@@ -13,11 +13,21 @@ show the evidence and ask for confirmation instead.
 **Where the script is.** It lives in this plugin at `scripts/bootstrap.mjs` —
 two directories up from this SKILL.md (`<plugin>/skills/bootstrap/SKILL.md` →
 `<plugin>/scripts/bootstrap.mjs`). Resolve `<plugin>` from the path you read
-this file from; the commands below write it as `$PLUGIN`. In a POSIX shell
-`$CLAUDE_PLUGIN_ROOT` holds the same directory when the host sets it; in
-PowerShell that is `$env:CLAUDE_PLUGIN_ROOT`, and the hosts do not promise the
-variable to skill-driven shells, so the SKILL.md path is the reliable source.
-Run from the adopter's repo root, or pass `--root=<dir>`.
+this file from and set it once, then use the commands below as written:
+
+```sh
+# POSIX shell — <skill-dir> is the directory this SKILL.md was read from
+PLUGIN="$(cd "<skill-dir>/../.." && pwd)"
+```
+```powershell
+# PowerShell
+$PLUGIN = (Resolve-Path "<skill-dir>\..\..").Path
+```
+
+(`$CLAUDE_PLUGIN_ROOT` / `$env:CLAUDE_PLUGIN_ROOT` holds the same directory
+when the host sets it, but the hosts do not promise it to skill-driven shells,
+so the SKILL.md path is the reliable source.) Run from the adopter's repo
+root, or pass `--root=<dir>`.
 
 If invoked with **`--upgrade`**, skip to [Upgrade](#upgrade).
 
