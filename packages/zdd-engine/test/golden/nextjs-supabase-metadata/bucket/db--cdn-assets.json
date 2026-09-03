@@ -1,0 +1,12 @@
+{
+  "kind": "bucket",
+  "id": "bucket:db/cdn-assets",
+  "title": "cdn-assets (db)",
+  "description": "",
+  "resource": [],
+  "refs": [],
+  "facts": {
+    "namespace": "db",
+    "origin": "external"
+  }
+}

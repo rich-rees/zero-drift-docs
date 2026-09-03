@@ -1,0 +1,19 @@
+{
+  "kind": "function",
+  "id": "function:db/save_thing",
+  "title": "save_thing()",
+  "description": "save a thing and log the change",
+  "resource": [
+    "migrations/00002_things.sql"
+  ],
+  "refs": [
+    "table:db/audit_log",
+    "table:db/things"
+  ],
+  "facts": {
+    "namespace": "db",
+    "signature": "p_id uuid, p_title text",
+    "returns": "void",
+    "language": "plpgsql"
+  }
+}

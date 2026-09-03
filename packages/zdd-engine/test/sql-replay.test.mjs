@@ -2,7 +2,7 @@
 // Run: node --test "test/*.test.mjs"
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { tokenizeSql, replayMigrations, sortMigrations, commentsToDescription } from "../src/adapters/nextjs-supabase/sql-replay.mjs";
+import { tokenizeSql, replayMigrations, sortMigrations, commentsToDescription } from "../src/extractors/supabase/sql-replay.mjs";
 
 test("tokenizer: semicolons inside dollar-quoted bodies do not split", () => {
   const sql = `create function f() returns void language plpgsql as $$\nbegin\n delete from x; update y set z=1;\nend;\n$$;\nselect 1;`;

@@ -1,0 +1,19 @@
+{
+  "kind": "route",
+  "id": "route:/api/hooks/callback",
+  "title": "/api/hooks/callback",
+  "description": "Machine-to-machine callback from the external worker — HMAC-verified.",
+  "resource": [
+    "src/app/api/hooks/callback/route.ts"
+  ],
+  "refs": [
+    "table:db/audit_log"
+  ],
+  "facts": {
+    "methods": [
+      "POST"
+    ],
+    "dynamicSegments": [],
+    "auth": "hmac"
+  }
+}

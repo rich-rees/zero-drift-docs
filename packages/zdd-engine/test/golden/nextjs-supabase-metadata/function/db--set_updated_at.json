@@ -1,0 +1,21 @@
+{
+  "kind": "function",
+  "id": "function:db/set_updated_at",
+  "title": "set_updated_at()",
+  "description": "touch updated_at on every write",
+  "resource": [
+    "migrations/00001_init.sql"
+  ],
+  "refs": [
+    "table:db/things"
+  ],
+  "facts": {
+    "namespace": "db",
+    "signature": "",
+    "returns": "trigger",
+    "language": "plpgsql",
+    "triggers": [
+      "BEFORE UPDATE ON things"
+    ]
+  }
+}

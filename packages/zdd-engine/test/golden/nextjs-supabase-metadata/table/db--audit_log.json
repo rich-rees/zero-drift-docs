@@ -1,0 +1,32 @@
+{
+  "kind": "table",
+  "id": "table:db/audit_log",
+  "title": "audit_log (db)",
+  "description": "append-only audit trail",
+  "resource": [
+    "migrations/00001_init.sql",
+    "migrations/00002_things.sql"
+  ],
+  "refs": [
+    "table:db/things"
+  ],
+  "facts": {
+    "namespace": "db",
+    "columns": [
+      {
+        "name": "id",
+        "type": "uuid"
+      },
+      {
+        "name": "thing_id",
+        "type": "uuid",
+        "references": "things(id)"
+      },
+      {
+        "name": "note",
+        "type": "text"
+      }
+    ],
+    "createdIn": "00001_init.sql"
+  }
+}

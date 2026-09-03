@@ -1,0 +1,15 @@
+{
+  "kind": "module",
+  "id": "module:src/lib/things-api.ts",
+  "title": "src/lib/things-api.ts",
+  "description": "Shared data-access helpers for things — used by pages and scripts alike.",
+  "resource": [
+    "src/lib/things-api.ts"
+  ],
+  "refs": [
+    "route:/api/things/[id]",
+    "table:db/audit_log",
+    "table:db/things"
+  ],
+  "facts": {}
+}

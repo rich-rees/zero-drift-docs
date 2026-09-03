@@ -1,0 +1,20 @@
+{
+  "kind": "bucket",
+  "id": "bucket:db/uploads",
+  "title": "uploads (db)",
+  "description": "",
+  "resource": [
+    "migrations/00002_things.sql"
+  ],
+  "refs": [],
+  "facts": {
+    "namespace": "db",
+    "origin": "migration",
+    "public": false,
+    "fileSizeLimit": 5242880,
+    "allowedMimeTypes": [
+      "image/png",
+      "image/jpeg"
+    ]
+  }
+}
