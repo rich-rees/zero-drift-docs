@@ -15,4 +15,5 @@ injects the agent index automatically each session.
   (glossary / ADRs / comments / map), regenerate the metadata and both indexes,
   and commit them in the PR. Docs and code merge together.
 - **Never hand-edit generated artifacts** (`zdd/metadata/`, `zdd/agent-index.md`,
-  `zdd/human-index.html`) — regenerate via `/zdd:update`. CI will fail otherwise.
+  `zdd/adr-index.md`, `zdd/graph.json`, `zdd/human-index.html`) — regenerate via
+  `/zdd:update`. CI will fail otherwise.
