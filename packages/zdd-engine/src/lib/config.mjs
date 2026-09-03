@@ -13,6 +13,7 @@
 
 import { readFileSync, existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { repoRelative } from "./paths.mjs";
 
 export const DEFAULT_PATHS = {
   glossary: "zdd/glossary.md",
@@ -60,6 +61,10 @@ export function loadConfig(args, cwd = process.cwd()) {
   }
   const config = JSON.parse(readFileSync(configPath, "utf8"));
   const paths = { ...DEFAULT_PATHS, ...(config.paths ?? {}) };
+  // Every artifact path is read or written on the adopter's behalf — none may
+  // point outside the checkout (CR-006). Same rule for localExtractorDir.
+  for (const [key, value] of Object.entries(paths)) paths[key] = repoRelative(value, `paths.${key}`);
+  if (config.localExtractorDir !== undefined) config.localExtractorDir = repoRelative(config.localExtractorDir, "localExtractorDir");
   return {
     repoRoot,
     configPath,
@@ -93,10 +98,23 @@ export const LEGACY_ADAPTERS = {
 
 export function resolveExtractors(config) {
   const diagnostics = [];
-  if (Array.isArray(config.extractors)) {
+  const hasNew = config.extractors !== undefined;
+  const hasLegacy = config.adapter !== undefined || config.adapterOptions !== undefined;
+  // Both forms at once would mean one silently wins and the other's options
+  // are ignored (CR-019: 15 records quietly became 9). Refuse.
+  if (hasNew && hasLegacy) {
+    return { error: `zdd/config.json has both 'adapter' and 'extractors' — keep 'extractors' + 'extractorOptions' and delete the deprecated 'adapter' / 'adapterOptions' keys` };
+  }
+  if (hasNew) {
+    const list = config.extractors;
+    if (!Array.isArray(list)) return { error: `'extractors' must be an array of names` };
+    if (!list.length) return { error: `'extractors' lists nothing — name at least one extractor ("generic" for a map-only bundle); an empty list would prune every metadata record` };
+    if (list.some((n) => typeof n !== "string")) return { error: `'extractors' entries must be strings (names)` };
+    const dup = list.find((n, i) => list.indexOf(n) !== i);
+    if (dup) return { error: `extractor '${dup}' is listed twice` };
     const options = config.extractorOptions ?? {};
     return {
-      extractors: config.extractors.map((name) => ({ name, options: options[name] ?? {} })),
+      extractors: list.map((name) => ({ name, options: options[name] ?? {} })),
       diagnostics,
     };
   }
@@ -106,7 +124,7 @@ export function resolveExtractors(config) {
       return { error: `Unknown adapter '${config.adapter}' — 'adapter' is deprecated; use "extractors": [...] (known legacy adapters: ${Object.keys(LEGACY_ADAPTERS).join(", ")})` };
     }
     diagnostics.push(
-      `[config] 'adapter' is deprecated — use "extractors": ${JSON.stringify(legacy.extractors)} with "extractorOptions" (bootstrap --upgrade migrates this)`,
+      `[config] 'adapter' is deprecated — use "extractors": ${JSON.stringify(legacy.extractors)} with "extractorOptions" (split adapterOptions by key: migrationNamespaces + externalBuckets under supabase, the rest under nextjs)`,
     );
     const split = legacy.split(config.adapterOptions);
     return { extractors: legacy.extractors.map((name) => ({ name, options: split[name] ?? {} })), diagnostics };
