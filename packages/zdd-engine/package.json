@@ -1,6 +1,6 @@
 {
   "name": "@rich-rees/zdd-engine",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Zero-Drift Docs engine: derive codebase metadata, render the agent + human indexes, and run the drift checks — deterministic, stdlib-only, no LLM. Consumed by both CI (npx, no Claude Code) and the zdd Claude Code plugin.",
   "type": "module",
   "bin": {

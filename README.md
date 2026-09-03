@@ -10,8 +10,10 @@ the machine-generated ones **un-mergeable**.
 > `@rich-rees/zdd-engine` with a green test suite, so the `npx` invocations
 > resolve for real. v0.3 makes the curated half self-sufficient — the skills
 > carry their own authoring discipline — and adds an optional `zdd:grill`
-> that wraps Matt Pocock's grilling when his plugin is installed. Remaining
-> before 1.0: the graph/viewers refactor and `spec.md`.
+> that wraps Matt Pocock's grilling when his plugin is installed. The engine has
+> since gained composed extractors (0.3.0) and the graph artifact + viewer
+> registry (0.4.0). Remaining before 1.0: the bootstrap runbook, Codex support,
+> and `spec.md`.
 
 ## The idea in one screen
 
@@ -116,9 +118,11 @@ plugins/zdd/
     zdd.yml                             # CI check (the with-CI path)
     config.schema.json  config.example.json
     adr-0001-adopt-zero-drift-docs.md   # seeded as the adopter's first ADR
-packages/zdd-engine/                # deriver / renderer / checks + extractors + viewer
+packages/zdd-engine/                # deriver / renderer / checks + extractors + viewers
   bin/zdd-engine.mjs                # the CLI (derive / render / lint / freshness)
-  src/  test/fixture/               # engine source + the miniature proving repo
+  src/extractors/{supabase,nextjs,fastapi,generic}/   # input end: one per convention
+  src/viewers/{cytoscape,minimal}/  # output end: human-index viewers over graph.json
+  test/fixture*/                    # the miniature proving repos
 LICENSE   CONTRIBUTING.md   README.md
 ```
 
@@ -135,9 +139,12 @@ LICENSE   CONTRIBUTING.md   README.md
       + `nextjs` (byte-identical output), plus `fastapi` and `generic`; a declared
       repo-local extractor directory; greenfield repos derive clean *(engine 0.3.0,
       DIO-309; [decision 0001](docs/decisions/0001-composed-extractors.md))*.
-- [ ] Expose the graph as a first-class data-model artifact (nodes + edges JSON),
-      then make **viewers pluggable** via a registry — so contributed visualizations
-      ship as selectable options (the output-end counterpart to extractors).
+- [x] **Graph artifact + pluggable viewers** — `render` writes the map+metadata
+      join as `zdd/graph.json` (schema `zdd-graph/1`) and renders the human index
+      through a viewer selected by config from a registry; the Cytoscape viewer
+      is viewer #1, isolated under its Apache-2.0 notice, and `minimal` is the
+      worked example *(engine 0.4.0, DIO-310;
+      [decision 0002](docs/decisions/0002-graph-artifact-and-viewers.md))*.
 - [ ] Conceptual reference doc (`spec.md`) for readers/contributors — repo-only,
       never installed into an adopter repo.
 
