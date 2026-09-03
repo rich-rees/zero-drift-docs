@@ -15,58 +15,66 @@
 //   bootstrap.mjs apply --answers=<file.json> [--root=<dir>] [--date=YYYY-MM-DD] [--json]
 //       Write the setup from an answer set (shape below). Idempotent: an
 //       artifact that already exists is KEPT, never overwritten — curated
-//       content is the adopter's, and a second run only fills gaps.
+//       content is the adopter's, and a second run only fills gaps. On a repo
+//       that already has a config (repair), an omitted answer keeps the
+//       current choice; only an explicit answer changes it.
 //
 //   bootstrap.mjs upgrade [--root=<dir>] [--json]
 //       The only later writer into an adopter's repo. Migrates `adapter` →
 //       `extractors`, moves `viewer.nonAreaTags` to the top level, rewrites
-//       every plugin-owned file (engine pins, hook, snippet blocks) to this
-//       plugin's version, and names every file it changed. Never touches a
-//       curated artifact.
+//       every plugin-OWNED file (engine pins, the managed hook, the marked
+//       snippet blocks) to this plugin's version, and names every file it
+//       changed. Never touches a curated artifact or a file it does not own.
 //
-// Answer set (every key optional unless noted):
+// Trust: the answer set, the existing config, and everything in the checkout
+// are untrusted input. Answers are validated whole before the first write;
+// a config that exists but cannot be read stops the run; every path is
+// validated repo-relative and resolved through resolveInside (no escape, no
+// symlink); files the plugin writes carry an ownership line and only owned
+// files are ever rewritten (review CR-002..CR-013, CR-029).
+//
+// Answer set (every key optional):
 //   {
 //     "name": "My App", "repoBase": "https://github.com/o/r/tree/main/", "baseBranch": "main",
 //     "extractors": ["supabase", "fastapi"],          // else derived from `stack`, else the detection
 //     "extractorOptions": { ... },                     // else defaults per extractor
 //     "stack": ["FastAPI", "Supabase", "React web", "Expo"],   // greenfield answers; strings or {name, path}
-//     "apps": ["Web", "Mobile"],                       // map skeleton (Application concepts); else from `stack`
-//     "optIns": { "autoLoad": true, "fence": true, "ci": true, "prePush": true },   // defaults: all on
+//     "apps": ["Web", "Mobile"],                       // map skeleton (Application concepts); else from `stack` / detection
+//     "optIns": { "autoLoad": true, "fence": true, "ci": true, "prePush": true },   // defaults: all on (repair: current state)
 //     "codex": false,                                  // also write AGENTS.md
 //     "seedAdr": true                                  // ADR-0001 "Adopt Zero-Drift Docs"
 //   }
 
-import {
-  readFileSync,
-  writeFileSync,
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  statSync,
-  chmodSync,
-} from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, lstatSync, chmodSync, openSync, writeSync, closeSync } from "node:fs";
 import { join, dirname, basename, relative } from "node:path";
 import { execFileSync } from "node:child_process";
 import {
   PLUGIN_ROOT,
   ENGINE_PACKAGE,
-  DEFAULT_PATHS,
   pluginVersion,
   parseArgs,
   adopterRoot,
   readJson,
-  loadConfig,
+  readConfig,
   artifactPaths,
+  repoRelative,
+  resolveInside,
   findPocock,
   posixify,
 } from "./lib/repo.mjs";
 
 const TEMPLATES = join(PLUGIN_ROOT, "templates");
-const SNIPPET_BEGIN = "<!-- zdd:begin";
+const SNIPPET_BEGIN = "<!-- zdd:begin -->";
 const SNIPPET_END = "<!-- zdd:end -->";
 const LEGACY_SNIPPET_HEADING = "## Documentation — Zero-Drift Docs (ZDD)";
-const MANAGED_MARK = "Managed by zdd";
+// The v0.3.1 snippet's fingerprint: the section must carry BOTH of these
+// bullets to be recognised as ours (CR-011). Anything else under that heading
+// is the adopter's and is left alone.
+const LEGACY_FINGERPRINT = ["/zdd:orient", "/zdd:update"];
+// Ownership line carried by every file the plugin writes besides config.
+export const OWNER_MARK = "Managed by Zero-Drift Docs (zdd)";
 const SKIP_DIRS = new Set(["node_modules", ".git", ".next", "dist", "build", "coverage", ".venv", "venv", "__pycache__", ".expo", "zdd"]);
+const MAX_NAME = 120;
 
 // Mirror of the engine's LEGACY_ADAPTERS (src/lib/config.mjs): the one legacy
 // adapter and how its options split. The engine expands it at derive time;
@@ -84,7 +92,8 @@ const LEGACY_ADAPTERS = {
 // ---------------------------------------------------------------------------
 // Detection — one probe per extractor convention, each returning the evidence
 // it found and the options that evidence implies. Purely file-shaped and
-// sorted, so the proposal is the same for the same tree.
+// sorted, so the proposal is the same for the same tree. Symlinks are never
+// followed (CR-004): a link is skipped, whatever it points at.
 // ---------------------------------------------------------------------------
 function walk(root, onFile, maxDepth = 6) {
   const rec = (dir, depth) => {
@@ -99,13 +108,14 @@ function walk(root, onFile, maxDepth = 6) {
       const p = join(dir, name);
       let st;
       try {
-        st = statSync(p);
+        st = lstatSync(p);
       } catch {
         continue;
       }
+      if (st.isSymbolicLink()) continue;
       if (st.isDirectory()) {
         if (!SKIP_DIRS.has(name) && !name.startsWith(".")) rec(p, depth + 1);
-      } else onFile(p, name, posixify(relative(root, p)));
+      } else if (st.isFile()) onFile(p, name, posixify(relative(root, p)));
     }
   };
   rec(root, 0);
@@ -113,12 +123,31 @@ function walk(root, onFile, maxDepth = 6) {
 
 function readPackageJson(root) {
   const p = join(root, "package.json");
-  if (!existsSync(p)) return null;
   try {
+    if (!lstatSync(p).isFile()) return null;
     return readJson(p);
   } catch {
     return null;
   }
+}
+
+// Namespace names for several migration dirs: the path above `migrations`,
+// minus the conventional `supabase` segment, made unique (CR-012).
+function namespaceNames(dirs) {
+  if (dirs.length === 1) return ["db"];
+  const names = dirs.map((d) => {
+    const segs = d.split("/").filter((s) => s && s !== "migrations" && s !== "supabase");
+    return segs.length ? segs.join("-") : "db";
+  });
+  return dedupe(names);
+}
+function dedupe(names) {
+  const seen = new Map();
+  return names.map((n) => {
+    const count = seen.get(n) ?? 0;
+    seen.set(n, count + 1);
+    return count ? `${n}-${count + 1}` : n;
+  });
 }
 
 export function detect(root) {
@@ -167,12 +196,11 @@ export function detect(root) {
 
   if (sqlDirs.size) {
     const dirs = [...sqlDirs.keys()].sort();
+    const names = namespaceNames(dirs);
     proposals.push({
       name: "supabase",
       evidence: dirs.map((d) => `SQL migrations under \`${d}\` (${sqlDirs.get(d)} file${sqlDirs.get(d) === 1 ? "" : "s"})`),
-      options: {
-        migrationNamespaces: dirs.map((d, i) => ({ name: dirs.length === 1 ? "db" : basename(dirname(d)) || `db${i + 1}`, dir: d })),
-      },
+      options: { migrationNamespaces: dirs.map((d, i) => ({ name: names[i], dir: d })) },
     });
   }
   if (appDir || deps.next) {
@@ -187,8 +215,8 @@ export function detect(root) {
   if (pyRouters.size) {
     const ev = [];
     for (const [dir, c] of [...pyRouters.entries()].sort()) {
-      if (c.routers) ev.push(`\`APIRouter\` under \`${dir}\``);
       if (c.apps) ev.push(dir === "." ? "`FastAPI()` app at the repo root" : `\`FastAPI()\` app under \`${dir}\``);
+      if (c.routers) ev.push(`\`APIRouter\` under \`${dir}\``);
     }
     proposals.push({ name: "fastapi", evidence: ev, options: { roots: [...pyRoots].sort() } });
   }
@@ -240,8 +268,48 @@ function fromStack(stack = []) {
 }
 
 // ---------------------------------------------------------------------------
+// Answer validation — the whole set, before the first write (CR-029, CR-009).
+// ---------------------------------------------------------------------------
+const isName = (s) => typeof s === "string" && s.length > 0 && s.length <= MAX_NAME && !/[\x00-\x1f\x7f]/.test(s) && s.trim() === s;
+const fail = (msg) => {
+  throw new Error(`answers: ${msg}`);
+};
+
+export function validateAnswers(a) {
+  if (!a || typeof a !== "object" || Array.isArray(a)) fail("must be a JSON object");
+  for (const k of ["name", "repoBase", "baseBranch"]) if (a[k] !== undefined && !isName(a[k])) fail(`${k} must be a single-line string (≤${MAX_NAME} chars)`);
+  if (a.repoBase !== undefined && a.repoBase !== "" && !/^https?:\/\//.test(a.repoBase)) fail("repoBase must be an http(s) URL or empty");
+  if (a.extractors !== undefined) {
+    if (!Array.isArray(a.extractors) || !a.extractors.every((n) => typeof n === "string" && /^[a-z][a-z0-9-]*$/.test(n))) fail("extractors must be an array of extractor names");
+    if (new Set(a.extractors).size !== a.extractors.length) fail("extractors lists a name twice");
+  }
+  if (a.extractorOptions !== undefined && (!a.extractorOptions || typeof a.extractorOptions !== "object" || Array.isArray(a.extractorOptions))) fail("extractorOptions must be an object");
+  if (a.stack !== undefined) {
+    if (!Array.isArray(a.stack)) fail("stack must be an array");
+    for (const e of a.stack) {
+      if (isName(e)) continue;
+      if (!e || typeof e !== "object" || !isName(e.name)) fail("each stack entry is a name or { name, path }");
+      if (e.path !== undefined) repoRelative(e.path, `stack entry ${e.name} path`);
+    }
+  }
+  if (a.apps !== undefined && (!Array.isArray(a.apps) || !a.apps.every(isName))) fail("apps must be an array of single-line names");
+  if (a.optIns !== undefined) {
+    if (!a.optIns || typeof a.optIns !== "object" || Array.isArray(a.optIns)) fail("optIns must be an object");
+    for (const [k, v] of Object.entries(a.optIns)) {
+      if (!["autoLoad", "fence", "ci", "prePush"].includes(k)) fail(`optIns.${k} is not an opt-in`);
+      if (typeof v !== "boolean") fail(`optIns.${k} must be true or false`);
+    }
+  }
+  for (const k of ["codex", "seedAdr"]) if (a[k] !== undefined && typeof a[k] !== "boolean") fail(`${k} must be true or false`);
+  return a;
+}
+
+// ---------------------------------------------------------------------------
 // Writers. Every one reports what it did to the ledger — wrote / kept /
-// skipped — so the runbook can narrate and the tests can assert.
+// skipped — so the runbook can narrate and the tests can assert. Every path
+// goes through resolveInside; a new file is created exclusively (`wx`) so a
+// file that appears between the check and the write is kept, not clobbered
+// (CR-010).
 // ---------------------------------------------------------------------------
 class Ledger {
   constructor(root) {
@@ -251,12 +319,33 @@ class Ledger {
     this.skipped = [];
     this.notes = [];
   }
-  rel(p) {
-    return posixify(relative(this.root, p));
+  abs(rel) {
+    return resolveInside(this.root, rel, rel);
   }
-  write(path, content, { executable = false } = {}) {
+  overwrite(rel, content) {
+    const path = this.abs(rel);
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, content);
+    this.wrote.push(rel);
+  }
+  create(rel, content, { executable = false } = {}) {
+    const path = this.abs(rel);
+    mkdirSync(dirname(path), { recursive: true });
+    let fd;
+    try {
+      fd = openSync(path, "wx");
+    } catch (e) {
+      if (e.code === "EEXIST") {
+        this.kept.push(rel);
+        return false;
+      }
+      throw e;
+    }
+    try {
+      writeSync(fd, content);
+    } finally {
+      closeSync(fd);
+    }
     if (executable) {
       try {
         chmodSync(path, 0o755);
@@ -264,15 +353,18 @@ class Ledger {
         /* windows */
       }
     }
-    this.wrote.push(this.rel(path));
+    this.wrote.push(rel);
+    return true;
   }
-  writeIfMissing(path, content, opts) {
-    if (existsSync(path)) {
-      this.kept.push(this.rel(path));
+  exists(rel) {
+    try {
+      return lstatSync(this.abs(rel)).isFile();
+    } catch {
       return false;
     }
-    this.write(path, content, opts);
-    return true;
+  }
+  read(rel) {
+    return readFileSync(this.abs(rel), "utf8");
   }
 }
 
@@ -288,19 +380,33 @@ const slug = (s) =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "") || "app";
 
+const yamlScalar = (s) => JSON.stringify(s); // a JSON string is a valid YAML double-quoted scalar
+
 function snippetText() {
   return readFileSync(join(TEMPLATES, "claude-md-snippet.md"), "utf8");
 }
+const isOwned = (text) => text.includes(OWNER_MARK);
 
-// Insert or refresh the managed block. Three cases: our marked block (refresh
-// in place), the v0.3.1 unmarked snippet (replace that section, bounded by
-// the next `## ` heading), or nothing (append).
-function upsertSnippet(existing, snippet) {
-  const body = snippet.trimEnd() + "\n";
+function count(hay, needle) {
+  return hay.split(needle).length - 1;
+}
+
+// Insert or refresh the managed block. Cases: exactly one well-formed marker
+// pair (refresh in place); the v0.3.1 unmarked snippet, recognised by its
+// fingerprint (replace that section, bounded by the next `## ` heading);
+// nothing (append); markers present but malformed (refuse — CR-011). Line
+// endings follow the file (CR-041).
+export function upsertSnippet(existing, snippet) {
+  const crlf = /\r\n/.test(existing);
+  const norm = (s) => (crlf ? s.replace(/\r?\n/g, "\r\n") : s);
+  const body = norm(snippet.trimEnd() + "\n");
   if (!existing) return { text: body, changed: true, how: "created" };
-  const b = existing.indexOf(SNIPPET_BEGIN);
-  const e = existing.indexOf(SNIPPET_END);
-  if (b !== -1 && e > b) {
+  const nb = count(existing, SNIPPET_BEGIN);
+  const ne = count(existing, SNIPPET_END);
+  if (nb || ne) {
+    const b = existing.indexOf(SNIPPET_BEGIN);
+    const e = existing.indexOf(SNIPPET_END);
+    if (nb !== 1 || ne !== 1 || e < b) return { text: existing, changed: false, how: "refused: the zdd:begin / zdd:end markers are not exactly one well-formed pair — fix them by hand" };
     const next = existing.slice(0, b) + body.trimEnd() + existing.slice(e + SNIPPET_END.length);
     return { text: next, changed: next !== existing, how: "refreshed" };
   }
@@ -308,48 +414,57 @@ function upsertSnippet(existing, snippet) {
   if (h !== -1) {
     const after = existing.indexOf("\n## ", h + LEGACY_SNIPPET_HEADING.length);
     const end = after === -1 ? existing.length : after + 1;
-    const next = existing.slice(0, h) + body + existing.slice(end);
-    return { text: next, changed: true, how: "replaced the pre-0.4 snippet" };
+    const section = existing.slice(h, end);
+    if (LEGACY_FINGERPRINT.every((f) => section.includes(f))) {
+      const next = existing.slice(0, h) + body + existing.slice(end);
+      return { text: next, changed: true, how: "replaced the pre-0.4 snippet" };
+    }
+    // The heading is there but the content is not ours: leave it, append.
   }
-  const sep = existing.endsWith("\n") ? (existing.endsWith("\n\n") ? "" : "\n") : "\n\n";
+  const sep = existing.endsWith("\n") ? (/\r?\n\r?\n$/.test(existing) ? "" : norm("\n")) : norm("\n\n");
   return { text: existing + sep + body, changed: true, how: "appended" };
 }
 
 function writeSnippet(ledger, file) {
-  const path = join(ledger.root, file);
-  const existing = existsSync(path) ? readFileSync(path, "utf8") : "";
+  const existing = ledger.exists(file) ? ledger.read(file) : "";
   const { text, changed, how } = upsertSnippet(existing, snippetText());
   if (!changed) {
     ledger.kept.push(file);
+    if (how.startsWith("refused")) ledger.notes.push(`${file}: ${how}`);
     return;
   }
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, text);
-  ledger.wrote.push(file);
+  if (existing) ledger.overwrite(file, text);
+  else if (!ledger.create(file, text)) return;
   ledger.notes.push(`${file}: ${how} the ZDD instruction block`);
 }
 
 function pinEngine(text, version) {
-  const re = new RegExp(ENGINE_PACKAGE.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&") + "@[0-9][^\"'\\s]*", "g");
+  const re = new RegExp(ENGINE_PACKAGE.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&") + "@[^\"'\\s]*", "g");
   return text.replace(re, `${ENGINE_PACKAGE}@${version}`);
 }
+const workflowText = (version) => pinEngine(readFileSync(join(TEMPLATES, "zdd.yml"), "utf8"), version);
+const prePushText = (version) => pinEngine(readFileSync(join(TEMPLATES, "pre-push"), "utf8"), version);
 
-function workflowText(version) {
-  return pinEngine(readFileSync(join(TEMPLATES, "zdd.yml"), "utf8"), version);
-}
-function prePushText(version) {
-  return pinEngine(readFileSync(join(TEMPLATES, "pre-push"), "utf8"), version);
-}
+const hasGit = (root) => existsSync(join(root, ".git"));
 
-function hasGit(root) {
-  return existsSync(join(root, ".git"));
-}
-
-function setHooksPath(ledger) {
+// core.hooksPath: set it only when unset or already ours; an adopter's own
+// hook manager (Husky, pre-commit, …) is never displaced (CR-007).
+function ensureHooksPath(ledger) {
   if (!hasGit(ledger.root)) {
     ledger.notes.push("no .git here — after `git init`, run: git config core.hooksPath .githooks");
     return;
   }
+  let current = "";
+  try {
+    current = execFileSync("git", ["config", "--get", "core.hooksPath"], { cwd: ledger.root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+  } catch {
+    current = "";
+  }
+  if (current && current !== ".githooks") {
+    ledger.notes.push(`core.hooksPath is already ${current} (another hook manager) — left as is; call .githooks/pre-push from your existing pre-push hook`);
+    return;
+  }
+  if (current === ".githooks") return;
   try {
     execFileSync("git", ["config", "core.hooksPath", ".githooks"], { cwd: ledger.root, stdio: "ignore" });
     ledger.notes.push("git config core.hooksPath .githooks (local config, not committed — each clone runs it once)");
@@ -358,17 +473,40 @@ function setHooksPath(ledger) {
   }
 }
 
+// A plugin-owned file: created when missing; an existing file is kept, and
+// one we do not own is called out (CR-006).
+function ensureOwned(ledger, rel, content, opts) {
+  if (!ledger.exists(rel)) return ledger.create(rel, content, opts);
+  ledger.kept.push(rel);
+  if (!isOwned(ledger.read(rel))) ledger.notes.push(`${rel}: exists and is not managed by zdd — left untouched; merge the template by hand (${posixify(relative(ledger.root, join(TEMPLATES, basename(rel) === "pre-push" ? "pre-push" : "zdd.yml")))})`);
+  return false;
+}
+
 // ---------------------------------------------------------------------------
 // apply
 // ---------------------------------------------------------------------------
-export function apply(root, answers, { date = today(), home } = {}) {
+export function apply(root, rawAnswers, { date = today(), home } = {}) {
+  const answers = validateAnswers(rawAnswers);
   const ledger = new Ledger(root);
   const version = pluginVersion();
+  const cfg = readConfig(root);
+  if (cfg.state === "invalid") throw new Error(`${cfg.error} — fix or remove it; bootstrap never replaces a config it cannot read`);
+  const existingConfig = cfg.config;
+  const paths = artifactPaths(existingConfig); // throws on a bad configured path — before any write
   const detection = detect(root);
-  const optIns = { autoLoad: true, fence: true, ci: true, prePush: true, ...(answers.optIns ?? {}) };
-  const existingConfig = loadConfig(root);
-  const paths = artifactPaths(existingConfig);
   const mode = existingConfig ? "repair" : detection.mode;
+
+  // Opt-ins: fresh adoption defaults all on; repair defaults to the current
+  // state, so an omitted answer never reverses an earlier choice (CR-005).
+  const current = existingConfig
+    ? {
+        autoLoad: existingConfig.hooks?.autoLoad ?? true,
+        fence: existingConfig.hooks?.fence ?? false,
+        ci: ledger.exists(".github/workflows/zdd.yml"),
+        prePush: ledger.exists(".githooks/pre-push"),
+      }
+    : { autoLoad: true, fence: true, ci: true, prePush: true };
+  const optIns = { ...current, ...(answers.optIns ?? {}) };
 
   // --- config.json -------------------------------------------------------
   let config = existingConfig;
@@ -399,58 +537,53 @@ export function apply(root, answers, { date = today(), home } = {}) {
       hooks: { autoLoad: optIns.autoLoad, fence: optIns.fence },
     };
     if (!hasGit(root)) config.render = { storeChanges: false };
-    ledger.write(join(root, "zdd", "config.json"), JSON.stringify(config, null, 2) + "\n");
-  } else {
-    ledger.kept.push("zdd/config.json");
-  }
+    ledger.create("zdd/config.json", JSON.stringify(config, null, 2) + "\n");
+  } else if (optIns.autoLoad !== current.autoLoad || optIns.fence !== current.fence) {
+    // Repair with an explicit new answer: the hooks block is plugin-owned.
+    existingConfig.hooks = { autoLoad: optIns.autoLoad, fence: optIns.fence };
+    ledger.overwrite("zdd/config.json", JSON.stringify(existingConfig, null, 2) + "\n");
+    ledger.notes.push("zdd/config.json: hooks block updated to the new answers");
+  } else ledger.kept.push("zdd/config.json");
 
   // --- curated skeleton (empty templates; never overwritten) ---------------
-  ledger.writeIfMissing(join(root, paths.glossary), "# Glossary\n\n<!-- One paragraph per term: **Term**: definition. Canonical, not descriptive. -->\n");
+  ledger.create(paths.glossary, "# Glossary\n\n<!-- One paragraph per term: **Term**: definition. Canonical, not descriptive. -->\n");
   for (const sub of ["features", "apps", "services"]) {
-    const dir = join(root, paths.mapDir, sub);
+    const dir = ledger.abs(`${paths.mapDir}/${sub}`);
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true });
-      ledger.write(join(dir, ".gitkeep"), "");
+      ledger.create(`${paths.mapDir}/${sub}/.gitkeep`, "");
     }
   }
-  const apps = answers.apps ?? stack.apps;
-  for (const app of apps) {
-    const file = join(root, paths.mapDir, "apps", `${slug(app)}.md`);
-    ledger.writeIfMissing(
-      file,
-      `---\ntype: Application\ntitle: ${app}\ndescription: ${app} — declared at bootstrap; fill in as the code lands.\nresource: .\ntags: []\n---\n\n${app}: planned at adoption, before any code existed. Link its features here as they appear.\n`,
+  const apps = answers.apps ?? (answers.stack ? stack.apps : detection.apps.map((a) => a.name));
+  const slugs = dedupe(apps.map(slug)); // CR-013
+  apps.forEach((app, i) => {
+    ledger.create(
+      `${paths.mapDir}/apps/${slugs[i]}.md`,
+      `---\ntype: Application\ntitle: ${yamlScalar(app)}\ndescription: ${yamlScalar(`${app} — declared at bootstrap; fill in as the code lands.`)}\nresource: .\ntags: []\n---\n\n${app.replace(/[<>]/g, "")}: planned at adoption, before any code existed. Link its features here as they appear.\n`,
     );
-  }
-  const adrDir = join(root, paths.adrDir);
+  });
+  const adrDir = ledger.abs(paths.adrDir);
   mkdirSync(adrDir, { recursive: true });
   const adrFiles = readdirSync(adrDir).filter((f) => /^\d{4}-.*\.md$/.test(f));
   if (answers.seedAdr !== false) {
-    if (adrFiles.length) ledger.kept.push(`${posixify(paths.adrDir)}/ (${adrFiles.length} ADR${adrFiles.length === 1 ? "" : "s"} present — seed skipped)`);
-    else {
-      const adr = readFileSync(join(TEMPLATES, "adr-0001-adopt-zero-drift-docs.md"), "utf8").replace("<DATE>", date);
-      ledger.write(join(adrDir, "0001-adopt-zero-drift-docs.md"), adr);
-    }
-  } else ledger.skipped.push(`${posixify(paths.adrDir)}/0001-adopt-zero-drift-docs.md (declined)`);
-  mkdirSync(join(root, paths.metadataDir), { recursive: true });
+    if (adrFiles.length) ledger.kept.push(`${paths.adrDir}/ (${adrFiles.length} ADR${adrFiles.length === 1 ? "" : "s"} present — seed skipped)`);
+    else ledger.create(`${paths.adrDir}/0001-adopt-zero-drift-docs.md`, readFileSync(join(TEMPLATES, "adr-0001-adopt-zero-drift-docs.md"), "utf8").replace("<DATE>", date));
+  } else ledger.skipped.push(`${paths.adrDir}/0001-adopt-zero-drift-docs.md (declined)`);
+  mkdirSync(ledger.abs(paths.metadataDir), { recursive: true });
 
   // --- opt-ins ------------------------------------------------------------
-  if (existingConfig && (existingConfig.hooks?.autoLoad !== optIns.autoLoad || existingConfig.hooks?.fence !== optIns.fence)) {
-    // Repair run with a changed answer: the hooks block is plugin-owned, so
-    // rewrite just that key.
-    existingConfig.hooks = { autoLoad: optIns.autoLoad, fence: optIns.fence };
-    writeFileSync(join(root, "zdd", "config.json"), JSON.stringify(existingConfig, null, 2) + "\n");
-    ledger.wrote.push("zdd/config.json (hooks block)");
-    ledger.kept.splice(ledger.kept.indexOf("zdd/config.json"), 1);
-  }
   ledger.notes.push(`hooks: autoLoad ${optIns.autoLoad ? "on" : "off"}, fence ${optIns.fence ? "on" : "off"} (recorded in zdd/config.json; the plugin's hooks.json reads it)`);
 
   if (optIns.ci) {
-    ledger.writeIfMissing(join(root, ".github", "workflows", "zdd.yml"), workflowText(version));
-    ledger.skipped.push(".githooks/pre-push (CI accepted — not needed)");
+    ensureOwned(ledger, ".github/workflows/zdd.yml", workflowText(version));
+    if (ledger.exists(".githooks/pre-push")) ledger.notes.push(".githooks/pre-push also present — with CI accepted it is redundant; remove it if you no longer want the local check");
+    else ledger.skipped.push(".githooks/pre-push (CI accepted — not needed)");
   } else {
-    ledger.skipped.push(".github/workflows/zdd.yml (CI declined)");
+    if (ledger.exists(".github/workflows/zdd.yml")) ledger.notes.push(".github/workflows/zdd.yml is present although CI was declined — delete it to make the choice real");
+    else ledger.skipped.push(".github/workflows/zdd.yml (CI declined)");
     if (optIns.prePush) {
-      if (ledger.writeIfMissing(join(root, ".githooks", "pre-push"), prePushText(version), { executable: true })) setHooksPath(ledger);
+      ensureOwned(ledger, ".githooks/pre-push", prePushText(version), { executable: true });
+      ensureHooksPath(ledger); // whenever pre-push is selected, not only on creation (CR-006)
     } else ledger.skipped.push(".githooks/pre-push (declined)");
   }
 
@@ -472,13 +605,18 @@ function ledgerOut(l) {
 export function upgrade(root) {
   const ledger = new Ledger(root);
   const version = pluginVersion();
-  const configPath = join(root, "zdd", "config.json");
-  if (!existsSync(configPath)) throw new Error(`no zdd/config.json under ${root} — nothing to upgrade (run bootstrap without --upgrade to adopt)`);
-  const config = readJson(configPath);
+  const cfg = readConfig(root);
+  if (cfg.state === "absent") throw new Error(`no zdd/config.json under ${root} — nothing to upgrade (run bootstrap without --upgrade to adopt)`);
+  if (cfg.state === "invalid") throw new Error(`${cfg.error} — fix it by hand; upgrade never rewrites a config it cannot read`);
+  const config = cfg.config;
+  const hasLegacy = config.adapter !== undefined || config.adapterOptions !== undefined;
+  const hasNew = config.extractors !== undefined || config.extractorOptions !== undefined;
+  if (hasLegacy && hasNew) throw new Error("zdd/config.json has both 'adapter' and 'extractors' — keep one by hand before upgrading (the engine refuses this shape too)"); // CR-008
   const before = JSON.stringify(config);
   const changes = [];
 
   if (config.adapter !== undefined) {
+    const adapterName = config.adapter;
     const legacy = LEGACY_ADAPTERS[config.adapter];
     if (!legacy) throw new Error(`unknown legacy adapter '${config.adapter}' — migrate by hand to "extractors": [...]`);
     const split = legacy.split(config.adapterOptions);
@@ -492,7 +630,7 @@ export function upgrade(root) {
     if (!next.extractorOptions) next.extractorOptions = Object.fromEntries(legacy.extractors.map((n) => [n, split[n] ?? {}]));
     for (const k of Object.keys(config)) delete config[k];
     Object.assign(config, next);
-    changes.push(`adapter "${next.extractors.join('" + "')}" → extractors ${JSON.stringify(next.extractors)}; adapterOptions split into extractorOptions`);
+    changes.push(`adapter "${adapterName}" → extractors ${JSON.stringify(next.extractors)}; adapterOptions split into extractorOptions`);
   }
   if (config.viewer && typeof config.viewer === "object" && Array.isArray(config.viewer.nonAreaTags)) {
     if (config.nonAreaTags === undefined) config.nonAreaTags = config.viewer.nonAreaTags;
@@ -501,47 +639,42 @@ export function upgrade(root) {
     changes.push("viewer.nonAreaTags → top-level nonAreaTags (it shapes graph.json, not just the viewer)");
   }
   if (config.engine !== version) {
-    changes.push(`engine pin ${config.engine ?? "(none)"} → ${version}`);
+    changes.push(`engine pin ${typeof config.engine === "string" ? config.engine : "(none)"} → ${version}`);
     config.engine = version;
   }
   if (JSON.stringify(config) !== before) {
-    writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n");
-    ledger.wrote.push("zdd/config.json");
+    ledger.overwrite("zdd/config.json", JSON.stringify(config, null, 2) + "\n");
     for (const c of changes) ledger.notes.push(`zdd/config.json: ${c}`);
   } else ledger.kept.push("zdd/config.json");
 
-  // Plugin-owned files: rewrite to this version, only where they exist.
-  const wf = join(root, ".github", "workflows", "zdd.yml");
-  if (existsSync(wf)) {
-    const cur = readFileSync(wf, "utf8");
-    const next = pinEngine(cur, version);
+  // Plugin-owned files: rewrite to this version, only where they exist AND
+  // carry the ownership line. A file we do not own is reported, not edited.
+  for (const [rel, fresh] of [
+    [".github/workflows/zdd.yml", () => workflowText(version)],
+    [".githooks/pre-push", () => prePushText(version)],
+  ]) {
+    if (!ledger.exists(rel)) continue;
+    const cur = ledger.read(rel);
+    if (!isOwned(cur)) {
+      ledger.kept.push(`${rel} (not managed by zdd — left untouched; check its engine pin by hand)`);
+      continue;
+    }
+    const next = rel.endsWith("pre-push") ? fresh() : pinEngine(cur, version);
     if (next !== cur) {
-      writeFileSync(wf, next);
-      ledger.wrote.push(".github/workflows/zdd.yml");
-      ledger.notes.push(`.github/workflows/zdd.yml: engine pin → ${version}`);
-    } else ledger.kept.push(".github/workflows/zdd.yml");
-  }
-  const hook = join(root, ".githooks", "pre-push");
-  if (existsSync(hook)) {
-    const cur = readFileSync(hook, "utf8");
-    const next = cur.includes(MANAGED_MARK) ? prePushText(version) : pinEngine(cur, version);
-    if (next !== cur) {
-      writeFileSync(hook, next);
-      ledger.wrote.push(".githooks/pre-push");
-      ledger.notes.push(`.githooks/pre-push: ${cur.includes(MANAGED_MARK) ? "rewritten from the template" : "engine pin updated"} (${version})`);
-    } else ledger.kept.push(".githooks/pre-push");
+      ledger.overwrite(rel, next);
+      ledger.notes.push(`${rel}: ${rel.endsWith("pre-push") ? "rewritten from the template" : "engine pin updated"} (${version})`);
+    } else ledger.kept.push(rel);
   }
   for (const file of ["CLAUDE.md", "AGENTS.md"]) {
-    const p = join(root, file);
-    if (!existsSync(p)) continue;
-    const cur = readFileSync(p, "utf8");
-    if (!cur.includes(SNIPPET_BEGIN) && !cur.includes(LEGACY_SNIPPET_HEADING)) {
+    if (!ledger.exists(file)) continue;
+    const cur = ledger.read(file);
+    if (!cur.includes(SNIPPET_BEGIN) && !cur.includes(SNIPPET_END) && !cur.includes(LEGACY_SNIPPET_HEADING)) {
       ledger.kept.push(`${file} (no ZDD block to refresh)`);
       continue;
     }
     writeSnippet(ledger, file);
   }
-  ledger.notes.push("curated artifacts (glossary, ADRs, map) untouched — upgrade never writes them");
+  ledger.notes.push("curated artifacts (glossary, ADRs, map, metadata) untouched — upgrade never writes them");
   ledger.notes.push("if the engine pin moved: run `render` and commit the regenerated artifacts in the same PR");
   return { version, ...ledgerOut(ledger) };
 }
@@ -567,7 +700,7 @@ function narrateDetect(d, pocock) {
 }
 
 function narratePocock(p) {
-  if (p.installed) return `mattpocock-skills: installed (${p.hits[0]}) — \`grill\` will run the real interview.`;
+  if (p.installed) return `mattpocock-skills: installed (${p.hits[0].where}: ${p.hits[0].path}) — \`grill\` will run the real interview.`;
   return (
     "mattpocock-skills: NOT installed. Recommended, never required: your glossary and ADRs will only be as good as the design " +
     "sessions that fill them, and `grill` (the design interview that writes them as it goes) needs Matt Pocock's skills. " +
@@ -624,6 +757,7 @@ if (process.argv[1] && posixify(process.argv[1]).endsWith("/scripts/bootstrap.mj
     } else if (cmd === "apply") {
       if (!flags.answers) throw new Error("apply needs --answers=<file.json>");
       const answers = readJson(flags.answers);
+      if (flags.date !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(String(flags.date))) throw new Error("--date must be YYYY-MM-DD");
       const r = apply(root, answers, { date: flags.date || today(), home: flags.home });
       process.stdout.write(flags.json ? JSON.stringify(r, null, 2) + "\n" : narrateApply(r) + "\n");
     } else if (cmd === "upgrade") {

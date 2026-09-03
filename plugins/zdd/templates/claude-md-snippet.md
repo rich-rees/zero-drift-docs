@@ -1,4 +1,5 @@
-<!-- zdd:begin — managed by Zero-Drift Docs; `zdd:bootstrap --upgrade` rewrites this block -->
+<!-- zdd:begin -->
+<!-- Managed by Zero-Drift Docs (zdd): `zdd:bootstrap --upgrade` rewrites everything between the zdd:begin and zdd:end markers. -->
 ## Documentation — Zero-Drift Docs (ZDD)
 
 This repo uses ZDD: seven documentation artifacts kept at most one unit of work
