@@ -1,0 +1,17 @@
+{
+  "kind": "route",
+  "id": "route:/api/hooks/status",
+  "title": "/api/hooks/status",
+  "description": "Worker status probe — checks the caller's session inside the handler",
+  "resource": [
+    "src/app/api/hooks/status/route.ts"
+  ],
+  "refs": [],
+  "facts": {
+    "methods": [
+      "GET"
+    ],
+    "dynamicSegments": [],
+    "auth": "session-in-handler"
+  }
+}
