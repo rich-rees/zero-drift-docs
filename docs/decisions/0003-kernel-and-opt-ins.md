@@ -1,0 +1,32 @@
+# 0003 — The kernel is two verbs; enforcement is an opt-in the runbook writes
+
+**Date:** 2026-09-03 · **Status:** accepted · **Origin:** DIO-307 grilling, built under DIO-311.
+
+## Context
+
+v0.3.1 shipped four skills and a SessionStart hook, and its `bootstrap` printed the setup steps for the adopter to do by hand: paste a snippet, copy a workflow, enable a hook. Adopters who watched the video could not get from "installed" to "working" without editing config, and every step that was printed rather than written was a step that got skipped. At the same time the standard said "at most one PR behind the code", which names a workflow (PRs) the tool does not require — a solo developer with no CI and no PRs is a legitimate adopter, and the guarantee had no honest words for them.
+
+## Decision
+
+1. **The kernel is two spoken verbs — "load ZDD" and "update ZDD" — and both work with any coding agent.** `load` (renamed from `orient`) is the declared read; `update` is the finish ritual. The skills are conveniences that carry the discipline; the reading and the writing are the contract, and an agent with no plugin can do both from the instruction block alone. `bootstrap` (the runbook) and `grill` (optional, see 0004) complete the set. There is no process nudge, no tracker wrapper, no separate `map` skill — bootstrap's mapping session is the one mapping step.
+2. **The guarantee is "at most one unit of work behind the code"; the PR is one instantiation.** With the CI check required in branch protection, the unit is the PR and drift in the generated artifacts is un-mergeable. Without CI, the unit is whatever the developer finishes before saying "update ZDD", and the guarantee is a habit — the runbook says so in plain words at the close. Neither mode is wrong; only one is a proof.
+3. **Enforcement is a set of opt-ins, all default on, and the runbook writes them.** Four questions, each yes/no with yes as the default so the secure setup is the easy path and declining is a visible choice: the session-start auto-load, the generated-artifact fence, the CI workflow, and — only when CI is declined — a local pre-push hook running the same checks. Bootstrap writes the workflow, the hook, the instruction block (into `CLAUDE.md`, and `AGENTS.md` for Codex users) and the seeded ADR-0001. **Branch protection is the one step that stays printed** — no tool can set it, and pretending otherwise would be the one lie in the runbook.
+4. **The hook opt-ins are recorded in the adopter's `zdd/config.json`, not in the host's settings.** The plugin's `hooks.json` registers both hooks for every repo where the plugin is installed; each script reads `hooks.autoLoad` / `hooks.fence` from config and is a silent no-op without an explicit opt-in. So opting in or out is a config change the adopter can see in a diff, the same file works in Claude Code and Codex, and the plugin never writes into `.claude/settings.json`. The fence reads the artifact paths from the same config, so a repo that moved its artifacts is fenced where they actually are.
+5. **The runbook is a script driven by a conversation, and the script is the only writer.** `scripts/bootstrap.mjs` detects the stack (existing codebase: scan for each extractor's convention and show the evidence; greenfield: take the stated stack and configure ahead of the code), applies an answer set, and later upgrades. The skill asks the questions and relays the ledger — wrote / kept / skipped — verbatim. This is what makes the runbook testable at the file seam: scripted answers against a fixture repo, files on disk asserted, no LLM in the loop.
+6. **`bootstrap --upgrade` is the only writer into an adopter's repo after adoption.** Updating the plugin touches nothing by itself. `--upgrade` migrates the pre-1.0 `adapter` to `extractors` (the same split the engine applies at derive time — decision 0001 — made permanent), moves `viewer.nonAreaTags` to the top level, rewrites every plugin-owned file (engine pins, the managed pre-push hook, the marked instruction block) and names each one. It never touches the glossary, ADRs, map or metadata. `load` checks the pins against the plugin version first and warns on skew, naming `--upgrade`, so version drift is caught where the developer will see it.
+
+## Consequences
+
+- A repo without CI and without the pre-push hook has *no* enforcement — ZDD is the two verbs and the instruction block. The runbook says the guarantee is weaker; it does not refuse.
+- The engine version is pinned in up to three plugin-owned places in an adopter's repo (`config.engine`, the workflow, the pre-push hook) and in two in the plugin (the workflow template and every skill's `npx` line). They move together, by `--upgrade` on the adopter's side and by one PR on the plugin's; the skew check exists because they can still be caught apart mid-upgrade.
+- The instruction block is bounded by `<!-- zdd:begin -->` / `<!-- zdd:end -->` markers so `--upgrade` can refresh it without touching the rest of the adopter's `CLAUDE.md`. The v0.3.1 snippet had no markers; `--upgrade` recognises its heading and replaces that section once.
+- A hook that cannot do its job (no config, malformed config, no `npx` for the pre-push) prints at most one line and exits 0. A hook that errors punishes every session in a repo that merely has the plugin installed.
+- The plugin and engine now share a version line (both `0.4.0` at this decision) so "behind" and "ahead" are meaningful across them.
+
+## Rejected
+
+- **Keep printing the steps** — the v0.3.1 shape; every printed step is a skipped step, and the adopter ends up with a half-installed tool that looks installed.
+- **Write hook registrations into the host's settings file** (`.claude/settings.json`) — host-specific, invisible to Codex, and a second file the plugin would have to own and upgrade; the config block is one file, one diff, both hosts.
+- **Hard-require CI** — excludes the solo developer the video speaks to, and turns a strong recommendation into a gate on a tool whose whole pitch is "adopt on day one".
+- **Have the skill write the files directly** — untestable except by running an LLM against a repo and hoping; the script gives the file seam.
+- **Auto-upgrade the adopter's repo when the plugin updates** — a plugin that silently edits your repo is a plugin you uninstall.

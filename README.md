@@ -1,19 +1,19 @@
 # Zero-Drift Docs (ZDD)
 
 A documentation architecture for repos built by **human + agent pairs**. ZDD keeps
-seven documentation artifacts *at most one PR behind the code* — and makes drift in
-the machine-generated ones **un-mergeable**.
+seven documentation artifacts *at most one unit of work behind the code* — and, with
+CI, makes drift in the machine-generated ones **un-mergeable**.
 
-> **Status: v0.3, self-sufficient with an optional grilling companion.** The
-> plugin installs, the SessionStart hook works, and `packages/zdd-engine` is
-> [published to npm](https://www.npmjs.com/package/@rich-rees/zdd-engine) as
-> `@rich-rees/zdd-engine` with a green test suite, so the `npx` invocations
-> resolve for real. v0.3 makes the curated half self-sufficient — the skills
-> carry their own authoring discipline — and adds an optional `zdd:grill`
-> that wraps Matt Pocock's grilling when his plugin is installed. The engine has
-> since gained composed extractors (0.3.0) and the graph artifact + viewer
-> registry (0.4.0). Remaining before 1.0: the bootstrap runbook, Codex support,
-> and `spec.md`.
+> **Status: v0.4, the runbook.** `bootstrap` now detects your stack (or grills
+> for it on a greenfield repo), proposes extractors with evidence, and *writes*
+> the opt-ins — auto-load hook, generated-artifact fence, CI workflow or a
+> pre-push hook — plus the instruction block and a seeded ADR-0001. `orient` is
+> now `load`, the kernel is two spoken verbs ("load ZDD" / "update ZDD"), and
+> the same plugin installs in Claude Code and Codex from one repo. The engine
+> (`packages/zdd-engine`, npm `@rich-rees/zdd-engine`) carries composed
+> extractors (0.3.0) and the graph artifact + viewer registry (0.4.0); 0.4.0 is
+> published with the 1.0 release. Remaining before 1.0: the live smoke test in
+> both hosts, then tag, publish, and go public.
 
 ## The idea in one screen
 
@@ -37,8 +37,11 @@ Four are **curated** (they can rot, so a per-PR ritual + CI watch them) and thre
 | 6 | Agent index — feature-first orientation | Generated | `zdd/agent-index.md` |
 | 7 | Human index — hosted graph view | Generated | `zdd/human-index.html` |
 
-Two lifecycle moments carry it: **orient before you work** (`/zdd:orient`, plus an
-auto-injected index) and **update before you finish** (`/zdd:update`).
+Two spoken verbs carry it, and both work with any coding agent: **"load ZDD"**
+before you work (the `load` skill, plus an auto-injected index) and **"update
+ZDD"** before you finish (the `update` skill). With the CI check in place the unit
+of work is the PR and stale generated artifacts cannot merge; without it, ZDD is
+the two verbs and the guarantee is a habit.
 
 ## What the plugin is (and is not)
 
@@ -47,16 +50,24 @@ no glossary terms, no map, and **none of ZDD's own ADRs**: the rationale for *wh
 ZDD is designed this way is baked into the mechanism, not shipped as decisions. An
 adopter consumes it as a finished tool.
 
-`/zdd:bootstrap` scaffolds a fresh `zdd/` in your repo — empty curated artifacts,
-plus one seeded **ADR-0001** recording *your* decision to adopt ZDD. That's the
-corpus's first entry *and* a worked example of the format (self-demonstrating: the
-first thing you document with ZDD is the choice to use ZDD). Opt out if you'd
-rather start from real work.
+`bootstrap` is the install runbook. On an existing codebase it scans for each
+extractor's convention and shows you the evidence ("SQL migrations under
+`supabase/migrations`", "`APIRouter` under `api/routes`") to confirm rather than
+describe; on a greenfield repo it asks for the intended stack and configures the
+extractors ahead of the code. Then it offers the opt-ins as yes/no with defaults
+on and **writes** them — the session-start auto-load, the generated-artifact
+fence, the CI workflow (or, if you decline CI, a pre-push hook), the instruction
+block in `CLAUDE.md` (and `AGENTS.md` for Codex) — plus an empty `zdd/` and one
+seeded **ADR-0001** recording *your* decision to adopt ZDD: the corpus's first
+entry *and* a worked example of the format. Branch protection is the one step it
+prints instead of doing. Idempotent; and `bootstrap --upgrade` is the only thing
+that writes into your repo later, narrating every file it changes.
 
-Contents: four skills (`bootstrap`, `orient`, `update`, `grill`), a shared authoring
-guide, a SessionStart hook, the engine + composed extractors
-(`packages/zdd-engine`, also the npm package `@rich-rees/zdd-engine`), and templates
-(CLAUDE.md snippet, CI workflow, config schema + example, and the seed ADR-0001).
+Contents: four skills (`bootstrap`, `load`, `update`, `grill`), a shared authoring
+guide, two hooks (auto-load, fence), the runbook script, the engine + composed
+extractors + viewers (`packages/zdd-engine`, also the npm package
+`@rich-rees/zdd-engine`), and templates (instruction block, CI workflow, pre-push
+hook, config schema + example, and the seed ADR-0001).
 
 ### Producing decisions — ZDD stands alone, grilling makes it sharper
 
@@ -68,56 +79,73 @@ glossary entries and ADRs on its own, from plan-mode work or plain thinking.
 
 For a sharper way to drive decisions out, install
 [Matt Pocock's skills](https://github.com/mattpocock/skills) (`mattpocock-skills`)
-and use **`/zdd:grill`** — a relentless design interview that writes the glossary
+and use **`grill`** — a relentless design interview that writes the glossary
 and ADRs as it goes, redirected into your `zdd/` folder. It self-checks: with the
-plugin absent it points you at the install or at plan-mode + `/zdd:update`, and ZDD
-keeps working. **Recommended, never required.**
+plugin absent it points you at the install or at plan-mode + "update ZDD", and ZDD
+keeps working. `bootstrap` says the same in plain words. **Recommended, never
+required.**
 
 ## Install
+
+Claude Code:
 
 ```
 /plugin marketplace add rich-rees/zero-drift-docs
 /plugin install zdd@zero-drift-docs
 ```
 
-(Works from a private repo — install uses your git credentials.) Then:
+Codex reads the same marketplace file and the same plugin (`.codex-plugin/plugin.json`
+beside the Claude manifest, pointing at the same skills and hooks) — add the
+marketplace and install `zdd` with Codex's plugin commands.
 
-1. Paste `plugins/zdd/templates/claude-md-snippet.md` into your repo's CLAUDE.md.
-2. Run `/zdd:bootstrap` — scaffolds `zdd/`, lists the extractors for your stack, runs the first derive.
+(Works from a private repo — install uses your git credentials.) Then run
+**`bootstrap`** in your repo and answer its questions. It detects the stack, writes
+`zdd/`, the config, the opt-ins and the instruction block, runs the first derive
+and render, and leaves you one step:
 
 ### …with CI — the real guarantee
 
-3. Copy `plugins/zdd/templates/zdd.yml` into your `.github/workflows/`.
-4. In branch protection: require the **zdd** check to pass, and require branches to
-   be up to date before merging.
+In branch protection: require the **zdd** check to pass, and require branches to
+be up to date before merging. Now stale generated artifacts **cannot merge**. Note
+the split this enforces: CI makes *drift in the generated artifacts* un-mergeable —
+the curated artifacts stay one unit of work behind on the ritual (no script can
+judge "should this have been an ADR?").
 
-Now stale generated artifacts **cannot merge**. Note the split this enforces: CI
-makes *drift in the generated artifacts* un-mergeable — the curated artifacts stay
-one-PR-behind on the ritual (no script can judge "should this have been an ADR?").
+### …without CI — the two verbs
 
-### …without CI — ritual only
-
-CI is a strong recommendation, not a hard dependency. Skip steps 3–4 and ZDD still
-runs: the agent orients and updates each PR. You lose *enforcement* — ZDD drops from
-a provable guarantee to a good habit. A middle option is a local git pre-push hook
+CI is a strong recommendation, not a hard dependency. Decline it and ZDD still
+runs: the agent loads before it works and updates before it finishes. You lose
+*enforcement* — ZDD drops from a provable guarantee to a good habit, and
+`bootstrap` says so. The middle option it offers is a local git pre-push hook
 running the engine's `--check`, which makes a forgotten update **loud** without a
 merge gate.
+
+### Upgrading
+
+Updating the plugin never touches your repo. `load` warns when your pinned engine
+falls behind the plugin; run **`bootstrap --upgrade`** to migrate config
+(`adapter` → `extractors`), rewrite the engine pins, the hook and the instruction
+block — every changed file named, curated artifacts untouched.
 
 ## Repo layout
 
 ```
-.claude-plugin/marketplace.json     # this repo is a plugin marketplace
+.claude-plugin/marketplace.json     # this repo is a plugin marketplace (Claude Code + Codex)
 plugins/zdd/
-  .claude-plugin/plugin.json
-  hooks/hooks.json                  # SessionStart → inject the agent index
-  scripts/inject-agent-index.mjs
-  skills/{bootstrap,orient,update,grill}/SKILL.md
+  .claude-plugin/plugin.json        # two manifests, one body
+  .codex-plugin/plugin.json
+  hooks/hooks.json                  # SessionStart auto-load + PreToolUse fence (opt-ins read from zdd/config.json)
+  scripts/
+    bootstrap.mjs                   # the runbook's writer: detect / apply / upgrade
+    inject-agent-index.mjs  fence.mjs  check-skew.mjs
+  skills/{bootstrap,load,update,grill}/SKILL.md
   skills/authoring.md               # shared curated-docs authoring discipline
   templates/
-    claude-md-snippet.md
-    zdd.yml                             # CI check (the with-CI path)
+    claude-md-snippet.md            # the instruction block (CLAUDE.md / AGENTS.md)
+    zdd.yml  pre-push               # CI check / local hook
     config.schema.json  config.example.json
     adr-0001-adopt-zero-drift-docs.md   # seeded as the adopter's first ADR
+  test/                             # seam 2: the runbook and hooks observed as files + processes
 packages/zdd-engine/                # deriver / renderer / checks + extractors + viewers
   bin/zdd-engine.mjs                # the CLI (derive / render / lint / freshness)
   src/extractors/{supabase,nextjs,fastapi,generic}/   # input end: one per convention
@@ -145,19 +173,29 @@ LICENSE   CONTRIBUTING.md   README.md
       is viewer #1, isolated under its Apache-2.0 notice, and `minimal` is the
       worked example *(engine 0.4.0, DIO-310;
       [decision 0002](docs/decisions/0002-graph-artifact-and-viewers.md))*.
-- [ ] Conceptual reference doc (`spec.md`) for readers/contributors — repo-only,
-      never installed into an adopter repo.
+- [x] **Bootstrap runbook, Codex, upgrade** — detect / greenfield modes with
+      evidence, opt-ins written (auto-load, fence, CI or pre-push), `orient` →
+      `load` with an engine-skew warning, `bootstrap --upgrade`, a Codex manifest
+      beside the Claude one *(plugin 0.4.0, DIO-311; decisions
+      [0003](docs/decisions/0003-kernel-and-opt-ins.md),
+      [0004](docs/decisions/0004-pocock-skills-recommended-not-required.md),
+      [0005](docs/decisions/0005-no-zdd-in-the-plugin-repo.md),
+      [0006](docs/decisions/0006-one-repo-two-manifests.md))*.
+- [ ] Live smoke test in both hosts against `rich-rees/zdd-smoke-test`, then
+      tag `v1.0.0`, publish the engine, flip the repo public (DIO-312).
 
 ## Versioning
 
-Semver, tracked in `plugins/zdd/plugin.json` and the marketplace entry (kept in
-sync), and marked with a matching git tag (`vX.Y.Z`).
+Semver, tracked in both plugin manifests and the marketplace entry (kept in
+sync — a test pins them together), and marked with a matching git tag
+(`vX.Y.Z`). The plugin and the engine share a version line so `load`'s skew
+warning can say "behind".
 
 - **`0.x` — private, pre-release.** Building and proving against the PressPlay
   instance. The API (skill names, config shape, engine CLI) may change freely.
   `0.1.0` was the scaffold; `0.2.0` added the extracted + published engine;
-  **`0.3.0`** makes the curated half self-sufficient and adds the optional
-  `zdd:grill` companion.
+  `0.3.0` made the curated half self-sufficient and added the optional `grill`
+  companion; **`0.4.0`** is the runbook, `load`, the opt-in hooks and Codex.
 - **`1.0.0` — first public release.** Cut when a clean repo can adopt ZDD
   end-to-end (engine is on npm as of 0.2.0). From here, breaking changes bump
   the major.

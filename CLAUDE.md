@@ -22,24 +22,31 @@ Supersession points both ways; never edit an accepted decision into a new truth.
 - **Branch off `main`**, never commit on it. Conventional commits (`feat:`,
   `fix:`, `docs:`, `test:`, `chore:`), one logical change each. One PR per change,
   merged with a merge commit.
-- **Tests are the contract.** `cd packages/zdd-engine && node --test "test/*.test.mjs"`.
-  Same source bytes in ⇒ byte-identical artifacts out — no timestamps, no
+- **Tests are the contract.** Engine: `cd packages/zdd-engine && node --test "test/*.test.mjs"`.
+  Plugin (the runbook and hooks at the file/process seam):
+  `node --test "plugins/zdd/test/*.test.mjs"`. Same source bytes in ⇒ byte-identical artifacts out — no timestamps, no
   environment-dependent values, no LLM anywhere in the engine. A change that
   alters bytes shows up as a golden diff (`test/golden/`); regenerate a golden
   only as a deliberate, narrated step, never to make a red test pass.
 - **Write the failing test first** for a bug; for a feature, alongside the code.
   A test goes green by changing the code, never by weakening the test.
 - **The engine version is pinned in more than one place** — the CI workflow
-  template and every skill's `npx` line. Bump them together in one PR, run
-  `render`, and commit the result. A new mandatory generated file is a breaking
+  template, the pre-push template, and every skill's `npx` line — and the plugin
+  shares the engine's version line (`load` compares them). Bump them together in
+  one PR, run `render`, and commit the result. A new mandatory generated file is a breaking
   change for adopters' CI (decision 0002).
 - **Semver on the engine:** config-schema or metadata-contract break = major.
-  Plugin version lives in `plugins/zdd/.claude-plugin/plugin.json` and the
-  marketplace entry, kept in sync, tagged `vX.Y.Z`.
+  Plugin version lives in both manifests (`plugins/zdd/.claude-plugin/plugin.json`,
+  `plugins/zdd/.codex-plugin/plugin.json`) and the marketplace entry, kept in
+  sync (a test pins them), tagged `vX.Y.Z`.
 
 ## Skills
 
-The plugin's skills (`plugins/zdd/skills/*/SKILL.md`) are the product. When a
+The plugin's skills (`plugins/zdd/skills/*/SKILL.md`) are the product. The
+kernel is two spoken verbs — "load ZDD" (`load`) and "update ZDD" (`update`) —
+plus `bootstrap` (the runbook) and the optional `grill`. The runbook's writer is
+`plugins/zdd/scripts/bootstrap.mjs`: the skill asks, the script detects and
+writes, and nothing else ever writes into an adopter's repo (decision 0003). When a
 skill wraps an upstream one (`grill` wraps Matt Pocock's grilling +
 domain-modeling), it self-checks and degrades with a clear message — **never
 improvise a substitute** for the wrapped skill. Skills are executed by reading
