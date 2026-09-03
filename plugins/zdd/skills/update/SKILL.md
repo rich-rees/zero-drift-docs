@@ -21,11 +21,12 @@ work — it holds maximal context, and capturing at that moment is the whole tri
    - **Semantic map** — feature / edge / blessing changes.
 2. **Run the deriver.** Regenerates the codebase metadata from source:
    ```
-   npx -y @rich-rees/zdd-engine derive
+   npx -y @rich-rees/zdd-engine@0.4.0 derive
    ```
-3. **Run the renderer.** Rebuilds the agent index, ADR index, and human index:
+3. **Run the renderer.** Rebuilds the graph artifact (`zdd/graph.json`), the
+   agent index, the ADR index, and the human index:
    ```
-   npx -y @rich-rees/zdd-engine render
+   npx -y @rich-rees/zdd-engine@0.4.0 render
    ```
 4. **Commit all of it in the PR.** Code and docs merge atomically; the doc delta
    is reviewed alongside the code delta.
@@ -34,8 +35,9 @@ work — it holds maximal context, and capturing at that moment is the whole tri
 
 - The ritual is **diff-anchored, not memory-anchored** — a fresh session can run
   it from the PR diff, the touched code, and the artifacts checkpointed en route.
-- **Never hand-edit the generated artifacts** (`zdd/metadata/`, both indexes) —
-  regenerate. The CI check (if wired) will fail otherwise.
+- **Never hand-edit the generated artifacts** (`zdd/metadata/`, `zdd/graph.json`,
+  both indexes, the human index) — regenerate. The CI check (if wired) will fail
+  otherwise.
 - Read back any working file (`TEMPSTATE.md`) and delete it before merge —
   durable residue moves to an artifact first.
 - The curated half is judgment CI can't gate — [authoring.md](../authoring.md) is

@@ -35,9 +35,9 @@
   "agentIndex": {
     "summary": "One-line orientation for an agent landing in this repo."
   },
+  "nonAreaTags": ["react-flow"],
   "viewer": {
-    "$comment": "Which viewer renders human-index.html from graph.json; omit for cytoscape with no options, or write \"viewer\": \"minimal\".",
-    "name": "cytoscape",
-    "nonAreaTags": []
+    "$comment": "Which viewer renders human-index.html from graph.json; omit for cytoscape with no options, or write \"viewer\": \"minimal\". nonAreaTags lives at the top level because it shapes graph.json, not just the viewer.",
+    "name": "cytoscape"
   }
 }
