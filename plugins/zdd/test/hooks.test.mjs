@@ -79,6 +79,23 @@ test("fence handles Codex apply_patch targets", () => {
   blocked(fence("apply_patch", { patch: "*** Begin Patch\n*** Add File: zdd/metadata/table/x.json\n+{}\n*** End Patch\n" }), "add file under metadata");
 });
 
+test("fence: a symlinked artifact is dropped on its own, the rest stay fenced; an alias link to the artifact still matches", (t) => {
+  const linked = join(scratch, "linked");
+  mkdirSync(join(linked, "zdd"), { recursive: true });
+  writeFileSync(join(linked, "zdd", "config.json"), JSON.stringify(VALID));
+  writeFileSync(join(scratch, "elsewhere.md"), "");
+  try {
+    symlinkSync(join(scratch, "elsewhere.md"), join(linked, "zdd", "adr-index.md"), "file");
+    symlinkSync(join(linked, "zdd"), join(linked, "alias"), "junction");
+  } catch {
+    return t.diagnostic("symlink creation not permitted here — case skipped");
+  }
+  const r = (file_path) => runHook(FENCE, { tool_name: "Write", tool_input: { file_path } }, { projectDir: linked });
+  blocked(r(join(linked, "zdd", "graph.json")), "the other artifacts stay fenced (CR-051)");
+  blocked(r(join(linked, "alias", "graph.json")), "alias link to the artifact's parent (CR-004)");
+  assert.equal(r(join(linked, "zdd", "adr-index.md")).status, 0, "the symlinked one is not vouched for");
+});
+
 // --- fence: shell ------------------------------------------------------------
 
 test("fence blocks write-shaped shell over generated paths in the common spellings", () => {

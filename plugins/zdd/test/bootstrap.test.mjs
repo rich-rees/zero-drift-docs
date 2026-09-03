@@ -270,6 +270,9 @@ test("dedupe never collides with a raw name already in the set (CR-047), and a s
   assert.deepEqual(config.extractorOptions.fastapi.roots, ["api", "workers"]);
   assert.deepEqual(config.extractorOptions.supabase.migrationNamespaces.map((m) => m.name), ["db", "db-2"]);
   assert.deepEqual(readdirSync(join(repo, "zdd", "map", "apps")).sort(), [".gitkeep", "foo-2.md", "foo-3.md", "foo.md"]);
+  const conflict = fresh("dedupe-conflict");
+  assert.match(bootstrapFails(conflict, ["apply", `--answers=${answersFile("dc", { stack: [{ name: "Next.js", path: "app" }, { name: "Next.js", path: "src/app" }] })}`]), /different nextjs\.appDir/);
+  assert.deepEqual(readdirSync(conflict), [], "nothing written");
 });
 
 test("stack entries may carry their future path; app names are YAML-safe and slugs never collide", () => {
@@ -321,6 +324,10 @@ test("a same-named file the plugin does not own is kept and called out, never ov
   writeFileSync(join(repo, ".githooks", "pre-push"), "#!/bin/sh\necho mine\n");
   const j1 = applyJson(repo, "u1", {});
   assert.equal(readFileSync(join(repo, ".github", "workflows", "zdd.yml"), "utf8"), "name: mine\n");
+  // The ownership phrase in the body is not a header: still not ours.
+  writeFileSync(join(repo, ".github", "workflows", "zdd.yml"), "name: mine\n\n\n\n# mentions Managed by Zero-Drift Docs (zdd) in prose\n");
+  const j1b = JSON.parse(bootstrap(repo, ["upgrade", "--json"]));
+  assert.ok(j1b.kept.some((k) => k.startsWith(".github/workflows/zdd.yml") && k.includes("not managed")), JSON.stringify(j1b.kept));
   assert.ok(j1.notes.some((n) => n.includes("zdd.yml") && n.includes("not managed by zdd")));
   const j2 = applyJson(repo, "u2", { optIns: { ci: false, prePush: true } });
   assert.equal(readFileSync(join(repo, ".githooks", "pre-push"), "utf8"), "#!/bin/sh\necho mine\n");
@@ -455,7 +462,7 @@ test("upgrade leaves alone what it does not own: a customised legacy section, an
   assert.equal(readFileSync(join(repo, ".githooks", "pre-push"), "utf8"), hook, "unmarked hook untouched");
   assert.ok(j.kept.some((k) => k.startsWith(".githooks/pre-push") && k.includes("not managed")));
 
-  for (const bad of ["<!-- zdd:begin -->\nx\n<!-- zdd:begin -->\ny\n<!-- zdd:end -->\n", "<!-- zdd:begin --> extra\nx\n<!-- zdd:end -->\n", "<!-- zdd:end -->\nx\n<!-- zdd:begin -->\n"]) {
+  for (const bad of ["<!-- zdd:begin -->\nx\n<!-- zdd:begin -->\ny\n<!-- zdd:end -->\n", "<!-- zdd:begin --> extra\nx\n<!-- zdd:end -->\n", "<!-- zdd:end -->\nx\n<!-- zdd:begin -->\n", "<!-- zdd:begin -->\nx\n<!-- zdd:end -->\nsee <!-- zdd:begin --> above\n", "<!-- zdd:begin --> \nx\n<!-- zdd:end -->\n"]) {
     writeFileSync(join(repo, "AGENTS.md"), bad);
     const j2 = JSON.parse(bootstrap(repo, ["upgrade", "--json"]));
     assert.equal(readFileSync(join(repo, "AGENTS.md"), "utf8"), bad, JSON.stringify(bad));

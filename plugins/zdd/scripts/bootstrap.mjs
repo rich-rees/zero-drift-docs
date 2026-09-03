@@ -269,7 +269,11 @@ function fromStack(stack = []) {
         // A second entry for the same extractor adds its path (CR-042).
         const cur = extractorOptions[rule.extractor];
         for (const [k, v] of Object.entries(opts)) {
-          if (Array.isArray(v) && Array.isArray(cur[k])) for (const item of v) if (!cur[k].some((x) => JSON.stringify(x) === JSON.stringify(item))) cur[k].push(item);
+          if (Array.isArray(v) && Array.isArray(cur[k])) {
+            for (const item of v) if (!cur[k].some((x) => JSON.stringify(x) === JSON.stringify(item))) cur[k].push(item);
+          } else if (JSON.stringify(cur[k]) !== JSON.stringify(v)) {
+            fail(`two stack entries give different ${rule.extractor}.${k} (${JSON.stringify(cur[k])} vs ${JSON.stringify(v)}) — an extractor has one ${k}; choose one`);
+          }
         }
         if (Array.isArray(cur.migrationNamespaces)) {
           const names = dedupe(cur.migrationNamespaces.map((m) => m.name));
@@ -399,11 +403,13 @@ const yamlScalar = (s) => JSON.stringify(s); // a JSON string is a valid YAML do
 function snippetText() {
   return readFileSync(join(TEMPLATES, "claude-md-snippet.md"), "utf8");
 }
-const isOwned = (text) => text.includes(OWNER_MARK);
+// Ownership is the HEADER — the mark within the first three lines — not the
+// phrase anywhere in the file (CR-006).
+const isOwned = (text) => text.split(/\r?\n/, 3).some((l) => l.includes(OWNER_MARK));
 
 // A marker counts only as a whole line (CR-011): `<!-- zdd:begin --> extra`
 // is not a marker.
-const MARKER_LINE = (m) => new RegExp("^" + m.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "[ \\t]*\\r?$", "gm");
+const MARKER_LINE = (m) => new RegExp("^" + m.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\r?$", "gm");
 function count(hay, marker) {
   return (hay.match(MARKER_LINE(marker)) ?? []).length;
 }
@@ -427,7 +433,8 @@ export function upsertSnippet(existing, snippet) {
   if (nb || ne || existing.includes(SNIPPET_BEGIN) || existing.includes(SNIPPET_END)) {
     const b = indexOfMarker(existing, SNIPPET_BEGIN);
     const e = indexOfMarker(existing, SNIPPET_END);
-    if (nb !== 1 || ne !== 1 || e < b) return { text: existing, changed: false, how: "refused: the zdd:begin / zdd:end markers are not exactly one well-formed pair — fix them by hand" };
+    const stray = existing.split(SNIPPET_BEGIN).length - 1 !== 1 || existing.split(SNIPPET_END).length - 1 !== 1;
+    if (nb !== 1 || ne !== 1 || e < b || stray) return { text: existing, changed: false, how: "refused: the zdd:begin / zdd:end markers are not exactly one well-formed pair — fix them by hand" };
     const next = existing.slice(0, b) + body.trimEnd() + existing.slice(e + SNIPPET_END.length);
     return { text: next, changed: next !== existing, how: "refreshed" };
   }
