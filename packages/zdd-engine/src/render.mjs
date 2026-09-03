@@ -229,11 +229,13 @@ function synthesizeBody(record, idOfRef) {
   const lines = [];
   if (record.description) lines.push(record.description, "");
   const f = record.facts;
+  // Per-kind sections are feature-detected: a third-party extractor may emit
+  // a `route` or `table` with its own facts shape (CR-014).
   if (record.kind === "route") {
-    lines.push(`# Methods`, "", f.methods.length ? f.methods.map((m) => `- \`${m}\``).join("\n") : "_(none exported)_", "");
+    if (Array.isArray(f.methods)) lines.push(`# Methods`, "", f.methods.length ? f.methods.map((m) => `- \`${m}\``).join("\n") : "_(none exported)_", "");
     if (f.auth) lines.push(`# Auth`, "", f.auth, "");
   }
-  if (record.kind === "table") {
+  if (record.kind === "table" && Array.isArray(f.columns)) {
     lines.push(`# Columns (${f.namespace})`, "", "| column | type |", "| --- | --- |");
     for (const c of f.columns) {
       lines.push(`| ${c.name}${c.references ? ` → ${c.references}` : ""} | ${c.type} |`);
@@ -241,13 +243,13 @@ function synthesizeBody(record, idOfRef) {
     lines.push("");
     if (f.renamedFrom) lines.push(`Renamed from: ${f.renamedFrom.join(", ")}`, "");
   }
-  if (record.kind === "function") {
+  if (record.kind === "function" && f.signature !== undefined) {
     lines.push(`# Signature`, "", "```sql", `${record.title.replace(/\(\)$/, "")}(${f.signature})`, `RETURNS ${f.returns} LANGUAGE ${f.language}`, "```", "");
-    if (f.triggers) {
+    if (Array.isArray(f.triggers)) {
       lines.push(`# Trigger attachments`, "", f.triggers.map((t) => `- \`${t}\``).join("\n"), "");
     }
   }
-  if (record.kind === "bucket") {
+  if (record.kind === "bucket" && f.origin !== undefined) {
     lines.push(`# Facts`, "", `- origin: ${f.origin}`);
     if (f.public !== undefined) lines.push(`- public: ${f.public}`);
     if (f.fileSizeLimit !== undefined) lines.push(`- file size limit: ${f.fileSizeLimit}`);
