@@ -8,7 +8,8 @@
 // record set. Misses are dropped with a diagnostic (the same honesty the
 // monolithic adapter had), self-refs are dropped silently, and a record
 // flagged `requireRefs` is dropped when nothing resolved — that flag is how a
-// "module" record (a file that references something) keeps its old meaning.
+// "module" record (a file that references something) keeps its old meaning;
+// refs pointing at a dropped record are stripped too (CR-009).
 //
 //   ?from:<name>      a table, else a bucket — the supabase-client `.from()`
 //                     / `.table()` receiver ambiguity, resolved by name-set
@@ -17,21 +18,35 @@
 //   ?bucket:<name>    a bucket by name
 //   ?function:<name>  a database function by name
 //   ?route:<url>      the route whose path pattern matches <url>; `*` in the
-//                     url is one wildcard segment; the most specific pattern
-//                     (most literal segments) wins, ties by id
+//                     url is one wildcard segment
 //
-// Determinism: resolution is a pure function of the merged record set. Name
-// indexes are first-wins in merge order (extractor order from config, records
-// as the extractor emitted them); a table name minted twice is an error, not
-// a guess — `.from()` calls would be unattributable.
+// <name> is the id's text after its `kind:` prefix, or after the namespace
+// slash when the id is namespaced (`table:db/things` -> `things`); a
+// namespace-qualified lookup (`?function:db/save`) matches the full text. An
+// UNQUALIFIED name that several records share is ambiguous: the ref is
+// dropped with a diagnostic naming the candidates — never a first-wins guess
+// (CR-008). A table name minted twice is an error outright: `.from()` calls
+// would be unattributable.
+//
+// Route choice: every matching route is scored by how many url segments it
+// matched literally (not through `*` or a dynamic segment); highest wins,
+// ties by id. So `fetch('/api/things/*')` prefers `[id]` over a literal
+// sibling, and `fetch('/api/things/mine')` prefers the literal.
+//
+// Determinism: resolution is a pure function of the merged record set.
 
-const nameOf = (id) => id.slice(id.indexOf("/") + 1);
+const afterKind = (id) => id.slice(id.indexOf(":") + 1);
+const shortName = (id) => {
+  const rest = afterKind(id);
+  return rest.slice(rest.indexOf("/") + 1);
+};
+
+const isCatchAll = (s) => /^\[\.\.\..+\]$/.test(s) || /^\{[^}]+:path\}$/.test(s);
+const isDynamic = (s) => /^\[.+\]$/.test(s) || /^\{.+\}$/.test(s);
 
 // `[x]` / `{x}` / `*` eat one segment; `[...x]` / `{x:path}` eat 1+ trailing.
 export function makeRouteMatcher(routePath) {
   const segs = routePath.split("/").filter(Boolean);
-  const isCatchAll = (s) => /^\[\.\.\..+\]$/.test(s) || /^\{[^}]+:path\}$/.test(s);
-  const isDynamic = (s) => /^\[.+\]$/.test(s) || /^\{.+\}$/.test(s);
   return (url) => {
     const uSegs = url.split("/").filter(Boolean);
     let i = 0;
@@ -46,23 +61,40 @@ export function makeRouteMatcher(routePath) {
   };
 }
 
+function literalMatches(routePath, url) {
+  const segs = routePath.split("/").filter(Boolean);
+  const uSegs = url.split("/").filter(Boolean);
+  let n = 0;
+  for (let i = 0; i < segs.length && i < uSegs.length; i++) {
+    if (!isDynamic(segs[i]) && segs[i] === uSegs[i]) n++;
+  }
+  return n;
+}
+
 export function resolveRefs(records) {
   const diagnostics = [];
-  const byName = { table: new Map(), bucket: new Map(), function: new Map() };
+  // name -> [ids], both the short name and the namespace-qualified text.
+  const index = { table: new Map(), bucket: new Map(), function: new Map() };
+  const add = (map, key, id) => {
+    const list = map.get(key) ?? [];
+    if (!list.includes(id)) list.push(id);
+    map.set(key, list);
+  };
   for (const r of records) {
-    const index = byName[r.kind];
-    if (!index) continue;
-    const name = nameOf(r.id);
-    if (r.kind === "table" && index.has(name) && index.get(name) !== r.id) {
-      throw new Error(`Table '${name}' minted twice (${index.get(name)} and ${r.id}) — cannot attribute .from() calls`);
+    const map = index[r.kind];
+    if (!map) continue;
+    const short = shortName(r.id);
+    if (r.kind === "table" && map.has(short) && !map.get(short).includes(r.id)) {
+      throw new Error(`Table '${short}' minted twice (${map.get(short)[0]} and ${r.id}) — cannot attribute .from() calls`);
     }
-    if (!index.has(name)) index.set(name, r.id);
+    add(map, short, r.id);
+    const full = afterKind(r.id);
+    if (full !== short) add(map, full, r.id);
   }
-  const literalCount = (id) => id.split("/").filter((s) => s && !/^[\[{*]/.test(s)).length;
   const routes = records
     .filter((r) => r.kind === "route")
-    .map((r) => ({ id: r.id, match: makeRouteMatcher(r.id.slice("route:".length)), literals: literalCount(r.id) }))
-    .sort((a, b) => b.literals - a.literals || (a.id < b.id ? -1 : 1));
+    .map((r) => ({ id: r.id, path: afterKind(r.id), match: makeRouteMatcher(afterKind(r.id)) }))
+    .sort((a, b) => (a.id < b.id ? -1 : 1));
 
   const resolveOne = (ref, record) => {
     const where = record.resource[0] ?? record.id;
@@ -73,16 +105,37 @@ export function resolveRefs(records) {
     const colon = ref.indexOf(":");
     const kind = ref.slice(1, colon);
     const target = ref.slice(colon + 1);
+    const lookup = (k, label) => {
+      const hits = index[k].get(target);
+      if (!hits) return undefined;
+      if (hits.length > 1) return drop(`${label} '${target}' is ambiguous (${hits.join(", ")}) — qualify it with its namespace`);
+      return hits[0];
+    };
     switch (kind) {
-      case "from":
-        return byName.table.get(target) ?? byName.bucket.get(target) ?? drop(`from('${target}') matches no known table or bucket`);
+      case "from": {
+        const t = lookup("table", "from");
+        if (t !== undefined) return t;
+        const b = lookup("bucket", "from");
+        return b !== undefined ? b : drop(`from('${target}') matches no known table or bucket`);
+      }
       case "table":
       case "bucket":
-      case "function":
-        return byName[kind].get(target) ?? drop(`${kind} '${target}' matches no known ${kind}`);
+      case "function": {
+        const hit = lookup(kind, kind);
+        return hit !== undefined ? hit : drop(`${kind} '${target}' matches no known ${kind}`);
+      }
       case "route": {
-        const hit = routes.find((rt) => rt.match(target));
-        return hit ? hit.id : drop(`fetch('${target}') matches no route`);
+        let best = null;
+        let bestScore = -1;
+        for (const rt of routes) {
+          if (!rt.match(target)) continue;
+          const score = literalMatches(rt.path, target);
+          if (score > bestScore) {
+            best = rt;
+            bestScore = score;
+          }
+        }
+        return best ? best.id : drop(`fetch('${target}') matches no route`);
       }
       default:
         throw new Error(`Record ${record.id}: unknown unresolved ref kind '${kind}' in '${ref}'`);
@@ -90,6 +143,7 @@ export function resolveRefs(records) {
   };
 
   const kept = [];
+  const dropped = new Set();
   for (const r of records) {
     const resolved = new Set();
     for (const ref of r.refs) {
@@ -97,9 +151,13 @@ export function resolveRefs(records) {
       if (id && id !== r.id) resolved.add(id);
     }
     r.refs = [...resolved].sort();
-    if (r.requireRefs && !r.refs.length) continue;
+    if (r.requireRefs && !r.refs.length) {
+      dropped.add(r.id);
+      continue;
+    }
     delete r.requireRefs;
     kept.push(r);
   }
+  if (dropped.size) for (const r of kept) r.refs = r.refs.filter((id) => !dropped.has(id));
   return { records: kept, diagnostics };
 }
