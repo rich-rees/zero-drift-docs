@@ -21,8 +21,8 @@
 // merge gate (CI) or the pre-push hook is the guarantee; the fence saves the
 // turn. Documented in docs/decisions/0003.
 
-import { readFileSync } from "node:fs";
-import { resolve, isAbsolute } from "node:path";
+import { readFileSync, realpathSync, existsSync } from "node:fs";
+import { resolve, isAbsolute, dirname, relative, join } from "node:path";
 import { adopterRoot, readConfig, artifactPaths, resolveInside, samePath, isUnder } from "./lib/repo.mjs";
 
 const EDIT_TOOLS = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit", "write_file", "edit_file"]);
@@ -59,6 +59,24 @@ function tokens(command) {
   return out;
 }
 
+// The real path of a target that may not exist yet: realpath of the nearest
+// existing ancestor plus the remaining segments.
+function canonical(abs) {
+  let probe = abs;
+  const rest = [];
+  while (!existsSync(probe)) {
+    const parent = dirname(probe);
+    if (parent === probe) return abs;
+    rest.unshift(relative(parent, probe));
+    probe = parent;
+  }
+  try {
+    return join(realpathSync(probe), ...rest);
+  } catch {
+    return abs;
+  }
+}
+
 function patchTargets(text) {
   const out = [];
   const re = /^\*\*\* (?:Add|Update|Delete) File: (.+)$|^\*\*\* Move to: (.+)$/gm;
@@ -80,20 +98,30 @@ function main() {
   if (state !== "valid" || config.hooks?.fence !== true) return 0;
 
   const paths = artifactPaths(config);
-  // Each generated path proven inside the checkout with no symlinked segment;
-  // a config that fails that is not a config the fence acts on (CR-004).
-  const generated = [
+  // Each generated path proven inside the checkout with no symlinked segment
+  // (CR-004). One that fails — a symlinked artifact — is dropped on its own;
+  // the others stay fenced (CR-051).
+  const generated = [];
+  for (const g of [
     { rel: paths.metadataDir, kind: "dir" },
     { rel: paths.graph, kind: "file" },
     { rel: paths.agentIndex, kind: "file" },
     { rel: paths.adrIndex, kind: "file" },
     { rel: paths.humanIndex, kind: "file" },
-  ].map((g) => ({ ...g, abs: resolveInside(root, g.rel, g.rel) }));
+  ]) {
+    try {
+      generated.push({ ...g, abs: canonical(resolveInside(root, g.rel, g.rel)) });
+    } catch {
+      /* not a path the fence can vouch for */
+    }
+  }
   // Shell-relative paths resolve against the command's cwd when it is inside
   // the checkout (CR-023); anything else resolves against the root.
   const cwd = cwdIn && (samePath(cwdIn, root) || isUnder(cwdIn, root)) ? resolve(cwdIn) : root;
   const hit = (candidate, base) => {
-    const abs = isAbsolute(candidate) ? resolve(candidate) : resolve(base, candidate);
+    // Compared by REAL path, so an alias link to the artifact or its parent
+    // still matches (CR-004).
+    const abs = canonical(isAbsolute(candidate) ? resolve(candidate) : resolve(base, candidate));
     for (const g of generated) {
       if (samePath(abs, g.abs) || (g.kind === "dir" && isUnder(abs, g.abs))) return g.rel;
     }
