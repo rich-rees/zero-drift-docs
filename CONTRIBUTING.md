@@ -103,7 +103,8 @@ A viewer is one module exporting
 the page as a string. `graph` is exactly what was written to `graph.json`; `docs`
 is `{ glossary, adrs }` (the store text, for viewers that embed it); `changed` is
 the latest-store-change highlight; `options` is whatever the adopter put in
-`viewer` besides `name`. A viewer is a good contribution when it honours the
+`viewer` besides `name`, plus the resolved top-level `nonAreaTags` whenever it
+is non-empty (your area model should exclude the same tags the graph did). A viewer is a good contribution when it honours the
 viewer contract (the equivalent of "determinism" for extractors):
 
 - **Self-contained and safe to publish.** The human index gets *hosted* — a single

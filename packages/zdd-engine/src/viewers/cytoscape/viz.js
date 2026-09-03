@@ -553,7 +553,9 @@
   // resource that is not a bare repo-relative path; this is the viewer's own
   // belt (CR-002): anything scheme-shaped renders as a dead, text-only link.
   const SAFE_BASE = /^(https?:\/\/[^\s]*)?$/i;
-  const safeResource = (r) => !/^[a-z][a-z0-9+.-]*:/i.test(r) && !r.startsWith("//") && !r.startsWith("/");
+  // Whitespace/control anywhere is refused outright: a browser strips them
+  // from a URL, so " javascript:x" would parse as a scheme (CR-002).
+  const safeResource = (r) => !/[\s\x00-\x1f\x7f]/.test(r) && !/^[a-z][a-z0-9+.-]*:/i.test(r) && !r.startsWith("//") && !r.startsWith("/");
   function githubHref(resource) {
     const base = bundle.repoBase || "";
     if (!SAFE_BASE.test(base) || !safeResource(resource)) return null;

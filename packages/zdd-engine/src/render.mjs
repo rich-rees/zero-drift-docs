@@ -564,7 +564,12 @@ async function render() {
   const changed = computeStoreChanges(docs.glossary);
   const graph = buildGraph(concepts);
   const viewer = await loadViewer(VIEWER.name);
-  const html = viewer.render({ graph, docs, changed, options: VIEWER.options, bundleName: BUNDLE_NAME, repoBase: REPO_BASE });
+  // The viewer gets the resolved nonAreaTags alongside its own options: its
+  // area model must exclude the same tags the graph's inheritance did, and
+  // the top-level key is otherwise invisible to it (verification CR-026).
+  // Only added when set, so a config without it keeps the v0.3.1 bytes.
+  const options = NON_AREA_TAGS.length ? { ...VIEWER.options, nonAreaTags: NON_AREA_TAGS } : VIEWER.options;
+  const html = viewer.render({ graph, docs, changed, options, bundleName: BUNDLE_NAME, repoBase: REPO_BASE });
   if (typeof html !== "string") {
     console.error(`Viewer '${VIEWER.name}' must return the human index as a string`);
     process.exit(1);

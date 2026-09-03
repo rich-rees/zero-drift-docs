@@ -14,7 +14,9 @@ const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").
 function href(repoBase, resource) {
   if (!resource) return null;
   if (!/^(https?:\/\/\S*)?$/i.test(repoBase)) return null;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(resource) || resource.startsWith("/")) return null;
+  // Whitespace/control anywhere is refused: browsers strip them from a URL,
+  // so " javascript:x" would otherwise parse as a scheme (CR-002).
+  if (/[\s\x00-\x1f\x7f]/.test(resource) || /^[a-z][a-z0-9+.-]*:/i.test(resource) || resource.startsWith("/")) return null;
   const isFile = /\.[A-Za-z0-9]+$/.test(resource.split("/").pop());
   const path = resource.replace(/\[/g, "%5B").replace(/\]/g, "%5D");
   return (isFile ? repoBase.replace("/tree/", "/blob/") : repoBase) + path;
