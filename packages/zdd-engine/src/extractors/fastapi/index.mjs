@@ -1,9 +1,11 @@
 // fastapi extractor — routes from decorated handlers in a FastAPI codebase.
 // One convention: `@app.<method>("/path")` and `@router.<method>("/path")`
-// decorators, with `router = APIRouter(prefix="...")` and same-file
-// `app.include_router(mod.router, prefix="...")` prefixes applied. Purely
-// textual — no Python parsing, no import resolution beyond "which file in the
-// scanned roots is called <mod>.py". Options (extractorOptions.fastapi):
+// decorators, with `router = APIRouter(prefix="...")` and
+// `<receiver>.include_router(<mod>.router, prefix="...")` mounts applied —
+// transitively (app -> api router -> jobs router) and for every mount (one
+// router included under both /v1 and /v2 yields both route sets). Purely
+// textual — no Python parsing, no import resolution beyond "which scanned
+// file is called <mod>.py". Options (extractorOptions.fastapi):
 //   roots        repo-relative files or directories to scan (default ["."])
 //   excludeDirs  directory names skipped during the walk
 //   appVar       the FastAPI() variable name (default "app")
@@ -14,36 +16,46 @@
 // `?function:x`) for the deriver to resolve against the supabase extractor's
 // records after the merge. Auth is not derived (FastAPI dependencies are not
 // statically readable without resolving imports); the map says who may call
-// what. A missing root is "nothing to inventory" (greenfield), never an error.
+// what. Line-oriented: a decorator quoted inside a docstring reads as a route
+// — accepted, and visible in the diff. A missing root is "nothing to
+// inventory" (greenfield) with a diagnostic, never an error.
 
-import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
+import { readFileSync, statSync, existsSync } from "node:fs";
 import { join, basename } from "node:path";
 import { slugify } from "../../lib/slug.mjs";
+import { repoRelative } from "../../lib/paths.mjs";
+import { walkDir } from "../../lib/walk.mjs";
 
 const posixify = (p) => p.split(/[\\/]/).join("/");
-const HTTP_METHOD_ORDER = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
-const DECORATOR_METHODS = new Set(["get", "post", "put", "patch", "delete", "head", "options", "api_route"]);
+const HTTP_METHOD_ORDER = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "TRACE"];
+const DECORATOR_METHODS = new Set(["get", "post", "put", "patch", "delete", "head", "options", "trace", "api_route"]);
 
 export const FACTS_KEY_ORDER = {
   route: ["methods", "dynamicSegments", "handlers"],
 };
 
-function walkPython(repoRoot, roots, excludeDirs) {
+function walkPython(repoRoot, roots, excludeDirs, diagnostics) {
   const out = [];
-  const visit = (abs) => {
-    if (!existsSync(abs)) return;
+  const seen = new Set();
+  for (const root of roots) {
+    const abs = join(repoRoot, root);
+    if (!existsSync(abs)) {
+      diagnostics.push(`${root} not found — nothing to inventory`);
+      continue;
+    }
     if (statSync(abs).isFile()) {
       if (abs.endsWith(".py")) out.push(posixify(abs.slice(repoRoot.length + 1)));
-      return;
+      continue;
     }
-    for (const name of readdirSync(abs).sort()) {
-      const p = join(abs, name);
-      if (statSync(p).isDirectory()) {
-        if (!excludeDirs.includes(name)) visit(p);
-      } else if (name.endsWith(".py")) out.push(posixify(p.slice(repoRoot.length + 1)));
-    }
-  };
-  for (const root of roots) visit(join(repoRoot, root));
+    walkDir(
+      abs,
+      (p, name) => {
+        if (name.endsWith(".py")) out.push(posixify(p.slice(repoRoot.length + 1)));
+      },
+      seen,
+      (_p, name) => !excludeDirs.includes(name),
+    );
+  }
   return [...new Set(out)].sort();
 }
 
@@ -103,9 +115,11 @@ export function parseFile(text) {
       pending = [];
       continue;
     }
-    // Any other non-decorator line between a decorator and its def is not a
-    // handler shape we read (e.g. a decorator with a multi-line argument list).
-    if (line.trim() && !line.trim().startsWith("@")) pending = [];
+    // Blank lines, comments and other decorators sit legally between a route
+    // decorator and its def (CR-012); anything else is not a handler shape we
+    // read (e.g. a decorator with a multi-line argument list).
+    const t = line.trim();
+    if (t && !t.startsWith("@") && !t.startsWith("#")) pending = [];
   }
   return { routers, includes, handlers };
 }
@@ -124,22 +138,28 @@ export function derive({ repoRoot, options }) {
     excludeDirs = ["node_modules", ".venv", "venv", "__pycache__", ".git", "tests", "test"],
     appVar = "app",
   } = options;
+  if (!Array.isArray(roots)) throw new Error(`fastapi: 'roots' must be an array of repo-relative paths`);
+  if (!Array.isArray(excludeDirs)) throw new Error(`fastapi: 'excludeDirs' must be an array of directory names`);
+  const safeRoots = roots.map((r) => repoRelative(r, "fastapi.roots"));
 
-  const files = walkPython(repoRoot, roots, excludeDirs);
+  const files = walkPython(repoRoot, safeRoots, excludeDirs, diagnostics);
   const parsed = new Map(files.map((rel) => [rel, parseFile(readFileSync(join(repoRoot, rel), "utf8"))]));
 
-  // Router prefixes: the router's own prefix, plus whatever include_router
-  // adds when the included router can be located by module basename.
+  // Mount graph: each include is an edge parent -> child router carrying the
+  // include prefix. A router's mount prefixes are every path from the app (or
+  // from an unmounted root router) down to it, so nested includes compose and
+  // repeated includes multiply (CR-010).
   const byModule = new Map(); // "jobs" -> [rel]
   for (const rel of files) {
     const mod = basename(rel, ".py");
     byModule.set(mod, [...(byModule.get(mod) ?? []), rel]);
   }
-  const includePrefix = new Map(); // `${rel}#${var}` -> prefix added by include
+  const key = (rel, v) => `${rel}#${v}`;
+  const edges = new Map(); // child key -> [{ parent: key | null (app), prefix }]
   for (const [rel, { routers, includes }] of parsed) {
     for (const inc of includes) {
-      const receiverPrefix = inc.receiver === appVar ? "" : routers.get(inc.receiver);
-      if (receiverPrefix === undefined) continue; // included into an unknown receiver
+      const parent = inc.receiver === appVar ? null : routers.has(inc.receiver) ? key(rel, inc.receiver) : undefined;
+      if (parent === undefined) continue; // included into an unknown receiver
       const parts = inc.target.split(".");
       const varName = parts.pop();
       const mod = parts.pop();
@@ -147,34 +167,54 @@ export function derive({ repoRoot, options }) {
       if (mod) {
         const candidates = byModule.get(mod) ?? [];
         if (candidates.length !== 1) {
-          diagnostics.push(`[fastapi] ${rel}: include_router(${inc.target}) — module '${mod}' resolves to ${candidates.length} files, prefix not applied`);
+          diagnostics.push(`${rel}: include_router(${inc.target}) — module '${mod}' resolves to ${candidates.length} files, prefix not applied`);
           continue;
         }
         targetRel = candidates[0];
       }
-      includePrefix.set(`${targetRel}#${varName}`, `${receiverPrefix}${inc.prefix}`);
+      const child = key(targetRel, varName);
+      edges.set(child, [...(edges.get(child) ?? []), { parent, prefix: inc.prefix }]);
     }
   }
+  const routerPrefix = (k) => {
+    const [rel, v] = k.split("#");
+    return parsed.get(rel)?.routers.get(v) ?? "";
+  };
+  // All mount prefixes for a router key (the part before its own prefix).
+  const mounts = (k, stack = new Set()) => {
+    const incoming = edges.get(k);
+    if (!incoming || stack.has(k)) return [""]; // unmounted root, or a cycle
+    stack.add(k);
+    const out = [];
+    for (const { parent, prefix } of incoming) {
+      const above = parent === null ? [""] : mounts(parent, stack).map((m) => `${m}${routerPrefix(parent)}`);
+      for (const a of above) out.push(`${a}${prefix}`);
+    }
+    stack.delete(k);
+    return out;
+  };
 
   const routes = new Map(); // full path -> { methods:Set, resource:Set, descriptions:[], handlers:Set, refs:Set }
   for (const [rel, { routers, handlers }] of parsed) {
     for (const h of handlers) {
       for (const d of h.decorators) {
-        let prefix;
-        if (d.receiver === appVar) prefix = "";
-        else if (routers.has(d.receiver)) prefix = `${includePrefix.get(`${rel}#${d.receiver}`) ?? ""}${routers.get(d.receiver)}`;
+        let prefixes;
+        if (d.receiver === appVar) prefixes = [""];
+        else if (routers.has(d.receiver)) prefixes = mounts(key(rel, d.receiver)).map((m) => `${m}${routers.get(d.receiver)}`);
         else {
-          diagnostics.push(`[fastapi] ${rel}: @${d.receiver}.* on ${h.name} — receiver is neither '${appVar}' nor a router declared in this file, skipped`);
+          diagnostics.push(`${rel}: @${d.receiver}.* on ${h.name} — receiver is neither '${appVar}' nor a router declared in this file, skipped`);
           continue;
         }
-        const full = joinPath(prefix, d.path);
-        const entry = routes.get(full) ?? { methods: new Set(), resource: new Set(), descriptions: [], handlers: new Set(), refs: new Set() };
-        d.methods.forEach((m) => entry.methods.add(m));
-        entry.resource.add(rel);
-        if (h.docstring) entry.descriptions.push(h.docstring);
-        entry.handlers.add(h.name);
-        scanHandlerRefs(h.body).forEach((r) => entry.refs.add(r));
-        routes.set(full, entry);
+        for (const prefix of prefixes) {
+          const full = joinPath(prefix, d.path);
+          const entry = routes.get(full) ?? { methods: new Set(), resource: new Set(), descriptions: [], handlers: new Set(), refs: new Set() };
+          d.methods.forEach((m) => entry.methods.add(m));
+          entry.resource.add(rel);
+          if (h.docstring) entry.descriptions.push(h.docstring);
+          entry.handlers.add(h.name);
+          scanHandlerRefs(h.body).forEach((r) => entry.refs.add(r));
+          routes.set(full, entry);
+        }
       }
     }
   }
