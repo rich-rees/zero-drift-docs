@@ -13,7 +13,7 @@
 //    Enforced by construction, not ritual.
 
 import { execFileSync } from "node:child_process";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { loadConfig } from "./lib/config.mjs";
 
@@ -23,7 +23,7 @@ export function run(args) {
 
   const problems = [];
 
-const adrFiles = readdirSync(ADR_DIR).filter((f) => /^\d{4}-.*\.md$/.test(f)).sort();
+const adrFiles = (existsSync(ADR_DIR) ? readdirSync(ADR_DIR) : []).filter((f) => /^\d{4}-.*\.md$/.test(f)).sort();
 const numOf = (f) => f.slice(0, 4);
 
 // ---- 0. Duplicate ADR numbers ----

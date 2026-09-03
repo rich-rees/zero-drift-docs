@@ -8,14 +8,16 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { derive } from "../src/adapters/nextjs-supabase/index.mjs";
+import { deriveRecords } from "../src/derive.mjs";
 
 const FIXTURE = resolve(dirname(fileURLToPath(import.meta.url)), "fixture");
 const config = JSON.parse(readFileSync(join(FIXTURE, "zdd", "config.json"), "utf8"));
 
 let records;
-before(() => {
-  ({ records } = derive({ repoRoot: FIXTURE, options: config.adapterOptions }));
+before(async () => {
+  // The fixture config is the legacy adapter form — the deriver expands it to
+  // [supabase, nextjs] and resolves refs across the two.
+  ({ records } = await deriveRecords({ repoRoot: FIXTURE, config }));
 });
 
 const byId = (id) => records.find((r) => r.id === id);

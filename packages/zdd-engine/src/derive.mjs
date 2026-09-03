@@ -4,22 +4,33 @@
 //
 //   zdd-engine derive             # write metadata records + prune stale
 //   zdd-engine derive --check     # exit 1 if metadata/ is stale
-//   zdd-engine derive --verbose   # adapter diagnostics to stderr
+//   zdd-engine derive --verbose   # extractor diagnostics to stderr
 //
 // Deterministic: same source bytes in, byte-identical metadata/*.json out (the
 // blocking CI check relies on this). No dependencies beyond Node stdlib, no
 // LLM anywhere. Nothing in this file may be stack- or project-specific — stack
-// facts belong in the adapter, project facts in zdd/config.json.
+// facts belong in an extractor, project facts in zdd/config.json.
+//
+// Extractors are composed: config lists them by name, each one inventories one
+// convention, and this file merges their records and resolves cross-extractor
+// refs afterwards (src/lib/resolve-refs.mjs). Selection is by NAME only —
+// from the static registry below, or from the one repo-local directory config
+// may declare (`localExtractorDir`), the single sanctioned place config can
+// point at code. A path in the extractors list is refused.
 
 import { readFileSync, writeFileSync, readdirSync, statSync, mkdirSync, rmSync, existsSync } from "node:fs";
 import { join, dirname, relative, resolve, sep } from "node:path";
-import { loadConfig } from "./lib/config.mjs";
+import { pathToFileURL } from "node:url";
+import { loadConfig, resolveExtractors } from "./lib/config.mjs";
+import { resolveRefs } from "./lib/resolve-refs.mjs";
 
-// Static registry — adapters are selected by name from config, never by path,
-// so config can't import arbitrary code.
-const ADAPTERS = {
-  "nextjs-supabase": "./adapters/nextjs-supabase/index.mjs",
+const EXTRACTORS = {
+  supabase: "./extractors/supabase/index.mjs",
+  nextjs: "./extractors/nextjs/index.mjs",
+  fastapi: "./extractors/fastapi/index.mjs",
+  generic: "./extractors/generic/index.mjs",
 };
+const NAME_RE = /^[a-z][a-z0-9-]*$/;
 
 const RECORD_KEYS = ["kind", "id", "title", "description", "resource", "refs", "facts"];
 const FILENAME_RE = /^[A-Za-z0-9._~()\[\]-]+\.json$/;
@@ -77,7 +88,7 @@ function validateRecords(records) {
     if (!Array.isArray(r.resource)) fail(`Record ${r.id}: resource must be an array`);
     if (!Array.isArray(r.refs)) fail(`Record ${r.id}: refs must be an array`);
     if (!FILENAME_RE.test(r.filename)) fail(`Record ${r.id}: bad filename '${r.filename}'`);
-    if (ids.has(r.id)) fail(`Duplicate record id '${r.id}'`);
+    if (ids.has(r.id)) fail(`Duplicate record id '${r.id}' (two extractors minted it?)`);
     ids.add(r.id);
     const fileKey = `${r.kind}/${r.filename.toLowerCase()}`;
     // Case-insensitive: Windows/macOS checkouts collapse case-variant names.
@@ -89,7 +100,7 @@ function validateRecords(records) {
       }
     }
   }
-  // Every ref must resolve to an emitted record — dangling refs are adapter
+  // Every ref must resolve to an emitted record — dangling refs are extractor
   // bugs, caught here rather than shipped.
   for (const r of records) {
     for (const ref of r.refs) {
@@ -98,14 +109,74 @@ function validateRecords(records) {
   }
 }
 
+// Which names are loadable: the registry plus whatever the local dir holds
+// (`<dir>/<name>.mjs` or `<dir>/<name>/index.mjs`). Local names may not
+// shadow built-ins — a fork that wants a different `nextjs` is a fork.
+function localExtractors(repoRoot, dir) {
+  const found = new Map();
+  if (!dir) return found;
+  const abs = resolve(repoRoot, dir);
+  if (!existsSync(abs)) return found;
+  for (const name of readdirSync(abs).sort()) {
+    const p = join(abs, name);
+    if (statSync(p).isDirectory() && existsSync(join(p, "index.mjs"))) found.set(name, join(p, "index.mjs"));
+    else if (name.endsWith(".mjs")) found.set(name.slice(0, -4), p);
+  }
+  return found;
+}
+
+async function loadExtractor(name, repoRoot, config) {
+  const localDir = config.localExtractorDir;
+  if (!NAME_RE.test(name)) {
+    fail(
+      `Extractor '${name}' is not a name: extractors are selected by name, never by path (config cannot import code). ` +
+        `Put the module in localExtractorDir${localDir ? ` (${localDir})` : ""} as <name>.mjs and list its name.`,
+    );
+  }
+  const local = localExtractors(repoRoot, localDir);
+  if (EXTRACTORS[name]) {
+    if (local.has(name)) fail(`Local extractor '${name}' shadows the built-in of the same name — rename it`);
+    return import(EXTRACTORS[name]);
+  }
+  if (local.has(name)) return import(pathToFileURL(local.get(name)).href);
+  const known = Object.keys(EXTRACTORS).sort().join(", ");
+  const localList = localDir ? `; local ${localDir}: ${[...local.keys()].join(", ") || "(none)"}` : "";
+  fail(`Unknown extractor '${name}' (known: ${known}${localList})`);
+}
+
+// Run every configured extractor, merge, resolve refs. Exported so tests can
+// observe records without the filesystem write.
+export async function deriveRecords({ repoRoot, config }) {
+  const selection = resolveExtractors(config);
+  if (selection.error) fail(selection.error);
+  const diagnostics = [];
+  const configDiagnostics = selection.diagnostics;
+  let records = [];
+  const factsOrder = {};
+  for (const { name, options } of selection.extractors) {
+    const extractor = await loadExtractor(name, repoRoot, config);
+    if (typeof extractor.derive !== "function") fail(`Extractor '${name}' exports no derive()`);
+    const out = extractor.derive({ repoRoot, options });
+    records.push(...out.records);
+    diagnostics.push(...out.diagnostics.map((d) => `[${name}] ${d}`));
+    // Facts key orders merge per kind in config order: first extractor's keys
+    // first, later extractors' unseen keys appended.
+    for (const [kind, order] of Object.entries(extractor.FACTS_KEY_ORDER ?? {})) {
+      factsOrder[kind] = [...new Set([...(factsOrder[kind] ?? []), ...order])];
+    }
+  }
+  const resolved = resolveRefs(records);
+  records = resolved.records;
+  diagnostics.push(...resolved.diagnostics);
+  validateRecords(records);
+  records.sort((a, b) => (a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : a.id < b.id ? -1 : 1));
+  return { records, factsOrder, diagnostics, configDiagnostics };
+}
+
 export async function run(args) {
   const CHECK = args.includes("--check");
   const VERBOSE = args.includes("--verbose");
   const { repoRoot: REPO, config, paths } = loadConfig(args);
-
-  const adapterPath = ADAPTERS[config.adapter];
-  if (!adapterPath) fail(`Unknown adapter '${config.adapter}' (known: ${Object.keys(ADAPTERS).join(", ")})`);
-  const adapter = await import(adapterPath);
 
   const metadataRel = paths.metadataDir;
   const metadataDir = resolve(REPO, metadataRel);
@@ -113,12 +184,12 @@ export async function run(args) {
   // arbitrary trees.
   if (!metadataDir.startsWith(REPO + sep)) fail(`metadataDir '${metadataRel}' resolves outside the repo`);
 
-  const { records, diagnostics } = adapter.derive({ repoRoot: REPO, options: config.adapterOptions });
+  const { records, factsOrder, diagnostics, configDiagnostics } = await deriveRecords({ repoRoot: REPO, config });
+  // Config-level notes (deprecations) always print; extractor diagnostics are
+  // opt-in noise.
+  for (const d of configDiagnostics) console.error(d);
   if (VERBOSE) for (const d of diagnostics) console.error(d);
-  validateRecords(records);
-  records.sort((a, b) => (a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : a.id < b.id ? -1 : 1));
 
-  const factsOrder = adapter.FACTS_KEY_ORDER ?? {};
   const expected = new Map(); // rel path under metadataDir -> content
   for (const r of records) {
     expected.set(`${r.kind}/${r.filename}`, stableStringify(r, factsOrder[r.kind] ?? []));
@@ -172,7 +243,7 @@ export async function run(args) {
     }
     const byKind = {};
     for (const r of records) byKind[r.kind] = (byKind[r.kind] ?? 0) + 1;
-    const summary = Object.entries(byKind).map(([k, n]) => `${n} ${k}s`).join(", ");
+    const summary = Object.entries(byKind).map(([k, n]) => `${n} ${k}s`).join(", ") || "nothing to inventory";
     console.log(`Wrote ${records.length} records (${summary}) -> ${metadataRel}`);
   }
 }

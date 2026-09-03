@@ -5,7 +5,7 @@
 // Run: node --test "test/*.test.mjs"
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { resolveWrapperTarget } from "../src/adapters/nextjs-supabase/index.mjs";
+import { resolveWrapperTarget } from "../src/extractors/nextjs/index.mjs";
 
 test("resolveWrapperTarget: bare named-import wrapper resolves", () => {
   const text = `import { ClientsPage } from "@/components/settings/ClientsPage";

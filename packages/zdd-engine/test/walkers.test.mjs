@@ -2,8 +2,9 @@
 // Run: node --test "test/*.test.mjs"
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { slugify, extractMethods, leadingComment } from "../src/adapters/nextjs-supabase/index.mjs";
-import { scanFileText, normalizeFetchUrl, makeRouteMatcher } from "../src/adapters/nextjs-supabase/refs.mjs";
+import { slugify, extractMethods, leadingComment } from "../src/extractors/nextjs/index.mjs";
+import { scanFileText, normalizeFetchUrl } from "../src/extractors/nextjs/refs.mjs";
+import { makeRouteMatcher } from "../src/lib/resolve-refs.mjs";
 
 test("slugify: dynamic + catch-all + groups + dots", () => {
   assert.equal(slugify("journeys/[id]/runs/[runId]"), "journeys--_id--runs--_runId");
@@ -11,6 +12,7 @@ test("slugify: dynamic + catch-all + groups + dots", () => {
   assert.equal(slugify("/"), "index");
   assert.equal(slugify("apps/backoffice/src/lib/journey-api.ts"), "apps--backoffice--src--lib--journey-api-ts");
   assert.equal(slugify("(app)/_layout"), "(app)--_layout");
+  assert.equal(slugify("/jobs/{id}/files/{p:path}"), "jobs--_id--files--_p");
 });
 
 test("extractMethods: three export forms, canonical order", () => {
@@ -71,4 +73,12 @@ test("makeRouteMatcher: exact, dynamic, catch-all", () => {
   const exact = makeRouteMatcher("/api/clients");
   assert.ok(exact("/api/clients"));
   assert.ok(!exact("/api/clients/extra"));
+
+  // FastAPI-shaped patterns share the matcher: {x} is one segment, {x:path} is 1+.
+  const fast = makeRouteMatcher("/jobs/{id}");
+  assert.ok(fast("/jobs/*"));
+  assert.ok(!fast("/jobs"));
+  const fastCatch = makeRouteMatcher("/files/{p:path}");
+  assert.ok(fastCatch("/files/a/b"));
+  assert.ok(!fastCatch("/files"));
 });
