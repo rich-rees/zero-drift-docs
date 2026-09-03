@@ -140,8 +140,9 @@ export function loadConfig(args, cwd = process.cwd()) {
 // (docs/decisions/0001). The pre-1.0 `adapter` + `adapterOptions` pair still
 // works: it expands to the extractors it was a bundle of, with the old option
 // keys routed to the extractor that owns them, and prints a deprecation note.
-// The engine never rewrites the config; a future `bootstrap --upgrade` (DIO-311)
-// will, and the deprecation note says how to do it by hand until then.
+// The engine never rewrites the config; the plugin's `bootstrap --upgrade`
+// does (plugins/zdd/scripts/bootstrap.mjs mirrors LEGACY_ADAPTERS for that),
+// and the deprecation note says how to do it by hand.
 // ---------------------------------------------------------------------------
 export const LEGACY_ADAPTERS = {
   "nextjs-supabase": {

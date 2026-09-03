@@ -1,0 +1,20 @@
+#!/bin/sh
+# zdd pre-push — the local stand-in for the CI check (written by `zdd:bootstrap`
+# when CI was declined). Runs the same deterministic engine checks the CI
+# workflow would: metadata matches source, indexes match their inputs, stores
+# lint. A failure here makes a forgotten `update` loud before the push — but
+# it is not a merge gate: without CI, ZDD's guarantee is a habit, not a proof.
+#
+# The engine version is PINNED below, in step with the plugin's other pins;
+# `zdd:bootstrap --upgrade` rewrites it. Managed by zdd — edits are overwritten
+# on upgrade.
+ZDD_ENGINE="@rich-rees/zdd-engine@0.4.0"
+
+if ! command -v npx >/dev/null 2>&1; then
+  echo "zdd: npx not found — engine checks skipped (install Node 20+, or re-run zdd:bootstrap)"
+  exit 0
+fi
+
+npx -y "$ZDD_ENGINE" derive --check &&
+  npx -y "$ZDD_ENGINE" render --check &&
+  npx -y "$ZDD_ENGINE" lint
