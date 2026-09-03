@@ -141,12 +141,15 @@ function namespaceNames(dirs) {
   });
   return dedupe(names);
 }
+// Unique names, checked against the whole set: a raw `foo-2` sitting next to
+// two `foo`s cannot be collided into (review CR-047).
 function dedupe(names) {
-  const seen = new Map();
+  const taken = new Set();
   return names.map((n) => {
-    const count = seen.get(n) ?? 0;
-    seen.set(n, count + 1);
-    return count ? `${n}-${count + 1}` : n;
+    let candidate = n;
+    for (let i = 2; taken.has(candidate); i++) candidate = `${n}-${i}`;
+    taken.add(candidate);
+    return candidate;
   });
 }
 
@@ -258,9 +261,20 @@ function fromStack(stack = []) {
       continue;
     }
     if (rule.extractor) {
+      const opts = rule.options(path);
       if (!extractors.includes(rule.extractor)) {
         extractors.push(rule.extractor);
-        extractorOptions[rule.extractor] = rule.options(path);
+        extractorOptions[rule.extractor] = opts;
+      } else {
+        // A second entry for the same extractor adds its path (CR-042).
+        const cur = extractorOptions[rule.extractor];
+        for (const [k, v] of Object.entries(opts)) {
+          if (Array.isArray(v) && Array.isArray(cur[k])) for (const item of v) if (!cur[k].some((x) => JSON.stringify(x) === JSON.stringify(item))) cur[k].push(item);
+        }
+        if (Array.isArray(cur.migrationNamespaces)) {
+          const names = dedupe(cur.migrationNamespaces.map((m) => m.name));
+          cur.migrationNamespaces.forEach((m, i) => (m.name = names[i]));
+        }
       }
     } else apps.push(rule.app);
   }
@@ -387,8 +401,15 @@ function snippetText() {
 }
 const isOwned = (text) => text.includes(OWNER_MARK);
 
-function count(hay, needle) {
-  return hay.split(needle).length - 1;
+// A marker counts only as a whole line (CR-011): `<!-- zdd:begin --> extra`
+// is not a marker.
+const MARKER_LINE = (m) => new RegExp("^" + m.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "[ \\t]*\\r?$", "gm");
+function count(hay, marker) {
+  return (hay.match(MARKER_LINE(marker)) ?? []).length;
+}
+function indexOfMarker(hay, marker) {
+  const m = MARKER_LINE(marker).exec(hay);
+  return m ? m.index : -1;
 }
 
 // Insert or refresh the managed block. Cases: exactly one well-formed marker
@@ -403,9 +424,9 @@ export function upsertSnippet(existing, snippet) {
   if (!existing) return { text: body, changed: true, how: "created" };
   const nb = count(existing, SNIPPET_BEGIN);
   const ne = count(existing, SNIPPET_END);
-  if (nb || ne) {
-    const b = existing.indexOf(SNIPPET_BEGIN);
-    const e = existing.indexOf(SNIPPET_END);
+  if (nb || ne || existing.includes(SNIPPET_BEGIN) || existing.includes(SNIPPET_END)) {
+    const b = indexOfMarker(existing, SNIPPET_BEGIN);
+    const e = indexOfMarker(existing, SNIPPET_END);
     if (nb !== 1 || ne !== 1 || e < b) return { text: existing, changed: false, how: "refused: the zdd:begin / zdd:end markers are not exactly one well-formed pair — fix them by hand" };
     const next = existing.slice(0, b) + body.trimEnd() + existing.slice(e + SNIPPET_END.length);
     return { text: next, changed: next !== existing, how: "refreshed" };
@@ -498,12 +519,15 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
 
   // Opt-ins: fresh adoption defaults all on; repair defaults to the current
   // state, so an omitted answer never reverses an earlier choice (CR-005).
+  // Only a file the plugin OWNS counts as a current opt-in — an adopter's own
+  // workflow or hook is not a ZDD choice to inherit or activate (CR-048).
+  const owned = (rel) => ledger.exists(rel) && isOwned(ledger.read(rel));
   const current = existingConfig
     ? {
         autoLoad: existingConfig.hooks?.autoLoad ?? true,
         fence: existingConfig.hooks?.fence ?? false,
-        ci: ledger.exists(".github/workflows/zdd.yml"),
-        prePush: ledger.exists(".githooks/pre-push"),
+        ci: owned(".github/workflows/zdd.yml"),
+        prePush: owned(".githooks/pre-push"),
       }
     : { autoLoad: true, fence: true, ci: true, prePush: true };
   const optIns = { ...current, ...(answers.optIns ?? {}) };
@@ -583,7 +607,8 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
     else ledger.skipped.push(".github/workflows/zdd.yml (CI declined)");
     if (optIns.prePush) {
       ensureOwned(ledger, ".githooks/pre-push", prePushText(version), { executable: true });
-      ensureHooksPath(ledger); // whenever pre-push is selected, not only on creation (CR-006)
+      // Point git at .githooks only when the hook there is ours (CR-006, CR-048).
+      if (owned(".githooks/pre-push")) ensureHooksPath(ledger);
     } else ledger.skipped.push(".githooks/pre-push (declined)");
   }
 

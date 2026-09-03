@@ -263,6 +263,15 @@ test("apply on an empty repo with the greenfield stack: extractors at the future
   assert.ok(existsSync(join(repo, "zdd", "agent-index.md")));
 });
 
+test("dedupe never collides with a raw name already in the set (CR-047), and a second stack entry for the same extractor adds its path (CR-042)", () => {
+  const repo = fresh("dedupe");
+  bootstrap(repo, ["apply", `--answers=${answersFile("dd", { stack: ["FastAPI", { name: "FastAPI", path: "workers" }, { name: "Supabase", path: "db/a/migrations" }, { name: "Supabase", path: "db/b/migrations" }], apps: ["foo-2", "foo", "foo"] })}`]);
+  const config = JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8"));
+  assert.deepEqual(config.extractorOptions.fastapi.roots, ["api", "workers"]);
+  assert.deepEqual(config.extractorOptions.supabase.migrationNamespaces.map((m) => m.name), ["db", "db-2"]);
+  assert.deepEqual(readdirSync(join(repo, "zdd", "map", "apps")).sort(), [".gitkeep", "foo-2.md", "foo-3.md", "foo.md"]);
+});
+
 test("stack entries may carry their future path; app names are YAML-safe and slugs never collide", () => {
   const repo = fresh("greenfield-paths");
   bootstrap(repo, ["apply", `--answers=${answersFile("gp", { stack: [{ name: "FastAPI", path: "backend/app" }, { name: "Supabase", path: "db/migrations" }], apps: ["Web: Admin", "Mobile", "Mobile (Expo)", "日本語"] })}`]);
@@ -318,6 +327,21 @@ test("a same-named file the plugin does not own is kept and called out, never ov
   assert.ok(j2.notes.some((n) => n.includes("pre-push") && n.includes("not managed by zdd")));
 });
 
+test("repair never inherits or activates an adopter's own workflow/hook (CR-048)", (t) => {
+  const git = (repo, ...args) => spawnSync("git", args, { cwd: repo, encoding: "utf8" });
+  const repo = fresh("unowned-repair");
+  if (git(repo, "init", "-q").status !== 0) return t.skip("git unavailable");
+  mkdirSync(join(repo, ".githooks"));
+  writeFileSync(join(repo, ".githooks", "pre-push"), "#!/bin/sh\necho mine\n");
+  applyJson(repo, "ur1", { optIns: { ci: false, prePush: false } });
+  const j = applyJson(repo, "ur2", {});
+  assert.equal(j.optIns.prePush, false, "an unowned pre-push is not a ZDD opt-in");
+  assert.equal(git(repo, "config", "--get", "core.hooksPath").stdout.trim(), "", "hooksPath never pointed at someone else's hook");
+  const j2 = applyJson(repo, "ur3", { optIns: { prePush: true } });
+  assert.equal(git(repo, "config", "--get", "core.hooksPath").stdout.trim(), "", "explicitly selected but the file is not ours: still not activated");
+  assert.ok(j2.notes.some((n) => n.includes("not managed by zdd")));
+});
+
 test("pre-push: an existing hook manager's core.hooksPath is left alone; a free one is set; an already-owned one is set on repair too", (t) => {
   const git = (repo, ...args) => spawnSync("git", args, { cwd: repo, encoding: "utf8" });
   const repo = fresh("hookspath");
@@ -370,7 +394,8 @@ const legacySnippet = "## Documentation — Zero-Drift Docs (ZDD)\n\nThis repo u
 
 test("upgrade a v0.3.1 repo: adapter → extractors, every owned file rewritten and named, curated + generated artifacts untouched", () => {
   const repo = fresh("upgrade", join(ENGINE_FIXTURES, "fixture"));
-  engine(repo, ["derive"]); // populate metadata so "untouched" means something
+  engine(repo, ["derive"]); // populate metadata + generated artifacts so "untouched" means something
+  engine(repo, ["render"]);
   const configBefore = JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8"));
   assert.equal(configBefore.adapter, "nextjs-supabase");
   configBefore.viewer = { nonAreaTags: ["react-flow"], defaultFocus: "map/features/things" };
@@ -380,7 +405,9 @@ test("upgrade a v0.3.1 repo: adapter → extractors, every owned file rewritten 
   writeFileSync(join(repo, ".github", "workflows", "zdd.yml"), `# ${OWNER}\nenv:\n  ZDD_ENGINE: "@rich-rees/zdd-engine@0.3.1"\n`);
   mkdirSync(join(repo, ".githooks"), { recursive: true });
   writeFileSync(join(repo, ".githooks", "pre-push"), readFileSync(join(PLUGIN, "templates", "pre-push"), "utf8").replace(/@rich-rees\/zdd-engine@[0-9.]+/, "@rich-rees/zdd-engine@0.3.1"));
-  const untouched = ["glossary.md", "adr", "map", "metadata"].map((p) => hashTree(join(repo, "zdd", p)));
+  const CANARY = ["glossary.md", "adr", "map", "metadata", "graph.json", "agent-index.md", "adr-index.md", "human-index.html"];
+  const untouched = CANARY.map((p) => hashTree(join(repo, "zdd", p)));
+  assert.ok(!untouched.includes("absent"), "every canary exists before upgrade");
 
   const out = bootstrap(repo, ["upgrade"]);
   const json = JSON.parse(bootstrap(repo, ["upgrade", "--json"])); // second run: nothing to do
@@ -404,7 +431,7 @@ test("upgrade a v0.3.1 repo: adapter → extractors, every owned file rewritten 
   const claude = readFileSync(join(repo, "CLAUDE.md"), "utf8");
   assert.ok(claude.includes("<!-- zdd:begin -->") && !claude.includes("/zdd:orient") && claude.includes("## Other section\n\nkeep me"), claude);
 
-  assert.deepEqual(["glossary.md", "adr", "map", "metadata"].map((p) => hashTree(join(repo, "zdd", p))), untouched, "curated + generated untouched");
+  assert.deepEqual(CANARY.map((p) => hashTree(join(repo, "zdd", p))), untouched, "curated + generated untouched");
   assert.deepEqual(json.wrote, [], "second upgrade is a no-op");
 
   assert.match(engine(repo, ["derive"]), /Wrote \d+ records/);
@@ -428,10 +455,12 @@ test("upgrade leaves alone what it does not own: a customised legacy section, an
   assert.equal(readFileSync(join(repo, ".githooks", "pre-push"), "utf8"), hook, "unmarked hook untouched");
   assert.ok(j.kept.some((k) => k.startsWith(".githooks/pre-push") && k.includes("not managed")));
 
-  writeFileSync(join(repo, "AGENTS.md"), "<!-- zdd:begin -->\nx\n<!-- zdd:begin -->\ny\n<!-- zdd:end -->\n");
-  const j2 = JSON.parse(bootstrap(repo, ["upgrade", "--json"]));
-  assert.equal(readFileSync(join(repo, "AGENTS.md"), "utf8"), "<!-- zdd:begin -->\nx\n<!-- zdd:begin -->\ny\n<!-- zdd:end -->\n");
-  assert.ok(j2.notes.some((n) => n.includes("AGENTS.md") && n.includes("refused")));
+  for (const bad of ["<!-- zdd:begin -->\nx\n<!-- zdd:begin -->\ny\n<!-- zdd:end -->\n", "<!-- zdd:begin --> extra\nx\n<!-- zdd:end -->\n", "<!-- zdd:end -->\nx\n<!-- zdd:begin -->\n"]) {
+    writeFileSync(join(repo, "AGENTS.md"), bad);
+    const j2 = JSON.parse(bootstrap(repo, ["upgrade", "--json"]));
+    assert.equal(readFileSync(join(repo, "AGENTS.md"), "utf8"), bad, JSON.stringify(bad));
+    assert.ok(j2.notes.some((n) => n.includes("AGENTS.md") && n.includes("refused")), JSON.stringify(bad));
+  }
 });
 
 test("upgrade refuses a repo that never adopted, a config it cannot read, and a mixed adapter+extractors config", () => {

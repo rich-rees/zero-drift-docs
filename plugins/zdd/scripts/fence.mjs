@@ -23,7 +23,7 @@
 
 import { readFileSync } from "node:fs";
 import { resolve, isAbsolute } from "node:path";
-import { adopterRoot, readConfig, artifactPaths, samePath, isUnder } from "./lib/repo.mjs";
+import { adopterRoot, readConfig, artifactPaths, resolveInside, samePath, isUnder } from "./lib/repo.mjs";
 
 const EDIT_TOOLS = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit", "write_file", "edit_file"]);
 const SHELL_TOOLS = new Set(["Bash", "PowerShell", "Shell", "shell", "shell_command", "exec_command", "local_shell"]);
@@ -80,13 +80,15 @@ function main() {
   if (state !== "valid" || config.hooks?.fence !== true) return 0;
 
   const paths = artifactPaths(config);
+  // Each generated path proven inside the checkout with no symlinked segment;
+  // a config that fails that is not a config the fence acts on (CR-004).
   const generated = [
-    { abs: resolve(root, paths.metadataDir), kind: "dir", rel: paths.metadataDir },
-    { abs: resolve(root, paths.graph), kind: "file", rel: paths.graph },
-    { abs: resolve(root, paths.agentIndex), kind: "file", rel: paths.agentIndex },
-    { abs: resolve(root, paths.adrIndex), kind: "file", rel: paths.adrIndex },
-    { abs: resolve(root, paths.humanIndex), kind: "file", rel: paths.humanIndex },
-  ];
+    { rel: paths.metadataDir, kind: "dir" },
+    { rel: paths.graph, kind: "file" },
+    { rel: paths.agentIndex, kind: "file" },
+    { rel: paths.adrIndex, kind: "file" },
+    { rel: paths.humanIndex, kind: "file" },
+  ].map((g) => ({ ...g, abs: resolveInside(root, g.rel, g.rel) }));
   // Shell-relative paths resolve against the command's cwd when it is inside
   // the checkout (CR-023); anything else resolves against the root.
   const cwd = cwdIn && (samePath(cwdIn, root) || isUnder(cwdIn, root)) ? resolve(cwdIn) : root;

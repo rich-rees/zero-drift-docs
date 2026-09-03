@@ -7,7 +7,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync, rmSync, mkdtempSync, mkdirSync, existsSync, symlinkSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, writeFileSync, rmSync, mkdtempSync, mkdirSync, existsSync, symlinkSync, readdirSync, statSync, chmodSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -61,7 +61,7 @@ test("fence reads the paths from config.json (moved index) and compares canonica
   setConfig({ extractors: ["generic"], hooks: { fence: true }, paths: { agentIndex: "./docs/AGENT.md" } });
   blocked(fence("Edit", { file_path: "docs/AGENT.md", cwd: repo }), "moved");
   blocked(fence("Edit", { file_path: "docs/../docs/AGENT.md" }), "dotted spelling");
-  assert.equal(fence("Write", { file_path: join(repo, "zdd", "agent-index.md") }).status, 0, "the default path is no longer generated here");
+  silent(fence("Write", { file_path: join(repo, "zdd", "agent-index.md") }), "the default path is no longer generated here");
   if (process.platform === "win32") blocked(fence("Write", { file_path: join(repo, "DOCS", "agent.MD") }), "windows casing");
   setConfig(VALID);
 });
@@ -77,7 +77,6 @@ test("fence handles Codex apply_patch targets", () => {
   blocked(fence("apply_patch", { patch }), "patch field");
   blocked(fence("shell_command", { command: patch }), "patch in command");
   blocked(fence("apply_patch", { patch: "*** Begin Patch\n*** Add File: zdd/metadata/table/x.json\n+{}\n*** End Patch\n" }), "add file under metadata");
-  assert.equal(fence("apply_patch", { patch: "*** Begin Patch\n*** Update File: zdd/glossary.md\n@@\n-a\n+b\n*** End Patch\n" }).status, 0, "curated");
 });
 
 // --- fence: shell ------------------------------------------------------------
@@ -109,16 +108,17 @@ test("fence blocks write-shaped shell over generated paths in the common spellin
 
 test("fence allows reads, copies FROM generated files, and curated writes", () => {
   for (const command of ["cat zdd/agent-index.md", "cp zdd/graph.json /tmp/debug.json", "cp zdd/graph.json ../elsewhere.json", "grep foo zdd/adr-index.md", "ls zdd/metadata", "echo x > zdd/glossary.md", "git status"]) {
-    assert.equal(fence("Bash", { command }).status, 0, command);
+    silent(fence("Bash", { command }), command);
   }
-  assert.equal(fence("Write", { file_path: join(repo, "zdd", "glossary.md") }).status, 0);
+  silent(fence("Write", { file_path: join(repo, "zdd", "glossary.md") }), "curated write");
+  silent(fence("apply_patch", { patch: "*** Begin Patch\n*** Update File: zdd/glossary.md\n@@\n-a\n+b\n*** End Patch\n" }), "curated patch");
 });
 
 test("fence resolves shell-relative paths against the command's cwd, inside the checkout", () => {
   const sub = join(repo, "packages", "app");
   mkdirSync(sub, { recursive: true });
   blocked(fence("Bash", { command: "rm ../../zdd/graph.json" }, { cwd: sub }), "from a subdir");
-  assert.equal(fence("Bash", { command: "rm zdd/graph.json" }, { cwd: sub }).status, 0, "relative to the subdir, not the root");
+  silent(fence("Bash", { command: "rm zdd/graph.json" }, { cwd: sub }), "relative to the subdir, not the root");
   // A cwd outside the checkout falls back to the root.
   blocked(fence("Bash", { command: "rm zdd/graph.json" }, { cwd: scratch }), "cwd outside");
 });
@@ -216,7 +216,10 @@ test("pre-push hook runs derive --check, render --check, lint in order and stops
   const bin = join(scratch, "fakebin");
   mkdirSync(bin, { recursive: true });
   const log = join(scratch, "npx.log").replace(/\\/g, "/");
-  const fake = (failOn) => writeFileSync(join(bin, "npx"), `#!/bin/sh\necho "$*" >> "${log}"\ncase "$*" in *"${failOn}"*) exit 1;; esac\nexit 0\n`);
+  const fake = (failOn) => {
+    writeFileSync(join(bin, "npx"), `#!/bin/sh\necho "$*" >> "${log}"\ncase "$*" in *"${failOn}"*) exit 1;; esac\nexit 0\n`);
+    chmodSync(join(bin, "npx"), 0o755);
+  };
   const run = () => spawnSync(sh, [join(PLUGIN, "templates", "pre-push")], { encoding: "utf8", env: { PATH: bin }, cwd: repo });
   fake("never");
   rmSync(log, { force: true });
