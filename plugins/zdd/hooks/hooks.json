@@ -1,29 +1,25 @@
 {
-  "description": "ZDD hooks. SessionStart injects the adopter repo's agent index (the auto-load); PreToolUse fences the generated artifacts against hand edits. Both are opt-ins recorded by `bootstrap` in the adopter's zdd/config.json (`hooks.autoLoad`, `hooks.fence`) and both are silent no-ops in a repo that has not opted in. Scripts are reached via ${CLAUDE_PLUGIN_ROOT} only — Codex sets the same variable — so this one file serves both hosts.",
+  "description": "ZDD hooks. SessionStart injects the adopter repo's agent index (the auto-load); PreToolUse fences the generated artifacts against hand edits. Both are opt-ins recorded by `bootstrap` in the adopter's zdd/config.json (`hooks.autoLoad`, `hooks.fence`) and both are silent no-ops in a repo that has not opted in. Scripts are reached via ${CLAUDE_PLUGIN_ROOT} only — Codex sets the same variable — as one command string, the form both hosts' hook schemas share, so this one file serves both.",
   "hooks": {
     "SessionStart": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/inject-agent-index.mjs"],
-            "timeout": 30,
-            "statusMessage": "Loading ZDD agent index"
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/inject-agent-index.mjs\"",
+            "timeout": 30
           }
         ]
       }
     ],
     "PreToolUse": [
       {
-        "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash|PowerShell",
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash|PowerShell|Shell|shell_command|apply_patch",
         "hooks": [
           {
             "type": "command",
-            "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/fence.mjs"],
-            "timeout": 10,
-            "statusMessage": "ZDD generated-artifact fence"
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/fence.mjs\"",
+            "timeout": 10
           }
         ]
       }
