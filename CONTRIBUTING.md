@@ -89,7 +89,9 @@ The graph artifact is the whole input. `nodes` are the metadata records and the
 semantic-map concepts, each with `id` (bundle-relative path minus extension),
 `layer` (`metadata` | `map`), `type` (the display type — `API Endpoint`, `Table`,
 `Feature`, …), `title`, `description`, `resource` (the repo-relative source path
-that becomes the GitHub link), `tags` (the product-area bucket), a markdown
+that becomes the GitHub link), `tags` (the product-area bucket — shaped by the
+top-level `nonAreaTags` config, never by a viewer option, so the artifact is the
+same bytes whichever viewer renders it), a markdown
 `body`, `recordId` on metadata nodes and `auth` on routes that carry it. `edges`
 are `{ source, target }` pairs — every resolved ref and every map link, deduped,
 no self-edges. Because the boring plumbing — node identity, edges, source links —
@@ -110,8 +112,13 @@ viewer contract (the equivalent of "determinism" for extractors):
   disqualified. **Source-derived text is untrusted**: descriptions, bodies and the
   store text come from code comments, docstrings and markdown anyone with commit
   access wrote, so it is escaped or sanitised before it reaches the DOM — the
-  reference viewer routes every markdown parse through `safe-marked.js`, and the
-  `minimal` viewer escapes everything it prints.
+  reference viewer routes every markdown parse through `safe-marked.js` and
+  builds every other source-derived string as a DOM text node, and the
+  `minimal` viewer escapes everything it prints. "No network calls" includes
+  images: an `<img>` in a docstring is a request the moment the panel opens, so
+  markdown images render as their alt text. Source links are built only from an
+  http(s) `repoBase` and a bare relative `resource` — the renderer refuses
+  anything else up front, and a viewer still treats both as untrusted.
 - **Deterministic** — identical inputs produce byte-identical output. No dates, no
   random ids, no environment-dependent values; the blocking `render --check` in
   CI compares bytes.

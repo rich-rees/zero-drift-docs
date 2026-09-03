@@ -95,7 +95,15 @@
     "repoBase": {
       "type": "string",
       "default": "",
-      "description": "GitHub tree URL prefix for source links in the human index, e.g. https://github.com/org/repo/tree/main/. Empty = relative links."
+      "pattern": "^(https?://.+)?$",
+      "description": "GitHub tree URL prefix for source links in the human index, e.g. https://github.com/org/repo/tree/main/. Empty = relative links. Must be http(s) — the renderer refuses anything else, since it becomes every source link's scheme."
+    },
+    "nonAreaTags": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": [],
+      "description": "Tags that are properties rather than product areas (tech tags like react-flow, rls-disabled). A metadata record inherits its area from the first tag of its claiming feature that is NOT listed here — this shapes graph.json, which is why it is top-level and not a viewer option. The pre-0.4 home, viewer.nonAreaTags, is still read with a deprecation note.",
+      "examples": [["react-flow", "rls-disabled"]]
     },
     "baseBranch": {
       "type": "string",
@@ -153,7 +161,7 @@
             "name": { "type": "string", "default": "cytoscape" },
             "defaultFocus": { "type": "string", "description": "cytoscape: node id the explorer view opens on." },
             "authHubs": { "type": "array", "items": { "type": "string" }, "description": "cytoscape: node ids whose edges to ordinary session-auth endpoints are stated, not drawn." },
-            "nonAreaTags": { "type": "array", "items": { "type": "string" }, "description": "Tags that are properties rather than product areas (also read by the renderer when a record inherits its area from a feature)." }
+            "nonAreaTags": { "type": "array", "items": { "type": "string" }, "deprecated": true, "description": "DEPRECATED (pre-0.4 home): move to the top-level nonAreaTags key — it shapes graph.json, not just this viewer. Still honoured with a note." }
           }
         }
       ],
