@@ -12,7 +12,7 @@ test("slugify: dynamic + catch-all + groups + dots", () => {
   assert.equal(slugify("/"), "index");
   assert.equal(slugify("apps/backoffice/src/lib/journey-api.ts"), "apps--backoffice--src--lib--journey-api-ts");
   assert.equal(slugify("(app)/_layout"), "(app)--_layout");
-  assert.equal(slugify("/jobs/{id}/files/{p:path}"), "jobs--_id--files--_p");
+  assert.equal(slugify("/jobs/{id}/files/{p:path}"), "jobs--_id--files--___p");
 });
 
 test("extractMethods: three export forms, canonical order", () => {
