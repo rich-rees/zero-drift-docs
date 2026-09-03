@@ -40,7 +40,46 @@ export function resolveViewer(config, defaultName) {
   if (typeof v !== "object" || Array.isArray(v)) return { error: `'viewer' must be a name or an object with a 'name'` };
   const { name = defaultName, ...options } = v;
   if (typeof name !== "string") return { error: `'viewer.name' must be a string` };
+  // Shape-check the built-in options up front — a `{}` where a list belongs
+  // otherwise throws mid-render, or worse, inside the rendered page (CR-012).
+  for (const key of ["authHubs", "nonAreaTags"]) {
+    if (options[key] !== undefined && !(Array.isArray(options[key]) && options[key].every((t) => typeof t === "string"))) {
+      return { error: `'viewer.${key}' must be an array of strings` };
+    }
+  }
+  if (options.defaultFocus !== undefined && typeof options.defaultFocus !== "string") return { error: `'viewer.defaultFocus' must be a string` };
   return { name, options };
+}
+
+// Tags that are properties rather than product areas (tech tags like
+// `react-flow`). They shape the GRAPH — which area a record inherits from its
+// claiming feature — so they are a top-level key, not a viewer option: the
+// artifact must not change when the viewer does (CR-003). The pre-0.4 home,
+// `viewer.nonAreaTags`, is still read as a fallback with a note.
+export function resolveNonAreaTags(config, viewerOptions) {
+  if (config.nonAreaTags !== undefined) {
+    if (!Array.isArray(config.nonAreaTags) || !config.nonAreaTags.every((t) => typeof t === "string")) {
+      return { error: `'nonAreaTags' must be an array of strings` };
+    }
+    return { tags: config.nonAreaTags, diagnostics: [] };
+  }
+  if (viewerOptions.nonAreaTags !== undefined) {
+    return {
+      tags: viewerOptions.nonAreaTags,
+      diagnostics: [`[config] 'viewer.nonAreaTags' shapes the graph, not just the viewer — move it to a top-level "nonAreaTags" key`],
+    };
+  }
+  return { tags: [], diagnostics: [] };
+}
+
+// Source links are `repoBase + resource`; a base that is not http(s) would
+// make every link a script gadget (CR-002). Empty means relative links.
+export function validateRepoBase(repoBase) {
+  if (repoBase === undefined || repoBase === "") return null;
+  if (typeof repoBase !== "string" || !/^https?:\/\/\S+$/i.test(repoBase)) {
+    return `'repoBase' must be empty or an http(s) URL, got ${JSON.stringify(repoBase)}`;
+  }
+  return null;
 }
 
 function argValue(args, name) {
