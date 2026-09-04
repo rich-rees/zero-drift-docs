@@ -37,7 +37,12 @@ const bootstrapFails = (root, args) => {
   assert.equal(r.status, 1, `expected failure: ${r.stdout}`);
   return r.stderr;
 };
-const engine = (root, args) => execFileSync(process.execPath, [ENGINE_BIN, ...args, `--root=${root}`], { encoding: "utf8" });
+// stdout AND stderr: the engine's deprecation notes go to stderr (CR-112).
+const engine = (root, args) => {
+  const r = spawnSync(process.execPath, [ENGINE_BIN, ...args, `--root=${root}`], { encoding: "utf8" });
+  assert.equal(r.status, 0, `engine ${args.join(" ")} failed: ${r.stderr}${r.stdout}`);
+  return r.stdout + r.stderr;
+};
 
 function answersFile(name, answers) {
   const p = join(scratch, `${name}.json`);
@@ -496,7 +501,10 @@ test("upgrade replaces the pre-0.4 section only when it IS the v0.3.1 snippet mo
 
 test("upgrade a v0.3.1 repo: adapter → extractors, every owned file rewritten and named, curated + generated artifacts untouched", () => {
   const repo = fresh("upgrade", join(ENGINE_FIXTURES, "fixture"));
-  engine(repo, ["derive"]); // populate metadata + generated artifacts so "untouched" means something
+  // Populate metadata + generated artifacts so "untouched" means something. The
+  // legacy adapter config prints a deprecation note (on stderr) — the positive
+  // control for the "no note after migration" assertion below (CR-112).
+  assert.match(engine(repo, ["derive"]), /deprecated/i, "the pre-upgrade adapter config is announced as deprecated");
   engine(repo, ["render"]);
   const configBefore = JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8"));
   assert.equal(configBefore.adapter, "nextjs-supabase");
