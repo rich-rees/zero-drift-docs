@@ -4,7 +4,11 @@
   "title": "ZDD repo config (zdd/config.json)",
   "description": "Per-repo ZDD configuration: which extractors to run, where the artifacts live, and per-extractor source paths. Artifact CONTENTS never live here — this is the small, portable config tier only.",
   "type": "object",
-  "anyOf": [{ "required": ["extractors"] }, { "required": ["adapter"] }],
+  "$comment": "Exactly one config tier: `extractors` (+ extractorOptions) OR the deprecated `adapter` (+ adapterOptions). The engine refuses a config carrying both, and so does this schema.",
+  "oneOf": [
+    { "required": ["extractors"], "not": { "anyOf": [{ "required": ["adapter"] }, { "required": ["adapterOptions"] }] } },
+    { "required": ["adapter"], "not": { "anyOf": [{ "required": ["extractors"] }, { "required": ["extractorOptions"] }] } }
+  ],
   "additionalProperties": true,
   "properties": {
     "extractors": {
