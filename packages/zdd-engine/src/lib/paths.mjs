@@ -7,6 +7,8 @@
 // package.json (DIO-309 review CR-003..CR-006). Symlinks inside the repo are
 // not policed here — an adopter who links their own tree elsewhere owns that.
 
+import { relative, resolve, isAbsolute, sep } from "node:path";
+
 export function repoRelative(value, label) {
   const bad = () => {
     throw new Error(`${label} '${value}' must be repo-relative (no absolute path, drive letter, URL scheme, backslash or '..')`);
@@ -37,11 +39,17 @@ export function overlaps(a, b) {
 
 // Resolve <repoRoot>/<rel> and prove the result stays inside repoRoot — the
 // belt behind repoRelative's braces, for paths assembled from several parts.
+// Compared segment-wise through path.relative (so `repo2` is not inside
+// `repo`, and `..foo` is not an escape), and case-folded ONLY on the
+// platforms whose filesystems fold case: on Linux `/srv/repo` and `/srv/Repo`
+// are different directories, and folding there accepted a case-variant
+// sibling checkout as "inside" (CR-067).
+const FOLDS_CASE = process.platform === "win32" || process.platform === "darwin";
+const fold = (s) => (FOLDS_CASE ? s.toLowerCase() : s);
+
 export function insideRepo(repoRoot, abs, label) {
-  const root = repoRoot.replace(/[\\/]+$/, "");
-  const norm = abs.replace(/\//g, "\\");
-  const rootNorm = root.replace(/\//g, "\\");
-  if (norm !== rootNorm && !norm.toLowerCase().startsWith(rootNorm.toLowerCase() + "\\")) {
+  const r = relative(fold(resolve(repoRoot)), fold(resolve(abs)));
+  if (r === ".." || r.startsWith(`..${sep}`) || isAbsolute(r)) {
     throw new Error(`${label} resolves outside the repo: ${abs}`);
   }
   return abs;
