@@ -35,8 +35,11 @@ const PATCH_TOOLS = new Set(["apply_patch"]);
 // and script-language one-liners (which can write anything).
 const WRITE_SHAPED =
   /(>|(^|[\s;&|(])(tee|sed\s+(-[a-z]*i|--in-place)|cp|mv|rm|del|erase|rmdir|truncate|dd|install|ln|touch|git\s+(checkout|restore|clean|rm|mv)|set-content|out-file|add-content|clear-content|remove-item|move-item|copy-item|new-item|rename-item|python3?|node|perl|ruby|php)(\s|$))/i;
-// Commands whose LAST operand is the destination; other operands are sources.
-const LAST_OPERAND_IS_TARGET = /^(cp|mv|copy-item|move-item|install|ln)$/i;
+// Commands whose LAST operand is the destination and the others are read-only
+// sources. A move is NOT one of them: `mv zdd/graph.json elsewhere` removes
+// the artifact, so every operand of mv/move-item/rename-item/git mv is a
+// candidate (CR-072).
+const LAST_OPERAND_IS_TARGET = /^(cp|copy-item|install|ln)$/i;
 
 function readStdin() {
   try {

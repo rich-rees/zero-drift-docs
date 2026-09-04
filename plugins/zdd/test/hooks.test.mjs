@@ -163,6 +163,14 @@ test("fence allows reads, copies FROM generated files, and curated writes", () =
   silent(fence("apply_patch", { patch: "*** Begin Patch\n*** Update File: zdd/glossary.md\n@@\n-a\n+b\n*** End Patch\n" }), "curated patch");
 });
 
+test("fence: moving a generated file away is a write to it — mv/move-item/rename-item/git mv inspect every operand (CR-072)", () => {
+  for (const command of ["mv zdd/graph.json /tmp/g.json", "mv -f zdd/graph.json elsewhere.json", "git mv zdd/adr-index.md docs/old.md", "Move-Item zdd/graph.json C:/tmp/g.json", "Rename-Item zdd/human-index.html old.html", "mv zdd/metadata/table/x.json /tmp/x.json"]) {
+    blocked(fence("Bash", { command }), command);
+  }
+  silent(fence("Bash", { command: "mv notes.md docs/notes.md" }), "mv of an unrelated file");
+  silent(fence("Bash", { command: "cp zdd/graph.json /tmp/g.json" }), "cp FROM a generated file stays a read");
+});
+
 test("fence resolves shell-relative paths against the command's cwd, inside the checkout", () => {
   const sub = join(repo, "packages", "app");
   mkdirSync(sub, { recursive: true });
