@@ -420,6 +420,34 @@ test("CR-100: the query-selected view is looked up as an own property — `?view
   assert.ok(!/if\s*\(\s*!VIEWS\[v\]\s*\)/.test(viz), "no bare VIEWS[v] existence test");
 });
 
+test("CR-106: protocol-relative and backslash-shaped hrefs are not scheme-less — they render as plain text like any other off-site scheme", () => {
+  const dir = join(PKG, "src", "viewers", "cytoscape");
+  const ctx = vm.createContext({});
+  vm.runInContext(readFileSync(join(dir, "vendor", "marked.min.js"), "utf8"), ctx);
+  vm.runInContext(readFileSync(join(dir, "safe-marked.js"), "utf8"), ctx);
+  const parse = (md) => vm.runInContext(`safeMarked.parse(${JSON.stringify(md)})`, ctx);
+  // `//host/p` resolves against the page's own scheme to a foreign host;
+  // browsers read `\\host`, `/\host` and `\/host` the same way. Markdown
+  // unescapes one level (`\\` -> `\`), so the source doubles each backslash
+  // that must reach the href.
+  const cases = [
+    ["//tracker.example/p", "//tracker.example/p"],
+    ["\\\\\\\\tracker.example/p", "\\\\tracker.example/p"],
+    ["/\\\\tracker.example/p", "/\\tracker.example/p"],
+    ["\\\\/tracker.example/p", "\\/tracker.example/p"],
+    ["  //tracker.example/p", "//tracker.example/p"],
+  ];
+  for (const [md, href] of cases) {
+    const html = parse(`[go](${md})`);
+    assert.ok(!/<a\b/i.test(html), `href ${JSON.stringify(href)} is not a link: ${html}`);
+    assert.ok(html.includes("go"), "the text stands in");
+  }
+  // In-page, relative and explicit http(s)/mailto targets are still links.
+  for (const href of ["#terms", "./diagram.md", "0002-things.md", "/docs/x.md", "https://example.com/a", "mailto:x@example.com"]) {
+    assert.match(parse(`[ok](${href})`), /<a href="/, `${href} stays a link`);
+  }
+});
+
 test("CR-007: source-derived markdown cannot execute script in the Cytoscape viewer", () => {
   // Same load order as viz.html: the vendored marked, then the sanitiser, in
   // one browser-like global scope.
