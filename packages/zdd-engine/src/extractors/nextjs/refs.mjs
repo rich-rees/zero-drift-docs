@@ -46,6 +46,7 @@ export function walkSourceFiles(repoRoot, { roots, extensions, excludeDirs, excl
         const rel = posixify(p.slice(repoRoot.length + 1));
         return !excludeDirs.some((d) => rel === d || rel.endsWith(`/${d}`) || name === d);
       },
+      (p, reason) => diagnostics.push(`${posixify(p.slice(repoRoot.length + 1))}: ${reason} — skipped`),
     );
   }
   return out;

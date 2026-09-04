@@ -40,9 +40,20 @@ export function derive({ repoRoot, options }) {
       diagnostics.push(`${ns}: ${dir} not found — nothing to inventory`);
       continue;
     }
-    const files = sortMigrations(
-      readdirSync(abs).filter((f) => f.endsWith(".sql") && statSync(join(abs, f)).isFile()),
-    ).map((f) => ({ name: `${dir}/${f}`, text: readFileSync(join(abs, f), "utf8") }));
+    // A .sql symlink pointing nowhere is skipped with a note, never thrown
+    // (CR-062); a valid one is read like any migration.
+    const isFile = (f) => {
+      try {
+        return statSync(join(abs, f)).isFile();
+      } catch {
+        diagnostics.push(`${ns}: ${dir}/${f} is a dangling symlink — skipped`);
+        return false;
+      }
+    };
+    const files = sortMigrations(readdirSync(abs).filter((f) => f.endsWith(".sql") && isFile(f))).map((f) => ({
+      name: `${dir}/${f}`,
+      text: readFileSync(join(abs, f), "utf8"),
+    }));
     const replayed = replayMigrations(files);
     for (const s of replayed.skipped) {
       diagnostics.push(`${ns}: unrecognized schema-like statement in ${s.file}: ${s.statement}`);
