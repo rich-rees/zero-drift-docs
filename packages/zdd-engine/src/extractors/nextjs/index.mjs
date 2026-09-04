@@ -189,6 +189,13 @@ export function derive({ repoRoot, options }) {
   const srcAliasRoot = repoRelative(srcAliasOpt ?? appDir.replace(/\/app$/, ""), "nextjs.srcAliasRoot");
   if (typeof refsOpt !== "object" || Array.isArray(refsOpt)) throw new Error(`nextjs: 'refs' must be an object`);
   if (!Array.isArray(authPatterns)) throw new Error(`nextjs: 'authPatterns' must be an array`);
+  // An entry without `auth` derived `auth: undefined`, which the serializer
+  // wrote as invalid JSON (CR-093). Shape-check every entry up front.
+  authPatterns.forEach((p, i) => {
+    if (!p || typeof p !== "object" || Array.isArray(p) || typeof p.includes !== "string" || typeof p.auth !== "string") {
+      throw new Error(`nextjs: 'authPatterns[${i}]' must be { includes: string, auth: string }, got ${JSON.stringify(p)}`);
+    }
+  });
   const refsOptions = { ...DEFAULT_REFS, roots: [srcAliasRoot], ...refsOpt };
   for (const k of ["roots", "extensions", "excludeDirs", "excludeSuffixes"]) {
     if (!Array.isArray(refsOptions[k])) throw new Error(`nextjs: 'refs.${k}' must be an array`);
