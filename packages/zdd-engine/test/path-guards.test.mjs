@@ -261,6 +261,35 @@ test("CR-060: a symlink inside metadataDir is neither read, overwritten nor prun
   rmSync(repo, { recursive: true, force: true });
 });
 
+test("CR-060: a symlink sitting AT an expected record path is refused before any write — the target is never followed", (t) => {
+  const repo = mkRepo(FIXTURE);
+  const secret = join(repo, "secret.json");
+  writeFileSync(secret, '{"token":"hunter2"}\n');
+  mkdirSync(join(repo, "zdd", "metadata", "bucket"), { recursive: true });
+  // `bucket/db--uploads.json` is a record the fixture derives every run.
+  if (!symlinkOrSkip(t, secret, join(repo, "zdd", "metadata", "bucket", "db--uploads.json"), "file")) {
+    rmSync(repo, { recursive: true, force: true });
+    return;
+  }
+  const err = runFail(repo, ["derive"]);
+  assert.match(err, /zdd\/metadata\/bucket\/db--uploads\.json is a symlink/, err);
+  assert.equal(readFileSync(secret, "utf8"), '{"token":"hunter2"}\n', "target untouched");
+  assert.ok(lstatSync(join(repo, "zdd", "metadata", "bucket", "db--uploads.json")).isSymbolicLink(), "link left in place");
+  assert.ok(!existsSync(join(repo, "zdd", "metadata", "bucket", "db--cdn-assets.json")), "nothing else was written either (fail closed)");
+  // A whole kind directory that is a link is the same hole one level up.
+  rmSync(join(repo, "zdd", "metadata"), { recursive: true, force: true });
+  mkdirSync(join(repo, "zdd", "metadata"), { recursive: true });
+  mkdirSync(join(repo, "outside-kind"));
+  if (!symlinkOrSkip(t, join(repo, "outside-kind"), join(repo, "zdd", "metadata", "bucket"), "junction")) {
+    rmSync(repo, { recursive: true, force: true });
+    return;
+  }
+  const err2 = runFail(repo, ["derive"]);
+  assert.match(err2, /zdd\/metadata\/bucket is a symlink/, err2);
+  assert.equal(readdirSync(join(repo, "outside-kind")).length, 0, "nothing written through the linked kind dir");
+  rmSync(repo, { recursive: true, force: true });
+});
+
 // ---------------------------------------------------------------------------
 // CR-108: the input side of symlinks. A repo REACHED through a link (a
 // symlinked checkout, /tmp -> /private/tmp on macOS) is legitimate: real
