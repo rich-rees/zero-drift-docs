@@ -97,6 +97,36 @@ function patchTargets(text) {
   return out;
 }
 
+function patchTarget(text, cwd, hit) {
+  for (const p of patchTargets(text)) {
+    const t = hit(p, cwd);
+    if (t) return t;
+  }
+  return null;
+}
+
+// The shell half. Split on command separators so each simple command's
+// operands are judged on their own; for copy-like verbs only the last operand
+// is a destination (CR-019).
+function shellTarget(command, cwd, hit) {
+  if (!command || !WRITE_SHAPED.test(command)) return null;
+  for (const simple of command.split(/\|\||&&|;|\||\n/)) {
+    const toks = tokens(simple);
+    if (!toks.length) continue;
+    const verb = toks[0].replace(/^.*[\\/]/, "");
+    const operands = toks.slice(1).filter((t) => !t.startsWith("-"));
+    // Path-shaped runs anywhere in the command (`node -e "...('zdd/graph.json')"`)
+    // are candidates too — a script can write anything it names.
+    const literals = [...simple.matchAll(/[\w.:-]*[\\/][\w.\\/:-]*/g)].map((m) => m[0]);
+    const candidates = LAST_OPERAND_IS_TARGET.test(verb) && operands.length > 1 ? operands.slice(-1) : /^(cat|less|head|tail|grep|diff|type|get-content)$/i.test(verb) && !/>/.test(simple) ? [] : operands.concat(toks[0], literals);
+    for (const c of candidates) {
+      const t = hit(c, cwd);
+      if (t) return t;
+    }
+  }
+  return null;
+}
+
 function main() {
   let input;
   try {
@@ -143,29 +173,23 @@ function main() {
   };
 
   const tool = input.tool_name;
-  const args = input.tool_input ?? {};
+  const args = input.tool_input && typeof input.tool_input === "object" ? input.tool_input : {};
+  const str = (v) => (typeof v === "string" ? v : "");
+  // Dispatch on the TOOL NAME, never on which fields happen to be present: a
+  // shell payload carrying a stray `patch` string must still have its
+  // `command` inspected (CR-073). Extra fields are inspected additionally.
   let target = null;
-  if (EDIT_TOOLS.has(tool) && typeof args.file_path === "string") {
-    target = hit(args.file_path, cwd);
-  } else if (PATCH_TOOLS.has(tool) || typeof args.patch === "string" || (typeof args.command === "string" && /^\*\*\* Begin Patch/m.test(args.command))) {
-    const text = typeof args.patch === "string" ? args.patch : typeof args.command === "string" ? args.command : typeof args.input === "string" ? args.input : "";
-    for (const p of patchTargets(text)) if ((target = hit(p, cwd))) break;
-  } else if (SHELL_TOOLS.has(tool) && typeof args.command === "string" && WRITE_SHAPED.test(args.command)) {
-    // Split on command separators so each simple command's operands are
-    // judged on their own; for copy-like verbs only the last operand is a
-    // destination (CR-019).
-    for (const simple of args.command.split(/\|\||&&|;|\||\n/)) {
-      const toks = tokens(simple);
-      if (!toks.length) continue;
-      const verb = toks[0].replace(/^.*[\\/]/, "");
-      const operands = toks.slice(1).filter((t) => !t.startsWith("-"));
-      // Path-shaped runs anywhere in the command (`node -e "...('zdd/graph.json')"`)
-      // are candidates too — a script can write anything it names.
-      const literals = [...simple.matchAll(/[\w.:-]*[\\/][\w.\\/:-]*/g)].map((m) => m[0]);
-      const candidates = LAST_OPERAND_IS_TARGET.test(verb) && operands.length > 1 ? operands.slice(-1) : /^(cat|less|head|tail|grep|diff|type|get-content)$/i.test(verb) && !/>/.test(simple) ? [] : operands.concat(toks[0], literals);
-      for (const c of candidates) if ((target = hit(c, cwd))) break;
-      if (target) break;
-    }
+  if (EDIT_TOOLS.has(tool)) {
+    if (str(args.file_path)) target = hit(args.file_path, cwd);
+  } else if (PATCH_TOOLS.has(tool)) {
+    target = patchTarget(str(args.patch) || str(args.input) || str(args.command), cwd, hit);
+  } else if (SHELL_TOOLS.has(tool)) {
+    const command = str(args.command);
+    target = shellTarget(command, cwd, hit);
+    if (!target && /^\*\*\* Begin Patch/m.test(command)) target = patchTarget(command, cwd, hit);
+    if (!target && str(args.patch)) target = patchTarget(args.patch, cwd, hit);
+  } else if (str(args.patch)) {
+    target = patchTarget(args.patch, cwd, hit);
   }
   if (!target) return 0;
 

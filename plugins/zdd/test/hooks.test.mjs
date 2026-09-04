@@ -97,6 +97,13 @@ test("fence handles Codex apply_patch targets", () => {
   blocked(fence("apply_patch", { patch: "*** Begin Patch\n*** Add File: zdd/metadata/table/x.json\n+{}\n*** End Patch\n" }), "add file under metadata");
 });
 
+test("fence dispatches on tool_name first: a shell command is always inspected, a patch field additionally (CR-073)", () => {
+  blocked(fence("Bash", { command: "rm zdd/graph.json", patch: "benign" }), "extra patch field does not hide the command");
+  blocked(fence("shell_command", { command: "echo hi", patch: "*** Begin Patch\n*** Update File: zdd/graph.json\n@@\n-a\n+b\n*** End Patch\n" }), "patch field is inspected additionally");
+  silent(fence("Bash", { command: "echo hi", patch: "benign" }), "neither names an artifact");
+  blocked(fence("Write", { file_path: join(repo, "zdd", "graph.json"), command: "echo hi" }), "an edit tool reads file_path even with a stray command");
+});
+
 test("fence: a symlinked artifact is dropped on its own, the rest stay fenced; an alias link to the artifact still matches", (t) => {
   const linked = join(scratch, "linked");
   mkdirSync(join(linked, "zdd"), { recursive: true });
