@@ -34,8 +34,13 @@ const safeMarked = (() => {
   // A target is safe when it has no scheme (relative / in-page) or a known
   // one. Whitespace and control characters are stripped first — browsers
   // ignore them inside a scheme, so "java\tscript:" would otherwise pass.
+  // A protocol-relative target (`//host/p`, and the `\\host`, `/\host`,
+  // `\/host` forms browsers read the same way) has no scheme of its own yet
+  // leaves the site: it is an off-site link in disguise, not a relative one
+  // (CR-106) — plain text like any other unknown scheme.
   const safeHref = (href) => {
     const h = String(href || "").replace(/[\s\x00-\x1f]/g, "");
+    if (/^[\/\\]{2}/.test(h)) return false;
     const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(h);
     if (!scheme) return true;
     return ["http", "https", "mailto"].includes(scheme[1].toLowerCase());
