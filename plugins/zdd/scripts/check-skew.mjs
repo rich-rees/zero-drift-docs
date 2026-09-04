@@ -51,6 +51,11 @@ export function findPins(root) {
   return pins.map((p) => ({ where: p.where, version: typeof p.raw === "string" && SEMVER.test(p.raw) ? p.raw : null, ...(p.unpinned ? { unpinned: true } : {}) }));
 }
 
+// Direction only — major.minor.patch, no prerelease precedence (CR-104). Skew
+// is decided by exact string inequality before this is consulted, so
+// `1.0.0-rc.1` against plugin `1.0.0` is skew either way; this merely chooses
+// the "behind" or "ahead" wording (here: equal numbers ⇒ 0 ⇒ "behind", whose
+// fix — `bootstrap --upgrade` — is the right one for a prerelease pin too).
 export function compareSemver(a, b) {
   const pa = SEMVER.exec(a);
   const pb = SEMVER.exec(b);

@@ -129,6 +129,16 @@ test("several kinds of skew at once: every applicable line is printed, behind fi
   rmSync(join(repo, ".githooks"), { recursive: true });
 });
 
+test("a prerelease of the plugin's own number is skew: compareSemver only labels direction, exact-string decides (CR-104)", () => {
+  config({ extractors: ["generic"], engine: `${VERSION}-rc.1` });
+  workflow(VERSION);
+  const out = run();
+  assert.match(out, /^ZDD engine skew/);
+  assert.match(out, /zdd\/config\.json \(engine\) pins @rich-rees\/zdd-engine@\d+\.\d+\.\d+-rc\.1/);
+  assert.match(out, /behind plugin|ahead of plugin/, "the direction label is advisory; the skew line is the contract");
+  assert.equal(JSON.parse(run("--json")).skew, true);
+});
+
 test("--json reports every pin with its state", () => {
   config({ extractors: ["generic"], engine: prev(VERSION) });
   const j = JSON.parse(run("--json"));
