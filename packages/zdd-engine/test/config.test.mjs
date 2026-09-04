@@ -41,6 +41,25 @@ test("no selection at all is an error", () => {
   assert.match(resolveExtractors({}).error, /names no extractors/);
 });
 
+test("CR-107: extractorOptions / adapterOptions and each per-extractor entry must be plain objects — a clean error, never a TypeError or a pass-through", () => {
+  for (const bad of [null, [], "supabase", 5]) {
+    const r = resolveExtractors({ extractors: ["supabase"], extractorOptions: bad });
+    assert.match(r.error ?? "", /'extractorOptions' must be an object keyed by extractor name/, JSON.stringify(bad));
+  }
+  for (const bad of [null, [], "x", 5]) {
+    const r = resolveExtractors({ extractors: ["nextjs"], extractorOptions: { nextjs: bad } });
+    assert.match(r.error ?? "", /'extractorOptions\.nextjs' must be an object/, JSON.stringify(bad));
+  }
+  // Legacy pair: `adapterOptions: null` used to destructure null (TypeError).
+  for (const bad of [null, [], "x"]) {
+    const r = resolveExtractors({ adapter: "nextjs-supabase", adapterOptions: bad });
+    assert.match(r.error ?? "", /'adapterOptions' must be an object/, JSON.stringify(bad));
+  }
+  // Absent is fine on both forms.
+  assert.ok(!resolveExtractors({ extractors: ["supabase"] }).error);
+  assert.ok(!resolveExtractors({ adapter: "nextjs-supabase" }).error);
+});
+
 test("repoRelative: accepts repo-relative POSIX, rejects absolute, traversal and backslashes (CR-005/CR-006)", () => {
   assert.equal(repoRelative("src/app", "appDir"), "src/app");
   assert.equal(repoRelative("./src/app/", "appDir"), "src/app");
