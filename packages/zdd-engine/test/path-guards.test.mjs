@@ -115,3 +115,38 @@ test("CR-059: derive refuses to prune a folder holding JSON it did not write; no
   assert.ok(existsSync(join(repo, "zdd", "metadata", "Archive", "old.json")));
   rmSync(repo, { recursive: true, force: true });
 });
+
+// ---------------------------------------------------------------------------
+// CR-061: the four render outputs are written last and unconditionally, so
+// they must be pairwise distinct and disjoint from everything render reads.
+// ---------------------------------------------------------------------------
+
+test("CR-061: render refuses outputs that coincide with each other or with an input, before reading or writing anything", () => {
+  const repo = mkRepo(FIXTURE);
+  run(repo, ["derive"]);
+  const glossaryBefore = readFileSync(join(repo, "zdd", "glossary.md"), "utf8");
+  const cases = [
+    [{ graph: "zdd/same.out", humanIndex: "zdd/same.out" }, /paths\.graph 'zdd\/same\.out' .*paths\.humanIndex/],
+    [{ agentIndex: "zdd/adr-index.md" }, /paths\.agentIndex 'zdd\/adr-index\.md' .*paths\.adrIndex/],
+    [{ humanIndex: "zdd/glossary.md" }, /paths\.humanIndex 'zdd\/glossary\.md' overlaps paths\.glossary/],
+    [{ agentIndex: "zdd/config.json" }, /paths\.agentIndex 'zdd\/config\.json' overlaps the config file/],
+    [{ adrIndex: "zdd/adr/index.md" }, /paths\.adrIndex 'zdd\/adr\/index\.md' overlaps paths\.adrDir/],
+    [{ graph: "zdd/map/graph.json" }, /paths\.graph 'zdd\/map\/graph\.json' overlaps paths\.mapDir/],
+    [{ humanIndex: "zdd/metadata/index.html" }, /overlaps/],
+  ];
+  for (const [paths, re] of cases) {
+    withPaths(repo, paths);
+    const err = runFail(repo, ["render"]);
+    assert.match(err, re, JSON.stringify(paths));
+    assert.ok(!existsSync(join(repo, "zdd", "same.out")), "no output written");
+    assert.ok(!existsSync(join(repo, "zdd", "adr", "index.md")), "no output written into adrDir");
+  }
+  assert.equal(readFileSync(join(repo, "zdd", "glossary.md"), "utf8"), glossaryBefore, "glossary never clobbered");
+  assert.match(readFileSync(join(repo, "zdd", "config.json"), "utf8"), /"name": "Fixture App"/, "config never clobbered");
+  // A legal relocation still works and --check stays green.
+  withPaths(repo, { graph: "docs/graph.json", humanIndex: "docs/index.html", agentIndex: "docs/agent.md", adrIndex: "docs/adrs.md" });
+  mkdirSync(join(repo, "docs"));
+  run(repo, ["render"]);
+  assert.match(run(repo, ["render", "--check"]), /in sync/);
+  rmSync(repo, { recursive: true, force: true });
+});
