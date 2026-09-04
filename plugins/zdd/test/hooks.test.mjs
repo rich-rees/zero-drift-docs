@@ -10,8 +10,8 @@ import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync, rmSync, mkdtempSync, mkdirSync, existsSync, symlinkSync, readdirSync, statSync, chmodSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
-import { fileURLToPath } from "node:url";
-import { FENCE_TOOLS } from "../scripts/lib/repo.mjs";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { FENCE_TOOLS, repoRelative, artifactPaths } from "../scripts/lib/repo.mjs";
 
 const PLUGIN = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const FENCE = join(PLUGIN, "scripts", "fence.mjs");
@@ -126,6 +126,39 @@ test("fence: a generated path that overlaps a curated one or zdd/config.json is 
   blocked(fence("Write", { file_path: "generated/meta/x.json" }), "a clean relocation still fences");
   blocked(fence("Write", { file_path: "generated/graph.json" }), "…both keys");
   silent(fence("Write", { file_path: "docs/glossary.md" }), "…and the curated file stays free");
+  setConfig(VALID);
+});
+
+test("repoRelative speaks the engine's path language exactly — whitespace and backslashes rejected, '.' normalised (CR-079)", async () => {
+  const engine = await import(pathToFileURL(resolve(PLUGIN, "..", "..", "packages", "zdd-engine", "src", "lib", "paths.mjs")).href);
+  const corpus = ["zdd/graph.json", "./docs/AGENT.md", "docs//x/./y.md", "zdd/", ".", "./", "docs/ZDD Index.md", " zdd/graph.json", "zdd/graph.json\n", "zdd\\graph.json", "\\zdd", "/etc/passwd", "C:/tmp/g.md", "c:\\tmp", "../x", "a/../b", "javascript:alert(1)", "http://x/y", "a:b/c", "", 42, null, "\x01x", "x\x7f"];
+  for (const v of corpus) {
+    let ours, theirs;
+    try {
+      ours = { ok: true, value: repoRelative(v, "p", { exact: true }) };
+    } catch (e) {
+      ours = { ok: false, error: e.message };
+    }
+    try {
+      theirs = { ok: true, value: engine.repoRelative(v, "p") };
+    } catch {
+      theirs = { ok: false };
+    }
+    assert.equal(ours.ok, theirs.ok, `${JSON.stringify(v)}: plugin ${ours.ok ? "accepts" : `rejects (${ours.error})`}, engine ${theirs.ok ? "accepts" : "rejects"}`);
+    if (ours.ok) assert.equal(ours.value, theirs.value, `${JSON.stringify(v)}: same normal form`);
+  }
+  // The default mode is for a path a person typed as a bootstrap answer: Windows separators are normalised, nothing else differs.
+  assert.equal(repoRelative("src\\app/", "p"), "src/app");
+  assert.throws(() => repoRelative("src\\my app", "p"), /whitespace/);
+  assert.throws(() => repoRelative("..\\x", "p"), /must not contain '\.\.'/);
+  // "not the repo root" is the plugin's own extra rule, applied where a path is used as an artifact.
+  assert.throws(() => artifactPaths({ paths: { adrDir: "." } }), /paths\.adrDir: must not be the repo root/);
+  assert.equal(artifactPaths({ paths: { adrDir: "." } }, { lenient: true }).adrDir, "zdd/adr");
+  // The fence therefore never fences a path the engine would refuse; the key falls back.
+  setConfig({ extractors: ["generic"], hooks: { fence: true }, paths: { agentIndex: "docs/ZDD Index.md", graph: "zdd\\graph.json" } });
+  silent(fence("Write", { file_path: "docs/ZDD Index.md" }), "a path with whitespace is not an artifact path");
+  blocked(fence("Write", { file_path: "zdd/agent-index.md" }), "…the default is");
+  blocked(fence("Write", { file_path: "zdd/graph.json" }), "a backslash spelling falls back to the default (same location here)");
   setConfig(VALID);
 });
 
