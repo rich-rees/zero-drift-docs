@@ -58,6 +58,36 @@ test("default viewer: BUNDLE (byte for byte) and agent index equal the v0.3.1 go
   rmSync(repo, { recursive: true, force: true });
 });
 
+// CR-096: the BUNDLE golden proves the data; nothing proved the PAGE. This is
+// the whole human-index.html with the two vendored library bodies swapped
+// back for their placeholders (they are checked against the vendor files
+// byte-for-byte), so a change to viz.html / viz.css / viz.js / safe-marked.js
+// or the embed shows up as a golden diff without committing 400 KB of
+// cytoscape. Regenerate only deliberately (test/golden/README.md).
+const VENDOR = [
+  ["/*__CYTOSCAPE_JS__*/", join(PKG, "src", "viewers", "cytoscape", "vendor", "cytoscape.min.js")],
+  ["/*__MARKED_JS__*/", join(PKG, "src", "viewers", "cytoscape", "vendor", "marked.min.js")],
+];
+const withoutVendor = (html) => {
+  for (const [marker, file] of VENDOR) {
+    const body = readFileSync(file, "utf8");
+    const at = html.indexOf(body);
+    assert.ok(at !== -1, `${file} is inlined verbatim`);
+    assert.equal(html.indexOf(body, at + 1), -1, `${file} is inlined once`);
+    html = html.slice(0, at) + marker + html.slice(at + body.length);
+  }
+  return html;
+};
+
+test("CR-096: the whole human-index.html (vendor bodies elided) equals its golden on the Next.js fixture", () => {
+  const repo = mkRepo(FIXTURE);
+  run(repo, ["derive"]);
+  run(repo, ["render"]);
+  const html = withoutVendor(readFileSync(join(repo, "zdd", "human-index.html"), "utf8"));
+  assert.equal(html, readFileSync(join(GOLDEN, "human-index-v1.0-nextjs-supabase.html"), "utf8"));
+  rmSync(repo, { recursive: true, force: true });
+});
+
 test("graph artifact: every record and map concept is a node with a resource; every ref and map link is an edge", () => {
   const repo = mkRepo(FIXTURE);
   run(repo, ["derive"]);

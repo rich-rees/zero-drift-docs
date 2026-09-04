@@ -1,0 +1,1552 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fixture App Wiki</title>
+<script>
+(() => {
+  // Light is the design baseline and the default; dark is opt-in via the
+  // toggle (persisted per browser).
+  let t = null;
+  try { t = localStorage.getItem("wiki-theme"); } catch {}
+  document.documentElement.dataset.theme = t === "dark" ? "dark" : "light";
+})();
+</script>
+<script>/*__CYTOSCAPE_JS__*/</script>
+<script>/*__MARKED_JS__*/</script>
+<script>// safeMarked — `marked` configured so source-derived markdown can never run
+// script in the hosted human index (CR-007, DIO-310). Everything the detail
+// and docs panels render comes from the repo: leading `//` comments, SQL
+// comments, FastAPI docstrings, the glossary and ADR bodies — text anyone
+// with commit access authored, and the viewer contract says the page must be
+// safe to host regardless. Three rules, applied at the renderer so the
+// parsed structure is untouched:
+//   - raw HTML (block or inline) is emitted escaped, as literal text;
+//   - links keep only http(s)/mailto, relative and in-page targets — any
+//     other scheme (javascript:, data:, vbscript:…) renders as plain text;
+//   - images never render: an <img> fires a network request the moment the
+//     panel opens, and the hosted page promises none (a tracking pixel in a
+//     docstring would beacon every reader — CR-006). The alt text stands in.
+// Plain script (no module syntax) so it inlines into viz.html and can be
+// loaded in a Node test with the vendored marked (test/viewers.test.mjs).
+const safeMarked = (() => {
+  const escapeHtml = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  // A target is safe when it has no scheme (relative / in-page) or a known
+  // one. Whitespace and control characters are stripped first — browsers
+  // ignore them inside a scheme, so "java\tscript:" would otherwise pass.
+  const safeHref = (href) => {
+    const h = String(href || "").replace(/[\s\x00-\x1f]/g, "");
+    const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(h);
+    if (!scheme) return true;
+    return ["http", "https", "mailto"].includes(scheme[1].toLowerCase());
+  };
+  const attr = (title) => (title ? ` title="${escapeHtml(title)}"` : "");
+  const parser = new marked.Marked({
+    breaks: false,
+    gfm: true,
+    renderer: {
+      html(token) {
+        const raw = typeof token === "string" ? token : token.text ?? token.raw ?? "";
+        return escapeHtml(raw);
+      },
+      link(token) {
+        const href = typeof token === "string" ? token : token.href;
+        const title = typeof token === "string" ? arguments[1] : token.title;
+        const text = typeof token === "string" ? arguments[2] : this.parser.parseInline(token.tokens);
+        if (!safeHref(href)) return text;
+        return `<a href="${escapeHtml(href)}"${attr(title)}>${text}</a>`;
+      },
+      image(token) {
+        const text = typeof token === "string" ? arguments[2] : token.text;
+        return escapeHtml(text || "");
+      },
+    },
+  });
+  return { parse: (md) => parser.parse(md || "") };
+})();
+</script>
+<style>
+/* Theme tokens — light is the design baseline; dark redefines tokens only. */
+:root, :root[data-theme="light"] {
+  --ground: #f8fafc;
+  --panel: #ffffff;
+  --raised: #ffffff; /* slide-out panels — one step above --panel in dark */
+  --ink: #0f172a;
+  --muted: #64748b;
+  --muted-2: #475569;
+  --line: #e2e8f0;
+  --wash: #f1f5f9;
+  --hover-wash: #e2e8f0;
+  --ctrl-border: #cbd5e1;
+  --link: #2563eb;
+  --sel-wash: #e8eef7;
+  --auth-bg: #fff8e8;
+  --auth-border: #eeddb0;
+  --authx: #c98500;
+  --code-bg: #0f172a;
+  --code-ink: #e2e8f0;
+  --label-veil: rgba(248, 250, 252, 0.85);
+  --changed-wash: #eefaf0;
+  --changed-border: #b5e3bf;
+  --changed-ink: #1c7a34;
+}
+/* Dark is neutral black, not blue-slate (DIO-149 review); the slide-outs sit
+   one surface step above the canvas (--raised) so they read as raised panels. */
+:root[data-theme="dark"] {
+  --ground: #0a0a0a;
+  --panel: #141414;
+  --raised: #1f1f1f;
+  --ink: #e7e7e7;
+  --muted: #9a9a9a;
+  --muted-2: #bdbdbd;
+  --line: #2a2a2a;
+  --wash: #232323;
+  --hover-wash: #2e2e2e;
+  --ctrl-border: #3d3d3d;
+  --link: #7ab3f5;
+  --sel-wash: #263344;
+  --auth-bg: #2e2510;
+  --auth-border: #6b5618;
+  --authx: #fab219;
+  --code-bg: #101010;
+  --code-ink: #e7e7e7;
+  --label-veil: rgba(10, 10, 10, 0.85);
+  --changed-wash: #142a18;
+  --changed-border: #2c5c37;
+  --changed-ink: #6fce85;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  font-size: 14px;
+  color: var(--ink);
+  background: var(--ground);
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+/* Top bar only — a bare `header` selector also captured the panels'
+   <header class="detail-header">, flexing title and subtitle side-by-side. */
+body > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+.title strong { font-size: 16px; margin-right: 8px; }
+.muted { color: var(--muted); font-size: 12px; }
+.controls { display: flex; gap: 8px; }
+.controls input, .controls select, .controls button {
+  font-size: 13px;
+  padding: 5px 8px;
+  border: 1px solid var(--ctrl-border);
+  border-radius: 4px;
+  background: var(--panel);
+}
+.controls input { width: 220px; }
+.controls button { cursor: pointer; background: var(--wash); }
+.controls button:hover { background: var(--hover-wash); }
+/* Cross-page links dressed as controls (the harness map is a separate
+   curated page, not a panel of this app). */
+.controls a.hdr-link {
+  font-size: 13px;
+  padding: 5px 8px;
+  border: 1px solid var(--ctrl-border);
+  border-radius: 4px;
+  background: var(--wash);
+  color: inherit;
+  text-decoration: none;
+}
+.controls a.hdr-link:hover { background: var(--hover-wash); }
+
+main {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  position: relative; /* anchors the slide-out panels */
+  overflow: hidden;
+}
+#graph {
+  flex: 1 1 60%;
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+  min-width: 0;
+  position: relative;
+}
+/* Slide-out panels (DIO-149, ported from the PressPlay canvas slide-out
+   pattern): hidden by default so the graph owns the full viewport; .open
+   slides them in from the right. Overlay, not flex — opening never reflows
+   the cytoscape canvas. */
+.slideout {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: clamp(340px, 42%, 620px);
+  overflow-y: auto;
+  padding: 18px 22px;
+  background: var(--raised);
+  border-left: 1px solid var(--line);
+  box-shadow: -8px 0 24px rgba(15, 23, 42, 0.18);
+  transform: translateX(103%);
+  transition: transform 0.25s ease;
+  z-index: 30;
+}
+.slideout.open { transform: translateX(0); }
+/* The hidden attribute must beat author display rules (.docs-back is
+   display:block, which silently overrode it — the stray back button bug). */
+.slideout [hidden] { display: none !important; }
+.slideout .detail-header {
+  display: block;
+  padding-right: 28px; /* clear of the ✕ */
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 8px;
+}
+.panel-close {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 15px;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+}
+.panel-close:hover { color: var(--ink); background: var(--wash); }
+.docs-back {
+  display: block;
+  border: 0;
+  background: none;
+  color: var(--link);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12.5px;
+  padding: 0;
+  margin-bottom: 6px;
+}
+#docs-source { word-break: break-all; }
+.doc-md { font-size: 13px; line-height: 1.55; }
+/* Clear heading ladder (DIO-149 review): h1 doc title > h2 section > h3
+   subsection > underlined term entries > body. h3 reads as a small-caps
+   section label so terms (larger, ink-colored) sit under it unambiguously. */
+.doc-md h1 { font-size: 21px; margin: 20px 0 8px; padding-bottom: 6px; border-bottom: 2px solid var(--ctrl-border); }
+.doc-md h2 { font-size: 17px; margin: 26px 0 6px; }
+.doc-md h3 {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin: 22px 0 4px;
+}
+.doc-md p { margin: 6px 0; }
+.doc-md code {
+  background: var(--wash);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 12px;
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+}
+.doc-md pre {
+  background: var(--code-bg);
+  color: var(--code-ink);
+  padding: 10px 12px;
+  border-radius: 6px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+.doc-md pre code { background: transparent; color: inherit; padding: 0; }
+.doc-md ul, .doc-md ol { padding-left: 22px; margin: 6px 0; }
+.doc-md table { border-collapse: collapse; margin: 8px 0; display: block; overflow-x: auto; }
+.doc-md th, .doc-md td { border: 1px solid var(--line); padding: 4px 8px; font-size: 12px; }
+.doc-md blockquote {
+  margin: 8px 0;
+  padding: 4px 12px;
+  border-left: 3px solid var(--ctrl-border);
+  color: var(--muted-2);
+}
+.doc-md a { color: var(--link); }
+/* Glossary term entries: the defined term becomes a block title with an
+   underline, description underneath — so it can't be confused with bold
+   cross-references inside the prose (DIO-149 review feedback). */
+.doc-md strong.term {
+  display: block;
+  font-size: 14px;
+  border-bottom: 1px solid var(--ctrl-border);
+  padding-bottom: 3px;
+  margin: 18px 0 6px;
+}
+.adr-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: 13px -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  padding: 7px 10px;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  border-radius: 4px;
+  color: var(--ink);
+}
+.adr-item:hover { background: var(--wash); }
+.adr-item .muted { display: block; }
+
+/* Latest store change (DIO-164): entries touched by the most recent
+   store-touching push get a tint + badge; everything older stays plain. */
+.changed-entry { background: var(--changed-wash); border-radius: 6px; }
+.adr-item.changed-entry { border: 1px solid var(--changed-border); }
+.doc-md p.changed-entry { padding: 2px 6px; margin-left: -6px; margin-right: -6px; }
+.changed-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 0 6px;
+  border: 1px solid var(--changed-border);
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--changed-ink);
+  background: var(--changed-wash);
+  vertical-align: 1px;
+}
+
+.detail-header { margin-bottom: 12px; }
+.detail-header h1 {
+  font-size: 18px;
+  margin: 4px 0 2px;
+  font-weight: 600;
+}
+.type-chip {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  background: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+dl.frontmatter {
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  row-gap: 4px;
+  column-gap: 12px;
+  margin: 8px 0 12px;
+  font-size: 13px;
+}
+dl.frontmatter dt {
+  color: var(--muted);
+  font-weight: 500;
+}
+dl.frontmatter dd { margin: 0; }
+dl.frontmatter a { color: var(--link); word-break: break-all; }
+
+.tag {
+  display: inline-block;
+  padding: 1px 6px;
+  margin: 0 4px 2px 0;
+  border-radius: 4px;
+  background: var(--wash);
+  color: var(--muted-2);
+  font-size: 11px;
+}
+
+hr { border: none; border-top: 1px solid var(--line); margin: 14px 0; }
+
+#detail-body { font-size: 13px; line-height: 1.55; }
+#detail-body h1 {
+  font-size: 16px; margin: 18px 0 6px;
+  padding-bottom: 4px; border-bottom: 1px solid var(--line);
+}
+#detail-body h2 { font-size: 14px; margin: 14px 0 4px; }
+#detail-body h3 { font-size: 13px; margin: 12px 0 4px; }
+#detail-body p { margin: 6px 0; }
+#detail-body code {
+  background: var(--wash);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 12px;
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+}
+#detail-body pre {
+  background: var(--code-bg);
+  color: var(--code-ink);
+  padding: 10px 12px;
+  border-radius: 6px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+#detail-body pre code { background: transparent; color: inherit; padding: 0; }
+#detail-body ul, #detail-body ol { padding-left: 22px; margin: 6px 0; }
+#detail-body li { margin: 2px 0; }
+#detail-body table { border-collapse: collapse; margin: 8px 0; }
+#detail-body th, #detail-body td {
+  border: 1px solid var(--line); padding: 4px 8px; font-size: 12px;
+}
+#detail-body a.internal { color: var(--link); cursor: pointer; }
+#detail-body a.external { color: var(--link); }
+
+#detail-backlinks { margin-top: 18px; }
+#detail-backlinks h2 { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+#detail-backlinks ul { padding-left: 18px; }
+#detail-backlinks a { color: var(--link); cursor: pointer; }
+
+.spacing-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+#zoom { width: 110px; }
+
+/* --- multi-view chrome (DIO-144) --- */
+#graph-wrap {
+  flex: 1 1 60%;
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+  min-width: 0;
+  position: relative;  overflow: hidden;
+}
+#graph-wrap #graph { position: absolute; inset: 0; }
+#overlay { position: absolute; inset: 0; pointer-events: none; }
+.lane-label {
+  position: absolute;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: var(--label-veil);
+  padding: 2px 8px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+#subbar {
+  flex-shrink: 0;
+  padding: 6px 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  font-size: 11.5px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+#subbar b { color: var(--ink); }
+.authdot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--panel);
+  border: 2.5px solid var(--authx);
+  vertical-align: -1px;
+}
+.auth-note {
+  font-size: 12px;
+  margin: 8px 0;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--wash);
+  border: 1px solid var(--line);
+}
+.auth-note.auth-exception { background: var(--auth-bg); border-color: var(--auth-border); }
+#index-panel {
+  flex: 0 0 250px;
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+  overflow-y: auto;
+  padding: 8px 6px;
+}
+#index-list summary {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  padding: 5px 6px;
+  cursor: pointer;
+  user-select: none;
+}
+#index-list .item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: 12.5px -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  padding: 4px 8px 4px 20px;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  border-radius: 4px;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#index-list .item:hover { background: var(--wash); }
+#index-list .item.on { background: var(--sel-wash); font-weight: 600; }
+
+#crumbs button {
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--ink);
+  cursor: pointer;
+  padding: 0 2px;
+  text-decoration: underline;
+  text-decoration-color: var(--code-ink);
+}
+button:focus-visible, .item:focus-visible { outline: 2px solid #c98500; outline-offset: 1px; }
+.spacing-control[hidden] { display: none; }
+
+/* The viewer is deliberately single-theme (light): the graph canvas, label
+   halos, and palette are validated against the light surface. Declaring the
+   scheme stops dark-mode UAs restyling form controls (white-on-white text). */
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+.controls input, .controls select, .controls button { color: var(--ink); }
+.controls input::placeholder { color: var(--muted); }
+
+#tooltip {
+  position: absolute;
+  max-width: 320px;
+  background: var(--code-bg);
+  color: var(--ground);
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 7px 10px;
+  border-radius: 6px;
+  pointer-events: none;
+  z-index: 20;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.3);
+}
+#tooltip { color: #f8fafc; }
+#tooltip b { color: #fff; }
+.node-acr {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  pointer-events: none;
+  user-select: none;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+}
+
+</style>
+</head>
+<body>
+<header>
+  <div class="title">
+    <strong id="bundle-name"></strong>
+    <span class="muted">codebase map</span>
+  </div>
+  <div class="controls">
+    <input id="search" type="search" placeholder="Search title / id / tag">
+    <select id="filter-type">
+      <option value="">All types</option>
+    </select>
+    <select id="view">
+      <option value="lanes">Architecture (lanes)</option>
+      <option value="columns">Area coupling (columns)</option>
+      <option value="explorer">Explorer (focus)</option>
+      <option value="force">Force (fallback)</option>
+    </select>
+    <label class="spacing-control" id="zoom-control"><span class="muted">Zoom</span>
+      <input id="zoom" type="range" min="0" max="1" step="0.01" value="0.5">
+    </label>
+    <button id="btn-glossary" title="zdd/glossary.md — the ubiquitous-language glossary">Glossary</button>
+    <button id="btn-adrs" title="zdd/adr/ — the decision record">ADRs</button>
+    <button id="theme-toggle" title="Toggle dark mode">◐</button>
+    <button id="reset">Reset view</button>
+  </div>
+</header>
+
+<div id="subbar">
+  <span id="legend" hidden></span>
+  <span id="crumbs" hidden></span>
+</div>
+
+<main>
+  <aside id="index-panel" hidden>
+    <div id="index-list"></div>
+  </aside>
+  <section id="graph-wrap">
+    <div id="graph"></div>
+    <div id="overlay"></div>
+    <div id="tooltip" hidden></div>
+  </section>
+  <!-- Slide-out panels (DIO-149): hidden by default so the graph gets the full
+       viewport; node click / Glossary / ADRs slide one in from the right. -->
+  <section id="detail" class="slideout">
+    <button class="panel-close" id="detail-close" title="Close" aria-label="Close">✕</button>
+    <article id="detail-content" hidden>
+      <header class="detail-header">
+        <span class="type-chip" id="detail-type"></span>
+        <h1 id="detail-title"></h1>
+        <div class="muted" id="detail-id"></div>
+      </header>
+      <div id="detail-auth" hidden></div>
+      <dl class="frontmatter">
+        <dt>Description</dt><dd id="detail-description"></dd>
+        <dt>Resource</dt><dd id="detail-resource"></dd>
+        <dt>Tags</dt><dd id="detail-tags"></dd>
+      </dl>
+      <hr>
+      <div id="detail-body"></div>
+      <section id="detail-backlinks" hidden>
+        <h2>Cited by</h2>
+        <ul id="backlinks-list"></ul>
+      </section>
+    </article>
+  </section>
+  <section id="docs" class="slideout">
+    <button class="panel-close" id="docs-close" title="Close" aria-label="Close">✕</button>
+    <article>
+      <header class="detail-header">
+        <button id="docs-back" class="docs-back" hidden>← All ADRs</button>
+        <h1 id="docs-title"></h1>
+        <div class="muted" id="docs-source"></div>
+      </header>
+      <div id="docs-body" class="doc-md"></div>
+    </article>
+  </section>
+</main>
+
+<script>
+window.BUNDLE_NAME = "Fixture App";
+window.BUNDLE = {"nodes":[{"data":{"id":"map/apps/fixture-app","label":"Fixture App","type":"Application","description":"The fixture Next.js app the engine tests derive against.","resource":"src","tags":["things"],"color":"#94a3b8","size":30}},{"data":{"id":"map/features/things","label":"Things","type":"Feature","description":"CRUD for things with an audit trail (ADR-0002).","resource":"src/components","tags":["things"],"color":"#4a3aa7","size":31}},{"data":{"id":"metadata/bucket/db--cdn-assets","label":"cdn-assets (db)","type":"Storage Bucket","description":"","resource":"","tags":["db"],"color":"#b45309","size":30}},{"data":{"id":"metadata/bucket/db--uploads","label":"uploads (db)","type":"Storage Bucket","description":"","resource":"migrations/00002_things.sql","tags":["db"],"color":"#b45309","size":30}},{"data":{"id":"metadata/function/db--save_thing","label":"save_thing()","type":"Database Function","description":"save a thing and log the change","resource":"migrations/00002_things.sql","tags":["things"],"color":"#0d9488","size":31}},{"data":{"id":"metadata/function/db--set_updated_at","label":"set_updated_at()","type":"Database Function","description":"touch updated_at on every write","resource":"migrations/00001_init.sql","tags":["db"],"color":"#0d9488","size":31}},{"data":{"id":"metadata/route/hooks--callback","label":"/api/hooks/callback","type":"API Endpoint","description":"Machine-to-machine callback from the external worker — HMAC-verified.","resource":"src/app/api/hooks/callback/route.ts","tags":["hooks"],"auth":"hmac","color":"#2a78d6","size":30}},{"data":{"id":"metadata/route/hooks--status","label":"/api/hooks/status","type":"API Endpoint","description":"Worker status probe — checks the caller's session inside the handler","resource":"src/app/api/hooks/status/route.ts","tags":["hooks"],"auth":"session-in-handler","color":"#2a78d6","size":30}},{"data":{"id":"metadata/route/things--_id","label":"/api/things/[id]","type":"API Endpoint","description":"Read (GET), save (PUT), and delete (DELETE) one thing.","resource":"src/app/api/things/[id]/route.ts","tags":["things"],"auth":"session","color":"#2a78d6","size":31}},{"data":{"id":"metadata/route/things","label":"/api/things","type":"API Endpoint","description":"List (GET) and create (POST) things.","resource":"src/app/api/things/route.ts","tags":["things"],"auth":"session","color":"#2a78d6","size":30}},{"data":{"id":"metadata/surface/_layout","label":"/_layout","type":"UI Surface","description":"Root layout — nav shell around every page.","resource":"src/app/layout.tsx","tags":["_layout"],"color":"#e87ba4","size":30}},{"data":{"id":"metadata/surface/index","label":"/","type":"UI Surface","description":"Home — thin wrapper around the HomePage component.","resource":"src/components/HomePage.tsx","tags":["root"],"color":"#e87ba4","size":30}},{"data":{"id":"metadata/surface/things--_id","label":"/things/[id]","type":"UI Surface","description":"Thing detail — loads one thing and renders it inline (real logic, no wrapper).","resource":"src/app/things/[id]/page.tsx","tags":["things"],"color":"#e87ba4","size":30}},{"data":{"id":"metadata/table/db--audit_log","label":"audit_log (db)","type":"Table","description":"append-only audit trail","resource":"migrations/00001_init.sql","tags":["db"],"color":"#008300","size":31}},{"data":{"id":"metadata/table/db--things","label":"things (db)","type":"Table","description":"the widget catalogue","resource":"migrations/00001_init.sql","tags":["things"],"color":"#008300","size":30}},{"data":{"id":"metadata/module/src--components--HomePage-tsx","label":"src/components/HomePage.tsx","type":"Module","description":"Client-side things list — fetches the catalogue and renders it.","resource":"src/components/HomePage.tsx","tags":["things"],"color":"#64748b","size":30}},{"data":{"id":"metadata/module/src--lib--things-api-ts","label":"src/lib/things-api.ts","type":"Module","description":"Shared data-access helpers for things — used by pages and scripts alike.","resource":"src/lib/things-api.ts","tags":["things"],"color":"#64748b","size":31}}],"edges":[{"data":{"id":"map/apps/fixture-app__map/features/things","source":"map/apps/fixture-app","target":"map/features/things"}},{"data":{"id":"map/features/things__metadata/table/db--things","source":"map/features/things","target":"metadata/table/db--things"}},{"data":{"id":"map/features/things__metadata/route/things","source":"map/features/things","target":"metadata/route/things"}},{"data":{"id":"map/features/things__metadata/route/things--_id","source":"map/features/things","target":"metadata/route/things--_id"}},{"data":{"id":"map/features/things__metadata/function/db--save_thing","source":"map/features/things","target":"metadata/function/db--save_thing"}},{"data":{"id":"metadata/function/db--save_thing__metadata/table/db--audit_log","source":"metadata/function/db--save_thing","target":"metadata/table/db--audit_log"}},{"data":{"id":"metadata/function/db--save_thing__metadata/table/db--things","source":"metadata/function/db--save_thing","target":"metadata/table/db--things"}},{"data":{"id":"metadata/function/db--set_updated_at__metadata/table/db--things","source":"metadata/function/db--set_updated_at","target":"metadata/table/db--things"}},{"data":{"id":"metadata/route/hooks--callback__metadata/table/db--audit_log","source":"metadata/route/hooks--callback","target":"metadata/table/db--audit_log"}},{"data":{"id":"metadata/route/things--_id__metadata/function/db--save_thing","source":"metadata/route/things--_id","target":"metadata/function/db--save_thing"}},{"data":{"id":"metadata/route/things--_id__metadata/table/db--things","source":"metadata/route/things--_id","target":"metadata/table/db--things"}},{"data":{"id":"metadata/route/things__metadata/table/db--things","source":"metadata/route/things","target":"metadata/table/db--things"}},{"data":{"id":"metadata/surface/things--_id__metadata/route/things--_id","source":"metadata/surface/things--_id","target":"metadata/route/things--_id"}},{"data":{"id":"metadata/table/db--audit_log__metadata/table/db--things","source":"metadata/table/db--audit_log","target":"metadata/table/db--things"}},{"data":{"id":"metadata/module/src--components--HomePage-tsx__metadata/route/things","source":"metadata/module/src--components--HomePage-tsx","target":"metadata/route/things"}},{"data":{"id":"metadata/module/src--lib--things-api-ts__metadata/route/things--_id","source":"metadata/module/src--lib--things-api-ts","target":"metadata/route/things--_id"}},{"data":{"id":"metadata/module/src--lib--things-api-ts__metadata/table/db--audit_log","source":"metadata/module/src--lib--things-api-ts","target":"metadata/table/db--audit_log"}},{"data":{"id":"metadata/module/src--lib--things-api-ts__metadata/table/db--things","source":"metadata/module/src--lib--things-api-ts","target":"metadata/table/db--things"}}],"bodies":{"map/apps/fixture-app":"\nA deliberately tiny Next.js App Router app: one feature, one wrapper page,\none hooks route pair, two migrations.\n\n- [Things](../features/things.md)\n","map/features/things":"\nThe things catalogue: list, edit, and audit things.\n\n- [things table](../../metadata/table/db--things.json)\n- [/api/things](../../metadata/route/things.json)\n- [/api/things/[id]](../../metadata/route/things--_id.json)\n- [save_thing()](../../metadata/function/db--save_thing.json)\n","metadata/bucket/db--cdn-assets":"# Facts\n\n- origin: external\n","metadata/bucket/db--uploads":"# Facts\n\n- origin: migration\n- public: false\n- file size limit: 5242880\n- mime types: image/png, image/jpeg\n","metadata/function/db--save_thing":"save a thing and log the change\n\n# Signature\n\n```sql\nsave_thing(p_id uuid, p_title text)\nRETURNS void LANGUAGE plpgsql\n```\n\n# References\n\n- [table:db/audit_log](/metadata/table/db--audit_log.json)\n- [table:db/things](/metadata/table/db--things.json)\n","metadata/function/db--set_updated_at":"touch updated_at on every write\n\n# Signature\n\n```sql\nset_updated_at()\nRETURNS trigger LANGUAGE plpgsql\n```\n\n# Trigger attachments\n\n- `BEFORE UPDATE ON things`\n\n# References\n\n- [table:db/things](/metadata/table/db--things.json)\n","metadata/route/hooks--callback":"Machine-to-machine callback from the external worker — HMAC-verified.\n\n# Methods\n\n- `POST`\n\n# Auth\n\nhmac\n\n# References\n\n- [table:db/audit_log](/metadata/table/db--audit_log.json)\n","metadata/route/hooks--status":"Worker status probe — checks the caller's session inside the handler\n\n# Methods\n\n- `GET`\n\n# Auth\n\nsession-in-handler\n","metadata/route/things--_id":"Read (GET), save (PUT), and delete (DELETE) one thing.\n\n# Methods\n\n- `GET`\n- `PUT`\n- `DELETE`\n\n# Auth\n\nsession\n\n# References\n\n- [function:db/save_thing](/metadata/function/db--save_thing.json)\n- [table:db/things](/metadata/table/db--things.json)\n","metadata/route/things":"List (GET) and create (POST) things.\n\n# Methods\n\n- `GET`\n- `POST`\n\n# Auth\n\nsession\n\n# References\n\n- [table:db/things](/metadata/table/db--things.json)\n","metadata/surface/_layout":"Root layout — nav shell around every page.\n","metadata/surface/index":"Home — thin wrapper around the HomePage component.\n","metadata/surface/things--_id":"Thing detail — loads one thing and renders it inline (real logic, no wrapper).\n\n# References\n\n- [route:/api/things/[id]](/metadata/route/things--_id.json)\n","metadata/table/db--audit_log":"append-only audit trail\n\n# Columns (db)\n\n| column | type |\n| --- | --- |\n| id | uuid |\n| thing_id → things(id) | uuid |\n| note | text |\n\n# References\n\n- [table:db/things](/metadata/table/db--things.json)\n","metadata/table/db--things":"the widget catalogue\n\n# Columns (db)\n\n| column | type |\n| --- | --- |\n| id | uuid |\n| title | text |\n| updated_at | timestamptz |\n\nRenamed from: widgets\n","metadata/module/src--components--HomePage-tsx":"Client-side things list — fetches the catalogue and renders it.\n\n# References\n\n- [route:/api/things](/metadata/route/things.json)\n","metadata/module/src--lib--things-api-ts":"Shared data-access helpers for things — used by pages and scripts alike.\n\n# References\n\n- [route:/api/things/[id]](/metadata/route/things--_id.json)\n- [table:db/audit_log](/metadata/table/db--audit_log.json)\n- [table:db/things](/metadata/table/db--things.json)\n"},"types":["API Endpoint","Application","Database Function","Feature","Module","Storage Bucket","Table","UI Surface"],"palette":{"API Endpoint":"#2a78d6","Table":"#008300","UI Surface":"#e87ba4","Feature":"#4a3aa7","External Service":"#eda100","Database Function":"#0d9488","Storage Bucket":"#b45309","Module":"#64748b"},"repoBase":"https://github.com/example/fixture/tree/main/","viewer":{},"docs":{"glossary":"# Glossary\n\n**Thing**: A catalogued item in the fixture app. Renamed from \"widget\" in ADR-0002.\n\n**Audit trail**: The append-only `audit_log` table recording every change to a Thing.\n","adrs":[{"num":"0001","file":"0001-widgets-are-the-core-entity.md","title":"Widgets are the core entity","body":"# Widgets are the core entity\n\n> **Superseded by [ADR-0002](0002-things-replace-widgets.md)** (2026-01-02): the entity was renamed.\n\nThe catalogue's core entity is the widget. Everything hangs off the `widgets` table.\n\n## Rejected alternatives\n\n- Calling them \"items\" — too generic to search for.\n"},{"num":"0002","file":"0002-things-replace-widgets.md","title":"Things replace widgets","body":"# Things replace widgets\n\nThis supersedes ADR-0001: the core entity is renamed to \"thing\", and the\n`widgets` table becomes `things` via an in-place rename so history survives.\n\n## Why\n\n\"Widget\" collided with the UI sense of the word.\n"}],"changed":{"adrs":[],"glossaryTerms":[]}}};
+document.getElementById("bundle-name").textContent = window.BUNDLE_NAME;
+</script>
+<script>
+(() => {
+  const bundle = window.BUNDLE;
+  // Every dictionary keyed by a source-derived string (node ids, types, ADR
+  // numbers, tags) is prototype-free: a map file with `type: __proto__` or
+  // `constructor` must index a slot, not Object.prototype (CR-010).
+  const dict = () => Object.create(null);
+  const nodeIndex = dict();
+  for (const n of bundle.nodes) nodeIndex[n.data.id] = n.data;
+
+  // Friendly display names, derived from the concept-id slug (endpoints carry
+  // methods+path as their title — precise, but noise on a map). The full
+  // technical title stays in the tooltip and detail header. Acronym = initials,
+  // shown inside the circle in the lanes view.
+  const isLightHex = (hex) => {
+    const v = parseInt(hex.slice(1), 16);
+    const r = v >> 16, g = (v >> 8) & 255, b = v & 255;
+    return 0.299 * r + 0.587 * g + 0.114 * b > 150;
+  };
+  // Module titles are full repo paths — captions show the basename (or the
+  // last two segments where basenames collide, e.g. bank/BankTable.tsx); the
+  // full path stays in the tooltip, detail header and resource link.
+  const baseCounts = dict();
+  for (const n of bundle.nodes) {
+    if (n.data.type !== "Module") continue;
+    const b = n.data.label.split("/").pop();
+    baseCounts[b] = (baseCounts[b] || 0) + 1;
+  }
+  // Endpoint labels are URL paths ("/api/journeys/[id]") — humanize them for
+  // the map, dropping whatever leading segments EVERY endpoint shares (a
+  // Next.js "/api", a FastAPI "/v1", nothing at all) rather than keying on any
+  // one framework's convention; the exact path stays in the tooltip. The
+  // shared prefix never eats a route whole: at least one segment of the
+  // shortest route stays, so "/jobs" + "/jobs/{id}" caption as "Jobs" and
+  // "Jobs {id}", not "Jobs" and "{id}" (CR-004; same rule as the renderer).
+  const routeSegs = bundle.nodes.filter((n) => n.data.type === "API Endpoint")
+    .map((n) => n.data.label.split("/").filter(Boolean));
+  let commonRoute = routeSegs.length ? [...routeSegs[0]] : [];
+  for (const segs of routeSegs) {
+    let i = 0;
+    while (i < commonRoute.length && i < segs.length && commonRoute[i] === segs[i]) i++;
+    commonRoute = commonRoute.slice(0, i);
+  }
+  const shortest = Math.min(...routeSegs.map((s) => s.length), Infinity);
+  if (commonRoute.length >= shortest) commonRoute = commonRoute.slice(0, Math.max(0, shortest - 1));
+  for (const n of bundle.nodes) {
+    const d = n.data;
+    if (d.type === "API Endpoint") {
+      const segs = d.label.split("/").filter(Boolean);
+      const own = segs.length > commonRoute.length ? segs.slice(commonRoute.length) : segs.slice(-1);
+      d.display = own
+        .map((w) => (/^[\[{].*[\]}]$/.test(w) ? w : w.charAt(0).toUpperCase() + w.slice(1))).join(" ");
+    } else if (d.type === "Module") {
+      const segs = d.label.split("/");
+      d.display = segs.slice(baseCounts[segs[segs.length - 1]] > 1 ? -2 : -1).join("/");
+    } else {
+      d.display = d.label;
+    }
+    // Acronym = initials of words AND path segments — "/" splits too, so
+    // "/settings/environment" -> SE rather than falling into the raw-slice
+    // fallback ("/SE") that path-shaped titles used to hit. The single-word
+    // fallback slices the word, not the raw display, so "/bank" -> BAN.
+    const words = d.display.replace(/[^A-Za-z0-9 _\-\[\]{}/]/g, "").split(/[\s_\-/]+/)
+      .filter((w) => w && !/^[\[{]/.test(w)); // all dynamic segments ([id], {id}), not just [id]
+    d.acr = (words.length >= 2 ? words.map((w) => w[0]).join("") : (words[0] || d.display).slice(0, 3))
+      .toUpperCase().slice(0, 4);
+  }
+
+  // Backlinks reflect the full bundle truth (including edges the graph
+  // suppresses as cross-cutting) — the detail panel never hides a relationship.
+  const backlinks = dict();
+  for (const e of bundle.edges) {
+    const { source, target } = e.data;
+    (backlinks[target] ||= []).push(source);
+  }
+
+  // ---------- derived facts ----------
+  // Lanes dispatch on display TYPE (node ids are bundle paths and carry no
+  // architecture meaning of their own).
+  // Functions sit in their own band beneath Tables (DIO-149): sharing a lane
+  // put a trigger function *next to* its tables, collapsing the join edges
+  // into invisible sub-node-width stubs. Storage buckets stay with Tables.
+  const LANE_BY_TYPE = {
+    "UI Surface": 0, "Feature": 1, "API Endpoint": 2,
+    "Table": 3, "Storage Bucket": 3, "Database Function": 4,
+  };
+  const own = (table, key) => (Object.hasOwn(table, key) ? table[key] : undefined); // CR-010: static tables, source keys
+  const layerOf = (id) => own(LANE_BY_TYPE, nodeIndex[id]?.type) ?? "rail";
+
+  // Auth mode is the deriver's facts.auth, carried on node data — mechanical
+  // truth from the middleware matcher, never a hand-maintained list or a
+  // prose parse.
+  const authMode = dict();
+  for (const n of bundle.nodes) {
+    if (n.data.type === "API Endpoint") authMode[n.data.id] = n.data.auth || "session";
+  }
+  const AUTH_LABELS = {
+    hmac: "HMAC-signed callback", "cron-secret": "CRON secret bearer",
+    "session-in-handler": "in-handler session check",
+    public: "NO auth guard",
+  };
+
+  // Cross-cutting concerns are attributes, not edges: an edge to the auth
+  // feature/service from a plain session-auth endpoint is the norm (the
+  // overwhelming majority) and carries no information as an arrow — it is
+  // stated in the detail panel instead. Exceptions keep their edges.
+  // Hubs come from zdd.config.json via the renderer.
+  const AUTH_HUBS = new Set((bundle.viewer && bundle.viewer.authHubs) || []);
+  const isSuppressed = (e) => {
+    const { source, target } = e.data;
+    const hub = AUTH_HUBS.has(source) ? source : AUTH_HUBS.has(target) ? target : null;
+    if (!hub) return false;
+    const other = hub === source ? target : source;
+    return authMode[other] === "session";
+  };
+  const visEdges = bundle.edges.filter((e) => !isSuppressed(e));
+
+  const degree = dict();
+  for (const e of visEdges) {
+    degree[e.data.source] = (degree[e.data.source] || 0) + 1;
+    degree[e.data.target] = (degree[e.data.target] || 0) + 1;
+  }
+  const HUB_DEG = 20;
+  const isHub = (id) => (degree[id] || 0) >= HUB_DEG;
+
+  // Product areas, derived from concept tags (never a hand-maintained list).
+  // Tags that describe properties rather than areas are excluded; areas with
+  // fewer than 4 concepts fold into "Other".
+  // Exclusions come from zdd.config.json (viewer.nonAreaTags) — property and
+  // tech tags (react-flow, nextjs, …) must not surface as product areas.
+  const NON_AREA_TAGS = new Set(
+    (bundle.viewer && bundle.viewer.nonAreaTags) || ["rls-disabled", "media-project"],
+  );
+  const rawArea = (d) => {
+    for (const t of d.tags || []) if (!NON_AREA_TAGS.has(t)) return t;
+    return null;
+  };
+  const areaCounts = dict();
+  for (const n of bundle.nodes) {
+    const a = rawArea(n.data);
+    if (a) areaCounts[a] = (areaCounts[a] || 0) + 1;
+  }
+  const MIN_AREA = 4;
+  const titleCase = (s) => s.replace(/[-_]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  const areaOf = (d) => {
+    const a = rawArea(d);
+    return a && areaCounts[a] >= MIN_AREA ? titleCase(a) : "Other";
+  };
+  const AREAS = [...new Set(bundle.nodes.map((n) => areaOf(n.data)))]
+    .sort((a, b) => (a === "Other") - (b === "Other") || a.localeCompare(b));
+
+  // ---------- theming ----------
+  // Dark mode uses the dark-surface steps of the same hues, validated
+  // all-pairs against #0f172a. Dark caps at 4 categorical slots, so Feature
+  // folds to neutral there — its own lane/stack position carries identity.
+  const theme = () => (document.documentElement.dataset.theme === "dark" ? "dark" : "light");
+  const DARK_NODE = {
+    "#2a78d6": "#3987e5", "#e87ba4": "#d55181", "#eda100": "#c98500",
+    "#4a3aa7": "#94a3b8", "#008300": "#008300",
+    "#0d9488": "#14b8a6", "#b45309": "#d97706",
+  };
+  const themedColor = (d) => (theme() === "dark" ? (own(DARK_NODE, d.color) || d.color) : d.color);
+  const THEMES = {
+    light: { ink: "#0f172a", halo: "#f8fafc", border: "#0f172a", authx: "#c98500",
+             sel: "#f59e0b", edge: "#94a3b8", cross: "#475569", lit: "#1c5cab" },
+    // Dark canvas is neutral black (#141414 panel) — halo must match it so
+    // label backgrounds blend instead of leaving blue-slate boxes.
+    dark:  { ink: "#e7e7e7", halo: "#141414", border: "#4a4a4a", authx: "#fab219",
+             sel: "#f8fafc", edge: "#414141", cross: "#8f8f8f", lit: "#86b6ef" },
+  };
+  function makeStyle() {
+    const T = THEMES[theme()];
+    return [
+      { selector: "node", style: {
+          // Features are curated vertical slices, not components — the diamond
+          // marks them as labels-of-slices in every view (DIO-149).
+          shape: (ele) => (ele.data("type") === "Feature" ? "diamond" : "ellipse"),
+          "background-color": (ele) => themedColor(ele.data()), label: "data(display)", color: T.ink,
+          "font-size": 11, "text-valign": "bottom", "text-margin-y": 4, "text-wrap": "wrap",
+          "text-max-width": 120, "text-background-color": T.halo,
+          "text-background-opacity": 0.85, "text-background-padding": 2,
+          width: "data(size)", height: "data(size)", "border-width": 1, "border-color": T.border } },
+      { selector: "node.authx", style: { "border-width": 4, "border-color": T.authx } },
+      { selector: "node.lbl", style: { "text-opacity": 1 } },
+      { selector: "node.dim", style: { opacity: 0.15 } },
+      { selector: "node:selected", style: { "border-width": 3, "border-color": T.sel } },
+      { selector: "edge", style: {
+          width: 1.2, "line-color": T.edge, "curve-style": "straight",
+          "target-arrow-shape": "none", opacity: 0.12 } },
+      { selector: "edge.crossarea", style: { opacity: 0.3, "line-color": T.cross } },
+      { selector: "edge.hubedge", style: { opacity: 0 } },
+      { selector: "edge.lit", style: { opacity: 0.95, width: 1.6, "line-color": T.lit, "z-index": 9 } },
+      { selector: "edge.offdim", style: { opacity: 0.02 } },
+      { selector: "edge.dim", style: { opacity: 0.02 } },
+    ];
+  }
+
+  let cy = null;
+  const graphEl = document.getElementById("graph");
+  const overlay = document.getElementById("overlay");
+  const legendEl = document.getElementById("legend");
+  const crumbsEl = document.getElementById("crumbs");
+  const indexEl = document.getElementById("index-panel");
+  let laneLabels = [];
+
+  function addLaneLabel(text, x, y, pin) {
+    const el = document.createElement("div");
+    el.className = "lane-label";
+    el.textContent = text;
+    overlay.appendChild(el);
+    laneLabels.push({ el, x, y, pin });
+  }
+  // In-circle acronyms are HTML overlay divs (cytoscape has one label slot,
+  // which the short title uses). Each tracks its cytoscape node live, so they
+  // survive drags and layout runs in every view.
+  function addAcrs(fontBase = 15) {
+    for (const n of cy.nodes()) {
+      const d = n.data();
+      const el = document.createElement("div");
+      el.className = "node-acr";
+      el.textContent = d.acr;
+      el.style.color = isLightHex(themedColor(d)) ? "#0f172a" : "#ffffff";
+      overlay.appendChild(el);
+      laneLabels.push({ el, cynode: n, base: fontBase, acr: true });
+    }
+    cy.on("position", "node", () => positionLaneLabels());
+    positionLaneLabels();
+  }
+  function positionLaneLabels() {
+    if (!cy) return;
+    const z = cy.zoom(), p = cy.pan();
+    for (const item of laneLabels) {
+      const { el, pin, acr } = item;
+      let x = item.x, y = item.y;
+      if (acr) {
+        const mp = item.cynode.position();
+        x = mp.x; y = mp.y;
+        const px = item.base * z;
+        el.style.visibility = px < 6 ? "hidden" : "visible";
+        el.style.fontSize = Math.min(px, 26) + "px";
+      }
+      el.style.left = pin ? "12px" : (x * z + p.x) + "px";
+      el.style.top = (y * z + p.y) + "px";
+    }
+  }
+
+  const BASE_FONT = 11;
+  const LABEL_ZOOM_MIN = 0.55;
+  function makeCy(elements, opts = {}) {
+    if (cy) cy.destroy();
+    overlay.innerHTML = "";
+    laneLabels = [];
+    cy = cytoscape({
+      container: graphEl, elements, style: makeStyle(),
+      layout: { name: "preset" }, wheelSensitivity: 0.2,
+      autoungrabify: opts.locked ?? true,
+    });
+    cy.minZoom(0.05);
+    cy.maxZoom(5);
+    for (const n of cy.nodes()) {
+      const am = authMode[n.id()];
+      if (am && am !== "session" && am !== "is-auth") n.addClass("authx");
+    }
+    // Labels hold constant screen size so zooming in separates them; below
+    // LABEL_ZOOM_MIN they hide (hover/select reveals via .lbl).
+    const refreshLabels = () => {
+      const z = cy.zoom();
+      cy.batch(() => {
+        cy.nodes().style({
+          "font-size": Math.max(0.5, Math.min(48, BASE_FONT / z)),
+          "text-max-width": Math.max(70, 120 / z),
+          "text-opacity": opts.alwaysLabel || z >= LABEL_ZOOM_MIN ? 1 : 0,
+        });
+        cy.edges().style({ width: Math.max(0.4, Math.min(1.6, 1.6 / z)) });
+      });
+    };
+    let raf = null;
+    cy.on("zoom", () => { if (!raf) raf = requestAnimationFrame(() => { raf = null; refreshLabels(); positionLaneLabels(); }); });
+    cy.on("pan", positionLaneLabels);
+
+    const light = (n) => cy.batch(() => {
+      cy.edges().removeClass("lit").addClass("offdim");
+      cy.nodes().addClass("dim").removeClass("lbl");
+      n.removeClass("dim").addClass("lbl");
+      n.connectedEdges().removeClass("offdim").addClass("lit");
+      n.neighborhood("node").removeClass("dim").addClass("lbl");
+    });
+    const unlight = () => cy.batch(() => {
+      cy.edges().removeClass("lit offdim");
+      cy.nodes().removeClass("dim lbl");
+    });
+    const tip = document.getElementById("tooltip");
+    cy.on("mouseover", "node", (e) => {
+      light(e.target);
+      const d = e.target.data();
+      tip.innerHTML = `<b></b><span></span>`;
+      tip.querySelector("b").textContent = d.label;
+      tip.querySelector("span").textContent = d.description ? " — " + d.description : "";
+      tip.hidden = false;
+    });
+    cy.on("mousemove", (e) => {
+      if (tip.hidden || !e.renderedPosition) return;
+      tip.style.left = Math.min(e.renderedPosition.x + 16, graphEl.clientWidth - 340) + "px";
+      tip.style.top = (e.renderedPosition.y + 18) + "px";
+    });
+    cy.on("mouseout", "node", () => {
+      tip.hidden = true;
+      const sel = cy.$("node:selected");
+      sel.length ? light(sel) : unlight();
+    });
+    cy.on("select", "node", (e) => light(e.target));
+    // Deselect closes the detail slide-out; a select in the same tap (node →
+    // node) reopens it before paint, so only true deselects visibly close.
+    cy.on("unselect", "node", () => { unlight(); detailEl.classList.remove("open"); });
+    cy.on("tap", (e) => { if (e.target === cy) { unlight(); closePanels(); } });
+    cy.on("tap", "node", (e) => { if (currentView !== "explorer") renderDetail(e.target.id()); });
+    refreshLabels();
+    return cy;
+  }
+
+  // Fit the graph, but never below a zoom where acronyms are legible — on
+  // small screens you land readable at the top of the map and pan, rather
+  // than seeing 123 unreadably small circles.
+  function fitWithFloor(pad, floor) {
+    cy.fit(undefined, pad);
+    if (cy.zoom() < floor) {
+      cy.zoom(floor);
+      const bb = cy.elements().boundingBox();
+      cy.pan({
+        x: graphEl.clientWidth / 2 - (floor * (bb.x1 + bb.x2)) / 2,
+        y: 30 - floor * bb.y1,
+      });
+    }
+    positionLaneLabels();
+  }
+
+  const markHubEdges = () => {
+    for (const e of cy.edges()) if (isHub(e.source().id()) || isHub(e.target().id())) e.addClass("hubedge");
+  };
+  const presetNodes = (pos) => bundle.nodes
+    .filter((n) => pos[n.data.id])
+    .map((n) => ({ data: n.data, position: pos[n.data.id] }));
+
+  // ---------- views ----------
+  const LANE_NAMES = ["UI Surfaces", "Features — curated slices", "API", "Tables", "DB Functions"];
+
+  function viewLanes() {
+    const lanes = [[], [], [], [], []];
+    const rail = [];
+    for (const n of bundle.nodes) {
+      // Modules (lib/component files) would swamp the orientation view — the
+      // lanes view hides them as a display choice; explorer/columns/force and
+      // the detail panel's backlinks still show them in full.
+      if (n.data.type === "Module") continue;
+      const l = layerOf(n.data.id);
+      (l === "rail" ? rail : lanes[l]).push(n.data.id);
+    }
+    // Order within a lane: 3 barycenter sweeps against neighbour positions,
+    // seeded by area so related nodes start adjacent; then wrap into rows.
+    const adj = dict();
+    for (const e of visEdges) {
+      (adj[e.data.source] ||= []).push(e.data.target);
+      (adj[e.data.target] ||= []).push(e.data.source);
+    }
+    const xIndex = new Map();
+    lanes.forEach((ids) => {
+      ids.sort((a, b) => (areaOf(nodeIndex[a]) + a).localeCompare(areaOf(nodeIndex[b]) + b));
+      ids.forEach((id, i) => xIndex.set(id, i));
+    });
+    for (let sweep = 0; sweep < 3; sweep++) {
+      lanes.forEach((ids) => {
+        const score = dict();
+        for (const id of ids) {
+          const ns = (adj[id] || []).map((o) => xIndex.get(o)).filter((v) => v !== undefined);
+          score[id] = ns.length ? ns.reduce((a, b) => a + b, 0) / ns.length : xIndex.get(id);
+        }
+        ids.sort((a, b) => score[a] - score[b]);
+        ids.forEach((id, i) => xIndex.set(id, i));
+      });
+    }
+    const PER_ROW = 12, GAPX = 150, ROW_H = 96, LANE_PAD = 190;
+    const laneW = (n) => Math.min(n, PER_ROW) * GAPX;
+    const maxW = Math.max(...lanes.map((l) => laneW(l.length)));
+    // Lane baselines are cumulative — a lane that wraps to many rows pushes
+    // the next lane down instead of overlapping it.
+    const laneY = [];
+    let yCursor = 0;
+    lanes.forEach((ids) => {
+      laneY.push(yCursor);
+      yCursor += Math.ceil(ids.length / PER_ROW) * ROW_H + LANE_PAD;
+    });
+    const pos = dict();
+    lanes.forEach((ids, li) => {
+      const order = [...ids].sort((a, b) => xIndex.get(a) - xIndex.get(b));
+      const off = (maxW - laneW(order.length)) / 2;
+      order.forEach((id, i) => {
+        pos[id] = { x: off + (i % PER_ROW) * GAPX, y: laneY[li] + Math.floor(i / PER_ROW) * ROW_H };
+      });
+    });
+    // Rail starts below its label's screen-space box: lane labels hold
+    // constant pixel size while the layout scales, so at fit zoom a y:-22
+    // label overlapped the first rail node (DIO-149).
+    // 110px pitch: each rail node's below-node caption needs clearance before
+    // the next circle — 78 left captions touching the following node.
+    rail.sort().forEach((id, i) => { pos[id] = { x: maxW + 260, y: 40 + i * 110 }; });
+    // Hidden Module nodes take their edges with them (cytoscape rejects edges
+    // with absent endpoints).
+    const laneEdges = visEdges.filter((e) => pos[e.data.source] && pos[e.data.target]);
+    makeCy([...presetNodes(pos), ...laneEdges]);
+    cy.nodes().style({ width: 46, height: 46 });
+    markHubEdges();
+    addAcrs();
+    LANE_NAMES.forEach((nm, i) => addLaneLabel(nm, 0, laneY[i] - 44, true));
+    addLaneLabel("Apps & Services", maxW + 190, -70);
+    fitWithFloor(40, 0.65);
+    legendEl.innerHTML = "<b>Architecture view.</b> UI → features → API → tables → functions, top to bottom; apps &amp; external services on the rail. Features (◆) are curated vertical slices, not an architectural tier — the Area coupling view shows the feature-first projection. Hover or tap a node to light its connections; high-traffic nodes show edges only then. <span class=\"authdot\"></span>&nbsp;= auth exception — ordinary session auth is stated per endpoint, not drawn.";
+    legendEl.hidden = false;
+  }
+
+  function viewColumns() {
+    const cols = dict();
+    for (const a of AREAS) cols[a] = [];
+    for (const n of bundle.nodes) cols[areaOf(n.data)].push(n.data.id);
+    const GAPX = 340, GAPY = 46;
+    const pos = dict(), colOf = dict();
+    AREAS.forEach((area, ci) => {
+      const ids = cols[area];
+      ids.sort((a, b) => {
+        const la = layerOf(a) === "rail" ? 4 : layerOf(a);
+        const lb = layerOf(b) === "rail" ? 4 : layerOf(b);
+        return la - lb || a.localeCompare(b);
+      });
+      ids.forEach((id, i) => {
+        pos[id] = { x: ci * GAPX + (i % 2) * 110, y: Math.floor(i / 2) * GAPY * 2 + (i % 2) * GAPY };
+        colOf[id] = ci;
+      });
+    });
+    makeCy([...presetNodes(pos), ...visEdges]);
+    cy.nodes().style({ width: 40, height: 40 });
+    for (const e of cy.edges()) if (colOf[e.source().id()] !== colOf[e.target().id()]) e.addClass("crossarea");
+    markHubEdges();
+    addAcrs(13);
+    AREAS.forEach((a, ci) => addLaneLabel(a, ci * GAPX - 20, -56));
+    fitWithFloor(40, 0.65);
+    legendEl.innerHTML = "<b>Area coupling view.</b> One column per product area, each stacked UI → API → tables. Wiring inside an area is assumed (very faint); the darker edges crossing columns are the coupling between areas. <span class=\"authdot\"></span>&nbsp;= auth exception.";
+    legendEl.hidden = false;
+  }
+
+  // Explorer: no overview at all — one node and its direct connections,
+  // click a neighbour to walk. The only view where every edge is traceable
+  // by construction.
+  let crumbs = [];
+  function egoElements(id) {
+    const els = [{ data: { ...nodeIndex[id] } }];
+    const seen = new Set([id]);
+    const edges = [];
+    for (const e of visEdges) {
+      const { source, target } = e.data;
+      if (source !== id && target !== id) continue;
+      const other = source === id ? target : source;
+      if (!seen.has(other)) { seen.add(other); els.push({ data: { ...nodeIndex[other] } }); }
+      edges.push({ data: { ...e.data } });
+    }
+    return [...els, ...edges];
+  }
+  function focusNode(id, fromCrumb) {
+    if (!fromCrumb) {
+      crumbs = crumbs.slice(-7);
+      if (crumbs[crumbs.length - 1] !== id) crumbs.push(id);
+    }
+    makeCy(egoElements(id), { alwaysLabel: true });
+    cy.layout({ name: "concentric", concentric: (n) => (n.id() === id ? 2 : 1), levelWidth: () => 1, animate: false, padding: 70, minNodeSpacing: 34 }).run();
+    cy.nodes().style({ width: 44, height: 44 });
+    cy.$id(id).style({ width: 58, height: 58 });
+    addAcrs();
+    cy.$id(id).select();
+    renderDetail(id);
+    indexEl.querySelectorAll(".item").forEach((el) => el.classList.toggle("on", el.dataset.id === id));
+    crumbsEl.hidden = false;
+    // DOM construction, never innerHTML: titles are source-derived (CR-001).
+    crumbsEl.textContent = "Path: ";
+    crumbs.forEach((c, i) => {
+      if (i) crumbsEl.appendChild(document.createTextNode(" › "));
+      const b = document.createElement("button");
+      b.textContent = nodeIndex[c].display;
+      b.addEventListener("click", () => {
+        crumbs = crumbs.slice(0, i + 1);
+        focusNode(crumbs[crumbs.length - 1], true);
+      });
+      crumbsEl.appendChild(b);
+    });
+    cy.on("tap", "node", (e) => { if (e.target.id() !== id) focusNode(e.target.id()); });
+  }
+  function viewExplorer() {
+    indexEl.hidden = false;
+    const byType = dict();
+    for (const n of bundle.nodes) (byType[n.data.type] ||= []).push(n.data);
+    const listEl = document.getElementById("index-list");
+    listEl.textContent = "";
+    // Built with DOM nodes: type, id and display title all come from the
+    // repo and must land as text (CR-001).
+    for (const t of Object.keys(byType).sort()) {
+      const details = document.createElement("details");
+      details.open = true;
+      const summary = document.createElement("summary");
+      summary.textContent = `${t} (${byType[t].length})`;
+      details.appendChild(summary);
+      for (const d of byType[t].sort((a, b) => a.display.localeCompare(b.display))) {
+        const btn = document.createElement("button");
+        btn.className = "item";
+        btn.dataset.id = d.id;
+        btn.textContent = d.display;
+        btn.addEventListener("click", () => focusNode(d.id));
+        details.appendChild(btn);
+      }
+      listEl.appendChild(details);
+    }
+    legendEl.hidden = true;
+    crumbs = [];
+    // A greenfield bundle has no nodes yet — say so instead of throwing on
+    // nodes[0] (CR-011).
+    if (!bundle.nodes.length) {
+      crumbsEl.hidden = false;
+      crumbsEl.textContent = "No nodes yet — the map and metadata are empty.";
+      return;
+    }
+    // Default focus comes from zdd.config.json via the renderer.
+    const focus = bundle.viewer && bundle.viewer.defaultFocus;
+    focusNode(focus && nodeIndex[focus] ? focus : bundle.nodes[0].data.id);
+  }
+
+  function viewForce() {
+    makeCy([...bundle.nodes.map((n) => ({ data: n.data })), ...visEdges], { locked: false });
+    markHubEdges();
+    const s = 1.6;
+    cy.layout({
+      name: "cose", animate: false, padding: 30,
+      nodeRepulsion: () => 400000 * s * s, idealEdgeLength: () => 45 * s,
+      componentSpacing: 40 * s, nodeOverlap: 10, gravity: 1 / s, numIter: 1500,
+    }).run();
+    cy.nodes().style({ width: 40, height: 40 });
+    addAcrs(13);
+    fitWithFloor(30, 0.6);
+    legendEl.innerHTML = "<b>Force view.</b> Emergent layout — kept as a fallback; the lanes/columns/explorer views are usually more readable.";
+    legendEl.hidden = false;
+  }
+
+  // GitHub's /tree/ form is for directories; files need /blob/. And GitHub's
+  // web UI 404s raw [ ] in blob URLs (Next.js dynamic-route dirs like [id])
+  // while accepting the percent-encoded form — parens like (app) are fine
+  // raw, so encode only the brackets (DIO-182; verified logged-in: raw → 404,
+  // %5Bid%5D → renders). Extension on the last segment = file.
+  // The renderer already refuses a repoBase that is not http(s) and a
+  // resource that is not a bare repo-relative path; this is the viewer's own
+  // belt (CR-002): anything scheme-shaped renders as a dead, text-only link.
+  const SAFE_BASE = /^(https?:\/\/[^\s]*)?$/i;
+  // Whitespace/control anywhere is refused outright: a browser strips them
+  // from a URL, so " javascript:x" would parse as a scheme (CR-002).
+  const safeResource = (r) => !/[\s\x00-\x1f\x7f]/.test(r) && !/^[a-z][a-z0-9+.-]*:/i.test(r) && !r.startsWith("//") && !r.startsWith("/");
+  function githubHref(resource) {
+    const base = bundle.repoBase || "";
+    if (!SAFE_BASE.test(base) || !safeResource(resource)) return null;
+    const isFile = /\.[A-Za-z0-9]+$/.test(resource.split("/").pop());
+    const path = resource.replace(/\[/g, "%5B").replace(/\]/g, "%5D");
+    return (isFile ? base.replace("/tree/", "/blob/") : base) + path;
+  }
+
+  // ---------- slide-out panels ----------
+  // One panel open at a time: node detail or the docs panel (glossary / ADRs).
+  const detailEl = document.getElementById("detail");
+  const docsEl = document.getElementById("docs");
+  const openPanel = (el) => {
+    for (const p of [detailEl, docsEl]) p.classList.toggle("open", p === el);
+  };
+  const closePanels = () => {
+    detailEl.classList.remove("open");
+    docsEl.classList.remove("open");
+  };
+  document.getElementById("detail-close").addEventListener("click", () => {
+    closePanels();
+    if (cy) cy.$("node:selected").unselect();
+  });
+  document.getElementById("docs-close").addEventListener("click", closePanels);
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closePanels(); });
+
+  // ---------- docs panel (glossary + ADR corpus, ADR-0021) ----------
+  // bundle.docs is a read-only render projection of the glossary (zdd/glossary.md) + zdd/adr/ —
+  // single-sourced by render.mjs, proven in sync by `render --check`.
+  const ADR_BY_NUM = dict();
+  for (const a of (bundle.docs && bundle.docs.adrs) || []) ADR_BY_NUM[a.num] = a;
+  // Latest store change (DIO-164, ADR-0034): which entries the most recent
+  // store-touching push changed — highlighted so a reader sees "what just
+  // changed"; the moment someone else merges store-touching commits, the
+  // highlight moves to theirs.
+  const CHANGED = (bundle.docs && bundle.docs.changed) || { adrs: [], glossaryTerms: [] };
+  const CHANGED_ADR = dict();
+  for (const c of CHANGED.adrs) CHANGED_ADR[c.file] = c.status;
+  const CHANGED_TERMS = new Set(CHANGED.glossaryTerms);
+  function changedBadge(status) {
+    const b = document.createElement("span");
+    b.className = "changed-badge";
+    b.textContent = status; // "new" | "updated"
+    b.title = "Changed in the latest push that touched the glossary or ADRs";
+    return b;
+  }
+  const docsTitle = document.getElementById("docs-title");
+  const docsSource = document.getElementById("docs-source");
+  const docsBody = document.getElementById("docs-body");
+  const docsBack = document.getElementById("docs-back");
+
+  function renderDocMarkdown(md, baseDir, opts = {}) {
+    // safeMarked, never marked.parse: store text is source-derived (CR-007).
+    docsBody.innerHTML = safeMarked.parse(md || "");
+    // Glossary entries are `**Term**: description` paragraphs — promote the
+    // defined term to a block title (underlined via .term) so it reads apart
+    // from bold cross-references inside descriptions.
+    if (opts.terms) {
+      docsBody.querySelectorAll("p").forEach((p) => {
+        const first = p.firstChild;
+        if (!first || first.nodeType !== 1 || first.tagName !== "STRONG") return;
+        const next = first.nextSibling;
+        if (!next || next.nodeType !== 3 || !next.nodeValue.startsWith(":")) return;
+        first.classList.add("term");
+        next.nodeValue = next.nodeValue.replace(/^:\s*/, "");
+        if (CHANGED_TERMS.has(first.textContent)) {
+          p.classList.add("changed-entry");
+          first.after(changedBadge("updated"));
+        }
+      });
+    }
+    // Relative links inside store bodies: sibling NNNN-*.md ADRs resolve
+    // in-page; everything else repo-relative goes to GitHub.
+    docsBody.querySelectorAll("a[href]").forEach((a) => {
+      const href = a.getAttribute("href");
+      if (!href || /^[a-z]+:/i.test(href) || href.startsWith("#")) {
+        if (/^https?:/i.test(href || "")) { a.target = "_blank"; a.rel = "noopener"; }
+        return;
+      }
+      const adrFile = /^(\d{4})-[\w.-]+\.md$/.exec(href);
+      if (adrFile && ADR_BY_NUM[adrFile[1]]) {
+        a.setAttribute("href", "javascript:void(0)");
+        a.addEventListener("click", (e) => { e.preventDefault(); openAdr(adrFile[1]); });
+        return;
+      }
+      // Normalize ../ against the doc's own directory, then link to GitHub.
+      const parts = (baseDir + "/" + href).split("/").filter((s) => s !== ".");
+      const stack = [];
+      for (const p of parts) p === ".." ? stack.pop() : stack.push(p);
+      const target = githubHref(stack.join("/"));
+      if (target === null) { a.removeAttribute("href"); return; }
+      a.setAttribute("href", target);
+      a.target = "_blank";
+      a.rel = "noopener";
+    });
+    linkifyAdrMentions(docsBody);
+    docsEl.scrollTop = 0;
+  }
+
+  function openGlossary() {
+    docsBack.hidden = true;
+    docsTitle.textContent = "Glossary";
+    docsSource.textContent = "zdd/glossary.md — the ubiquitous language; rendered from the repo, never edited here";
+    renderDocMarkdown(bundle.docs && bundle.docs.glossary, "", { terms: true });
+    openPanel(docsEl);
+  }
+  function openAdrIndex() {
+    docsBack.hidden = true;
+    docsTitle.textContent = "Architecture Decision Records";
+    docsSource.textContent = "zdd/adr/ — full decision record; rendered from the repo, never edited here";
+    docsBody.innerHTML = "";
+    for (const a of (bundle.docs && bundle.docs.adrs) || []) {
+      const btn = document.createElement("button");
+      btn.className = "adr-item";
+      const strong = document.createElement("b");
+      strong.textContent = `ADR-${a.num}`;
+      btn.appendChild(strong);
+      if (CHANGED_ADR[a.file]) {
+        btn.classList.add("changed-entry");
+        btn.appendChild(changedBadge(CHANGED_ADR[a.file]));
+      }
+      const span = document.createElement("span");
+      span.className = "muted";
+      span.textContent = a.title;
+      btn.appendChild(span);
+      btn.addEventListener("click", () => openAdr(a.num));
+      docsBody.appendChild(btn);
+    }
+    docsEl.scrollTop = 0;
+    openPanel(docsEl);
+  }
+  function openAdr(num) {
+    const a = ADR_BY_NUM[num];
+    if (!a) return;
+    docsBack.hidden = false;
+    docsTitle.textContent = `ADR-${a.num}`;
+    docsSource.textContent = `zdd/adr/${a.file}`;
+    renderDocMarkdown(a.body, "zdd/adr");
+    openPanel(docsEl);
+  }
+  docsBack.addEventListener("click", openAdrIndex);
+  document.getElementById("btn-glossary").addEventListener("click", openGlossary);
+  document.getElementById("btn-adrs").addEventListener("click", openAdrIndex);
+
+  // Bare ADR-NNNN citations in any rendered markdown become in-page links —
+  // the 15 formerly-dead references this panel exists to resurrect. Text-node
+  // walk; code/pre and existing anchors are left alone.
+  function linkifyAdrMentions(root) {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode: (node) =>
+        node.parentElement.closest("code, pre, a")
+          ? NodeFilter.FILTER_REJECT
+          : NodeFilter.FILTER_ACCEPT,
+    });
+    const targets = [];
+    while (walker.nextNode()) {
+      if (/ADR-\d{4}/.test(walker.currentNode.nodeValue)) targets.push(walker.currentNode);
+    }
+    for (const node of targets) {
+      const frag = document.createDocumentFragment();
+      let rest = node.nodeValue;
+      let m;
+      while ((m = /ADR-(\d{4})/.exec(rest))) {
+        frag.appendChild(document.createTextNode(rest.slice(0, m.index)));
+        if (ADR_BY_NUM[m[1]]) {
+          const a = document.createElement("a");
+          a.className = "internal";
+          a.textContent = m[0];
+          a.href = "javascript:void(0)";
+          const num = m[1];
+          a.addEventListener("click", (e) => { e.preventDefault(); openAdr(num); });
+          frag.appendChild(a);
+        } else {
+          frag.appendChild(document.createTextNode(m[0]));
+        }
+        rest = rest.slice(m.index + m[0].length);
+      }
+      frag.appendChild(document.createTextNode(rest));
+      node.parentNode.replaceChild(frag, node);
+    }
+  }
+
+  // ---------- detail panel ----------
+  function renderDetail(conceptId) {
+    const data = nodeIndex[conceptId];
+    if (!data) return;
+    document.getElementById("detail-content").hidden = false;
+    openPanel(detailEl);
+    detailEl.scrollTop = 0;
+
+    const chip = document.getElementById("detail-type");
+    chip.textContent = data.type;
+    chip.style.background = themedColor(data);
+    document.getElementById("detail-title").textContent = data.label;
+    document.getElementById("detail-id").textContent = conceptId;
+    document.getElementById("detail-description").textContent = data.description || "—";
+
+    const authEl = document.getElementById("detail-auth");
+    const am = authMode[conceptId];
+    if (!am) { authEl.hidden = true; }
+    else {
+      authEl.hidden = false;
+      const label = Object.hasOwn(AUTH_LABELS, am) ? AUTH_LABELS[am] : am; // am is facts.auth — source-derived
+      authEl.className = "auth-note" + (Object.hasOwn(AUTH_LABELS, am) ? " auth-exception" : "");
+      authEl.textContent = "";
+      if (am === "session") {
+        authEl.textContent = "🔒 Session auth (middleware) — the norm; stated here rather than drawn as an edge.";
+      } else if (am === "is-auth") {
+        authEl.append("This ", Object.assign(document.createElement("em"), { textContent: "is" }), " the auth endpoint.");
+      } else {
+        const dot = document.createElement("span");
+        dot.className = "authdot";
+        authEl.append(dot, " ", Object.assign(document.createElement("b"), { textContent: "Auth exception:" }), ` ${label} — not behind the session middleware.`);
+      }
+    }
+
+    const resourceEl = document.getElementById("detail-resource");
+    resourceEl.innerHTML = "";
+    const href = data.resource ? githubHref(data.resource) : null;
+    if (href !== null && data.resource) {
+      const a = document.createElement("a");
+      a.href = href;
+      a.textContent = data.resource;
+      a.title = "Open the source on GitHub";
+      a.target = "_blank";
+      a.rel = "noopener";
+      a.className = "external";
+      resourceEl.appendChild(a);
+    } else resourceEl.textContent = data.resource || "—";
+
+    const tagsEl = document.getElementById("detail-tags");
+    tagsEl.innerHTML = "";
+    if (data.tags && data.tags.length) {
+      for (const t of data.tags) {
+        const span = document.createElement("span");
+        span.className = "tag";
+        span.textContent = t;
+        tagsEl.appendChild(span);
+      }
+    } else tagsEl.textContent = "—";
+
+    const bodyEl = document.getElementById("detail-body");
+    bodyEl.innerHTML = safeMarked.parse(bundle.bodies[conceptId] || "");
+    rewriteInternalLinks(bodyEl);
+    linkifyAdrMentions(bodyEl);
+
+    const bl = backlinks[conceptId] || [];
+    const blSection = document.getElementById("detail-backlinks");
+    const blList = document.getElementById("backlinks-list");
+    blList.innerHTML = "";
+    blSection.hidden = !bl.length;
+    for (const src of bl) {
+      const li = document.createElement("li");
+      const a = document.createElement("a");
+      a.textContent = nodeIndex[src]?.display || src;
+      a.addEventListener("click", () => reveal(src));
+      li.appendChild(a);
+      const muted = document.createElement("span");
+      muted.className = "muted";
+      muted.textContent = ` (${src})`;
+      li.appendChild(muted);
+      blList.appendChild(li);
+    }
+  }
+
+  function rewriteInternalLinks(root) {
+    root.querySelectorAll("a[href]").forEach((a) => {
+      const href = a.getAttribute("href");
+      if (!href) return;
+      const ext = /\.(md|json)$/.exec(href);
+      if (href.startsWith("/") && ext) {
+        const target = href.slice(1, -ext[0].length);
+        if (nodeIndex[target]) {
+          a.className = "internal";
+          a.setAttribute("href", "javascript:void(0)");
+          a.addEventListener("click", (e) => { e.preventDefault(); reveal(target); });
+          return;
+        }
+      }
+      a.className = "external";
+      a.setAttribute("target", "_blank");
+      a.setAttribute("rel", "noopener");
+    });
+  }
+
+  // Bring a concept into view in whatever the current view is.
+  function reveal(id) {
+    if (currentView === "explorer") { focusNode(id); return; }
+    renderDetail(id);
+    const n = cy.$id(id);
+    if (n.length) {
+      cy.$("node:selected").unselect();
+      n.select();
+      cy.animate({ center: { eles: n }, zoom: Math.max(cy.zoom(), 0.8) }, { duration: 200 });
+    }
+  }
+
+  // ---------- header controls & view routing ----------
+  const VIEWS = { lanes: viewLanes, columns: viewColumns, explorer: viewExplorer, force: viewForce };
+  let currentView = null;
+
+  const zoomSlider = document.getElementById("zoom");
+  const sliderToZoom = (v) => 0.05 * Math.pow(100, v);
+  const zoomToSlider = (z) => Math.log(z / 0.05) / Math.log(100);
+  function syncZoomSlider() { if (cy) zoomSlider.value = Math.max(0, Math.min(1, zoomToSlider(cy.zoom()))); }
+  zoomSlider.addEventListener("input", () => {
+    if (!cy) return;
+    cy.zoom({ level: sliderToZoom(parseFloat(zoomSlider.value)),
+      renderedPosition: { x: graphEl.clientWidth / 2, y: graphEl.clientHeight / 2 } });
+  });
+
+  function showView(v) {
+    if (!VIEWS[v]) v = "lanes";
+    currentView = v;
+    indexEl.hidden = true;
+    crumbsEl.hidden = true;
+    document.getElementById("view").value = v;
+    closePanels();
+    VIEWS[v]();
+    if (cy) cy.on("zoom", syncZoomSlider); // explorer on an empty graph builds no cy (CR-011)
+    syncZoomSlider();
+    try { history.replaceState(null, "", "?view=" + v); } catch { /* file:// */ }
+  }
+
+  document.getElementById("view").addEventListener("change", (e) => showView(e.target.value));
+  document.getElementById("reset").addEventListener("click", () => showView(currentView));
+  document.getElementById("theme-toggle").addEventListener("click", () => {
+    const next = theme() === "dark" ? "light" : "dark";
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem("wiki-theme", next); } catch {}
+    showView(currentView);
+  });
+
+  const typeSelect = document.getElementById("filter-type");
+  for (const t of bundle.types) {
+    const opt = document.createElement("option");
+    opt.value = t;
+    opt.textContent = t;
+    typeSelect.appendChild(opt);
+  }
+  const applyDim = (pred) => {
+    cy.nodes().forEach((n) => n.toggleClass("dim", !pred(n)));
+    cy.edges().forEach((e) => e.toggleClass("dim", e.source().hasClass("dim") || e.target().hasClass("dim")));
+  };
+  typeSelect.addEventListener("change", (e) => {
+    const t = e.target.value;
+    if (currentView === "explorer") return;
+    t ? applyDim((n) => n.data("type") === t) : cy.elements().removeClass("dim");
+  });
+  document.getElementById("search").addEventListener("input", (e) => {
+    const q = e.target.value.trim().toLowerCase();
+    if (currentView === "explorer") {
+      document.querySelectorAll("#index-list .item").forEach((el) => {
+        el.style.display = !q || el.textContent.toLowerCase().includes(q) || el.dataset.id.includes(q) ? "block" : "none";
+      });
+      return;
+    }
+    q ? applyDim((n) => {
+      const d = n.data();
+      return ((d.label || "") + " " + d.id + " " + (d.tags || []).join(" ")).toLowerCase().includes(q);
+    }) : cy.elements().removeClass("dim");
+  });
+
+  showView(new URLSearchParams(location.search).get("view") || "lanes");
+})();
+
+</script>
+</body>
+</html>
