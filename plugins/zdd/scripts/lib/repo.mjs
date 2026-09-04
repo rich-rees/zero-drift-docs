@@ -37,6 +37,16 @@ export const DEFAULT_PATHS = {
   bundleDir: "zdd",
 };
 
+// The tool names the fence handles, by shape. hooks.json's PreToolUse matcher
+// must be exactly their union — a test derives one from the other (CR-077).
+// Claude Code names (Write, Edit, Bash…) and Codex names (shell_command,
+// apply_patch…) side by side; the extra spellings cost nothing.
+export const FENCE_TOOLS = {
+  edit: ["Write", "Edit", "MultiEdit", "NotebookEdit", "write_file", "edit_file"],
+  shell: ["Bash", "PowerShell", "Shell", "shell", "shell_command", "exec_command", "local_shell"],
+  patch: ["apply_patch"],
+};
+
 // The plugin's own version — the one every pin is compared against.
 export function pluginVersion() {
   const manifest = JSON.parse(readFileSync(join(PLUGIN_ROOT, ".claude-plugin", "plugin.json"), "utf8"));
