@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync, rmSync, mkdtempSync, cpSync, existsSync, readdirSync, statSync, mkdirSync, symlinkSync } from "node:fs";
+import { readFileSync, writeFileSync, rmSync, mkdtempSync, cpSync, existsSync, readdirSync, statSync, lstatSync, mkdirSync, symlinkSync } from "node:fs";
 import { dirname, resolve, join, relative } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -205,5 +205,58 @@ test("CR-063: a symlinked glossary.md is refused, not followed", (t) => {
   const err = runFail(repo, ["render"]);
   assert.match(err, /paths\.glossary 'zdd\/glossary\.md' must be a regular \.md file, not a symlink/);
   noLeak(repo);
+  rmSync(repo, { recursive: true, force: true });
+});
+
+// ---------------------------------------------------------------------------
+// CR-060: derive's containment was lexical; a symlinked metadataDir (or a
+// linked ancestor) carried the writes and the prune anywhere the user can
+// reach. Realpath containment before scan/write/prune; links inside skipped.
+// ---------------------------------------------------------------------------
+
+test("CR-060: a metadataDir that is a symlink, or sits under one, pointing outside the repo is refused before scan, write or prune", (t) => {
+  const repo = mkRepo(FIXTURE);
+  const outside = mkdtempSync(join(tmpdir(), "zdd-outside-"));
+  mkdirSync(join(outside, "route"));
+  writeFileSync(join(outside, "route", "victim.json"), "{}\n");
+  const before = tree(outside);
+  // Junction type: the only directory-link Windows creates without privileges;
+  // ignored (plain symlink) elsewhere.
+  if (!symlinkOrSkip(t, outside, join(repo, "zdd", "metadata"), "junction")) {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+    return;
+  }
+  let err = runFail(repo, ["derive"]);
+  assert.match(err, /metadataDir 'zdd\/metadata' .*(symlink|outside the repo)/, err);
+  assert.deepEqual(tree(outside), before, "nothing written or pruned through the link");
+  assert.match(runFail(repo, ["derive", "--check"]), /metadataDir 'zdd\/metadata' .*(symlink|outside the repo)/);
+  rmSync(join(repo, "zdd", "metadata"));
+  // A linked ANCESTOR of a not-yet-existing metadataDir: realpath of the nearest
+  // existing ancestor decides.
+  symlinkSync(outside, join(repo, "linked"), "junction");
+  withPaths(repo, { metadataDir: "linked/derived" });
+  err = runFail(repo, ["derive"]);
+  assert.match(err, /metadataDir 'linked\/derived' (sits under a symlink|.*outside the repo)/, err);
+  assert.deepEqual(tree(outside), before, "nothing written through the linked ancestor");
+  rmSync(repo, { recursive: true, force: true });
+  rmSync(outside, { recursive: true, force: true });
+});
+
+test("CR-060: a symlink inside metadataDir is neither read, overwritten nor pruned — skipped with a --verbose note", (t) => {
+  const repo = mkRepo(FIXTURE);
+  const secret = join(repo, "secret.json");
+  writeFileSync(secret, '{"token":"hunter2"}\n');
+  mkdirSync(join(repo, "zdd", "metadata", "route"), { recursive: true });
+  if (!symlinkOrSkip(t, secret, join(repo, "zdd", "metadata", "route", "leak.json"), "file")) {
+    rmSync(repo, { recursive: true, force: true });
+    return;
+  }
+  const { status, stderr } = spawnSync(process.execPath, [BIN, "derive", "--verbose"], { cwd: repo, encoding: "utf8" });
+  assert.equal(status, 0, stderr);
+  assert.match(stderr, /zdd\/metadata\/route\/leak\.json is a symlink — skipped/);
+  assert.equal(readFileSync(secret, "utf8"), '{"token":"hunter2"}\n', "target untouched");
+  assert.ok(lstatSync(join(repo, "zdd", "metadata", "route", "leak.json")).isSymbolicLink(), "link left in place, not pruned");
+  assert.match(run(repo, ["derive", "--check"]), /in sync/);
   rmSync(repo, { recursive: true, force: true });
 });
