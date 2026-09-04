@@ -217,6 +217,8 @@ export const LEGACY_ADAPTERS = {
   },
 };
 
+const isPlainObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+
 export function resolveExtractors(config) {
   const diagnostics = [];
   const hasNew = config.extractors !== undefined;
@@ -233,9 +235,21 @@ export function resolveExtractors(config) {
     if (list.some((n) => typeof n !== "string")) return { error: `'extractors' entries must be strings (names)` };
     const dup = list.find((n, i) => list.indexOf(n) !== i);
     if (dup) return { error: `extractor '${dup}' is listed twice` };
-    const options = config.extractorOptions ?? {};
+    // `extractorOptions: null` / `[]` / a string, or a per-extractor entry
+    // that is not an object, reached the extractor's destructuring as-is
+    // (CR-107). Refuse with the key named.
+    const options = config.extractorOptions === undefined ? {} : config.extractorOptions;
+    if (!isPlainObject(options)) return { error: `'extractorOptions' must be an object keyed by extractor name, got ${JSON.stringify(options)}` };
+    // hasOwn: an extractor named `constructor` must read its own options,
+    // not Object.prototype's (CR-022).
+    const own = (name) => (Object.hasOwn(options, name) ? options[name] : undefined);
+    for (const name of list) {
+      if (own(name) !== undefined && !isPlainObject(own(name))) {
+        return { error: `'extractorOptions.${name}' must be an object, got ${JSON.stringify(own(name))}` };
+      }
+    }
     return {
-      extractors: list.map((name) => ({ name, options: options[name] ?? {} })),
+      extractors: list.map((name) => ({ name, options: own(name) ?? {} })),
       diagnostics,
     };
   }
@@ -247,6 +261,9 @@ export function resolveExtractors(config) {
     diagnostics.push(
       `[config] 'adapter' is deprecated — use "extractors": ${JSON.stringify(legacy.extractors)} with "extractorOptions" (split adapterOptions by key: migrationNamespaces + externalBuckets under supabase, the rest under nextjs)`,
     );
+    if (config.adapterOptions !== undefined && !isPlainObject(config.adapterOptions)) {
+      return { error: `'adapterOptions' must be an object, got ${JSON.stringify(config.adapterOptions)}` };
+    }
     const split = legacy.split(config.adapterOptions);
     return { extractors: legacy.extractors.map((name) => ({ name, options: split[name] ?? {} })), diagnostics };
   }
