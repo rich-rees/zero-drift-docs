@@ -95,6 +95,8 @@ function main() {
 try {
   main();
 } catch {
-  // A broken repo must not break `load`; the skill carries on without the check.
+  // Advisory by design (CR-020, CR-115): this check is `load`'s first step and
+  // must never stop it, so every error — unreadable config, odd filesystem,
+  // a bug here — is swallowed and the skill carries on without the warning.
 }
 process.exitCode = 0;
