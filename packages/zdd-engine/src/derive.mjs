@@ -322,6 +322,22 @@ export async function run(args) {
     }
     console.log(`codebase metadata in sync (${records.length} records)`);
   } else {
+    // A link AT a record path (or a linked kind dir above it) would be
+    // followed by writeFileSync — scanMetadata skips links, but skipping is
+    // not enough where derive is about to write (CR-060). Fail closed before
+    // the first write: lstat each target and its kind dir, refuse anything
+    // that is not a plain file / plain directory.
+    const notPlain = (p, rel, want) => {
+      const st = lstatSync(p, { throwIfNoEntry: false }); // lstat, not exists: a dangling link must still count
+      if (!st) return;
+      const what = st.isSymbolicLink() ? "is a symlink" : want === "file" && !st.isFile() ? "is not a regular file" : want === "dir" && !st.isDirectory() ? "is not a directory" : null;
+      if (what) fail(`${metadataRel}/${rel} ${what} — derive writes only through plain files inside metadataDir; remove it and re-run`);
+    };
+    for (const rel of expected.keys()) {
+      const p = insideRepo(metadataDir, join(metadataDir, rel), `metadata path ${rel}`);
+      notPlain(dirname(p), rel.slice(0, rel.lastIndexOf("/")), "dir");
+      notPlain(p, rel, "file");
+    }
     for (const [rel, content] of expected) {
       const p = insideRepo(metadataDir, join(metadataDir, rel), `metadata path ${rel}`);
       mkdirSync(dirname(p), { recursive: true });
