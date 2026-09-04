@@ -12,7 +12,7 @@
 // validated repo-relative, and every read or write goes through resolveInside,
 // which refuses symlinks and a real path outside the real checkout.
 
-import { readFileSync, existsSync, readdirSync, statSync, lstatSync, realpathSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync, statSync, lstatSync, realpathSync, openSync, readSync, closeSync } from "node:fs";
 import { dirname, join, resolve, relative, isAbsolute, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
@@ -20,7 +20,7 @@ import { homedir } from "node:os";
 export const PLUGIN_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 export const ENGINE_PACKAGE = "@rich-rees/zdd-engine";
 export const MAX_CONFIG_BYTES = 1024 * 1024; // a config bigger than this is not a config
-export const MAX_INDEX_BYTES = 512 * 1024; // an index bigger than this is not injected
+export const MAX_INDEX_BYTES = 64 * 1024; // the SessionStart injection is cut here (~16k tokens, 8× render's budget) — CR-086
 
 // Mirror of the engine's DEFAULT_PATHS (src/lib/config.mjs). The engine is
 // installed outside the plugin (npx), so the plugin cannot import it — this
@@ -231,8 +231,11 @@ export function resolveInside(root, rel, label = rel) {
 }
 
 // Read a regular file inside the checkout, bounded. Returns null when it is
-// absent, a symlink, not a regular file, or over the cap.
-export function readInside(root, rel, maxBytes, label = rel) {
+// absent, a symlink, not a regular file, or — without `truncate` — over the
+// cap. With `truncate`, a file over the cap is read up to the cap only (never
+// whole into memory) and cut back to the last complete line; the caller sees
+// `{ text, truncated }` and says so in its own words (CR-086).
+export function readInside(root, rel, maxBytes, label = rel, { truncate = false } = {}) {
   const abs = resolveInside(root, rel, label);
   let st;
   try {
@@ -240,8 +243,23 @@ export function readInside(root, rel, maxBytes, label = rel) {
   } catch {
     return null;
   }
-  if (!st.isFile() || st.size > maxBytes) return null;
-  return readFileSync(abs, "utf8");
+  if (!st.isFile()) return null;
+  if (st.size <= maxBytes) {
+    const text = readFileSync(abs, "utf8");
+    return truncate ? { text, truncated: false } : text;
+  }
+  if (!truncate) return null;
+  const buf = Buffer.alloc(maxBytes);
+  const fd = openSync(abs, "r");
+  let n;
+  try {
+    n = readSync(fd, buf, 0, maxBytes, 0);
+  } finally {
+    closeSync(fd);
+  }
+  const head = buf.subarray(0, n);
+  const nl = head.lastIndexOf(0x0a);
+  return { text: (nl > 0 ? head.subarray(0, nl) : head).toString("utf8"), truncated: true };
 }
 
 // Same-path comparison for the fence: canonical absolute form, and

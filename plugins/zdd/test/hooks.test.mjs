@@ -344,9 +344,19 @@ test("session-start is silent with no config, malformed config, no index, an esc
   const escaped = runHook(INJECT, undefined, { projectDir: empty });
   assert.doesNotMatch(escaped.stdout, /SECRET/, "escaping path is never read");
   assert.match(escaped.stdout, /# stale/, "the invalid key falls back to its default (CR-070)");
+  // An oversized index is injected up to the cap (64 KiB) and cut at a line
+  // boundary with a one-line marker — never skipped, never whole (CR-086).
   writeFileSync(join(empty, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], paths: { agentIndex: "zdd/big.md" } }));
-  writeFileSync(join(empty, "zdd", "big.md"), "x".repeat(600 * 1024));
-  silent(runHook(INJECT, undefined, { projectDir: empty }), "oversized");
+  writeFileSync(join(empty, "zdd", "big.md"), ("# Big\n" + "- item\n".repeat(100 * 1024)).slice(0, 600 * 1024));
+  const big = runHook(INJECT, undefined, { projectDir: empty });
+  assert.equal(big.status, 0);
+  assert.equal(big.stderr, "");
+  assert.match(big.stdout, /<zdd-agent-index>\n# Big\n/, "oversized index is still injected");
+  assert.match(big.stdout, /\n\[zdd: agent index truncated at 64 KiB — .*"update ZDD".*\]\n<\/zdd-agent-index>/, "one-line marker before the close");
+  assert.ok(Buffer.byteLength(big.stdout) < 66 * 1024, `bounded: ${Buffer.byteLength(big.stdout)} bytes`);
+  assert.ok(/- item\n\[zdd: agent index truncated/.test(big.stdout), "cut at a line boundary");
+  writeFileSync(join(empty, "zdd", "big.md"), "# Small\n" + "- item\n".repeat(8000)); // ~55 KiB, under the cap
+  assert.doesNotMatch(runHook(INJECT, undefined, { projectDir: empty }).stdout, /truncated/, "under the cap: whole, no marker");
   rmSync(join(empty, "zdd", "agent-index.md"));
   writeFileSync(join(empty, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"] }));
   silent(runHook(INJECT, undefined, { projectDir: empty }), "no index");
