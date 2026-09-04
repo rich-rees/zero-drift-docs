@@ -78,6 +78,7 @@ const LEGACY_FINGERPRINT = ["/zdd:orient", "/zdd:update"];
 export const OWNER_MARK = "Managed by Zero-Drift Docs (zdd)";
 const SKIP_DIRS = new Set(["node_modules", ".git", ".next", "dist", "build", "coverage", ".venv", "venv", "__pycache__", ".expo", "zdd"]);
 const MAX_NAME = 120;
+const MAX_SCAN_BYTES = 1024 * 1024; // detection never reads a file larger than this (CR-091)
 
 // Mirror of the engine's LEGACY_ADAPTERS (src/lib/config.mjs): the one legacy
 // adapter and how its options split. The engine expands it at derive time;
@@ -118,7 +119,12 @@ function walk(root, onFile, maxDepth = 6) {
       if (st.isSymbolicLink()) continue;
       if (st.isDirectory()) {
         if (!SKIP_DIRS.has(name) && !name.startsWith(".")) rec(p, depth + 1);
-      } else if (st.isFile()) onFile(p, name, posixify(relative(root, p)));
+      } else if (st.isFile()) {
+        // A file over the cap is not a convention to inventory (a generated
+        // blob, a vendored bundle) and is never read (CR-091).
+        if (st.size > MAX_SCAN_BYTES) continue;
+        onFile(p, name, posixify(relative(root, p)));
+      }
     }
   };
   rec(root, 0);
