@@ -624,6 +624,8 @@ test("without --date, apply dates ADR-0001 with today's date (the default today(
   const repo = fresh("no-date-flag");
   writeFileSync(join(repo, "answers.json"), JSON.stringify({ extractors: ["generic"] }));
   execFileSync(process.execPath, [SCRIPT, "apply", `--answers=${join(repo, "answers.json")}`, `--root=${repo}`, `--home=${fakeHome}`], { encoding: "utf8" });
-  const today = new Date().toISOString().slice(0, 10);
+  // Local calendar date, as today() computes it — not toISOString() (UTC), which differs around local midnight (CR-119).
+  const d = new Date();
+  const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   assert.match(readFileSync(join(repo, "zdd", "adr", "0001-adopt-zero-drift-docs.md"), "utf8"), new RegExp(today.replace(/-/g, "\-")));
 });
