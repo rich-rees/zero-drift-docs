@@ -1,12 +1,12 @@
 ---
 name: update
-description: The Zero-Drift Docs PR-finish ritual. Curate the changed artifacts (glossary, ADRs, code comments, semantic map), regenerate the codebase metadata and both indexes, and commit everything in the PR so docs and code merge atomically. Use before finishing any PR in a repo that uses ZDD.
+description: "update ZDD" — the Zero-Drift Docs finish ritual. Curate the changed artifacts (glossary, ADRs, code comments, semantic map), regenerate the codebase metadata and both indexes, and commit everything in the PR so docs and code merge atomically. Use before finishing any unit of work (a PR is one instantiation) in a repo that uses ZDD; triggers on "update ZDD".
 ---
 
-# zdd:update — the PR-finish ritual
+# zdd:update — the finish ritual
 
-Run this as the definition of done for every PR, in the session that did the
-work — it holds maximal context, and capturing at that moment is the whole trick.
+Run this as the definition of done for every unit of work — the spoken form is
+**"update ZDD"**; a PR is the usual unit — in the session that did the work — it holds maximal context, and capturing at that moment is the whole trick.
 
 ## Steps
 
@@ -36,11 +36,11 @@ work — it holds maximal context, and capturing at that moment is the whole tri
 - The ritual is **diff-anchored, not memory-anchored** — a fresh session can run
   it from the PR diff, the touched code, and the artifacts checkpointed en route.
 - **Never hand-edit the generated artifacts** (`zdd/metadata/`, `zdd/graph.json`,
-  both indexes, the human index) — regenerate. The CI check (if wired) will fail
-  otherwise.
+  both indexes, the human index) — regenerate. The fence hook (if opted in)
+  refuses the edit; the CI check (if wired) fails otherwise.
 - Read back any working file (`TEMPSTATE.md`) and delete it before merge —
   durable residue moves to an artifact first.
 - The curated half is judgment CI can't gate — [authoring.md](../authoring.md) is
   the discipline that stands in for a gate. Prefer to have driven the decisions out
-  with `/zdd:grill` (if the mattpocock-skills plugin is installed) or plan mode;
+  with `grill` (if the mattpocock-skills plugin is installed) or plan mode;
   by PR-finish this step is capture, not fresh design.
