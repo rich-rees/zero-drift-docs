@@ -136,7 +136,7 @@ test("fence dispatches on tool_name first: a shell command is always inspected, 
   blocked(fence("Write", { file_path: join(repo, "zdd", "graph.json"), command: "echo hi" }), "an edit tool reads file_path even with a stray command");
 });
 
-test("fence: a symlinked artifact is dropped on its own, the rest stay fenced; an alias link to the artifact still matches", (t) => {
+test("fence: a symlinked artifact stays fenced at its lexical path, the rest stay fenced; an alias link to the artifact still matches", (t) => {
   const linked = join(scratch, "linked");
   mkdirSync(join(linked, "zdd"), { recursive: true });
   writeFileSync(join(linked, "zdd", "config.json"), JSON.stringify(VALID));
@@ -153,7 +153,13 @@ test("fence: a symlinked artifact is dropped on its own, the rest stay fenced; a
   // An alias OUTSIDE the checkout that points back in is still the artifact (CR-055).
   symlinkSync(join(linked, "zdd"), join(scratch, "outside-alias"), "junction");
   blocked(r(join(scratch, "outside-alias", "graph.json")), "outside alias into the checkout");
-  silent(r(join(linked, "zdd", "adr-index.md")), "the symlinked one is not vouched for");
+  // The symlinked artifact cannot be vouched for physically, so it is fenced
+  // where the config names it (CR-088) — never dropped. Its link target
+  // outside the checkout is not the fence's to police.
+  blocked(r(join(linked, "zdd", "adr-index.md")), "the symlinked one stays fenced lexically");
+  blocked(r("zdd/adr-index.md"), "…relative spelling too");
+  blocked(runHook(FENCE, { tool_name: "Bash", tool_input: { command: "rm zdd/adr-index.md" } }, { projectDir: linked }), "…and from the shell");
+  silent(r(join(scratch, "elsewhere.md")), "the link's target outside the checkout is not fenced");
   // A path on another drive (a mapped share, perhaps) is compared as text, never probed (CR-057).
   if (process.platform === "win32") silent(runHook(FENCE, { tool_name: "Bash", tool_input: { command: "rm Q:\\\\nowhere\\\\zdd\\\\graph.json" } }, { projectDir: linked }), "other drive");
   // A UNC or device path is compared as text, never probed (CR-052).

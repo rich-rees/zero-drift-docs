@@ -239,8 +239,10 @@ function main() {
   // typo never unfences the rest (CR-070).
   const paths = artifactPaths(config, { lenient: true });
   // Each generated path proven inside the checkout with no symlinked segment
-  // (CR-004). One that fails — a symlinked artifact — is dropped on its own;
-  // the others stay fenced (CR-051).
+  // (CR-004) and compared by real path. One that cannot be vouched for — a
+  // symlinked artifact, a junctioned parent — is still fenced at the LEXICAL
+  // location the config names (CR-088); only its link target goes unpoliced.
+  // A failure on one never touches the others (CR-051).
   const generated = [];
   for (const g of [
     { rel: paths.metadataDir, kind: "dir" },
@@ -253,7 +255,7 @@ function main() {
     try {
       generated.push({ ...g, abs: canonical(resolveInside(root, g.rel, g.rel)) });
     } catch {
-      /* not a path the fence can vouch for */
+      generated.push({ ...g, abs: resolve(root, g.rel), lexical: true });
     }
   }
   // Shell-relative paths resolve against the command's own directory when it
@@ -266,11 +268,15 @@ function main() {
   const cwd = cmdDir && (samePath(cmdDir, root) || isUnder(cmdDir, root)) ? resolve(cmdDir) : root;
   const hit = (candidate, base, { ancestor = false } = {}) => {
     // Compared by REAL path, so an alias link to the artifact or its parent
-    // still matches (CR-004).
-    const abs = canonical(isAbsolute(candidate) ? resolve(candidate) : resolve(base, candidate), root);
+    // still matches (CR-004) — and by the spelled path too, so a lexically
+    // fenced artifact (itself a link) matches its own name (CR-088).
+    const lexical = isAbsolute(candidate) ? resolve(candidate) : resolve(base, candidate);
+    const real = canonical(lexical, root);
     for (const g of generated) {
-      if (samePath(abs, g.abs) || (g.kind === "dir" && isUnder(abs, g.abs))) return g.rel;
-      if (ancestor && isUnder(g.abs, abs)) return g.rel;
+      for (const abs of samePath(lexical, real) ? [lexical] : [lexical, real]) {
+        if (samePath(abs, g.abs) || (g.kind === "dir" && isUnder(abs, g.abs))) return g.rel;
+        if (ancestor && isUnder(g.abs, abs)) return g.rel;
+      }
     }
     return null;
   };
