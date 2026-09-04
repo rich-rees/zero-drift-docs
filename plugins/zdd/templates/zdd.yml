@@ -1,4 +1,7 @@
 # Zero-Drift Docs — blocking CI check.
+# Managed by Zero-Drift Docs (zdd): written by `zdd:bootstrap`; `zdd:bootstrap
+# --upgrade` rewrites the engine pin below. Remove this header line to take
+# ownership of the file.
 #
 # Copy into the adopter repo's .github/workflows/ and require it in branch
 # protection (plus "require branches up to date before merge"). This is what

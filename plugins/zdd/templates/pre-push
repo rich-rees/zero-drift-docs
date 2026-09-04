@@ -1,0 +1,21 @@
+#!/bin/sh
+# Managed by Zero-Drift Docs (zdd) — written by `zdd:bootstrap` when CI was
+# declined; `zdd:bootstrap --upgrade` rewrites this file, so edits here are
+# overwritten (remove this header line to take ownership of it).
+#
+# The local stand-in for the CI check: the same deterministic engine checks the
+# CI workflow would run — metadata matches source, indexes match their inputs,
+# stores lint. A failure here makes a forgotten `update` loud before the push,
+# but it is not a merge gate: without CI, ZDD's guarantee is a habit, not a
+# proof. The engine version is PINNED below, in step with the plugin's other
+# pins.
+ZDD_ENGINE="@rich-rees/zdd-engine@0.4.0"
+
+if ! command -v npx >/dev/null 2>&1; then
+  echo "zdd: npx not found — engine checks skipped (install Node 20+, or re-run zdd:bootstrap)"
+  exit 0
+fi
+
+npx -y "$ZDD_ENGINE" derive --check &&
+  npx -y "$ZDD_ENGINE" render --check &&
+  npx -y "$ZDD_ENGINE" lint
