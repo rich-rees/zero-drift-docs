@@ -93,6 +93,9 @@ test("fence: a symlinked artifact is dropped on its own, the rest stay fenced; a
   const r = (file_path) => runHook(FENCE, { tool_name: "Write", tool_input: { file_path } }, { projectDir: linked });
   blocked(r(join(linked, "zdd", "graph.json")), "the other artifacts stay fenced (CR-051)");
   blocked(r(join(linked, "alias", "graph.json")), "alias link to the artifact's parent (CR-004)");
+  // An alias OUTSIDE the checkout that points back in is still the artifact (CR-055).
+  symlinkSync(join(linked, "zdd"), join(scratch, "outside-alias"), "junction");
+  blocked(r(join(scratch, "outside-alias", "graph.json")), "outside alias into the checkout");
   silent(r(join(linked, "zdd", "adr-index.md")), "the symlinked one is not vouched for");
   // A path outside the checkout is compared as text, never probed (CR-052).
   silent(runHook(FENCE, { tool_name: "Bash", tool_input: { command: "rm \\\\\\\\nowhere.invalid\\\\share\\\\zdd\\\\graph.json" } }, { projectDir: linked }), "UNC path");
