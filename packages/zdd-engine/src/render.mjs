@@ -20,7 +20,7 @@
 // cannot change the outputs. Repos that want no git dependency at all set
 // config `render.storeChanges: false`.
 
-import { readFileSync, writeFileSync, readdirSync, lstatSync, realpathSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync, lstatSync, realpathSync, existsSync, renameSync, rmSync } from "node:fs";
 import { insideRepo, repoRelative } from "./lib/paths.mjs";
 import { join, dirname, resolve, relative } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -680,13 +680,29 @@ export async function run(args) {
     }
     console.log(`renderings in sync (${counts.concepts} concepts, ${counts.edges} edges, ${counts.features} features, viewer ${VIEWER.name})`);
   } else {
+    // Stage every output to a sibling temp file, then rename all four: a
+    // failure part-way (disk, permissions, a parent that turns out to be a
+    // file) leaves the previous generation intact and no half-written
+    // artifact behind (CR-098). rename over an existing file is atomic on
+    // POSIX and a replace on Windows.
+    const staged = [];
     try {
       for (const [, path] of outputs) safeOutputPath(path);
+      for (const [label, path, content] of outputs) {
+        const tmp = `${path}.${process.pid}.tmp`;
+        try {
+          writeFileSync(tmp, content);
+        } catch (e) {
+          throw new Error(`could not write ${label} (${path}): ${e.message}`);
+        }
+        staged.push([tmp, path]);
+      }
+      for (const [tmp, path] of staged) renameSync(tmp, path);
     } catch (e) {
+      for (const [tmp] of staged) rmSync(tmp, { force: true });
       console.error(e.message);
       process.exit(1);
     }
-    for (const [, path, content] of outputs) writeFileSync(path, content);
     console.log(`Wrote ${counts.concepts} concepts, ${counts.edges} edges -> graph.json + human-index.html (viewer ${VIEWER.name}); ${counts.features} feature sections -> agent-index.md; ${counts.adrs} ADRs -> adr-index.md`);
   }
 }
