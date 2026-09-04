@@ -24,7 +24,7 @@
 
 import { readFileSync, realpathSync, existsSync } from "node:fs";
 import { resolve, isAbsolute, dirname, relative, join } from "node:path";
-import { adopterRoot, readConfig, artifactPaths, resolveInside, samePath, isUnder, FENCE_TOOLS } from "./lib/repo.mjs";
+import { adopterRoot, readConfig, artifactPaths, resolveInside, samePath, isUnder, FENCE_TOOLS, REMOTE_OR_DEVICE } from "./lib/repo.mjs";
 
 // hooks.json's matcher is the union of these three (CR-077).
 const EDIT_TOOLS = new Set(FENCE_TOOLS.edit);
@@ -132,7 +132,6 @@ function lex(command) {
 // (CR-052). An ordinary local path outside the checkout IS probed, because an
 // alias link out there can point back at an artifact (CR-055); the command
 // about to run would touch that path anyway.
-const REMOTE_OR_DEVICE = /^(\\\\|\/\/)/;
 const driveOf = (p) => (/^[a-zA-Z]:/.test(p) ? p[0].toLowerCase() : "");
 function canonical(abs, root) {
   if (REMOTE_OR_DEVICE.test(abs)) return abs;
