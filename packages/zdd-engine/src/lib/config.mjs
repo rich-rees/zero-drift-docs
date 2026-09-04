@@ -12,8 +12,8 @@
 // the config, but the config itself is found at the conventional spot.
 
 import { readFileSync, existsSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { repoRelative } from "./paths.mjs";
+import { dirname, join, resolve, relative } from "node:path";
+import { repoRelative, overlaps } from "./paths.mjs";
 
 export const DEFAULT_PATHS = {
   glossary: "zdd/glossary.md",
@@ -82,6 +82,37 @@ export function validateRepoBase(repoBase) {
   return null;
 }
 
+// Layout rule over the resolved paths. `derive` prunes metadataDir, so it
+// must be a dedicated folder: a metadataDir that equals, contains or sits
+// inside any other configured path — or the config file itself — would let
+// a one-line config typo (`"metadataDir": "zdd"`) delete the glossary, the
+// map and config.json as "orphaned records" (CR-059). bundleDir is the one
+// deliberate ancestor (metadata lives under zdd/) and is not in the set.
+// `configRel` is the config file's repo-relative name (may start with `..`
+// when --config= points elsewhere; then it overlaps nothing). Returns an
+// error string or null.
+export function validatePathLayout(paths, configRel) {
+  const others = [
+    ["paths.glossary", paths.glossary],
+    ["paths.adrDir", paths.adrDir],
+    ["paths.mapDir", paths.mapDir],
+    ["paths.agentIndex", paths.agentIndex],
+    ["paths.adrIndex", paths.adrIndex],
+    ["paths.humanIndex", paths.humanIndex],
+    ["paths.graph", paths.graph],
+    ["the config file", configRel],
+  ];
+  for (const [label, value] of others) {
+    if (overlaps(paths.metadataDir, value)) {
+      return (
+        `paths.metadataDir '${paths.metadataDir}' overlaps ${label} '${value}' — ` +
+        `metadataDir must be a dedicated folder (derive prunes everything in it that is not a current record)`
+      );
+    }
+  }
+  return null;
+}
+
 function argValue(args, name) {
   const hit = args.find((a) => a.startsWith(`--${name}=`));
   return hit ? hit.slice(name.length + 3) : null;
@@ -121,6 +152,12 @@ export function loadConfig(args, cwd = process.cwd()) {
   // point outside the checkout (CR-006). Same rule for localExtractorDir.
   for (const [key, value] of Object.entries(paths)) paths[key] = repoRelative(value, `paths.${key}`);
   if (config.localExtractorDir !== undefined) config.localExtractorDir = repoRelative(config.localExtractorDir, "localExtractorDir");
+  const configRel = relative(repoRoot, configPath).split(/[\\/]/).join("/");
+  const layoutError = validatePathLayout(paths, configRel);
+  if (layoutError) {
+    console.error(layoutError);
+    process.exit(1);
+  }
   return {
     repoRoot,
     configPath,
