@@ -114,7 +114,7 @@
     "repoBase": {
       "type": "string",
       "default": "",
-      "pattern": "^(https?://\S+)?$",
+      "pattern": "^(https?://\\S+)?$",
       "description": "GitHub tree URL prefix for source links in the human index, e.g. https://github.com/org/repo/tree/main/. Empty = relative links. Must be http(s) — the renderer refuses anything else, since it becomes every source link's scheme."
     },
     "nonAreaTags": {

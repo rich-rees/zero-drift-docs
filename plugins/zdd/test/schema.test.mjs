@@ -56,12 +56,12 @@ function validate(schema, value, path = "$") {
 }
 
 // The engine's verdict on a config: null when derive accepts it, else its message.
-function engineRejects(config) {
+function engineRejects(config, command = "derive") {
   const repo = mkdtempSync(join(tmpdir(), "zdd-schema-"));
   try {
     mkdirSync(join(repo, "zdd"));
     writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify(config));
-    const r = spawnSync(process.execPath, [ENGINE_BIN, "derive", "--check", `--root=${repo}`], { encoding: "utf8" });
+    const r = spawnSync(process.execPath, [ENGINE_BIN, command, "--check", `--root=${repo}`], { encoding: "utf8" });
     return r.status === 0 ? null : (r.stderr + r.stdout).trim();
   } finally {
     rmSync(repo, { recursive: true, force: true });
@@ -97,13 +97,16 @@ test("a config with both `extractors` and `adapter` is invalid under the schema,
 });
 
 test("repoBase: the schema pattern refuses internal whitespace exactly as the engine does (CR-103)", () => {
+  // repoBase is the renderer's concern (source links), so the engine probe is `render`.
+  const cfg = (repoBase) => ({ extractors: ["generic"], repoBase, render: { storeChanges: false } });
   for (const bad of ["https://", "https://example.test/ bad", "ftp://x"]) {
-    assert.notDeepEqual(validate(SCHEMA, { extractors: ["generic"], repoBase: bad }), [], bad);
-    assert.notEqual(engineRejects({ extractors: ["generic"], repoBase: bad }), null, bad);
+    assert.notDeepEqual(validate(SCHEMA, cfg(bad)), [], `schema: ${bad}`);
+    assert.match(engineRejects(cfg(bad), "render") ?? "", /repoBase/, `engine: ${bad}`);
   }
   for (const ok of ["", "https://github.com/o/r/tree/main/"]) {
-    assert.deepEqual(validate(SCHEMA, { extractors: ["generic"], repoBase: ok }), [], ok);
-    assert.equal(engineRejects({ extractors: ["generic"], repoBase: ok }), null, ok);
+    assert.deepEqual(validate(SCHEMA, cfg(ok)), [], `schema: ${ok}`);
+    const r = engineRejects(cfg(ok), "render");
+    assert.ok(r === null || !/repoBase/.test(r), `engine: ${ok} -> ${r}`);
   }
 });
 
