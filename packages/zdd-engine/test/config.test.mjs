@@ -4,8 +4,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
-import { resolveExtractors, validateRepoBase } from "../src/lib/config.mjs";
-import { repoRelative, insideRepo } from "../src/lib/paths.mjs";
+import { resolveExtractors, validateRepoBase, validatePathLayout, DEFAULT_PATHS } from "../src/lib/config.mjs";
+import { repoRelative, insideRepo, overlaps } from "../src/lib/paths.mjs";
 
 test("extractors list: names + per-name options; missing options default to {}", () => {
   const r = resolveExtractors({ extractors: ["supabase", "generic"], extractorOptions: { supabase: { a: 1 } } });
@@ -98,4 +98,22 @@ test("CR-067: insideRepo compares by path segments and folds case only where the
   const variant = resolve("/srv/repo/zdd/graph.json");
   if (process.platform === "win32" || process.platform === "darwin") inside(variant);
   else outside(variant);
+});
+
+test("CR-059/CR-061: overlaps() folds case exactly where insideRepo does — a case-variant metadataDir cannot slip past the layout rule on Windows/macOS", () => {
+  assert.ok(overlaps("zdd/metadata", "zdd/metadata"));
+  assert.ok(overlaps("zdd", "zdd/metadata/x.json"));
+  assert.ok(!overlaps("zdd/metadata", "zdd/metadata2"));
+  // `zdd/Metadata` IS `zdd/metadata` on a case-folding filesystem: derive
+  // would prune the real folder while the layout rule saw two distinct names.
+  // On Linux they are different directories and stay distinct.
+  const folds = process.platform === "win32" || process.platform === "darwin";
+  assert.equal(overlaps("zdd/Metadata", "zdd/metadata"), folds);
+  assert.equal(overlaps("ZDD", "zdd/map/x.md"), folds);
+  const layout = validatePathLayout({ ...DEFAULT_PATHS, metadataDir: "zdd/Map" }, "zdd/config.json");
+  if (folds) assert.match(layout ?? "", /paths\.metadataDir 'zdd\/Map' overlaps paths\.mapDir/);
+  else assert.equal(layout, null);
+  const outputs = validatePathLayout({ ...DEFAULT_PATHS, agentIndex: "zdd/Graph.json" }, "zdd/config.json");
+  if (folds) assert.match(outputs ?? "", /paths\.graph 'zdd\/graph\.json' overlaps paths\.agentIndex 'zdd\/Graph\.json'/);
+  else assert.equal(outputs, null);
 });
