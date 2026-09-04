@@ -40,6 +40,9 @@ const WRITE_SHAPED =
 // the artifact, so every operand of mv/move-item/rename-item/git mv is a
 // candidate (CR-072).
 const LAST_OPERAND_IS_TARGET = /^(cp|copy-item|install|ln)$/i;
+// Verbs that take a whole tree with them: an ancestor of a generated path is
+// as good as the path (CR-071). `git clean` / `git rm` are handled by sub-verb.
+const DESTRUCTIVE = /^(rm|rmdir|rd|del|erase|unlink|remove-item|ri)$/i;
 
 function readStdin() {
   try {
@@ -121,9 +124,29 @@ function shellTarget(command, cwd, hit) {
     // Path-shaped runs anywhere in the command (`node -e "...('zdd/graph.json')"`)
     // are candidates too — a script can write anything it names.
     const literals = [...simple.matchAll(/[\w.:-]*[\\/][\w.\\/:-]*/g)].map((m) => m[0]);
-    const candidates = LAST_OPERAND_IS_TARGET.test(verb) && operands.length > 1 ? operands.slice(-1) : /^(cat|less|head|tail|grep|diff|type|get-content)$/i.test(verb) && !/>/.test(simple) ? [] : operands.concat(toks[0], literals);
+    // `-t DIR` / `--target-directory[= ]DIR` names the destination up front
+    // (CR-071); it is a candidate whatever the operand order.
+    const targetDirs = [];
+    toks.forEach((t, i) => {
+      const eq = /^--target-directory=(.+)$/.exec(t);
+      if (eq) targetDirs.push(eq[1]);
+      else if ((t === "-t" || t === "--target-directory") && toks[i + 1]) targetDirs.push(toks[i + 1]);
+    });
+    const copyLike = LAST_OPERAND_IS_TARGET.test(verb);
+    const candidates =
+      copyLike && targetDirs.length
+        ? targetDirs // every operand is a source
+        : copyLike && operands.length > 1
+          ? operands.slice(-1)
+          : /^(cat|less|head|tail|grep|diff|type|get-content)$/i.test(verb) && !/>/.test(simple)
+            ? []
+            : operands.concat(toks[0], literals, targetDirs);
+    // A destructive verb over an ANCESTOR of a generated path takes the
+    // artifact with it (`rm -rf zdd`), so for those verbs an ancestor is a hit
+    // too (CR-071). Globs and variables stay opaque — decision 0003's ceiling.
+    const destructive = DESTRUCTIVE.test(verb) || (/^git$/i.test(verb) && /^(clean|rm)$/i.test(toks[1] ?? ""));
     for (const c of candidates) {
-      const t = hit(c, cwd);
+      const t = hit(c, cwd, { ancestor: destructive });
       if (t) return t;
     }
   }
@@ -170,12 +193,13 @@ function main() {
   const toolInput = input.tool_input && typeof input.tool_input === "object" ? input.tool_input : {};
   const cmdDir = [toolInput.workdir, toolInput.cwd, cwdIn].find((v) => typeof v === "string" && v.length);
   const cwd = cmdDir && (samePath(cmdDir, root) || isUnder(cmdDir, root)) ? resolve(cmdDir) : root;
-  const hit = (candidate, base) => {
+  const hit = (candidate, base, { ancestor = false } = {}) => {
     // Compared by REAL path, so an alias link to the artifact or its parent
     // still matches (CR-004).
     const abs = canonical(isAbsolute(candidate) ? resolve(candidate) : resolve(base, candidate), root);
     for (const g of generated) {
       if (samePath(abs, g.abs) || (g.kind === "dir" && isUnder(abs, g.abs))) return g.rel;
+      if (ancestor && isUnder(g.abs, abs)) return g.rel;
     }
     return null;
   };
