@@ -1,0 +1,24 @@
+{
+  "kind": "table",
+  "id": "table:db/jobs",
+  "title": "jobs (db)",
+  "description": "Jobs posted by organisations.",
+  "resource": [
+    "supabase/migrations/0001_init.sql"
+  ],
+  "refs": [],
+  "facts": {
+    "namespace": "db",
+    "columns": [
+      {
+        "name": "id",
+        "type": "uuid"
+      },
+      {
+        "name": "title",
+        "type": "text"
+      }
+    ],
+    "createdIn": "0001_init.sql"
+  }
+}

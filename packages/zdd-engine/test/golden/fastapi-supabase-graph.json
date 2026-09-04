@@ -1,0 +1,93 @@
+{
+  "schema": "zdd-graph/1",
+  "name": "Fixture FastAPI",
+  "repoBase": "",
+  "nodes": [
+    {
+      "id": "map/features/jobs",
+      "layer": "map",
+      "type": "Feature",
+      "title": "Jobs",
+      "description": "Job listings and the offers made against them.",
+      "resource": "api/routes",
+      "tags": [
+        "jobs"
+      ],
+      "body": "\nThe jobs feature: read a job, post an offer.\n\n- [jobs table](../../metadata/table/db--jobs.json)\n- [/jobs/{id}](../../metadata/route/jobs--_id.json)\n"
+    },
+    {
+      "id": "metadata/route/jobs--_id",
+      "layer": "metadata",
+      "recordId": "route:/jobs/{id}",
+      "type": "API Endpoint",
+      "title": "/jobs/{id}",
+      "description": "Fetch one job by id.",
+      "resource": "api/routes/jobs.py",
+      "tags": [
+        "jobs"
+      ],
+      "body": "Fetch one job by id.\n\n# Methods\n\n- `GET`\n- `DELETE`\n\n# References\n\n- [table:db/jobs](/metadata/table/db--jobs.json)\n"
+    },
+    {
+      "id": "metadata/route/offers",
+      "layer": "metadata",
+      "recordId": "route:/offers",
+      "type": "API Endpoint",
+      "title": "/offers",
+      "description": "Create an offer against a job.",
+      "resource": "main.py",
+      "tags": [
+        "offers"
+      ],
+      "body": "Create an offer against a job.\n\n# Methods\n\n- `POST`\n\n# References\n\n- [table:db/offers](/metadata/table/db--offers.json)\n"
+    },
+    {
+      "id": "metadata/table/db--jobs",
+      "layer": "metadata",
+      "recordId": "table:db/jobs",
+      "type": "Table",
+      "title": "jobs (db)",
+      "description": "Jobs posted by organisations.",
+      "resource": "supabase/migrations/0001_init.sql",
+      "tags": [
+        "jobs"
+      ],
+      "body": "Jobs posted by organisations.\n\n# Columns (db)\n\n| column | type |\n| --- | --- |\n| id | uuid |\n| title | text |\n"
+    },
+    {
+      "id": "metadata/table/db--offers",
+      "layer": "metadata",
+      "recordId": "table:db/offers",
+      "type": "Table",
+      "title": "offers (db)",
+      "description": "Offers made against jobs.",
+      "resource": "supabase/migrations/0001_init.sql",
+      "tags": [
+        "db"
+      ],
+      "body": "Offers made against jobs.\n\n# Columns (db)\n\n| column | type |\n| --- | --- |\n| id | uuid |\n| job_id → jobs(id) | uuid |\n\n# References\n\n- [table:db/jobs](/metadata/table/db--jobs.json)\n"
+    }
+  ],
+  "edges": [
+    {
+      "source": "map/features/jobs",
+      "target": "metadata/table/db--jobs"
+    },
+    {
+      "source": "map/features/jobs",
+      "target": "metadata/route/jobs--_id"
+    },
+    {
+      "source": "metadata/route/jobs--_id",
+      "target": "metadata/table/db--jobs"
+    },
+    {
+      "source": "metadata/route/offers",
+      "target": "metadata/table/db--offers"
+    },
+    {
+      "source": "metadata/table/db--offers",
+      "target": "metadata/table/db--jobs"
+    }
+  ]
+}

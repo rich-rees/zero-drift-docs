@@ -1,0 +1,25 @@
+{
+  "kind": "route",
+  "id": "route:/jobs/{id}",
+  "title": "/jobs/{id}",
+  "description": "Fetch one job by id.",
+  "resource": [
+    "api/routes/jobs.py"
+  ],
+  "refs": [
+    "table:db/jobs"
+  ],
+  "facts": {
+    "methods": [
+      "GET",
+      "DELETE"
+    ],
+    "dynamicSegments": [
+      "id"
+    ],
+    "handlers": [
+      "delete_job",
+      "read_job"
+    ]
+  }
+}

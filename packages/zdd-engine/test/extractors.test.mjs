@@ -100,6 +100,18 @@ test("fastapi + supabase: prefix-aware router routes, app routes, tables from mi
   rmSync(repo, { recursive: true, force: true });
 });
 
+test("CR-097: fastapi + supabase fixture equals its committed goldens (metadata tree, graph.json, agent-index.md)", () => {
+  // Goldens under test/golden/fastapi-supabase-*; regenerate only as a
+  // deliberate, narrated step (command in test/golden/README.md).
+  const repo = mkRepo(FIXTURE_FASTAPI);
+  run(repo, ["derive"]);
+  run(repo, ["render"]);
+  assertTreesEqual(tree(join(repo, "zdd", "metadata")), tree(join(PKG, "test", "golden", "fastapi-supabase-metadata")), "fastapi metadata vs golden");
+  assert.equal(readFileSync(join(repo, "zdd", "graph.json"), "utf8"), readFileSync(join(PKG, "test", "golden", "fastapi-supabase-graph.json"), "utf8"));
+  assert.equal(readFileSync(join(repo, "zdd", "agent-index.md"), "utf8"), readFileSync(join(PKG, "test", "golden", "fastapi-supabase-agent-index.md"), "utf8"));
+  rmSync(repo, { recursive: true, force: true });
+});
+
 test("greenfield: config only, no source dirs — derive/render/lint and both --checks exit 0, metadata empty, roots reported", () => {
   const repo = mkRepo(FIXTURE_GREENFIELD);
   const { status, stdout, stderr } = spawnSync(process.execPath, [BIN, "derive", "--verbose"], { cwd: repo, encoding: "utf8" });

@@ -1,0 +1,27 @@
+{
+  "kind": "table",
+  "id": "table:db/offers",
+  "title": "offers (db)",
+  "description": "Offers made against jobs.",
+  "resource": [
+    "supabase/migrations/0001_init.sql"
+  ],
+  "refs": [
+    "table:db/jobs"
+  ],
+  "facts": {
+    "namespace": "db",
+    "columns": [
+      {
+        "name": "id",
+        "type": "uuid"
+      },
+      {
+        "name": "job_id",
+        "type": "uuid",
+        "references": "jobs(id)"
+      }
+    ],
+    "createdIn": "0001_init.sql"
+  }
+}

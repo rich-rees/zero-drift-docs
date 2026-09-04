@@ -1,0 +1,21 @@
+{
+  "kind": "route",
+  "id": "route:/offers",
+  "title": "/offers",
+  "description": "Create an offer against a job.",
+  "resource": [
+    "main.py"
+  ],
+  "refs": [
+    "table:db/offers"
+  ],
+  "facts": {
+    "methods": [
+      "POST"
+    ],
+    "dynamicSegments": [],
+    "handlers": [
+      "create_offer"
+    ]
+  }
+}
