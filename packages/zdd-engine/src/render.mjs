@@ -28,7 +28,7 @@ import { parseFrontmatter } from "./lib/frontmatter.mjs";
 import { changedTerms, parseNameStatus } from "./lib/store-changes.mjs";
 import { refreshOriginBase } from "./lib/fetch-freshness.mjs";
 import { buildAdrIndex } from "./lib/adr-index.mjs";
-import { loadConfig, resolveViewer, resolveNonAreaTags, validateRepoBase } from "./lib/config.mjs";
+import { loadConfig, resolveViewer, resolveNonAreaTags, validateRepoBase, absentStoreNotes } from "./lib/config.mjs";
 import { loadViewer, DEFAULT_VIEWER } from "./viewers/index.mjs";
 
 // Per-run state, set by run() from the adopter's config: repo root, artifact
@@ -642,6 +642,9 @@ export async function run(args) {
   }
   NON_AREA_TAGS = nonArea.tags;
   for (const d of nonArea.diagnostics) console.error(d);
+  // A missing store dir renders as empty; name it when the bundle is
+  // otherwise populated, so a typo is not mistaken for greenfield (CR-068/099).
+  for (const note of absentStoreNotes(REPO, PATHS, ["adrDir", "mapDir", "metadataDir"])) console.error(note);
   // Refuse an unknown viewer before any store is read: the error names the
   // registry so the fix is a config edit, not a source dig.
   try {

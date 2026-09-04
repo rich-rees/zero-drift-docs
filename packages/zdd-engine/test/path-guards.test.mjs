@@ -260,3 +260,40 @@ test("CR-060: a symlink inside metadataDir is neither read, overwritten nor prun
   assert.match(run(repo, ["derive", "--check"]), /in sync/);
   rmSync(repo, { recursive: true, force: true });
 });
+
+// ---------------------------------------------------------------------------
+// CR-068 / CR-099: a mistyped store dir lints and renders as an empty corpus,
+// indistinguishable from greenfield. One stderr line when the bundle is
+// otherwise populated; silence — and exit 0 — when it is truly greenfield.
+// ---------------------------------------------------------------------------
+
+const FIXTURE_GREENFIELD = join(PKG, "test", "fixture-greenfield");
+const spawn = (repo, args) => spawnSync(process.execPath, [BIN, ...args], { cwd: repo, encoding: "utf8" });
+
+test("CR-068/CR-099: an absent store dir in a populated bundle is noted on stderr by lint and render, exit 0; greenfield stays silent", () => {
+  const repo = mkRepo(FIXTURE);
+  run(repo, ["derive"]);
+  withPaths(repo, { adrDir: "zdd/decisions" }); // typo for zdd/adr
+  let out = spawn(repo, ["lint"]);
+  assert.equal(out.status, 0, out.stderr);
+  assert.match(out.stderr, /^WARNING: paths\.adrDir 'zdd\/decisions' does not exist.*not greenfield/m, out.stderr);
+  assert.match(out.stdout, /store lints passed/);
+  out = spawn(repo, ["render"]);
+  assert.equal(out.status, 0, out.stderr);
+  assert.match(out.stderr, /^WARNING: paths\.adrDir 'zdd\/decisions' does not exist/m, out.stderr);
+  // The same note for a mistyped map or metadata dir (render reads all three).
+  withPaths(repo, { mapDir: "zdd/maps" });
+  out = spawn(repo, ["render"]);
+  assert.equal(out.status, 0, out.stderr);
+  assert.match(out.stderr, /^WARNING: paths\.mapDir 'zdd\/maps' does not exist/m, out.stderr);
+  assert.ok(!/^WARNING: paths\.adrDir/m.test(out.stderr), "only the absent one gets a line");
+  rmSync(repo, { recursive: true, force: true });
+
+  const green = mkRepo(FIXTURE_GREENFIELD);
+  for (const args of [["derive"], ["lint"], ["render"]]) {
+    const o = spawn(green, args);
+    assert.equal(o.status, 0, o.stderr);
+    assert.ok(!/WARNING/.test(o.stderr), `${args[0]} on greenfield: ${o.stderr}`);
+  }
+  rmSync(green, { recursive: true, force: true });
+});
