@@ -126,19 +126,31 @@ export function loadConfig(root) {
   return readConfig(root).config;
 }
 
-// A repo-relative path: a non-empty string, no scheme, not absolute (POSIX or
-// Windows), no `..` segment, no control characters. Returns the POSIX form.
-export function repoRelative(value, label) {
+// A repo-relative path, in the engine's language
+// (packages/zdd-engine/src/lib/paths.mjs, CR-079): a non-empty string with no
+// whitespace or control character anywhere, no leading `/`, no drive letter,
+// no URL scheme, no `..` segment. Returns the normal form — `.`-segments and
+// empty segments dropped, "." for the repo root itself (the engine's
+// convention; a caller that cannot use the root says so — see artifactPaths).
+//
+// `exact` is the engine byte-for-byte: a backslash is refused. That is the
+// mode for anything read back from zdd/config.json, so the fence never guards
+// a path the engine will refuse to write. The default additionally accepts
+// Windows separators and normalises them — for a path a person TYPED as a
+// bootstrap answer, which bootstrap writes to config in the normal form
+// (bootstrap.test: "equivalent spellings are one path"). A test holds the
+// exact mode and the engine together.
+export function repoRelative(value, label, { exact = false } = {}) {
   if (typeof value !== "string" || !value.length) throw new Error(`${label}: must be a non-empty string`);
-  if (/[\x00-\x1f\x7f]/.test(value)) throw new Error(`${label}: contains control characters`);
-  const p = posixify(value).replace(/\/+$/, "");
-  if (isAbsolute(value) || /^[a-zA-Z]:/.test(p) || p.startsWith("/") || p.startsWith("\\") || /^[a-z][a-z0-9+.-]*:/i.test(p)) {
-    throw new Error(`${label}: must be repo-relative, got ${JSON.stringify(value)}`);
+  if (/[\s\x00-\x1f\x7f]/.test(value)) throw new Error(`${label}: must not contain whitespace or control characters, got ${JSON.stringify(value)}`);
+  if (exact && value.includes("\\")) throw new Error(`${label}: must use '/' separators, no backslash, got ${JSON.stringify(value)}`);
+  const p = exact ? value : posixify(value);
+  if (p.startsWith("/") || /^[A-Za-z]:/.test(p) || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(p)) {
+    throw new Error(`${label}: must be repo-relative (no absolute path, drive letter or URL scheme), got ${JSON.stringify(value)}`);
   }
   const segs = p.split("/").filter((s) => s !== "" && s !== ".");
   if (segs.some((s) => s === "..")) throw new Error(`${label}: must not contain '..', got ${JSON.stringify(value)}`);
-  if (!segs.length) throw new Error(`${label}: must not be the repo root`);
-  return segs.join("/");
+  return segs.length ? segs.join("/") : ".";
 }
 
 // Every artifact path, validated, keyed by the nine names the engine knows.
@@ -170,7 +182,10 @@ export function artifactPaths(config, { lenient = false } = {}) {
   for (const [key, fallback] of Object.entries(DEFAULT_PATHS)) {
     const value = configured[key] === undefined ? fallback : configured[key];
     try {
-      out[key] = repoRelative(value, `paths.${key}`);
+      const rel = repoRelative(value, `paths.${key}`, { exact: true }); // config values: the engine's language exactly (CR-079)
+      // The plugin's own extra rule (not the engine's): an artifact is never the checkout itself.
+      if (rel === ".") throw new Error(`paths.${key}: must not be the repo root`);
+      out[key] = rel;
     } catch (e) {
       if (!lenient) throw e;
       out[key] = fallback;
