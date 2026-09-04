@@ -17,15 +17,20 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
+        node: ["20", "22"]
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: ${{ matrix.node }}
+      # bash on both runners: Node 20's --test takes file paths, not glob
+      # patterns (22 accepts either), so the shell expands the glob.
       - name: Engine tests (determinism, goldens, extractors, viewers)
         working-directory: packages/zdd-engine
-        run: node --test "test/*.test.mjs"
+        shell: bash
+        run: node --test test/*.test.mjs
       - name: Plugin tests (runbook, hooks, skew, manifests)
-        run: node --test "plugins/zdd/test/*.test.mjs"
+        shell: bash
+        run: node --test plugins/zdd/test/*.test.mjs
