@@ -51,7 +51,11 @@ function toBundle(graph, docs, changed, options, repoBase) {
       size: 30 + Math.min(60, Math.floor(n.body.length / 200)),
     },
   }));
-  const edges = graph.edges.map((e) => ({ data: { id: `${e.source}__${e.target}`, source: e.source, target: e.target } }));
+  // Edge id: injective in (source, target). Node ids may contain `__`, so the
+  // plain `source__target` join was ambiguous and cytoscape silently drops a
+  // second element with a duplicate id (CR-069); the length prefix pins the
+  // split. viz.js never parses edge ids — it reads data.source / data.target.
+  const edges = graph.edges.map((e) => ({ data: { id: `${e.source.length}:${e.source}__${e.target}`, source: e.source, target: e.target } }));
   const bodies = Object.fromEntries(graph.nodes.map((n) => [n.id, n.body]));
   const types = [...new Set(graph.nodes.map((n) => n.type))].sort();
   return {

@@ -386,6 +386,31 @@ test("CONTRIBUTING names the graph schema and the registry step", () => {
   assert.ok(text.includes("zdd/graph.json"));
 });
 
+test("CR-069: cytoscape edge ids are injective — two edges that collide under `source__target` stay distinct", async () => {
+  // Node ids are bundle-relative paths (map files, record slugs) and may
+  // contain `__`. Every id starts with its layer (`map/`, `metadata/`), so a
+  // collision under `${source}__${target}` needs `__map/` inside an id — a
+  // map directory called `a__map` — contrived, hence P3, but legal, and
+  // cytoscape silently drops the second element with a duplicate id.
+  //   (map/a -> map/b__map/c)  and  (map/a__map/b -> map/c)  both read
+  //   `map/a__map/b__map/c`.
+  const { render } = await import("../src/viewers/cytoscape/index.mjs");
+  const node = (id) => ({ id, title: id, type: "Feature", description: "", resource: `${id}.md`, tags: [], layer: "map", body: "" });
+  const graph = {
+    schema: "zdd-graph/1",
+    nodes: [node("map/a"), node("map/b__map/c"), node("map/a__map/b"), node("map/c")],
+    edges: [
+      { source: "map/a", target: "map/b__map/c" },
+      { source: "map/a__map/b", target: "map/c" },
+    ],
+  };
+  const html = render({ graph, docs: { glossary: "", adrs: [] }, changed: { adrs: [], terms: [] }, options: {}, bundleName: "T", repoBase: "" });
+  const bundle = JSON.parse(/window\.BUNDLE = (.*);\n/.exec(html)[1]);
+  const ids = bundle.edges.map((e) => e.data.id);
+  assert.equal(new Set(ids).size, ids.length, `edge ids collide: ${ids.join(", ")}`);
+  assert.deepEqual(bundle.edges.map((e) => [e.data.source, e.data.target]), [["map/a", "map/b__map/c"], ["map/a__map/b", "map/c"]]);
+});
+
 test("CR-007: source-derived markdown cannot execute script in the Cytoscape viewer", () => {
   // Same load order as viz.html: the vendored marked, then the sanitiser, in
   // one browser-like global scope.
