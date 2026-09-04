@@ -30,7 +30,12 @@ each what it needs, off **seven artifacts** — the design test for every fact:
 > **Document only what grep cannot find and code cannot say.**
 
 Four are **curated** (they can rot, so a per-PR ritual + CI watch them) and three are
-**generated** (rot-proof by construction, never hand-edited):
+**generated** (rot-proof by construction, never hand-edited). The count is by
+*role*, not by file: the generated half also lands on disk as `zdd/adr-index.md`
+(the ADRs' index, rendered) and `zdd/graph.json` (the machine form of the whole
+generated half — schema `zdd-graph/1` — from which the human index is rendered).
+Both are mandatory outputs of `render` and both are fenced, but they are forms
+of artifacts 5–7, not an eighth and ninth.
 
 | # | Artifact | Kind | Home |
 |---|----------|------|------|
