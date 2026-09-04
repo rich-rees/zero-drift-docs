@@ -125,12 +125,28 @@ export function repoRelative(value, label) {
   return segs.join("/");
 }
 
-// Every artifact path, validated. Throws on a bad one — hooks catch and stay
-// silent, bootstrap reports and stops.
-export function artifactPaths(config) {
-  const merged = { ...DEFAULT_PATHS, ...(config?.paths ?? {}) };
+// Every artifact path, validated, keyed by the nine names the engine knows.
+// Unknown `paths.*` keys are ignored: the engine does not read them, and one
+// stray key must never decide the fate of the others (CR-070).
+//
+// Two modes. Strict (the default, bootstrap): the first bad value throws, so
+// nothing is written over a config the adopter has to fix. Lenient (the
+// hooks): each key is judged on its own and a bad value falls back to its
+// default — a fence that switched itself off over one typo would be the one
+// failure mode worse than a noisy one.
+export function artifactPaths(config, { lenient = false } = {}) {
+  const given = config?.paths;
+  const configured = given && typeof given === "object" && !Array.isArray(given) ? given : {};
   const out = {};
-  for (const [key, value] of Object.entries(merged)) out[key] = repoRelative(value, `paths.${key}`);
+  for (const [key, fallback] of Object.entries(DEFAULT_PATHS)) {
+    const value = configured[key] === undefined ? fallback : configured[key];
+    try {
+      out[key] = repoRelative(value, `paths.${key}`);
+    } catch (e) {
+      if (!lenient) throw e;
+      out[key] = fallback;
+    }
+  }
   return out;
 }
 
