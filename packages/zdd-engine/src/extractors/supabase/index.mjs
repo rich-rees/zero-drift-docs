@@ -32,9 +32,18 @@ export function derive({ repoRoot, options }) {
 
   // ---- Schema replay (per namespace, independent) ----
   const schemas = new Map(); // ns -> { tables, functions, buckets, triggers }
+  const nsDirs = new Map(); // ns -> dir, to name both sides of a duplicate
   for (const { name: ns, dir: dirOpt } of migrationNamespaces) {
     if (typeof ns !== "string" || !ns) throw new Error(`supabase: every migrationNamespaces entry needs a string 'name'`);
     const dir = repoRelative(dirOpt, `supabase.migrationNamespaces[${ns}].dir`);
+    // Two entries with one name would replace each other in `schemas`: the
+    // first namespace's tables vanish and their metadata is pruned as
+    // orphaned (CR-064). Checked before the greenfield tolerance below so a
+    // missing first dir cannot hide the duplicate.
+    if (nsDirs.has(ns)) {
+      throw new Error(`supabase: migrationNamespaces: name '${ns}' is used twice (${nsDirs.get(ns)} and ${dir}) — every namespace needs its own name`);
+    }
+    nsDirs.set(ns, dir);
     const abs = join(repoRoot, dir);
     if (!existsSync(abs)) {
       diagnostics.push(`${ns}: ${dir} not found — nothing to inventory`);
