@@ -418,7 +418,34 @@ test("Pocock recommendation: names the plugin, the install route, and the conseq
 
 // --- upgrade ---------------------------------------------------------------------------
 
-const legacySnippet = "## Documentation — Zero-Drift Docs (ZDD)\n\nThis repo uses ZDD.\n\n- **Before building:** run `/zdd:orient`.\n- **Before finishing:** run `/zdd:update`.\n\n";
+// The snippet v0.3.1 shipped, byte for byte (git show v0.3.1:plugins/zdd/templates/claude-md-snippet.md).
+const legacySnippet = readFileSync(join(PLUGIN, "test", "fixtures", "v0.3.1", "claude-md-snippet.md"), "utf8") + "\n";
+
+test("upgrade replaces the pre-0.4 section only when it IS the v0.3.1 snippet modulo whitespace; an adopter's line inside it keeps the section (CR-080)", () => {
+  const stock = fresh("legacy-stock");
+  mkdirSync(join(stock, "zdd"));
+  writeFileSync(join(stock, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], engine: PLUGIN_VERSION }));
+  // Reflowed and CRLF: whitespace differences alone do not make it the adopter's.
+  const reflowed = legacySnippet.replace(/ +\n/g, "\n").replace(/([a-z,])\n([a-z`])/g, "$1 $2").replace(/\n/g, "\r\n");
+  writeFileSync(join(stock, "CLAUDE.md"), "# Repo\r\n\r\n" + reflowed + "## After\r\n\r\nkeep\r\n");
+  const j1 = JSON.parse(bootstrap(stock, ["upgrade", "--json"]));
+  const c1 = readFileSync(join(stock, "CLAUDE.md"), "utf8");
+  assert.ok(!c1.includes("/zdd:orient") && c1.includes("<!-- zdd:begin -->") && c1.includes("## After\r\n\r\nkeep"), c1);
+  assert.ok(j1.notes.some((n) => n.includes("replaced the pre-0.4 snippet")), JSON.stringify(j1.notes));
+
+  const edited = fresh("legacy-edited");
+  mkdirSync(join(edited, "zdd"));
+  writeFileSync(join(edited, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], engine: PLUGIN_VERSION }));
+  const mine = legacySnippet.trimEnd() + "\n- **House rule:** ADRs need two reviewers.\n\n";
+  const before = "# Repo\n\n" + mine + "## After\n\nkeep\n";
+  writeFileSync(join(edited, "CLAUDE.md"), before);
+  const j2 = JSON.parse(bootstrap(edited, ["upgrade", "--json"]));
+  const c2 = readFileSync(join(edited, "CLAUDE.md"), "utf8");
+  assert.ok(c2.startsWith(before), "the section with the adopter's line is kept verbatim");
+  assert.ok(c2.includes("House rule") && c2.includes("/zdd:orient"), "nothing of the adopter's text is lost");
+  assert.ok(c2.includes("<!-- zdd:begin -->"), "the marked block is appended instead");
+  assert.ok(j2.notes.some((n) => n.includes("CLAUDE.md") && n.includes("legacy section left in place")), JSON.stringify(j2.notes));
+});
 
 test("upgrade a v0.3.1 repo: adapter → extractors, every owned file rewritten and named, curated + generated artifacts untouched", () => {
   const repo = fresh("upgrade", join(ENGINE_FIXTURES, "fixture"));

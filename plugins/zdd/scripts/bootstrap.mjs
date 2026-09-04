@@ -68,9 +68,11 @@ const TEMPLATES = join(PLUGIN_ROOT, "templates");
 const SNIPPET_BEGIN = "<!-- zdd:begin -->";
 const SNIPPET_END = "<!-- zdd:end -->";
 const LEGACY_SNIPPET_HEADING = "## Documentation — Zero-Drift Docs (ZDD)";
-// The v0.3.1 snippet's fingerprint: the section must carry BOTH of these
-// bullets to be recognised as ours (CR-011). Anything else under that heading
-// is the adopter's and is left alone.
+// The v0.3.1 snippet's fingerprint. Replacement needs the whole section to
+// equal the v0.3.1 snippet modulo whitespace (CR-080, isLegacySnippet below);
+// the fingerprint only decides whether a section that is NOT replaced gets
+// the "legacy section left in place" note (both bullets present ⇒ it started
+// as ours and was edited) or is simply the adopter's own heading (CR-011).
 const LEGACY_FINGERPRINT = ["/zdd:orient", "/zdd:update"];
 // Ownership line carried by every file the plugin writes besides config.
 export const OWNER_MARK = "Managed by Zero-Drift Docs (zdd)";
@@ -475,6 +477,13 @@ const normaliseText = (s) =>
     .join("\n")
     .trim() + "\n";
 const isLegacyWorkflow = (text) => createHash("sha256").update(normaliseText(text)).digest("hex") === LEGACY_WORKFLOW_SHA256;
+// Same idea for the v0.3.1 CLAUDE.md snippet, compared modulo ALL whitespace
+// (editors reflow prose; a reflowed stock section is still stock — CR-080).
+// Regenerate with `git show v0.3.1:plugins/zdd/templates/claude-md-snippet.md`
+// through collapseWhitespace (fixture: test/fixtures/v0.3.1/claude-md-snippet.md).
+const LEGACY_SNIPPET_SHA256 = "d4dca24f9b590def6ba926a8bb6660b91b74e72bc792a1d1bc32c85aadcb887d";
+const collapseWhitespace = (s) => s.replace(/\s+/g, " ").trim();
+const isLegacySnippet = (text) => createHash("sha256").update(collapseWhitespace(text)).digest("hex") === LEGACY_SNIPPET_SHA256;
 
 // A marker counts only as a whole line (CR-011): `<!-- zdd:begin --> extra`
 // is not a marker.
@@ -508,23 +517,31 @@ export function upsertSnippet(existing, snippet) {
     return { text: next, changed: next !== existing, how: "refreshed" };
   }
   const h = existing.indexOf(LEGACY_SNIPPET_HEADING);
+  let legacyKept = false;
   if (h !== -1) {
     const after = existing.indexOf("\n## ", h + LEGACY_SNIPPET_HEADING.length);
     const end = after === -1 ? existing.length : after + 1;
     const section = existing.slice(h, end);
-    if (LEGACY_FINGERPRINT.every((f) => section.includes(f))) {
+    if (isLegacySnippet(section)) {
       const next = existing.slice(0, h) + body + existing.slice(end);
       return { text: next, changed: true, how: "replaced the pre-0.4 snippet" };
     }
-    // The heading is there but the content is not ours: leave it, append.
+    // The heading is there but the section is not the stock snippet — an
+    // adopter's line inside it, or their own section: leave it, append.
+    legacyKept = LEGACY_FINGERPRINT.every((f) => section.includes(f));
   }
   const sep = existing.endsWith("\n") ? (/\r?\n\r?\n$/.test(existing) ? "" : norm("\n")) : norm("\n\n");
-  return { text: existing + sep + body, changed: true, how: "appended" };
+  return {
+    text: existing + sep + body,
+    changed: true,
+    how: "appended",
+    note: legacyKept ? `legacy section left in place: the "${LEGACY_SNIPPET_HEADING}" section differs from the v0.3.1 snippet, so it is yours — fold what you want into the marked block and delete the rest by hand` : undefined,
+  };
 }
 
 function writeSnippet(ledger, file) {
   const existing = ledger.exists(file) ? ledger.read(file) : "";
-  const { text, changed, how } = upsertSnippet(existing, snippetText());
+  const { text, changed, how, note } = upsertSnippet(existing, snippetText());
   if (!changed) {
     ledger.kept.push(file);
     if (how.startsWith("refused")) ledger.notes.push(`${file}: ${how}`);
@@ -533,6 +550,7 @@ function writeSnippet(ledger, file) {
   if (existing) ledger.overwrite(file, text);
   else if (!ledger.create(file, text)) return;
   ledger.notes.push(`${file}: ${how} the ZDD instruction block`);
+  if (note) ledger.notes.push(`${file}: ${note}`);
 }
 
 function pinEngine(text, version) {
