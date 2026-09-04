@@ -11,6 +11,7 @@ import { readFileSync, writeFileSync, rmSync, mkdtempSync, mkdirSync, existsSync
 import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { FENCE_TOOLS } from "../scripts/lib/repo.mjs";
 
 const PLUGIN = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const FENCE = join(PLUGIN, "scripts", "fence.mjs");
@@ -410,6 +411,12 @@ test("manifests: Claude and Codex reference the same skills and hooks; hooks.jso
   }
   const pre = hooks.hooks.PreToolUse[0].matcher.split("|");
   for (const t of ["Write", "Edit", "Bash", "apply_patch", "shell_command"]) assert.ok(pre.includes(t), `matcher covers ${t}`);
+  // The matcher is exactly the union of the tool names the fence handles —
+  // derived from the fence's own tables, so neither can drift (CR-077).
+  const handled = [...FENCE_TOOLS.edit, ...FENCE_TOOLS.shell, ...FENCE_TOOLS.patch];
+  assert.deepEqual(new Set(pre), new Set(handled), "matcher == fence tool sets");
+  assert.equal(pre.length, new Set(pre).size, "no duplicate in the matcher");
+  for (const t of ["write_file", "edit_file", "exec_command", "local_shell"]) assert.ok(pre.includes(t), `matcher covers ${t}`);
   const market = JSON.parse(readFileSync(resolve(PLUGIN, "..", "..", ".claude-plugin", "marketplace.json"), "utf8"));
   assert.equal(market.plugins.find((p) => p.name === "zdd").version, claude.version);
   for (const s of ["bootstrap", "load", "update", "grill"]) assert.ok(existsSync(join(PLUGIN, "skills", s, "SKILL.md")), s);

@@ -24,11 +24,12 @@
 
 import { readFileSync, realpathSync, existsSync } from "node:fs";
 import { resolve, isAbsolute, dirname, relative, join } from "node:path";
-import { adopterRoot, readConfig, artifactPaths, resolveInside, samePath, isUnder } from "./lib/repo.mjs";
+import { adopterRoot, readConfig, artifactPaths, resolveInside, samePath, isUnder, FENCE_TOOLS } from "./lib/repo.mjs";
 
-const EDIT_TOOLS = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit", "write_file", "edit_file"]);
-const SHELL_TOOLS = new Set(["Bash", "PowerShell", "Shell", "shell", "shell_command", "exec_command", "local_shell"]);
-const PATCH_TOOLS = new Set(["apply_patch"]);
+// hooks.json's matcher is the union of these three (CR-077).
+const EDIT_TOOLS = new Set(FENCE_TOOLS.edit);
+const SHELL_TOOLS = new Set(FENCE_TOOLS.shell);
+const PATCH_TOOLS = new Set(FENCE_TOOLS.patch);
 
 // What counts as a write in a simple command (all case-insensitive). Only a
 // redirect DESTINATION and an explicit write verb's operands are candidates;
