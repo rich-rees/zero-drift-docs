@@ -1,0 +1,41 @@
+# Zero-Drift Docs — blocking CI check.
+#
+# Copy into the adopter repo's .github/workflows/ and require it in branch
+# protection (plus "require branches up to date before merge"). This is what
+# turns zero-drift from a habit into a gate: it re-runs the deriver and renderer
+# in --check mode and fails if the committed artifacts don't match source.
+#
+# No LLM in CI, by design — this job is deterministic and secret-free. It calls
+# the same @rich-rees/zdd-engine the plugin's skills call, so CI and the agent
+# can never disagree about what "fresh" means.
+
+name: zdd
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  zero-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history: the renderer's changed-set highlight and the freshness
+          # diff both need origin/<baseBranch> and the store files' history.
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Codebase metadata matches source
+        run: npx -y @rich-rees/zdd-engine derive --check
+
+      - name: Indexes match their inputs
+        run: npx -y @rich-rees/zdd-engine render --check
+
+      - name: Store lints (supersession symmetry, etc.)
+        run: npx -y @rich-rees/zdd-engine lint
+
+      - name: Semantic-map freshness (advisory)
+        run: npx -y @rich-rees/zdd-engine freshness >> "$GITHUB_STEP_SUMMARY"

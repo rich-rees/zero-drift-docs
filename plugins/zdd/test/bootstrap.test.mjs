@@ -491,6 +491,37 @@ test("upgrade leaves alone what it does not own: a customised legacy section, an
   }
 });
 
+test("upgrade recognises the exact v0.3.1 workflow (no owner line, floating npx) as ours and replaces it with the pinned template (CR-081)", () => {
+  const v031 = readFileSync(join(PLUGIN, "test", "fixtures", "v0.3.1", "zdd.yml"), "utf8");
+  const template = readFileSync(join(PLUGIN, "templates", "zdd.yml"), "utf8");
+  for (const [label, text] of [
+    ["LF", v031],
+    ["CRLF", v031.replace(/\n/g, "\r\n")],
+    ["trailing whitespace", v031.replace(/\n/g, "  \n") + "\n\n"],
+  ]) {
+    const repo = fresh(`upgrade-v031-${label.replace(/\s/g, "-")}`);
+    mkdirSync(join(repo, "zdd"));
+    writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], engine: PLUGIN_VERSION }));
+    mkdirSync(join(repo, ".github", "workflows"), { recursive: true });
+    writeFileSync(join(repo, ".github", "workflows", "zdd.yml"), text);
+    const out = bootstrap(repo, ["upgrade"]);
+    assert.equal(readFileSync(join(repo, ".github", "workflows", "zdd.yml"), "utf8"), template, label);
+    assert.match(out, /changed \.github\/workflows\/zdd\.yml/, label);
+    assert.match(out, /v0\.3\.1 workflow.*replaced/i, label);
+    assert.ok(template.includes(`@rich-rees/zdd-engine@${PLUGIN_VERSION}`) && template.includes(OWNER));
+  }
+  // One edit away from v0.3.1 is the adopter's: left untouched and called out.
+  const edited = fresh("upgrade-v031-edited");
+  mkdirSync(join(edited, "zdd"));
+  writeFileSync(join(edited, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], engine: PLUGIN_VERSION }));
+  mkdirSync(join(edited, ".github", "workflows"), { recursive: true });
+  const mine = v031.replace("node-version: \"20\"", "node-version: \"22\"");
+  writeFileSync(join(edited, ".github", "workflows", "zdd.yml"), mine);
+  const j = JSON.parse(bootstrap(edited, ["upgrade", "--json"]));
+  assert.equal(readFileSync(join(edited, ".github", "workflows", "zdd.yml"), "utf8"), mine);
+  assert.ok(j.kept.some((k) => k.startsWith(".github/workflows/zdd.yml") && k.includes("not managed")), JSON.stringify(j.kept));
+});
+
 test("upgrade refuses a repo that never adopted, a config it cannot read, and a mixed adapter+extractors config", () => {
   const repo = fresh("never");
   assert.match(bootstrapFails(repo, ["upgrade"]), /nothing to upgrade/);
