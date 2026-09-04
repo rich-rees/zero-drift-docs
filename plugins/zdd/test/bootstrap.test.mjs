@@ -141,6 +141,23 @@ test("detect: a source file over 1 MiB is not read (CR-091); the same convention
   assert.deepEqual(j2.proposals.find((p) => p.name === "fastapi").options, { roots: ["api"] });
 });
 
+test("narration never emits control characters from repo-derived strings (CR-092)", async () => {
+  // Windows refuses such names on disk, so the narrator is driven directly with
+  // what a POSIX checkout could hand it: an ANSI escape and a newline in a path.
+  const { narrateDetect, narrateApply, narrateUpgrade } = await import(`file://${SCRIPT.replace(/\\/g, "/")}`);
+  const evil = "apps/\x1b[31mred\x1b[0m/migrations\nnote    FAKE LINE";
+  const d = { mode: "existing", sourceFiles: 1, proposals: [{ name: "supabase", evidence: [`SQL migrations under \`${evil}\` (1 file)`], options: { migrationNamespaces: [{ name: "db", dir: evil }] } }], apps: [{ name: "x\x07", evidence: "e", extractor: "f" }] };
+  const pocock = { installed: false, hits: [], searched: [] };
+  for (const text of [
+    narrateDetect(d, pocock),
+    narrateApply({ mode: "existing", version: "1.0.0", date: DATE, wrote: [evil], kept: [], skipped: [], notes: [`${evil}: kept`], optIns: { ci: true }, pocock }),
+    narrateUpgrade({ version: "1.0.0", wrote: [], kept: [evil], notes: [] }),
+  ]) {
+    assert.ok(!/[\x00-\x09\x0b-\x1f\x7f]/.test(text), JSON.stringify(text));
+    assert.ok(!text.split("\n").some((l) => l.startsWith("note    FAKE")), "a newline in a path cannot forge a ledger line");
+  }
+});
+
 // --- existing codebase ---------------------------------------------------------
 
 test("apply on the FastAPI+Supabase fixture with all defaults: config, owned workflow, hook registrations, snippet, dated ADR-0001", () => {

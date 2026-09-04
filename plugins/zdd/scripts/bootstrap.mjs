@@ -812,9 +812,15 @@ export function upgrade(root) {
 }
 
 // ---------------------------------------------------------------------------
-// Narration
+// Narration. Every line is one ledger entry; evidence and paths inside it come
+// from the checkout (directory names, config values), which on POSIX may hold
+// a newline or an ANSI escape. The skill reads this output, so a control
+// character is replaced before it can forge a line or restyle the terminal
+// (CR-092). `--json` output is JSON-quoted and needs no such step.
 // ---------------------------------------------------------------------------
-function narrateDetect(d, pocock) {
+const printable = (line) => line.replace(/[\x00-\x1f\x7f]/g, "?");
+
+export function narrateDetect(d, pocock) {
   const out = [];
   if (d.mode === "greenfield") {
     out.push("Mode: GREENFIELD — no source to read. Ask for the intended stack and configure extractors ahead of the code.");
@@ -828,7 +834,7 @@ function narrateDetect(d, pocock) {
     for (const a of d.apps) out.push(`  - map only: ${a.name} — ${a.evidence}; extractor ${a.extractor}`);
   }
   out.push(narratePocock(pocock));
-  return out.join("\n");
+  return out.map(printable).join("\n");
 }
 
 function narratePocock(p) {
@@ -841,7 +847,7 @@ function narratePocock(p) {
   );
 }
 
-function narrateApply(r) {
+export function narrateApply(r) {
   const out = [`Bootstrap (${r.mode}) — plugin ${r.version}, ${r.date}`];
   for (const f of r.wrote) out.push(`  wrote   ${f}`);
   for (const f of r.kept) out.push(`  kept    ${f}`);
@@ -862,16 +868,16 @@ function narrateApply(r) {
     );
   }
   out.push(narratePocock(r.pocock));
-  return out.join("\n");
+  return out.map(printable).join("\n");
 }
 
-function narrateUpgrade(r) {
+export function narrateUpgrade(r) {
   const out = [`Upgrade to plugin ${r.version}`];
   if (!r.wrote.length) out.push("  nothing to change — every plugin-owned file is already at this version");
   for (const f of r.wrote) out.push(`  changed ${f}`);
   for (const f of r.kept) out.push(`  kept    ${f}`);
   for (const n of r.notes) out.push(`  note    ${n}`);
-  return out.join("\n");
+  return out.map(printable).join("\n");
 }
 
 // ---------------------------------------------------------------------------
