@@ -97,7 +97,9 @@ test("fence: a symlinked artifact is dropped on its own, the rest stay fenced; a
   symlinkSync(join(linked, "zdd"), join(scratch, "outside-alias"), "junction");
   blocked(r(join(scratch, "outside-alias", "graph.json")), "outside alias into the checkout");
   silent(r(join(linked, "zdd", "adr-index.md")), "the symlinked one is not vouched for");
-  // A path outside the checkout is compared as text, never probed (CR-052).
+  // A path on another drive (a mapped share, perhaps) is compared as text, never probed (CR-057).
+  if (process.platform === "win32") silent(runHook(FENCE, { tool_name: "Bash", tool_input: { command: "rm Q:\\\\nowhere\\\\zdd\\\\graph.json" } }, { projectDir: linked }), "other drive");
+  // A UNC or device path is compared as text, never probed (CR-052).
   silent(runHook(FENCE, { tool_name: "Bash", tool_input: { command: "rm \\\\\\\\nowhere.invalid\\\\share\\\\zdd\\\\graph.json" } }, { projectDir: linked }), "UNC path");
 });
 

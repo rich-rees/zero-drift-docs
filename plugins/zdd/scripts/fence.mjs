@@ -67,8 +67,12 @@ function tokens(command) {
 // alias link out there can point back at an artifact (CR-055); the command
 // about to run would touch that path anyway.
 const REMOTE_OR_DEVICE = /^(\\\\|\/\/)/;
-function canonical(abs) {
+const driveOf = (p) => (/^[a-zA-Z]:/.test(p) ? p[0].toLowerCase() : "");
+function canonical(abs, root) {
   if (REMOTE_OR_DEVICE.test(abs)) return abs;
+  // A different drive letter may be a mapped network share (CR-057): compare
+  // as text. An alias on the checkout's own drive is still followed (CR-055).
+  if (root && driveOf(abs) !== driveOf(root)) return abs;
   let probe = abs;
   const rest = [];
   while (!existsSync(probe)) {
@@ -128,7 +132,7 @@ function main() {
   const hit = (candidate, base) => {
     // Compared by REAL path, so an alias link to the artifact or its parent
     // still matches (CR-004).
-    const abs = canonical(isAbsolute(candidate) ? resolve(candidate) : resolve(base, candidate));
+    const abs = canonical(isAbsolute(candidate) ? resolve(candidate) : resolve(base, candidate), root);
     for (const g of generated) {
       if (samePath(abs, g.abs) || (g.kind === "dir" && isUnder(abs, g.abs))) return g.rel;
     }
