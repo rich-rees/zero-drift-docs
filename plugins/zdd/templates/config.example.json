@@ -1,5 +1,5 @@
 {
-  "$comment": "Example zdd/config.json for a Next.js + Supabase repo. Values only — nothing here is required beyond 'extractors'; every path shown under 'paths' is already the default. Compose extractors per convention: a FastAPI + Supabase repo lists [\"supabase\", \"fastapi\"]; a stack with no extractor yet lists [\"generic\"].",
+  "$comment": "Example zdd/config.json for a Next.js + Supabase repo. Values only — nothing here is required beyond 'extractors'; every path shown under 'paths' is already the default. Compose extractors per convention: a FastAPI + Supabase repo lists [\"supabase\", \"fastapi\"]; a stack with no extractor yet lists [\"generic\"]. An extractorOptions block is only read when its extractor is listed — the 'fastapi' block below is inert here.",
   "extractors": ["supabase", "nextjs"],
   "name": "My App",
   "repoBase": "https://github.com/my-org/my-app/tree/main/",
@@ -27,7 +27,6 @@
       }
     },
     "fastapi": {
-      "$comment": "Only read when 'fastapi' is listed above.",
       "roots": ["main.py", "api"],
       "appVar": "app"
     }

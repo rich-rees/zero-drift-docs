@@ -74,6 +74,11 @@ test("the validator itself is honest: a known-bad and a known-good shape", () =>
   assert.throws(() => validate({ minLength: 1 }, "x"), /not implemented/);
 });
 
+test("templates/config.example.json validates against templates/config.schema.json (CR-102)", () => {
+  const example = JSON.parse(readFileSync(join(PLUGIN, "templates", "config.example.json"), "utf8"));
+  assert.deepEqual(validate(SCHEMA, example), []);
+});
+
 test("a config with both `extractors` and `adapter` is invalid under the schema, exactly as the engine refuses it (CR-082)", () => {
   const mixed = { extractors: ["generic"], adapter: "nextjs-supabase" };
   assert.notDeepEqual(validate(SCHEMA, mixed), [], "schema must refuse the mixed shape");
