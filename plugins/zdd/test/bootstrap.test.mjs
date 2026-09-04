@@ -215,6 +215,10 @@ test("the written workflow: exact ordered command list, the pin once in env, rea
   const checkout = job.slice(job.indexOf("actions/checkout"), job.indexOf("actions/setup-node"));
   assert.match(checkout, /^\s+persist-credentials: false$/m, "checkout does not persist credentials");
   assert.match(checkout, /^\s+fetch-depth: 0$/m, "full history is still fetched");
+  // Actions are pinned to a full commit SHA with the tag as a comment (CR-110).
+  const uses = lines.filter((l) => /^\s*-\s*uses:/.test(l)).map((l) => l.replace(/^\s*-\s*uses:\s*/, ""));
+  assert.equal(uses.length, 2, uses.join("\n"));
+  for (const u of uses) assert.match(u, /^actions\/(checkout|setup-node)@[0-9a-f]{40} # v\d+\.\d+\.\d+$/, u);
 });
 
 test("apply is idempotent and byte-stable: a second run keeps everything; two fresh runs produce identical trees", () => {
