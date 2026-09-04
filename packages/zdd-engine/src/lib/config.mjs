@@ -222,11 +222,20 @@ const isPlainObject = (v) => v !== null && typeof v === "object" && !Array.isArr
 export function resolveExtractors(config) {
   const diagnostics = [];
   const hasNew = config.extractors !== undefined;
-  const hasLegacy = config.adapter !== undefined || config.adapterOptions !== undefined;
   // Both forms at once would mean one silently wins and the other's options
   // are ignored (CR-019: 15 records quietly became 9). Refuse.
-  if (hasNew && hasLegacy) {
+  if (hasNew && config.adapter !== undefined) {
     return { error: `zdd/config.json has both 'adapter' and 'extractors' — keep 'extractors' + 'extractorOptions' and delete the deprecated 'adapter' / 'adapterOptions' keys` };
+  }
+  // The cross-tier options are the same hole one key over: `extractorOptions`
+  // beside `adapter` (or `adapterOptions` beside `extractors`) was read by
+  // nobody and ignored without a word (CR-117). The plugin's schema refuses
+  // the shape; the engine must agree.
+  if (config.adapter !== undefined && config.extractorOptions !== undefined) {
+    return { error: `zdd/config.json has both 'adapter' and 'extractorOptions' — keep one tier: 'extractors' + 'extractorOptions', or the deprecated 'adapter' + 'adapterOptions'` };
+  }
+  if (hasNew && config.adapterOptions !== undefined) {
+    return { error: `zdd/config.json has both 'extractors' and 'adapterOptions' — keep one tier: 'extractors' + 'extractorOptions', or the deprecated 'adapter' + 'adapterOptions'` };
   }
   if (hasNew) {
     const list = config.extractors;
