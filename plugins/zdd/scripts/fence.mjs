@@ -248,6 +248,7 @@ function main() {
     { rel: paths.adrIndex, kind: "file" },
     { rel: paths.humanIndex, kind: "file" },
   ]) {
+    if (!g.rel) continue; // no safe location for this key (CR-075)
     try {
       generated.push({ ...g, abs: canonical(resolveInside(root, g.rel, g.rel)) });
     } catch {

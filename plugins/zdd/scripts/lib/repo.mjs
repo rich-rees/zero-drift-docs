@@ -134,6 +134,19 @@ export function repoRelative(value, label) {
 // hooks): each key is judged on its own and a bad value falls back to its
 // default — a fence that switched itself off over one typo would be the one
 // failure mode worse than a noisy one.
+//
+// A generated path may not overlap anything the fence must leave alone
+// (CR-075): a generated dir equal to or above a curated path (glossary,
+// adrDir, mapDir) or zdd/config.json, a generated file that IS one of those,
+// or two keys sharing one value — otherwise the fence would block the very
+// file its reason text tells the agent to edit. Such a value is invalid the
+// same way an escaping one is: strict throws, lenient falls back.
+export const GENERATED_KEYS = ["metadataDir", "graph", "agentIndex", "adrIndex", "humanIndex"];
+export const CURATED_KEYS = ["glossary", "adrDir", "mapDir"];
+export const CONFIG_REL = "zdd/config.json";
+const samePosix = (a, b) => (process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b);
+const posixPrefix = (dir, p) => samePosix(dir, p) || (process.platform === "win32" ? p.toLowerCase().startsWith(dir.toLowerCase() + "/") : p.startsWith(dir + "/"));
+
 export function artifactPaths(config, { lenient = false } = {}) {
   const given = config?.paths;
   const configured = given && typeof given === "object" && !Array.isArray(given) ? given : {};
@@ -147,6 +160,25 @@ export function artifactPaths(config, { lenient = false } = {}) {
       out[key] = fallback;
     }
   }
+  const overlap = (key) => {
+    const p = out[key];
+    if (key === "metadataDir") {
+      for (const c of [...CURATED_KEYS.map((k) => out[k]), CONFIG_REL]) if (posixPrefix(p, c)) return `paths.${key} ${JSON.stringify(p)} contains ${JSON.stringify(c)}`;
+    } else if (samePosix(p, CONFIG_REL)) return `paths.${key} ${JSON.stringify(p)} is the config file`;
+    for (const other of Object.keys(out)) if (other !== key && samePosix(p, out[other])) return `paths.${key} and paths.${other} are both ${JSON.stringify(p)}`;
+    return null;
+  };
+  // Judge every generated key against the values as configured, then apply
+  // the fallbacks together, so two keys sharing a value both fall back.
+  const bad = GENERATED_KEYS.map((key) => [key, overlap(key)]).filter(([, why]) => why);
+  for (const [key, why] of bad) {
+    if (!lenient) throw new Error(`${why} — a generated path must not overlap a curated one`);
+    out[key] = DEFAULT_PATHS[key];
+  }
+  // A default can itself collide with a curated value the adopter chose
+  // (`glossary: "zdd/graph.json"`); a generated key with nowhere safe to fall
+  // back to is dropped (undefined) rather than fencing a curated file.
+  if (lenient) for (const [key] of bad) if (overlap(key)) delete out[key];
   return out;
 }
 

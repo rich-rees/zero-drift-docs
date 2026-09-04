@@ -97,6 +97,37 @@ test("fence handles Codex apply_patch targets", () => {
   blocked(fence("apply_patch", { patch: "*** Begin Patch\n*** Add File: zdd/metadata/table/x.json\n+{}\n*** End Patch\n" }), "add file under metadata");
 });
 
+test("fence: a generated path that overlaps a curated one or zdd/config.json is invalid and falls back to its default (CR-075)", () => {
+  const cfg = (paths) => setConfig({ extractors: ["generic"], hooks: { fence: true }, paths });
+  cfg({ metadataDir: "zdd" });
+  silent(fence("Edit", { file_path: "zdd/config.json" }), "config.json is never fenced");
+  silent(fence("Edit", { file_path: "zdd/glossary.md" }), "the glossary is never fenced");
+  silent(fence("Write", { file_path: "zdd/adr/0002-x.md" }), "an ADR is never fenced");
+  blocked(fence("Write", { file_path: "zdd/metadata/table/x.json" }), "metadataDir falls back to its default");
+  blocked(fence("Write", { file_path: "zdd/graph.json" }), "the rest stay fenced");
+  cfg({ metadataDir: "docs", adrDir: "docs/adr" });
+  silent(fence("Write", { file_path: "docs/adr/0002-x.md" }), "a generated dir above a curated dir is invalid");
+  silent(fence("Write", { file_path: "docs/readme.md" }), "…so nothing under it is fenced");
+  blocked(fence("Write", { file_path: "zdd/metadata/x.json" }), "…and the default is");
+  cfg({ agentIndex: "zdd/glossary.md" });
+  silent(fence("Write", { file_path: "zdd/glossary.md" }), "a duplicate of a curated path is invalid");
+  blocked(fence("Write", { file_path: "zdd/agent-index.md" }), "…and falls back");
+  cfg({ graph: "zdd/config.json" });
+  silent(fence("Edit", { file_path: "zdd/config.json" }), "a generated file named as config.json is invalid");
+  blocked(fence("Edit", { file_path: "zdd/graph.json" }), "…and falls back");
+  cfg({ graph: "zdd/agent-index.md" });
+  blocked(fence("Edit", { file_path: "zdd/graph.json" }), "two generated keys sharing a value both fall back");
+  blocked(fence("Edit", { file_path: "zdd/agent-index.md" }), "…the other too");
+  cfg({ glossary: "zdd/graph.json", graph: "zdd/config.json" });
+  silent(fence("Edit", { file_path: "zdd/graph.json" }), "a default that collides with a curated choice is dropped, not fenced");
+  blocked(fence("Edit", { file_path: "zdd/agent-index.md" }), "…the rest stay fenced");
+  cfg({ metadataDir: "generated/meta", graph: "generated/graph.json", glossary: "docs/glossary.md" });
+  blocked(fence("Write", { file_path: "generated/meta/x.json" }), "a clean relocation still fences");
+  blocked(fence("Write", { file_path: "generated/graph.json" }), "…both keys");
+  silent(fence("Write", { file_path: "docs/glossary.md" }), "…and the curated file stays free");
+  setConfig(VALID);
+});
+
 test("fence dispatches on tool_name first: a shell command is always inspected, a patch field additionally (CR-073)", () => {
   blocked(fence("Bash", { command: "rm zdd/graph.json", patch: "benign" }), "extra patch field does not hide the command");
   blocked(fence("shell_command", { command: "echo hi", patch: "*** Begin Patch\n*** Update File: zdd/graph.json\n@@\n-a\n+b\n*** End Patch\n" }), "patch field is inspected additionally");
