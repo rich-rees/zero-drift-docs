@@ -120,6 +120,25 @@ export function validatePathLayout(paths, configRel) {
   return null;
 }
 
+// Greenfield tolerance has a blind spot: a mistyped store dir lints and
+// renders as an EMPTY corpus, exactly like a bundle that has none yet
+// (CR-068 / CR-099). So: for each asked-for store dir that is absent, one
+// WARNING line when any other store (adr, map, metadata, glossary) is
+// present — the bundle is not greenfield, the path is probably wrong. A
+// truly greenfield bundle gets no line. Advisory: exit codes are unchanged.
+const STORE_KEYS = ["adrDir", "mapDir", "metadataDir", "glossary"];
+export function absentStoreNotes(repoRoot, paths, keys) {
+  const present = STORE_KEYS.filter((k) => existsSync(resolve(repoRoot, paths[k])));
+  if (!present.length) return [];
+  return keys
+    .filter((k) => !present.includes(k))
+    .map(
+      (k) =>
+        `WARNING: paths.${k} '${paths[k]}' does not exist, but ${present.map((p) => `paths.${p}`).join(" + ")} ${present.length > 1 ? "do" : "does"} ` +
+        `(not greenfield) — a mistyped path reads as an empty store`,
+    );
+}
+
 function argValue(args, name) {
   const hit = args.find((a) => a.startsWith(`--${name}=`));
   return hit ? hit.slice(name.length + 3) : null;
