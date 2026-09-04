@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync, rmSync, mkdtempSync, cpSync, existsSync, readdirSync, statSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, rmSync, mkdtempSync, cpSync, existsSync, readdirSync, statSync, mkdirSync, symlinkSync } from "node:fs";
 import { dirname, resolve, join, relative } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -148,5 +148,62 @@ test("CR-061: render refuses outputs that coincide with each other or with an in
   mkdirSync(join(repo, "docs"));
   run(repo, ["render"]);
   assert.match(run(repo, ["render", "--check"]), /in sync/);
+  rmSync(repo, { recursive: true, force: true });
+});
+
+// ---------------------------------------------------------------------------
+// CR-063: the glossary is embedded verbatim in the hosted page, so it must be
+// a regular markdown file — never a symlink, never `.env`.
+// ---------------------------------------------------------------------------
+
+// Create a symlink, or skip the test (narrated) where the OS refuses — Windows
+// without Developer Mode returns EPERM; Linux CI exercises the guard.
+const symlinkOrSkip = (t, target, path, type) => {
+  try {
+    symlinkSync(target, path, type);
+    return true;
+  } catch (e) {
+    if (e.code !== "EPERM") throw e;
+    t.skip("symlink creation needs privileges on this machine (EPERM)");
+    return false;
+  }
+};
+const noLeak = (repo) => {
+  for (const f of ["human-index.html", "graph.json", "agent-index.md", "adr-index.md"]) {
+    const p = join(repo, "zdd", f);
+    if (existsSync(p)) assert.ok(!readFileSync(p, "utf8").includes("hunter2"), `${f} does not embed the sentinel`);
+  }
+};
+
+test("CR-063: paths.glossary naming a non-markdown file is refused, and the sentinel is embedded nowhere", () => {
+  const repo = mkRepo(FIXTURE);
+  run(repo, ["derive"]);
+  writeFileSync(join(repo, ".env"), "SECRET_TOKEN=hunter2\n");
+  withPaths(repo, { glossary: ".env" });
+  const err = runFail(repo, ["render"]);
+  assert.match(err, /paths\.glossary '\.env' must be a regular \.md file/);
+  noLeak(repo);
+  // A directory is not a glossary either.
+  withPaths(repo, { glossary: "zdd/map" });
+  assert.match(runFail(repo, ["render"]), /paths\.glossary 'zdd\/map' must be a regular \.md file/);
+  // A missing glossary is still greenfield: render exits 0 with an empty embed.
+  withPaths(repo, { glossary: "zdd/not-yet.md" });
+  run(repo, ["render"]);
+  rmSync(repo, { recursive: true, force: true });
+});
+
+test("CR-063: a symlinked glossary.md is refused, not followed", (t) => {
+  const repo = mkRepo(FIXTURE);
+  run(repo, ["derive"]);
+  const secret = join(repo, "secret.md");
+  writeFileSync(secret, "# Terms\n\nTOKEN=hunter2\n");
+  rmSync(join(repo, "zdd", "glossary.md"));
+  if (!symlinkOrSkip(t, secret, join(repo, "zdd", "glossary.md"), "file")) {
+    rmSync(repo, { recursive: true, force: true });
+    return;
+  }
+  const err = runFail(repo, ["render"]);
+  assert.match(err, /paths\.glossary 'zdd\/glossary\.md' must be a regular \.md file, not a symlink/);
+  noLeak(repo);
   rmSync(repo, { recursive: true, force: true });
 });

@@ -94,11 +94,33 @@ function safeOutputPath(path) {
 // embed different bytes than CI and fail the check (same trap as DIO-148).
 // ---------------------------------------------------------------------------
 const normEol = (s) => s.replace(/\r\n/g, "\n");
+// lstat that answers null for "nothing there" — existsSync alone is false for
+// a dangling symlink, which is exactly the shape that must still be refused.
+const lstatOrNull = (p) => {
+  try {
+    return lstatSync(p);
+  } catch {
+    return null;
+  }
+};
 function loadDocs() {
   // A greenfield bundle may not have a glossary yet — render it as empty
   // rather than failing; the stores fill in as the mapping session runs.
+  // When it does exist it must be a regular markdown file: the bytes go into
+  // the hosted page verbatim, so `paths.glossary: ".env"` or a glossary.md
+  // symlinked at a credentials file would publish it (CR-063). lstat, so a
+  // link is seen as a link and never followed.
   const glossaryPath = resolve(REPO, PATHS.glossary);
-  const glossary = existsSync(glossaryPath) ? normEol(readFileSync(glossaryPath, "utf8")) : "";
+  let glossary = "";
+  const st = lstatOrNull(glossaryPath);
+  if (st) {
+    const why = st.isSymbolicLink() ? "not a symlink" : st.isDirectory() ? "not a directory" : "";
+    if (st.isSymbolicLink() || !st.isFile() || !PATHS.glossary.endsWith(".md")) {
+      console.error(`paths.glossary '${PATHS.glossary}' must be a regular .md file${why ? `, ${why}` : ""} — it is embedded verbatim in the human index`);
+      process.exit(1);
+    }
+    glossary = normEol(readFileSync(glossaryPath, "utf8"));
+  }
   const adrDir = resolve(REPO, PATHS.adrDir);
   const adrs = [];
   for (const path of walk(adrDir, ".md")) {
