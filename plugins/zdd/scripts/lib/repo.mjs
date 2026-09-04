@@ -69,14 +69,20 @@ export const posixify = (p) => p.split(/[\\/]/).join("/");
 // Adopter root: explicit flag, else the host's project dir, else the nearest
 // directory at or above `cwd` holding zdd/config.json (a session opened in a
 // monorepo package still finds the repo's config — CR-025), else cwd.
+// A UNC or device path (`\\server\share`, `\\?\`, `\\.\`) handed in as the
+// cwd is never probed — an existsSync there is an SMB round-trip with the
+// session's credentials (CR-089, the same rule as the fence's CR-052) — the
+// walk starts from the process cwd instead.
+export const REMOTE_OR_DEVICE = /^(\\\\|\/\/)/;
 export function adopterRoot(flags = {}) {
   if (flags.root) return resolve(flags.root);
   if (process.env.CLAUDE_PROJECT_DIR) return resolve(process.env.CLAUDE_PROJECT_DIR);
-  let dir = resolve(flags.cwd || process.cwd());
+  const start = flags.cwd && !REMOTE_OR_DEVICE.test(flags.cwd) ? flags.cwd : process.cwd();
+  let dir = resolve(start);
   for (;;) {
     if (existsSync(join(dir, "zdd", "config.json"))) return dir;
     const parent = dirname(dir);
-    if (parent === dir) return resolve(flags.cwd || process.cwd());
+    if (parent === dir) return resolve(start);
     dir = parent;
   }
 }

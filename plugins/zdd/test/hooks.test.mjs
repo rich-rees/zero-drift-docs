@@ -289,6 +289,15 @@ test("fence finds the repo by walking up from cwd when the host gives no project
   blocked(r, "walk up");
 });
 
+test("fence: a UNC or device cwd is never probed for a config — the walk starts from the process cwd instead (CR-089)", () => {
+  for (const cwd of ["\\\\nowhere.invalid\\share\\proj", "//nowhere.invalid/share/proj", "\\\\?\\C:\\nowhere", "\\\\.\\pipe\\x"]) {
+    const started = Date.now();
+    const r = runHook(FENCE, { tool_name: "Write", tool_input: { file_path: join(repo, "zdd", "graph.json") }, cwd }, { projectDir: null });
+    blocked(r, `cwd ${cwd}`);
+    assert.ok(Date.now() - started < 5000, `no network round-trip for ${cwd}`);
+  }
+});
+
 test("fence is a silent no-op without the opt-in, without config, with malformed config, and on garbage input", () => {
   setConfig({ extractors: ["generic"] });
   silent(fence("Write", { file_path: join(repo, "zdd", "agent-index.md") }), "no opt-in");
