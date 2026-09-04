@@ -229,12 +229,31 @@ test("apply validates the whole answer set before the first write", () => {
     [{ extractors: ["supabase", "supabase"] }, /twice/],
     [{ stack: [{ name: "FastAPI", path: "../api" }] }, /must not contain/],
     [{ repoBase: "ftp://x" }, /repoBase/],
+    // CR-078: the engine's rule exactly — `^https?:\/\/\S+$` — so a base the
+    // engine would refuse never reaches config.json.
+    [{ repoBase: "https://" }, /repoBase/],
+    [{ repoBase: "https://example.test/ bad" }, /repoBase/],
+    // CR-078: every path-bearing extractor option is validated with the
+    // engine's repo-relative rule before the first write.
+    [{ extractorOptions: { fastapi: { roots: ["../outside"] } } }, /fastapi\.roots/],
+    [{ extractorOptions: { fastapi: { roots: ["C:/tmp"] } } }, /fastapi\.roots/],
+    [{ extractorOptions: { nextjs: { appDir: "/abs/app" } } }, /nextjs\.appDir/],
+    [{ extractorOptions: { nextjs: { middlewarePath: "src\\middleware.ts" } } }, /nextjs\.middlewarePath/],
+    [{ extractorOptions: { nextjs: { srcAliasRoot: "javascript:x" } } }, /nextjs\.srcAliasRoot/],
+    [{ extractorOptions: { nextjs: { refs: { roots: ["src", "a b"] } } } }, /nextjs\.refs\.roots/],
+    [{ extractorOptions: { supabase: { migrationNamespaces: [{ name: "db", dir: "../../m" }] } } }, /supabase\.migrationNamespaces\[0\]\.dir/],
+    [{ extractorOptions: { supabase: { migrationNamespaces: [{ name: "db" }] } } }, /supabase\.migrationNamespaces\[0\]\.dir/],
+    [{ extractorOptions: { fastapi: { roots: "api" } } }, /fastapi\.roots/],
     [{ codex: "true" }, /codex must be/],
     [[], /must be a JSON object/],
   ]) {
     assert.match(bootstrapFails(repo, ["apply", `--answers=${answersFile("ba", answers)}`]), re, JSON.stringify(answers));
   }
   assert.deepEqual(readdirSync(repo), [], "nothing written by any of them");
+  // What the engine accepts, bootstrap accepts: "." is the fastapi default root.
+  const ok = fresh("ok-paths");
+  bootstrap(ok, ["apply", `--answers=${answersFile("ok", { repoBase: "https://github.com/o/r/tree/main/", extractors: ["fastapi"], extractorOptions: { fastapi: { roots: ["."] } } })}`]);
+  assert.deepEqual(JSON.parse(readFileSync(join(ok, "zdd", "config.json"), "utf8")).extractorOptions.fastapi.roots, ["."]);
 });
 
 // --- greenfield ------------------------------------------------------------------
