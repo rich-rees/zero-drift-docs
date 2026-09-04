@@ -37,6 +37,15 @@ test("both adapter and extractors present is an error, never a silent precedence
   assert.match(r.error, /both 'adapter' and 'extractors'/);
 });
 
+test("CR-117: mixed tiers are refused — extractorOptions beside adapter, adapterOptions beside extractors — never silently ignored", () => {
+  const a = resolveExtractors({ adapter: "nextjs-supabase", extractorOptions: { nextjs: { appDir: "src/app" } } });
+  assert.match(a.error ?? "", /both 'adapter' and 'extractorOptions'.*keep one tier/, JSON.stringify(a));
+  const b = resolveExtractors({ extractors: ["supabase", "nextjs"], adapterOptions: { appDir: "src/app" } });
+  assert.match(b.error ?? "", /both 'extractors' and 'adapterOptions'.*keep one tier/, JSON.stringify(b));
+  // The options-only cross (no adapter, no extractors) is still "names no extractors".
+  assert.match(resolveExtractors({ extractorOptions: {} }).error, /names no extractors/);
+});
+
 test("no selection at all is an error", () => {
   assert.match(resolveExtractors({}).error, /names no extractors/);
 });
