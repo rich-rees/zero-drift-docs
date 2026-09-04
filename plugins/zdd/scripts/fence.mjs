@@ -11,7 +11,8 @@
 // come from the same config (`paths.*`), validated repo-relative, so a repo
 // that moved its artifacts is fenced where they actually are. Never fails a
 // session: no config, malformed config, unreadable stdin — exit 0, silently.
-// Blocking is exit 2 + stderr, the one signal every host honours.
+// Blocking is the JSON PreToolUse deny reply on stdout (exit 0) — the shape
+// both hosts honour; exit 2 fails open in Codex (decision 0007).
 //
 // What it inspects: direct edit tools (file_path), Codex's apply_patch (the
 // file lines of the patch), and shell commands. The shell half is BEST-EFFORT
@@ -166,12 +167,17 @@ function main() {
   }
   if (!target) return 0;
 
-  process.stderr.write(
+  const reason =
     `ZDD fence: ${target} is a generated artifact — never hand-edit it. ` +
-      `Run the ZDD update ritual ("update ZDD" / the \`update\` skill) to regenerate it ` +
-      `(zdd-engine derive + render). To lift the fence for this repo set "hooks": { "fence": false } in zdd/config.json.\n`,
-  );
-  return 2;
+    `Run the ZDD update ritual ("update ZDD" / the \`update\` skill) to regenerate it ` +
+    `(zdd-engine derive + render). To lift the fence for this repo set "hooks": { "fence": false } in zdd/config.json.`;
+  // The block is the JSON PreToolUse deny reply on stdout with exit 0 — the
+  // shape both hosts document AND honour (decision 0007). Exit 2 + stderr was
+  // observed to fail open in Codex 0.145.0 (hook "Failed", edit applied). The
+  // reason is mirrored on stderr for the hosts' hook logs only.
+  process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason } }) + "\n");
+  process.stderr.write(reason + "\n");
+  return 0;
 }
 
 let code = 0;
@@ -180,5 +186,5 @@ try {
 } catch {
   code = 0;
 }
-// exitCode, not exit(): let stderr drain so the reason reaches the host (CR-039).
+// exitCode, not exit(): let stdout/stderr drain so the reply reaches the host (CR-039).
 process.exitCode = code;

@@ -40,10 +40,19 @@ const silent = (r, msg) => {
   assert.equal(r.stdout, "", `${msg}: stdout`);
   assert.equal(r.stderr, "", `${msg}: stderr`);
 };
+// A block is the JSON PreToolUse deny reply on stdout with exit 0 — the shape
+// both hosts honour (decision 0007; exit 2 fails open in Codex 0.145.0). The
+// reason is mirrored on stderr for the hook log.
 const blocked = (r, msg) => {
-  assert.equal(r.status, 2, `${msg}: exit ${r.status} ${r.stderr}`);
-  assert.match(r.stderr, /generated artifact/, msg);
-  assert.match(r.stderr, /update/, msg);
+  assert.equal(r.status, 0, `${msg}: exit ${r.status} ${r.stderr}`);
+  let reply;
+  assert.doesNotThrow(() => (reply = JSON.parse(r.stdout)), `${msg}: stdout is exactly one JSON object`);
+  const out = reply.hookSpecificOutput ?? {};
+  assert.equal(out.hookEventName, "PreToolUse", msg);
+  assert.equal(out.permissionDecision, "deny", msg);
+  assert.match(out.permissionDecisionReason ?? "", /generated artifact/, msg);
+  assert.match(out.permissionDecisionReason ?? "", /update/, msg);
+  assert.match(r.stderr, /generated artifact/, `${msg}: reason mirrored on stderr`);
 };
 const fence = (tool_name, tool_input, extra = {}) => runHook(FENCE, { tool_name, tool_input, ...extra });
 

@@ -1,6 +1,6 @@
 # 0006 — One repo, two manifests: Claude Code and Codex share the skills and the hooks
 
-**Date:** 2026-09-03 · **Status:** accepted · **Origin:** DIO-307 grilling, built under DIO-311.
+**Date:** 2026-09-03 · **Status:** accepted; point 3's block signal superseded by [0007](0007-fence-blocks-with-the-json-deny-reply.md) (exit 2 fails open in Codex — the fence now replies with the JSON deny shape) · **Origin:** DIO-307 grilling, built under DIO-311.
 
 ## Context
 
