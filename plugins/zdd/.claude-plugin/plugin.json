@@ -11,6 +11,5 @@
   "repository": "https://github.com/rich-rees/zero-drift-docs",
   "license": "MIT",
   "keywords": ["documentation", "zero-drift", "adr", "glossary", "agent-index", "docs"],
-  "skills": "./skills",
-  "hooks": "./hooks/hooks.json"
+  "skills": "./skills"
 }

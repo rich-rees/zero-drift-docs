@@ -454,10 +454,16 @@ test("manifests: Claude and Codex reference the same skills and hooks; hooks.jso
   assert.equal(claude.name, codex.name);
   assert.equal(claude.version, codex.version);
   assert.equal(claude.skills, codex.skills);
-  assert.equal(claude.hooks, codex.hooks);
+  // One hooks file, reached two ways: Claude Code auto-loads hooks/hooks.json
+  // and REFUSES a manifest that also names it ("duplicate" — the plugin did
+  // not load at all in the DIO-312 live smoke test), while Codex needs the
+  // explicit entry. So the Claude manifest carries no `hooks` key and the
+  // Codex manifest points at the default path.
+  assert.equal(claude.hooks, undefined, "Claude manifest must not name the auto-loaded hooks file");
+  assert.equal(codex.hooks, "./hooks/hooks.json");
   assert.ok(existsSync(join(PLUGIN, claude.skills)));
-  assert.ok(existsSync(join(PLUGIN, claude.hooks)));
-  const hooks = JSON.parse(readFileSync(join(PLUGIN, claude.hooks), "utf8"));
+  assert.ok(existsSync(join(PLUGIN, "hooks", "hooks.json")));
+  const hooks = JSON.parse(readFileSync(join(PLUGIN, "hooks", "hooks.json"), "utf8"));
   const commands = Object.values(hooks.hooks).flat().flatMap((g) => g.hooks);
   assert.ok(commands.length >= 2);
   for (const c of commands) {
