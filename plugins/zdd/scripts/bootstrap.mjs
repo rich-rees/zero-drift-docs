@@ -133,7 +133,8 @@ function walk(root, onFile, maxDepth = 6) {
 function readPackageJson(root) {
   const p = join(root, "package.json");
   try {
-    if (!lstatSync(p).isFile()) return null;
+    const st = lstatSync(p);
+    if (!st.isFile() || st.size > MAX_SCAN_BYTES) return null; // CR-091: same bound as the walk
     return readJson(p);
   } catch {
     return null;
