@@ -71,7 +71,9 @@ block in `CLAUDE.md` (and `AGENTS.md` for Codex) — plus an empty `zdd/` and on
 seeded **ADR-0001** recording *your* decision to adopt ZDD: the corpus's first
 entry *and* a worked example of the format. Branch protection is the one step it
 prints instead of doing. Idempotent; and `bootstrap --upgrade` is the only thing
-that writes into your repo later, narrating every file it changes.
+that writes to those files later, narrating every file it changes. (The
+generated artifacts are the engine's: `derive` and `render` write them on every
+"update ZDD"; nothing else touches your repo.)
 
 Contents: four skills (`bootstrap`, `load`, `update`, `grill`), a shared authoring
 guide, two hooks (auto-load, fence), the runbook script, the engine + composed
