@@ -18,7 +18,7 @@
 // may declare (`localExtractorDir`), the single sanctioned place config can
 // point at code. A path in the extractors list is refused.
 
-import { readFileSync, writeFileSync, readdirSync, statSync, lstatSync, mkdirSync, rmSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync, statSync, lstatSync, realpathSync, mkdirSync, rmSync, existsSync } from "node:fs";
 import { join, dirname, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { loadConfig, resolveExtractors } from "./lib/config.mjs";
@@ -152,6 +152,40 @@ async function loadExtractor(name, repoRoot, config) {
   fail(`Unknown extractor '${name}' (known: ${known}${localList})`);
 }
 
+// The lexical check above is the braces; this is the belt (CR-060). A
+// metadataDir that is itself a symlink, or that sits under one, would carry
+// every write and the prune wherever the link points — a sibling checkout,
+// the user's home — while the string still starts with the repo root. So:
+// metadataDir must not be a link, and the real path of it (or, before the
+// first derive creates it, of its nearest existing ancestor) must sit under
+// the real path of the repo. Same discipline as render's safeOutputPath.
+function assertMetadataDirContained(repoRoot, metadataDir, metadataRel) {
+  let probe = metadataDir;
+  for (;;) {
+    let st = null;
+    try {
+      st = lstatSync(probe);
+    } catch {
+      /* not there yet — look one level up */
+    }
+    if (st) {
+      if (st.isSymbolicLink()) {
+        const what = probe === metadataDir ? "is a symlink" : `sits under a symlink (${probe})`;
+        fail(`metadataDir '${metadataRel}' ${what} — derive writes and prunes only through real directories inside the repo`);
+      }
+      break;
+    }
+    const up = dirname(probe);
+    if (up === probe) break;
+    probe = up;
+  }
+  try {
+    insideRepo(realpathSync(repoRoot), realpathSync(probe), `metadataDir '${metadataRel}'`);
+  } catch (e) {
+    fail(e.message);
+  }
+}
+
 // What is on disk under metadataDir. The folder holds exactly
 // `<kind>/<record>.json` and derive manages nothing else: any other JSON file
 // — or any directory that is not a kind — is FOREIGN, and the caller refuses
@@ -234,6 +268,7 @@ export async function run(args) {
   // Refuse to prune outside the repo — a config typo must not delete
   // arbitrary trees.
   if (!metadataDir.startsWith(REPO + sep)) fail(`metadataDir '${metadataRel}' resolves outside the repo`);
+  assertMetadataDirContained(REPO, metadataDir, metadataRel);
 
   const { records, factsOrder, diagnostics, configDiagnostics } = await deriveRecords({ repoRoot: REPO, config });
   // Config-level notes (deprecations) always print; extractor diagnostics are
