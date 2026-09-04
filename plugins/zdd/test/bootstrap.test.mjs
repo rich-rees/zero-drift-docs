@@ -619,3 +619,11 @@ test("upgrade refuses a repo that never adopted, a config it cannot read, and a 
   assert.match(bootstrapFails(repo, ["upgrade"]), /both 'adapter' and 'extractors'/);
   assert.equal(readFileSync(join(repo, "zdd", "config.json"), "utf8"), mixed, "untouched");
 });
+
+test("without --date, apply dates ADR-0001 with today's date (the default today() path — CR-114)", () => {
+  const repo = fresh("no-date-flag");
+  writeFileSync(join(repo, "answers.json"), JSON.stringify({ extractors: ["generic"] }));
+  execFileSync(process.execPath, [SCRIPT, "apply", `--answers=${join(repo, "answers.json")}`, `--root=${repo}`, `--home=${fakeHome}`], { encoding: "utf8" });
+  const today = new Date().toISOString().slice(0, 10);
+  assert.match(readFileSync(join(repo, "zdd", "adr", "0001-adopt-zero-drift-docs.md"), "utf8"), new RegExp(today.replace(/-/g, "\-")));
+});
