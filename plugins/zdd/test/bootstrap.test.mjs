@@ -129,6 +129,18 @@ test("detect: several migration dirs get distinct namespace names; symlinked dir
   assert.ok(!j2.proposals.some((p) => p.name === "fastapi"), "code behind a link is not inventoried");
 });
 
+test("detect: a source file over 1 MiB is not read (CR-091); the same convention in a small file is", () => {
+  const repo = fresh("detect-huge");
+  mkdirSync(join(repo, "api"));
+  writeFileSync(join(repo, "api", "generated.py"), "# " + "x".repeat(1024 * 1024) + "\nfrom fastapi import FastAPI\napp = FastAPI()\n");
+  writeFileSync(join(repo, "index.ts"), "");
+  const j1 = JSON.parse(bootstrap(repo, ["detect", "--json"]));
+  assert.ok(!j1.proposals.some((p) => p.name === "fastapi"), JSON.stringify(j1.proposals));
+  writeFileSync(join(repo, "api", "small.py"), "from fastapi import FastAPI\napp = FastAPI()\n");
+  const j2 = JSON.parse(bootstrap(repo, ["detect", "--json"]));
+  assert.deepEqual(j2.proposals.find((p) => p.name === "fastapi").options, { roots: ["api"] });
+});
+
 // --- existing codebase ---------------------------------------------------------
 
 test("apply on the FastAPI+Supabase fixture with all defaults: config, owned workflow, hook registrations, snippet, dated ADR-0001", () => {
