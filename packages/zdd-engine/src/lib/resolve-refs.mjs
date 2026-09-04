@@ -142,8 +142,6 @@ export function resolveRefs(records) {
     }
   };
 
-  const kept = [];
-  const dropped = new Set();
   for (const r of records) {
     const resolved = new Set();
     for (const ref of r.refs) {
@@ -151,13 +149,17 @@ export function resolveRefs(records) {
       if (id && id !== r.id) resolved.add(id);
     }
     r.refs = [...resolved].sort();
-    if (r.requireRefs && !r.refs.length) {
-      dropped.add(r.id);
-      continue;
-    }
-    delete r.requireRefs;
-    kept.push(r);
   }
-  if (dropped.size) for (const r of kept) r.refs = r.refs.filter((id) => !dropped.has(id));
+  // Prune to a fixed point: dropping a record strips the refs that pointed
+  // at it, which can empty another `requireRefs` record, which must then be
+  // dropped in turn (CR-065) — a single pass kept such a record with `refs: []`.
+  let kept = records;
+  for (;;) {
+    const dropped = new Set(kept.filter((r) => r.requireRefs && !r.refs.length).map((r) => r.id));
+    if (!dropped.size) break;
+    kept = kept.filter((r) => !dropped.has(r.id));
+    for (const r of kept) r.refs = r.refs.filter((id) => !dropped.has(id));
+  }
+  for (const r of kept) delete r.requireRefs;
   return { records: kept, diagnostics };
 }
