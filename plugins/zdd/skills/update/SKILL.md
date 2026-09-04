@@ -21,12 +21,12 @@ Run this as the definition of done for every unit of work — the spoken form is
    - **Semantic map** — feature / edge / blessing changes.
 2. **Run the deriver.** Regenerates the codebase metadata from source:
    ```
-   npx -y @rich-rees/zdd-engine@0.4.0 derive
+   npx -y @rich-rees/zdd-engine@1.0.0 derive
    ```
 3. **Run the renderer.** Rebuilds the graph artifact (`zdd/graph.json`), the
    agent index, the ADR index, and the human index:
    ```
-   npx -y @rich-rees/zdd-engine@0.4.0 render
+   npx -y @rich-rees/zdd-engine@1.0.0 render
    ```
 4. **Commit all of it in the PR.** Code and docs merge atomically; the doc delta
    is reviewed alongside the code delta.

@@ -9,7 +9,7 @@
       "name": "zdd",
       "source": "./plugins/zdd",
       "description": "Zero-Drift Docs — seven documentation artifacts kept at most one unit of work behind the code.",
-      "version": "0.4.0"
+      "version": "1.0.0"
     }
   ]
 }
