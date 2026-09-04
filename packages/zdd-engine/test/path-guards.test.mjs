@@ -301,6 +301,38 @@ test("CR-108: a repo reached through a symlinked root derives and renders into t
 });
 
 // ---------------------------------------------------------------------------
+// CR-098: render writes four outputs. A failure part-way must not leave a
+// mixed generation on disk: every output is staged to a temp file first, and
+// the renames happen only once all four are staged.
+// ---------------------------------------------------------------------------
+
+test("CR-098: a write failure on the last output leaves the previous generation of the other three intact, and no temp files behind", () => {
+  const repo = mkRepo(FIXTURE);
+  run(repo, ["derive"]);
+  run(repo, ["render"]);
+  const before = tree(join(repo, "zdd"));
+  assert.ok(![...before.keys()].some((k) => /\.tmp/.test(k)), "no temp residue after a clean render");
+  // Change an input so the next generation differs, then make the LAST
+  // output unwritable: its parent is a regular file, which passes the
+  // pre-write checks (it exists, it is in-repo, the leaf is no symlink) and
+  // fails only at write time.
+  writeFileSync(join(repo, "zdd", "map", "features", "things.md"), readFileSync(join(repo, "zdd", "map", "features", "things.md"), "utf8") + "\nExtra paragraph.\n");
+  writeFileSync(join(repo, "zdd", "blocker"), "not a directory\n");
+  withPaths(repo, { adrIndex: "zdd/blocker/adr-index.md" });
+  const out = spawnSync(process.execPath, [BIN, "render"], { cwd: repo, encoding: "utf8" });
+  assert.notEqual(out.status, 0);
+  assert.match(out.stderr, /adr-index\.md/, out.stderr);
+  const after = tree(join(repo, "zdd"));
+  after.delete("config.json");
+  before.delete("config.json");
+  for (const k of ["graph.json", "human-index.html", "agent-index.md", "adr-index.md"]) {
+    assert.equal(after.get(k), before.get(k), `${k} still the previous generation`);
+  }
+  assert.ok(![...after.keys()].some((k) => /\.tmp/.test(k)), `no temp residue after a failed render: ${[...after.keys()].join(", ")}`);
+  rmSync(repo, { recursive: true, force: true });
+});
+
+// ---------------------------------------------------------------------------
 // CR-068 / CR-099: a mistyped store dir lints and renders as an empty corpus,
 // indistinguishable from greenfield. One stderr line when the bundle is
 // otherwise populated; silence — and exit 0 — when it is truly greenfield.
