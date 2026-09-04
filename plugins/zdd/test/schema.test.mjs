@@ -11,7 +11,7 @@ import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync, rmSync, mkdtempSync, mkdirSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const PLUGIN = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const ENGINE_BIN = resolve(PLUGIN, "..", "..", "packages", "zdd-engine", "bin", "zdd-engine.mjs");
@@ -94,4 +94,23 @@ test("a config with both `extractors` and `adapter` is invalid under the schema,
   // Neither tier is invalid for both.
   assert.notDeepEqual(validate(SCHEMA, { name: "x" }), []);
   assert.notEqual(engineRejects({ name: "x" }), null);
+});
+
+test("repoBase: the schema pattern refuses internal whitespace exactly as the engine does (CR-103)", () => {
+  for (const bad of ["https://", "https://example.test/ bad", "ftp://x"]) {
+    assert.notDeepEqual(validate(SCHEMA, { extractors: ["generic"], repoBase: bad }), [], bad);
+    assert.notEqual(engineRejects({ extractors: ["generic"], repoBase: bad }), null, bad);
+  }
+  for (const ok of ["", "https://github.com/o/r/tree/main/"]) {
+    assert.deepEqual(validate(SCHEMA, { extractors: ["generic"], repoBase: ok }), [], ok);
+    assert.equal(engineRejects({ extractors: ["generic"], repoBase: ok }), null, ok);
+  }
+});
+
+test("the schema's documented refs defaults are the engine's defaults (CR-116)", async () => {
+  const refs = await import(pathToFileURL(resolve(PLUGIN, "..", "..", "packages", "zdd-engine", "src", "extractors", "nextjs", "refs.mjs")).href);
+  const doc = SCHEMA.properties.extractorOptions.properties.nextjs.properties.refs.properties;
+  assert.deepEqual(doc.extensions.default, refs.DEFAULT_REFS.extensions);
+  assert.deepEqual(doc.excludeSuffixes.default, refs.DEFAULT_REFS.excludeSuffixes);
+  assert.deepEqual(doc.excludeDirs?.default ?? refs.DEFAULT_REFS.excludeDirs, refs.DEFAULT_REFS.excludeDirs);
 });

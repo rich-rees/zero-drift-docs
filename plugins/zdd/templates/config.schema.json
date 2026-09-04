@@ -54,9 +54,9 @@
               "additionalProperties": false,
               "properties": {
                 "roots": { "type": "array", "items": { "type": "string" } },
-                "extensions": { "type": "array", "items": { "type": "string" }, "default": [".ts", ".tsx"] },
+                "extensions": { "type": "array", "items": { "type": "string" }, "default": [".ts", ".tsx", ".js", ".jsx"] },
                 "excludeDirs": { "type": "array", "items": { "type": "string" }, "default": ["node_modules"] },
-                "excludeSuffixes": { "type": "array", "items": { "type": "string" }, "default": [".test.ts", ".test.tsx", ".d.ts"] }
+                "excludeSuffixes": { "type": "array", "items": { "type": "string" }, "default": [".test.ts", ".test.tsx", ".test.js", ".test.jsx", ".d.ts"] }
               }
             }
           }
@@ -114,7 +114,7 @@
     "repoBase": {
       "type": "string",
       "default": "",
-      "pattern": "^(https?://.+)?$",
+      "pattern": "^(https?://\S+)?$",
       "description": "GitHub tree URL prefix for source links in the human index, e.g. https://github.com/org/repo/tree/main/. Empty = relative links. Must be http(s) — the renderer refuses anything else, since it becomes every source link's scheme."
     },
     "nonAreaTags": {
