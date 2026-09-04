@@ -1,7 +1,7 @@
 # Authoring the curated artifacts
 
 Shared reference for `update`, `bootstrap`, and `grill`. The *generated*
-artifacts (metadata, indexes) are the engine's job and CI-enforced. The *curated*
+artifacts (metadata, the graph, the indexes) are the engine's job and CI-enforced. The *curated*
 ones — glossary, ADRs, comments, map — are judgment, and no script can gate them.
 This is the discipline for writing them well.
 

@@ -24,18 +24,26 @@ on:
   workflow_dispatch:
 
 env:
-  ZDD_ENGINE: "@rich-rees/zdd-engine@0.4.0"
+  ZDD_ENGINE: "@rich-rees/zdd-engine@1.0.0"
 
 jobs:
   zero-drift:
     runs-on: ubuntu-latest
+    # Least privilege: a repo-local extractor (localExtractorDir) is code from
+    # the PR under test and runs in this job, so the token it can reach is
+    # read-only and is never left behind in the checkout.
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
+      # Actions pinned to a full commit SHA (the tag is the trailing comment):
+      # a moving major tag would let a compromised release run in this job.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           # Full history: the renderer's changed-set highlight and the freshness
           # diff both need origin/<baseBranch> and the store files' history.
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "20"
 

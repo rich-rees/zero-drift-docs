@@ -10,7 +10,8 @@ import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync, rmSync, mkdtempSync, mkdirSync, existsSync, symlinkSync, readdirSync, statSync, chmodSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { FENCE_TOOLS, repoRelative, artifactPaths } from "../scripts/lib/repo.mjs";
 
 const PLUGIN = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const FENCE = join(PLUGIN, "scripts", "fence.mjs");
@@ -40,10 +41,19 @@ const silent = (r, msg) => {
   assert.equal(r.stdout, "", `${msg}: stdout`);
   assert.equal(r.stderr, "", `${msg}: stderr`);
 };
+// A block is the JSON PreToolUse deny reply on stdout with exit 0 — the shape
+// both hosts honour (decision 0007; exit 2 fails open in Codex 0.145.0). The
+// reason is mirrored on stderr for the hook log.
 const blocked = (r, msg) => {
-  assert.equal(r.status, 2, `${msg}: exit ${r.status} ${r.stderr}`);
-  assert.match(r.stderr, /generated artifact/, msg);
-  assert.match(r.stderr, /update/, msg);
+  assert.equal(r.status, 0, `${msg}: exit ${r.status} ${r.stderr}`);
+  let reply;
+  assert.doesNotThrow(() => (reply = JSON.parse(r.stdout)), `${msg}: stdout is exactly one JSON object`);
+  const out = reply.hookSpecificOutput ?? {};
+  assert.equal(out.hookEventName, "PreToolUse", msg);
+  assert.equal(out.permissionDecision, "deny", msg);
+  assert.match(out.permissionDecisionReason ?? "", /generated artifact/, msg);
+  assert.match(out.permissionDecisionReason ?? "", /update/, msg);
+  assert.match(r.stderr, /generated artifact/, `${msg}: reason mirrored on stderr`);
 };
 const fence = (tool_name, tool_input, extra = {}) => runHook(FENCE, { tool_name, tool_input, ...extra });
 
@@ -66,9 +76,18 @@ test("fence reads the paths from config.json (moved index) and compares canonica
   setConfig(VALID);
 });
 
-test("fence: a configured path that escapes the checkout makes the hook a silent no-op (never a read outside)", () => {
+test("fence: one invalid or unknown paths.* key never unfences the rest — the bad key falls back to its default (CR-070)", () => {
   setConfig({ extractors: ["generic"], hooks: { fence: true }, paths: { agentIndex: "../../outside.md" } });
-  silent(fence("Write", { file_path: join(repo, "zdd", "agent-index.md") }), "escape");
+  blocked(fence("Write", { file_path: join(repo, "zdd", "graph.json") }), "the other artifacts stay fenced");
+  blocked(fence("Write", { file_path: join(repo, "zdd", "agent-index.md") }), "the invalid key falls back to its default");
+  silent(fence("Write", { file_path: join(scratch, "outside.md") }), "the escaping value itself is never fenced (never a read outside)");
+  setConfig({ extractors: ["generic"], hooks: { fence: true }, paths: { bogus: "../x" } });
+  blocked(fence("Write", { file_path: join(repo, "zdd", "graph.json") }), "an unknown key is ignored");
+  setConfig({ extractors: ["generic"], hooks: { fence: true }, paths: "nope" });
+  blocked(fence("Write", { file_path: join(repo, "zdd", "graph.json") }), "a non-object paths block means the defaults");
+  setConfig({ extractors: ["generic"], hooks: { fence: true }, paths: { graph: 42, metadataDir: null } });
+  blocked(fence("Write", { file_path: join(repo, "zdd", "graph.json") }), "wrong-typed value falls back");
+  blocked(fence("Write", { file_path: join(repo, "zdd", "metadata", "x.json") }), "null value falls back");
   setConfig(VALID);
 });
 
@@ -79,7 +98,78 @@ test("fence handles Codex apply_patch targets", () => {
   blocked(fence("apply_patch", { patch: "*** Begin Patch\n*** Add File: zdd/metadata/table/x.json\n+{}\n*** End Patch\n" }), "add file under metadata");
 });
 
-test("fence: a symlinked artifact is dropped on its own, the rest stay fenced; an alias link to the artifact still matches", (t) => {
+test("fence: a generated path that overlaps a curated one or zdd/config.json is invalid and falls back to its default (CR-075)", () => {
+  const cfg = (paths) => setConfig({ extractors: ["generic"], hooks: { fence: true }, paths });
+  cfg({ metadataDir: "zdd" });
+  silent(fence("Edit", { file_path: "zdd/config.json" }), "config.json is never fenced");
+  silent(fence("Edit", { file_path: "zdd/glossary.md" }), "the glossary is never fenced");
+  silent(fence("Write", { file_path: "zdd/adr/0002-x.md" }), "an ADR is never fenced");
+  blocked(fence("Write", { file_path: "zdd/metadata/table/x.json" }), "metadataDir falls back to its default");
+  blocked(fence("Write", { file_path: "zdd/graph.json" }), "the rest stay fenced");
+  cfg({ metadataDir: "docs", adrDir: "docs/adr" });
+  silent(fence("Write", { file_path: "docs/adr/0002-x.md" }), "a generated dir above a curated dir is invalid");
+  silent(fence("Write", { file_path: "docs/readme.md" }), "…so nothing under it is fenced");
+  blocked(fence("Write", { file_path: "zdd/metadata/x.json" }), "…and the default is");
+  cfg({ agentIndex: "zdd/glossary.md" });
+  silent(fence("Write", { file_path: "zdd/glossary.md" }), "a duplicate of a curated path is invalid");
+  blocked(fence("Write", { file_path: "zdd/agent-index.md" }), "…and falls back");
+  cfg({ graph: "zdd/config.json" });
+  silent(fence("Edit", { file_path: "zdd/config.json" }), "a generated file named as config.json is invalid");
+  blocked(fence("Edit", { file_path: "zdd/graph.json" }), "…and falls back");
+  cfg({ graph: "zdd/agent-index.md" });
+  blocked(fence("Edit", { file_path: "zdd/graph.json" }), "two generated keys sharing a value both fall back");
+  blocked(fence("Edit", { file_path: "zdd/agent-index.md" }), "…the other too");
+  cfg({ glossary: "zdd/graph.json", graph: "zdd/config.json" });
+  silent(fence("Edit", { file_path: "zdd/graph.json" }), "a default that collides with a curated choice is dropped, not fenced");
+  blocked(fence("Edit", { file_path: "zdd/agent-index.md" }), "…the rest stay fenced");
+  cfg({ metadataDir: "generated/meta", graph: "generated/graph.json", glossary: "docs/glossary.md" });
+  blocked(fence("Write", { file_path: "generated/meta/x.json" }), "a clean relocation still fences");
+  blocked(fence("Write", { file_path: "generated/graph.json" }), "…both keys");
+  silent(fence("Write", { file_path: "docs/glossary.md" }), "…and the curated file stays free");
+  setConfig(VALID);
+});
+
+test("repoRelative speaks the engine's path language exactly — whitespace and backslashes rejected, '.' normalised (CR-079)", async () => {
+  const engine = await import(pathToFileURL(resolve(PLUGIN, "..", "..", "packages", "zdd-engine", "src", "lib", "paths.mjs")).href);
+  const corpus = ["zdd/graph.json", "./docs/AGENT.md", "docs//x/./y.md", "zdd/", ".", "./", "docs/ZDD Index.md", " zdd/graph.json", "zdd/graph.json\n", "zdd\\graph.json", "\\zdd", "/etc/passwd", "C:/tmp/g.md", "c:\\tmp", "../x", "a/../b", "javascript:alert(1)", "http://x/y", "a:b/c", "", 42, null, "\x01x", "x\x7f"];
+  for (const v of corpus) {
+    let ours, theirs;
+    try {
+      ours = { ok: true, value: repoRelative(v, "p", { exact: true }) };
+    } catch (e) {
+      ours = { ok: false, error: e.message };
+    }
+    try {
+      theirs = { ok: true, value: engine.repoRelative(v, "p") };
+    } catch {
+      theirs = { ok: false };
+    }
+    assert.equal(ours.ok, theirs.ok, `${JSON.stringify(v)}: plugin ${ours.ok ? "accepts" : `rejects (${ours.error})`}, engine ${theirs.ok ? "accepts" : "rejects"}`);
+    if (ours.ok) assert.equal(ours.value, theirs.value, `${JSON.stringify(v)}: same normal form`);
+  }
+  // The default mode is for a path a person typed as a bootstrap answer: Windows separators are normalised, nothing else differs.
+  assert.equal(repoRelative("src\\app/", "p"), "src/app");
+  assert.throws(() => repoRelative("src\\my app", "p"), /whitespace/);
+  assert.throws(() => repoRelative("..\\x", "p"), /must not contain '\.\.'/);
+  // "not the repo root" is the plugin's own extra rule, applied where a path is used as an artifact.
+  assert.throws(() => artifactPaths({ paths: { adrDir: "." } }), /paths\.adrDir: must not be the repo root/);
+  assert.equal(artifactPaths({ paths: { adrDir: "." } }, { lenient: true }).adrDir, "zdd/adr");
+  // The fence therefore never fences a path the engine would refuse; the key falls back.
+  setConfig({ extractors: ["generic"], hooks: { fence: true }, paths: { agentIndex: "docs/ZDD Index.md", graph: "zdd\\graph.json" } });
+  silent(fence("Write", { file_path: "docs/ZDD Index.md" }), "a path with whitespace is not an artifact path");
+  blocked(fence("Write", { file_path: "zdd/agent-index.md" }), "…the default is");
+  blocked(fence("Write", { file_path: "zdd/graph.json" }), "a backslash spelling falls back to the default (same location here)");
+  setConfig(VALID);
+});
+
+test("fence dispatches on tool_name first: a shell command is always inspected, a patch field additionally (CR-073)", () => {
+  blocked(fence("Bash", { command: "rm zdd/graph.json", patch: "benign" }), "extra patch field does not hide the command");
+  blocked(fence("shell_command", { command: "echo hi", patch: "*** Begin Patch\n*** Update File: zdd/graph.json\n@@\n-a\n+b\n*** End Patch\n" }), "patch field is inspected additionally");
+  silent(fence("Bash", { command: "echo hi", patch: "benign" }), "neither names an artifact");
+  blocked(fence("Write", { file_path: join(repo, "zdd", "graph.json"), command: "echo hi" }), "an edit tool reads file_path even with a stray command");
+});
+
+test("fence: a symlinked artifact stays fenced at its lexical path, the rest stay fenced; an alias link to the artifact still matches", (t) => {
   const linked = join(scratch, "linked");
   mkdirSync(join(linked, "zdd"), { recursive: true });
   writeFileSync(join(linked, "zdd", "config.json"), JSON.stringify(VALID));
@@ -96,7 +186,13 @@ test("fence: a symlinked artifact is dropped on its own, the rest stay fenced; a
   // An alias OUTSIDE the checkout that points back in is still the artifact (CR-055).
   symlinkSync(join(linked, "zdd"), join(scratch, "outside-alias"), "junction");
   blocked(r(join(scratch, "outside-alias", "graph.json")), "outside alias into the checkout");
-  silent(r(join(linked, "zdd", "adr-index.md")), "the symlinked one is not vouched for");
+  // The symlinked artifact cannot be vouched for physically, so it is fenced
+  // where the config names it (CR-088) — never dropped. Its link target
+  // outside the checkout is not the fence's to police.
+  blocked(r(join(linked, "zdd", "adr-index.md")), "the symlinked one stays fenced lexically");
+  blocked(r("zdd/adr-index.md"), "…relative spelling too");
+  blocked(runHook(FENCE, { tool_name: "Bash", tool_input: { command: "rm zdd/adr-index.md" } }, { projectDir: linked }), "…and from the shell");
+  silent(r(join(scratch, "elsewhere.md")), "the link's target outside the checkout is not fenced");
   // A path on another drive (a mapped share, perhaps) is compared as text, never probed (CR-057).
   if (process.platform === "win32") silent(runHook(FENCE, { tool_name: "Bash", tool_input: { command: "rm Q:\\\\nowhere\\\\zdd\\\\graph.json" } }, { projectDir: linked }), "other drive");
   // A UNC or device path is compared as text, never probed (CR-052).
@@ -138,6 +234,70 @@ test("fence allows reads, copies FROM generated files, and curated writes", () =
   silent(fence("apply_patch", { patch: "*** Begin Patch\n*** Update File: zdd/glossary.md\n@@\n-a\n+b\n*** End Patch\n" }), "curated patch");
 });
 
+test("fence: moving a generated file away is a write to it — mv/move-item/rename-item/git mv inspect every operand (CR-072)", () => {
+  for (const command of ["mv zdd/graph.json /tmp/g.json", "mv -f zdd/graph.json elsewhere.json", "git mv zdd/adr-index.md docs/old.md", "Move-Item zdd/graph.json C:/tmp/g.json", "Rename-Item zdd/human-index.html old.html", "mv zdd/metadata/table/x.json /tmp/x.json"]) {
+    blocked(fence("Bash", { command }), command);
+  }
+  silent(fence("Bash", { command: "mv notes.md docs/notes.md" }), "mv of an unrelated file");
+  silent(fence("Bash", { command: "cp zdd/graph.json /tmp/g.json" }), "cp FROM a generated file stays a read");
+});
+
+test("fence: only a redirect DESTINATION or a write verb's operand is a write — reads with redirection elsewhere pass (CR-074)", () => {
+  for (const command of [
+    "cat zdd/graph.json > /tmp/debug.json",
+    "cat zdd/graph.json >> notes.txt",
+    "diff zdd/graph.json expected.json > report.txt",
+    "jq . zdd/graph.json 2> errors.log",
+    "grep -c foo zdd/agent-index.md > count.txt",
+    "cat zdd/graph.json 2>&1 | tee /tmp/out.txt",
+    'echo "a > b" zdd/graph.json',
+    "node scripts/report.mjs zdd/graph.json",
+    "node -e \"console.log(require('fs').readFileSync('zdd/graph.json','utf8'))\"",
+    "node -e \"const j = require('./zdd/graph.json'); console.log(j.nodes.filter(n => n.kind === 'table').length)\"",
+    "python -c \"print(open('zdd/graph.json').read())\"",
+    "python3 -c \"import json; print(json.load(open('zdd/graph.json'))['nodes'][0])\"",
+    "perl -ne 'print if /foo/' zdd/agent-index.md",
+    "ruby -e \"puts File.read('zdd/graph.json')\"",
+    "php -r \"echo file_get_contents('zdd/graph.json');\"",
+    "cat <<EOF > notes.txt\nzdd/graph.json\nEOF",
+  ]) {
+    silent(fence("Bash", { command }), command);
+    silent(fence("PowerShell", { command }), `pwsh: ${command}`);
+  }
+  for (const command of [
+    "echo x > zdd/graph.json",
+    "echo x 1> zdd/graph.json",
+    "cat expected.json 2> zdd/graph.json",
+    "cmd &> zdd/graph.json",
+    "cat <<EOF > zdd/graph.json\n{}\nEOF",
+    "node scripts/report.mjs > zdd/graph.json",
+    "node -e \"require('fs').writeFileSync('zdd/graph.json','{}')\"",
+    "node -e \"fs.unlinkSync('zdd/graph.json')\"",
+    "node -e \"fs.rmSync('zdd/metadata',{recursive:true})\"",
+    "node -e \"fs.createWriteStream('zdd/agent-index.md')\"",
+    "python -c \"open('zdd/graph.json','w').write('x')\"",
+    "python -c \"open('zdd/graph.json', 'a').write('x')\"",
+    "python -c \"import os; os.remove('zdd/graph.json')\"",
+    "python -c \"import shutil; shutil.rmtree('zdd/metadata')\"",
+    "perl -e \"rename 'zdd/graph.json','x'\"",
+    "ruby -e \"File.open('zdd/graph.json','w')\"",
+    "php -r \"unlink('zdd/graph.json');\"",
+    "cat zdd/graph.json | Out-File zdd/adr-index.md",
+  ]) {
+    blocked(fence("Bash", { command }), command);
+    blocked(fence("PowerShell", { command }), `pwsh: ${command}`);
+  }
+});
+
+test("fence: removing an ANCESTOR of a generated path is a hit for destructive verbs; -t/--target-directory is the destination (CR-071)", () => {
+  for (const command of ["rm -rf zdd", "rm -r ./zdd/", "rmdir zdd", "Remove-Item -Recurse -Force zdd", "git clean -fdx zdd", "git rm -r zdd", "rm -rf .", "cp -t zdd/metadata/table x.json", "mv --target-directory=zdd/metadata/table x.json", "cp --target-directory zdd/metadata x.json", "install -t zdd/metadata/table x.json"]) {
+    blocked(fence("Bash", { command }), command);
+  }
+  for (const command of ["rm -rf docs", "rm -rf node_modules", "ls zdd", "touch zdd", "cat zdd", "git clean -fdx docs", "cp -t docs zdd/graph.json", "mkdir -p zdd"]) {
+    silent(fence("Bash", { command }), command);
+  }
+});
+
 test("fence resolves shell-relative paths against the command's cwd, inside the checkout", () => {
   const sub = join(repo, "packages", "app");
   mkdirSync(sub, { recursive: true });
@@ -145,6 +305,14 @@ test("fence resolves shell-relative paths against the command's cwd, inside the 
   silent(fence("Bash", { command: "rm zdd/graph.json" }, { cwd: sub }), "relative to the subdir, not the root");
   // A cwd outside the checkout falls back to the root.
   blocked(fence("Bash", { command: "rm zdd/graph.json" }, { cwd: scratch }), "cwd outside");
+  // Codex's shell_command carries the command's own directory as tool_input.workdir
+  // (Claude Code: tool_input.cwd on some tools); it wins over the session cwd (CR-076).
+  blocked(fence("shell_command", { command: "rm ../../zdd/graph.json", workdir: sub }), "workdir subdir");
+  blocked(fence("shell_command", { command: "rm ../../zdd/graph.json", workdir: sub }, { cwd: repo }), "workdir beats the session cwd");
+  blocked(fence("Bash", { command: "rm ../../zdd/graph.json", cwd: sub }), "tool_input.cwd subdir");
+  silent(fence("shell_command", { command: "rm zdd/graph.json", workdir: sub }), "relative to workdir, not the root");
+  blocked(fence("shell_command", { command: "rm zdd/graph.json", workdir: scratch }), "workdir outside the checkout falls back to the root");
+  blocked(fence("shell_command", { command: "rm zdd/graph.json", workdir: 42 }), "non-string workdir is ignored");
 });
 
 test("fence finds the repo by walking up from cwd when the host gives no project dir", () => {
@@ -152,6 +320,15 @@ test("fence finds the repo by walking up from cwd when the host gives no project
   mkdirSync(sub, { recursive: true });
   const r = runHook(FENCE, { tool_name: "Write", tool_input: { file_path: join(repo, "zdd", "graph.json") }, cwd: sub }, { projectDir: null });
   blocked(r, "walk up");
+});
+
+test("fence: a UNC or device cwd is never probed for a config — the walk starts from the process cwd instead (CR-089)", () => {
+  for (const cwd of ["\\\\nowhere.invalid\\share\\proj", "//nowhere.invalid/share/proj", "\\\\?\\C:\\nowhere", "\\\\.\\pipe\\x"]) {
+    const started = Date.now();
+    const r = runHook(FENCE, { tool_name: "Write", tool_input: { file_path: join(repo, "zdd", "graph.json") }, cwd }, { projectDir: null });
+    blocked(r, `cwd ${cwd}`);
+    assert.ok(Date.now() - started < 5000, `no network round-trip for ${cwd}`);
+  }
 });
 
 test("fence is a silent no-op without the opt-in, without config, with malformed config, and on garbage input", () => {
@@ -197,10 +374,22 @@ test("session-start is silent with no config, malformed config, no index, an esc
   silent(runHook(INJECT, undefined, { projectDir: empty }), "malformed config");
   writeFileSync(join(empty, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], paths: { agentIndex: "../../outside.md" } }));
   writeFileSync(join(scratch, "outside.md"), "SECRET\n");
-  silent(runHook(INJECT, undefined, { projectDir: empty }), "escaping path");
+  const escaped = runHook(INJECT, undefined, { projectDir: empty });
+  assert.doesNotMatch(escaped.stdout, /SECRET/, "escaping path is never read");
+  assert.match(escaped.stdout, /# stale/, "the invalid key falls back to its default (CR-070)");
+  // An oversized index is injected up to the cap (64 KiB) and cut at a line
+  // boundary with a one-line marker — never skipped, never whole (CR-086).
   writeFileSync(join(empty, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], paths: { agentIndex: "zdd/big.md" } }));
-  writeFileSync(join(empty, "zdd", "big.md"), "x".repeat(600 * 1024));
-  silent(runHook(INJECT, undefined, { projectDir: empty }), "oversized");
+  writeFileSync(join(empty, "zdd", "big.md"), ("# Big\n" + "- item\n".repeat(100 * 1024)).slice(0, 600 * 1024));
+  const big = runHook(INJECT, undefined, { projectDir: empty });
+  assert.equal(big.status, 0);
+  assert.equal(big.stderr, "");
+  assert.match(big.stdout, /<zdd-agent-index>\n# Big\n/, "oversized index is still injected");
+  assert.match(big.stdout, /\n\[zdd: agent index truncated at 64 KiB — .*"update ZDD".*\]\n<\/zdd-agent-index>/, "one-line marker before the close");
+  assert.ok(Buffer.byteLength(big.stdout) < 66 * 1024, `bounded: ${Buffer.byteLength(big.stdout)} bytes`);
+  assert.ok(/- item\n\[zdd: agent index truncated/.test(big.stdout), "cut at a line boundary");
+  writeFileSync(join(empty, "zdd", "big.md"), "# Small\n" + "- item\n".repeat(8000)); // ~55 KiB, under the cap
+  assert.doesNotMatch(runHook(INJECT, undefined, { projectDir: empty }).stdout, /truncated/, "under the cap: whole, no marker");
   rmSync(join(empty, "zdd", "agent-index.md"));
   writeFileSync(join(empty, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"] }));
   silent(runHook(INJECT, undefined, { projectDir: empty }), "no index");
@@ -265,10 +454,16 @@ test("manifests: Claude and Codex reference the same skills and hooks; hooks.jso
   assert.equal(claude.name, codex.name);
   assert.equal(claude.version, codex.version);
   assert.equal(claude.skills, codex.skills);
-  assert.equal(claude.hooks, codex.hooks);
+  // One hooks file, reached two ways: Claude Code auto-loads hooks/hooks.json
+  // and REFUSES a manifest that also names it ("duplicate" — the plugin did
+  // not load at all in the DIO-312 live smoke test), while Codex needs the
+  // explicit entry. So the Claude manifest carries no `hooks` key and the
+  // Codex manifest points at the default path.
+  assert.equal(claude.hooks, undefined, "Claude manifest must not name the auto-loaded hooks file");
+  assert.equal(codex.hooks, "./hooks/hooks.json");
   assert.ok(existsSync(join(PLUGIN, claude.skills)));
-  assert.ok(existsSync(join(PLUGIN, claude.hooks)));
-  const hooks = JSON.parse(readFileSync(join(PLUGIN, claude.hooks), "utf8"));
+  assert.ok(existsSync(join(PLUGIN, "hooks", "hooks.json")));
+  const hooks = JSON.parse(readFileSync(join(PLUGIN, "hooks", "hooks.json"), "utf8"));
   const commands = Object.values(hooks.hooks).flat().flatMap((g) => g.hooks);
   assert.ok(commands.length >= 2);
   for (const c of commands) {
@@ -280,6 +475,12 @@ test("manifests: Claude and Codex reference the same skills and hooks; hooks.jso
   }
   const pre = hooks.hooks.PreToolUse[0].matcher.split("|");
   for (const t of ["Write", "Edit", "Bash", "apply_patch", "shell_command"]) assert.ok(pre.includes(t), `matcher covers ${t}`);
+  // The matcher is exactly the union of the tool names the fence handles —
+  // derived from the fence's own tables, so neither can drift (CR-077).
+  const handled = [...FENCE_TOOLS.edit, ...FENCE_TOOLS.shell, ...FENCE_TOOLS.patch];
+  assert.deepEqual(new Set(pre), new Set(handled), "matcher == fence tool sets");
+  assert.equal(pre.length, new Set(pre).size, "no duplicate in the matcher");
+  for (const t of ["write_file", "edit_file", "exec_command", "local_shell"]) assert.ok(pre.includes(t), `matcher covers ${t}`);
   const market = JSON.parse(readFileSync(resolve(PLUGIN, "..", "..", ".claude-plugin", "marketplace.json"), "utf8"));
   assert.equal(market.plugins.find((p) => p.name === "zdd").version, claude.version);
   for (const s of ["bootstrap", "load", "update", "grill"]) assert.ok(existsSync(join(PLUGIN, "skills", s, "SKILL.md")), s);

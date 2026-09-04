@@ -12,7 +12,7 @@
 // validated repo-relative, and every read or write goes through resolveInside,
 // which refuses symlinks and a real path outside the real checkout.
 
-import { readFileSync, existsSync, readdirSync, statSync, lstatSync, realpathSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync, statSync, lstatSync, realpathSync, openSync, readSync, closeSync } from "node:fs";
 import { dirname, join, resolve, relative, isAbsolute, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
@@ -20,7 +20,7 @@ import { homedir } from "node:os";
 export const PLUGIN_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 export const ENGINE_PACKAGE = "@rich-rees/zdd-engine";
 export const MAX_CONFIG_BYTES = 1024 * 1024; // a config bigger than this is not a config
-export const MAX_INDEX_BYTES = 512 * 1024; // an index bigger than this is not injected
+export const MAX_INDEX_BYTES = 64 * 1024; // the SessionStart injection is cut here (~16k tokens, 8× render's budget) — CR-086
 
 // Mirror of the engine's DEFAULT_PATHS (src/lib/config.mjs). The engine is
 // installed outside the plugin (npx), so the plugin cannot import it — this
@@ -35,6 +35,16 @@ export const DEFAULT_PATHS = {
   humanIndex: "zdd/human-index.html",
   graph: "zdd/graph.json",
   bundleDir: "zdd",
+};
+
+// The tool names the fence handles, by shape. hooks.json's PreToolUse matcher
+// must be exactly their union — a test derives one from the other (CR-077).
+// Claude Code names (Write, Edit, Bash…) and Codex names (shell_command,
+// apply_patch…) side by side; the extra spellings cost nothing.
+export const FENCE_TOOLS = {
+  edit: ["Write", "Edit", "MultiEdit", "NotebookEdit", "write_file", "edit_file"],
+  shell: ["Bash", "PowerShell", "Shell", "shell", "shell_command", "exec_command", "local_shell"],
+  patch: ["apply_patch"],
 };
 
 // The plugin's own version — the one every pin is compared against.
@@ -59,14 +69,20 @@ export const posixify = (p) => p.split(/[\\/]/).join("/");
 // Adopter root: explicit flag, else the host's project dir, else the nearest
 // directory at or above `cwd` holding zdd/config.json (a session opened in a
 // monorepo package still finds the repo's config — CR-025), else cwd.
+// A UNC or device path (`\\server\share`, `\\?\`, `\\.\`) handed in as the
+// cwd is never probed — an existsSync there is an SMB round-trip with the
+// session's credentials (CR-089, the same rule as the fence's CR-052) — the
+// walk starts from the process cwd instead.
+export const REMOTE_OR_DEVICE = /^(\\\\|\/\/)/;
 export function adopterRoot(flags = {}) {
   if (flags.root) return resolve(flags.root);
   if (process.env.CLAUDE_PROJECT_DIR) return resolve(process.env.CLAUDE_PROJECT_DIR);
-  let dir = resolve(flags.cwd || process.cwd());
+  const start = flags.cwd && !REMOTE_OR_DEVICE.test(flags.cwd) ? flags.cwd : process.cwd();
+  let dir = resolve(start);
   for (;;) {
     if (existsSync(join(dir, "zdd", "config.json"))) return dir;
     const parent = dirname(dir);
-    if (parent === dir) return resolve(flags.cwd || process.cwd());
+    if (parent === dir) return resolve(start);
     dir = parent;
   }
 }
@@ -110,27 +126,90 @@ export function loadConfig(root) {
   return readConfig(root).config;
 }
 
-// A repo-relative path: a non-empty string, no scheme, not absolute (POSIX or
-// Windows), no `..` segment, no control characters. Returns the POSIX form.
-export function repoRelative(value, label) {
+// A repo-relative path, in the engine's language
+// (packages/zdd-engine/src/lib/paths.mjs, CR-079): a non-empty string with no
+// whitespace or control character anywhere, no leading `/`, no drive letter,
+// no URL scheme, no `..` segment. Returns the normal form — `.`-segments and
+// empty segments dropped, "." for the repo root itself (the engine's
+// convention; a caller that cannot use the root says so — see artifactPaths).
+//
+// `exact` is the engine byte-for-byte: a backslash is refused. That is the
+// mode for anything read back from zdd/config.json, so the fence never guards
+// a path the engine will refuse to write. The default additionally accepts
+// Windows separators and normalises them — for a path a person TYPED as a
+// bootstrap answer, which bootstrap writes to config in the normal form
+// (bootstrap.test: "equivalent spellings are one path"). A test holds the
+// exact mode and the engine together.
+export function repoRelative(value, label, { exact = false } = {}) {
   if (typeof value !== "string" || !value.length) throw new Error(`${label}: must be a non-empty string`);
-  if (/[\x00-\x1f\x7f]/.test(value)) throw new Error(`${label}: contains control characters`);
-  const p = posixify(value).replace(/\/+$/, "");
-  if (isAbsolute(value) || /^[a-zA-Z]:/.test(p) || p.startsWith("/") || p.startsWith("\\") || /^[a-z][a-z0-9+.-]*:/i.test(p)) {
-    throw new Error(`${label}: must be repo-relative, got ${JSON.stringify(value)}`);
+  if (/[\s\x00-\x1f\x7f]/.test(value)) throw new Error(`${label}: must not contain whitespace or control characters, got ${JSON.stringify(value)}`);
+  if (exact && value.includes("\\")) throw new Error(`${label}: must use '/' separators, no backslash, got ${JSON.stringify(value)}`);
+  const p = exact ? value : posixify(value);
+  if (p.startsWith("/") || /^[A-Za-z]:/.test(p) || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(p)) {
+    throw new Error(`${label}: must be repo-relative (no absolute path, drive letter or URL scheme), got ${JSON.stringify(value)}`);
   }
   const segs = p.split("/").filter((s) => s !== "" && s !== ".");
   if (segs.some((s) => s === "..")) throw new Error(`${label}: must not contain '..', got ${JSON.stringify(value)}`);
-  if (!segs.length) throw new Error(`${label}: must not be the repo root`);
-  return segs.join("/");
+  return segs.length ? segs.join("/") : ".";
 }
 
-// Every artifact path, validated. Throws on a bad one — hooks catch and stay
-// silent, bootstrap reports and stops.
-export function artifactPaths(config) {
-  const merged = { ...DEFAULT_PATHS, ...(config?.paths ?? {}) };
+// Every artifact path, validated, keyed by the nine names the engine knows.
+// Unknown `paths.*` keys are ignored: the engine does not read them, and one
+// stray key must never decide the fate of the others (CR-070).
+//
+// Two modes. Strict (the default, bootstrap): the first bad value throws, so
+// nothing is written over a config the adopter has to fix. Lenient (the
+// hooks): each key is judged on its own and a bad value falls back to its
+// default — a fence that switched itself off over one typo would be the one
+// failure mode worse than a noisy one.
+//
+// A generated path may not overlap anything the fence must leave alone
+// (CR-075): a generated dir equal to or above a curated path (glossary,
+// adrDir, mapDir) or zdd/config.json, a generated file that IS one of those,
+// or two keys sharing one value — otherwise the fence would block the very
+// file its reason text tells the agent to edit. Such a value is invalid the
+// same way an escaping one is: strict throws, lenient falls back.
+export const GENERATED_KEYS = ["metadataDir", "graph", "agentIndex", "adrIndex", "humanIndex"];
+export const CURATED_KEYS = ["glossary", "adrDir", "mapDir"];
+export const CONFIG_REL = "zdd/config.json";
+const samePosix = (a, b) => (process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b);
+const posixPrefix = (dir, p) => samePosix(dir, p) || (process.platform === "win32" ? p.toLowerCase().startsWith(dir.toLowerCase() + "/") : p.startsWith(dir + "/"));
+
+export function artifactPaths(config, { lenient = false } = {}) {
+  const given = config?.paths;
+  const configured = given && typeof given === "object" && !Array.isArray(given) ? given : {};
   const out = {};
-  for (const [key, value] of Object.entries(merged)) out[key] = repoRelative(value, `paths.${key}`);
+  for (const [key, fallback] of Object.entries(DEFAULT_PATHS)) {
+    const value = configured[key] === undefined ? fallback : configured[key];
+    try {
+      const rel = repoRelative(value, `paths.${key}`, { exact: true }); // config values: the engine's language exactly (CR-079)
+      // The plugin's own extra rule (not the engine's): an artifact is never the checkout itself.
+      if (rel === ".") throw new Error(`paths.${key}: must not be the repo root`);
+      out[key] = rel;
+    } catch (e) {
+      if (!lenient) throw e;
+      out[key] = fallback;
+    }
+  }
+  const overlap = (key) => {
+    const p = out[key];
+    if (key === "metadataDir") {
+      for (const c of [...CURATED_KEYS.map((k) => out[k]), CONFIG_REL]) if (posixPrefix(p, c)) return `paths.${key} ${JSON.stringify(p)} contains ${JSON.stringify(c)}`;
+    } else if (samePosix(p, CONFIG_REL)) return `paths.${key} ${JSON.stringify(p)} is the config file`;
+    for (const other of Object.keys(out)) if (other !== key && samePosix(p, out[other])) return `paths.${key} and paths.${other} are both ${JSON.stringify(p)}`;
+    return null;
+  };
+  // Judge every generated key against the values as configured, then apply
+  // the fallbacks together, so two keys sharing a value both fall back.
+  const bad = GENERATED_KEYS.map((key) => [key, overlap(key)]).filter(([, why]) => why);
+  for (const [key, why] of bad) {
+    if (!lenient) throw new Error(`${why} — a generated path must not overlap a curated one`);
+    out[key] = DEFAULT_PATHS[key];
+  }
+  // A default can itself collide with a curated value the adopter chose
+  // (`glossary: "zdd/graph.json"`); a generated key with nowhere safe to fall
+  // back to is dropped (undefined) rather than fencing a curated file.
+  if (lenient) for (const [key] of bad) if (overlap(key)) delete out[key];
   return out;
 }
 
@@ -167,8 +246,11 @@ export function resolveInside(root, rel, label = rel) {
 }
 
 // Read a regular file inside the checkout, bounded. Returns null when it is
-// absent, a symlink, not a regular file, or over the cap.
-export function readInside(root, rel, maxBytes, label = rel) {
+// absent, a symlink, not a regular file, or — without `truncate` — over the
+// cap. With `truncate`, a file over the cap is read up to the cap only (never
+// whole into memory) and cut back to the last complete line; the caller sees
+// `{ text, truncated }` and says so in its own words (CR-086).
+export function readInside(root, rel, maxBytes, label = rel, { truncate = false } = {}) {
   const abs = resolveInside(root, rel, label);
   let st;
   try {
@@ -176,8 +258,23 @@ export function readInside(root, rel, maxBytes, label = rel) {
   } catch {
     return null;
   }
-  if (!st.isFile() || st.size > maxBytes) return null;
-  return readFileSync(abs, "utf8");
+  if (!st.isFile()) return null;
+  if (st.size <= maxBytes) {
+    const text = readFileSync(abs, "utf8");
+    return truncate ? { text, truncated: false } : text;
+  }
+  if (!truncate) return null;
+  const buf = Buffer.alloc(maxBytes);
+  const fd = openSync(abs, "r");
+  let n;
+  try {
+    n = readSync(fd, buf, 0, maxBytes, 0);
+  } finally {
+    closeSync(fd);
+  }
+  const head = buf.subarray(0, n);
+  const nl = head.lastIndexOf(0x0a);
+  return { text: (nl > 0 ? head.subarray(0, nl) : head).toString("utf8"), truncated: true };
 }
 
 // Same-path comparison for the fence: canonical absolute form, and

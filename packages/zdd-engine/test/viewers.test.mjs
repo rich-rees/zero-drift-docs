@@ -58,6 +58,36 @@ test("default viewer: BUNDLE (byte for byte) and agent index equal the v0.3.1 go
   rmSync(repo, { recursive: true, force: true });
 });
 
+// CR-096: the BUNDLE golden proves the data; nothing proved the PAGE. This is
+// the whole human-index.html with the two vendored library bodies swapped
+// back for their placeholders (they are checked against the vendor files
+// byte-for-byte), so a change to viz.html / viz.css / viz.js / safe-marked.js
+// or the embed shows up as a golden diff without committing 400 KB of
+// cytoscape. Regenerate only deliberately (test/golden/README.md).
+const VENDOR = [
+  ["/*__CYTOSCAPE_JS__*/", join(PKG, "src", "viewers", "cytoscape", "vendor", "cytoscape.min.js")],
+  ["/*__MARKED_JS__*/", join(PKG, "src", "viewers", "cytoscape", "vendor", "marked.min.js")],
+];
+const withoutVendor = (html) => {
+  for (const [marker, file] of VENDOR) {
+    const body = readFileSync(file, "utf8");
+    const at = html.indexOf(body);
+    assert.ok(at !== -1, `${file} is inlined verbatim`);
+    assert.equal(html.indexOf(body, at + 1), -1, `${file} is inlined once`);
+    html = html.slice(0, at) + marker + html.slice(at + body.length);
+  }
+  return html;
+};
+
+test("CR-096: the whole human-index.html (vendor bodies elided) equals its golden on the Next.js fixture", () => {
+  const repo = mkRepo(FIXTURE);
+  run(repo, ["derive"]);
+  run(repo, ["render"]);
+  const html = withoutVendor(readFileSync(join(repo, "zdd", "human-index.html"), "utf8"));
+  assert.equal(html, readFileSync(join(GOLDEN, "human-index-v1.0-nextjs-supabase.html"), "utf8"));
+  rmSync(repo, { recursive: true, force: true });
+});
+
 test("graph artifact: every record and map concept is a node with a resource; every ref and map link is an edge", () => {
   const repo = mkRepo(FIXTURE);
   run(repo, ["derive"]);
@@ -354,6 +384,68 @@ test("CONTRIBUTING names the graph schema and the registry step", () => {
   assert.ok(text.includes("zdd-graph/1"));
   assert.ok(text.includes("src/viewers/index.mjs"));
   assert.ok(text.includes("zdd/graph.json"));
+});
+
+test("CR-069: cytoscape edge ids are injective — two edges that collide under `source__target` stay distinct", async () => {
+  // Node ids are bundle-relative paths (map files, record slugs) and may
+  // contain `__`. Every id starts with its layer (`map/`, `metadata/`), so a
+  // collision under `${source}__${target}` needs `__map/` inside an id — a
+  // map directory called `a__map` — contrived, hence P3, but legal, and
+  // cytoscape silently drops the second element with a duplicate id.
+  //   (map/a -> map/b__map/c)  and  (map/a__map/b -> map/c)  both read
+  //   `map/a__map/b__map/c`.
+  const { render } = await import("../src/viewers/cytoscape/index.mjs");
+  const node = (id) => ({ id, title: id, type: "Feature", description: "", resource: `${id}.md`, tags: [], layer: "map", body: "" });
+  const graph = {
+    schema: "zdd-graph/1",
+    nodes: [node("map/a"), node("map/b__map/c"), node("map/a__map/b"), node("map/c")],
+    edges: [
+      { source: "map/a", target: "map/b__map/c" },
+      { source: "map/a__map/b", target: "map/c" },
+    ],
+  };
+  const html = render({ graph, docs: { glossary: "", adrs: [] }, changed: { adrs: [], terms: [] }, options: {}, bundleName: "T", repoBase: "" });
+  const bundle = JSON.parse(/window\.BUNDLE = (.*);\n/.exec(html)[1]);
+  const ids = bundle.edges.map((e) => e.data.id);
+  assert.equal(new Set(ids).size, ids.length, `edge ids collide: ${ids.join(", ")}`);
+  assert.deepEqual(bundle.edges.map((e) => [e.data.source, e.data.target]), [["map/a", "map/b__map/c"], ["map/a__map/b", "map/c"]]);
+});
+
+test("CR-100: the query-selected view is looked up as an own property — `?view=constructor` falls back to lanes", () => {
+  // showView() runs against a DOM, so this pins the source: every VIEWS
+  // lookup keyed by the URL value goes through Object.hasOwn, never a bare
+  // `VIEWS[v]` truthiness test (which found Object.prototype.constructor).
+  const viz = readFileSync(join(PKG, "src", "viewers", "cytoscape", "viz.js"), "utf8");
+  assert.match(viz, /Object\.hasOwn\(VIEWS,\s*v\)/, "view routing uses Object.hasOwn");
+  assert.ok(!/if\s*\(\s*!VIEWS\[v\]\s*\)/.test(viz), "no bare VIEWS[v] existence test");
+});
+
+test("CR-106: protocol-relative and backslash-shaped hrefs are not scheme-less — they render as plain text like any other off-site scheme", () => {
+  const dir = join(PKG, "src", "viewers", "cytoscape");
+  const ctx = vm.createContext({});
+  vm.runInContext(readFileSync(join(dir, "vendor", "marked.min.js"), "utf8"), ctx);
+  vm.runInContext(readFileSync(join(dir, "safe-marked.js"), "utf8"), ctx);
+  const parse = (md) => vm.runInContext(`safeMarked.parse(${JSON.stringify(md)})`, ctx);
+  // `//host/p` resolves against the page's own scheme to a foreign host;
+  // browsers read `\\host`, `/\host` and `\/host` the same way. Markdown
+  // unescapes one level (`\\` -> `\`), so the source doubles each backslash
+  // that must reach the href.
+  const cases = [
+    ["//tracker.example/p", "//tracker.example/p"],
+    ["\\\\\\\\tracker.example/p", "\\\\tracker.example/p"],
+    ["/\\\\tracker.example/p", "/\\tracker.example/p"],
+    ["\\\\/tracker.example/p", "\\/tracker.example/p"],
+    ["  //tracker.example/p", "//tracker.example/p"],
+  ];
+  for (const [md, href] of cases) {
+    const html = parse(`[go](${md})`);
+    assert.ok(!/<a\b/i.test(html), `href ${JSON.stringify(href)} is not a link: ${html}`);
+    assert.ok(html.includes("go"), "the text stands in");
+  }
+  // In-page, relative and explicit http(s)/mailto targets are still links.
+  for (const href of ["#terms", "./diagram.md", "0002-things.md", "/docs/x.md", "https://example.com/a", "mailto:x@example.com"]) {
+    assert.match(parse(`[ok](${href})`), /<a href="/, `${href} stays a link`);
+  }
 });
 
 test("CR-007: source-derived markdown cannot execute script in the Cytoscape viewer", () => {

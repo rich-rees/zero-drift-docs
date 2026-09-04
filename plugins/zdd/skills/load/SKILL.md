@@ -1,6 +1,6 @@
 ---
 name: load
-description: "load ZDD" — the declared load. Read the glossary whole, the ADR index whole, the ADRs your task cites, and the agent-index sections for the feature, say what you loaded, then read the code fresh. First checks the adopter's engine pin against the plugin and warns on skew. Use before designing or building in a repo that uses Zero-Drift Docs; triggers on "load ZDD".
+description: "\"load ZDD\" — the declared load. Read the glossary whole, the ADR index whole, the ADRs your task cites, and the agent-index sections for the feature, say what you loaded, then read the code fresh. First checks the adopter's engine pin against the plugin and warns on skew. Use before designing or building in a repo that uses Zero-Drift Docs; triggers on \"load ZDD\"."
 ---
 
 # zdd:load — the declared load
@@ -30,10 +30,17 @@ mention it then.
 
 ## Steps
 
-1. **Read `zdd/glossary.md` whole.** A grep is never orientation — the whole
-   vocabulary is small and cheap, and the point is to start with the right words.
-2. **Read `zdd/adr-index.md` whole.** One line per decision; this is the map of
-   what has been decided and what supersedes what.
+The paths below are the defaults. The repo's `zdd/config.json` may move any of
+them under `paths.*` — `paths.glossary`, `paths.adrIndex`, `paths.adrDir`,
+`paths.agentIndex` — so read that block first when it exists and use what it
+names; the `zdd/…` names apply only where a key is absent.
+
+1. **Read the glossary whole** (`paths.glossary`, default `zdd/glossary.md`). A
+   grep is never orientation — the whole vocabulary is small and cheap, and the
+   point is to start with the right words.
+2. **Read the ADR index whole** (`paths.adrIndex`, default `zdd/adr-index.md`).
+   One line per decision; this is the map of what has been decided and what
+   supersedes what.
 3. **Drill into the ADR bodies your task cites** — plus the glossary entries for
    the prompt's terms, and the agent-index sections for the feature you're
    touching.

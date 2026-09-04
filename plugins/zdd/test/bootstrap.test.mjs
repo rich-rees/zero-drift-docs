@@ -37,7 +37,12 @@ const bootstrapFails = (root, args) => {
   assert.equal(r.status, 1, `expected failure: ${r.stdout}`);
   return r.stderr;
 };
-const engine = (root, args) => execFileSync(process.execPath, [ENGINE_BIN, ...args, `--root=${root}`], { encoding: "utf8" });
+// stdout AND stderr: the engine's deprecation notes go to stderr (CR-112).
+const engine = (root, args) => {
+  const r = spawnSync(process.execPath, [ENGINE_BIN, ...args, `--root=${root}`], { encoding: "utf8" });
+  assert.equal(r.status, 0, `engine ${args.join(" ")} failed: ${r.stderr}${r.stdout}`);
+  return r.stdout + r.stderr;
+};
 
 function answersFile(name, answers) {
   const p = join(scratch, `${name}.json`);
@@ -129,6 +134,35 @@ test("detect: several migration dirs get distinct namespace names; symlinked dir
   assert.ok(!j2.proposals.some((p) => p.name === "fastapi"), "code behind a link is not inventoried");
 });
 
+test("detect: a source file over 1 MiB is not read (CR-091); the same convention in a small file is", () => {
+  const repo = fresh("detect-huge");
+  mkdirSync(join(repo, "api"));
+  writeFileSync(join(repo, "api", "generated.py"), "# " + "x".repeat(1024 * 1024) + "\nfrom fastapi import FastAPI\napp = FastAPI()\n");
+  writeFileSync(join(repo, "index.ts"), "");
+  const j1 = JSON.parse(bootstrap(repo, ["detect", "--json"]));
+  assert.ok(!j1.proposals.some((p) => p.name === "fastapi"), JSON.stringify(j1.proposals));
+  writeFileSync(join(repo, "api", "small.py"), "from fastapi import FastAPI\napp = FastAPI()\n");
+  const j2 = JSON.parse(bootstrap(repo, ["detect", "--json"]));
+  assert.deepEqual(j2.proposals.find((p) => p.name === "fastapi").options, { roots: ["api"] });
+});
+
+test("narration never emits control characters from repo-derived strings (CR-092)", async () => {
+  // Windows refuses such names on disk, so the narrator is driven directly with
+  // what a POSIX checkout could hand it: an ANSI escape and a newline in a path.
+  const { narrateDetect, narrateApply, narrateUpgrade } = await import(`file://${SCRIPT.replace(/\\/g, "/")}`);
+  const evil = "apps/\x1b[31mred\x1b[0m/migrations\nnote    FAKE LINE";
+  const d = { mode: "existing", sourceFiles: 1, proposals: [{ name: "supabase", evidence: [`SQL migrations under \`${evil}\` (1 file)`], options: { migrationNamespaces: [{ name: "db", dir: evil }] } }], apps: [{ name: "x\x07", evidence: "e", extractor: "f" }] };
+  const pocock = { installed: false, hits: [], searched: [] };
+  for (const text of [
+    narrateDetect(d, pocock),
+    narrateApply({ mode: "existing", version: "1.0.0", date: DATE, wrote: [evil], kept: [], skipped: [], notes: [`${evil}: kept`], optIns: { ci: true }, pocock }),
+    narrateUpgrade({ version: "1.0.0", wrote: [], kept: [evil], notes: [] }),
+  ]) {
+    assert.ok(!/[\x00-\x09\x0b-\x1f\x7f]/.test(text), JSON.stringify(text));
+    assert.ok(!text.split("\n").some((l) => l.startsWith("note    FAKE")), "a newline in a path cannot forge a ledger line");
+  }
+});
+
 // --- existing codebase ---------------------------------------------------------
 
 test("apply on the FastAPI+Supabase fixture with all defaults: config, owned workflow, hook registrations, snippet, dated ADR-0001", () => {
@@ -163,6 +197,28 @@ test("apply on the FastAPI+Supabase fixture with all defaults: config, owned wor
   // The written config actually drives the engine against the detected tree.
   assert.match(engine(repo, ["derive"]), /Wrote \d+ records/);
   assert.match(engine(repo, ["derive", "--check"]), /in sync/);
+});
+
+test("the written workflow: exact ordered command list, the pin once in env, read-only token, no persisted credentials (CR-094, CR-084)", () => {
+  const repo = fastapiRepo("workflow-shape");
+  bootstrap(repo, ["apply", `--answers=${answersFile("wf", {})}`]);
+  const wf = readFileSync(join(repo, ".github", "workflows", "zdd.yml"), "utf8");
+  const lines = wf.split("\n");
+  const runs = lines.filter((l) => /^\s*run:\s/.test(l)).map((l) => l.replace(/^\s*run:\s*/, "").trim());
+  assert.deepEqual(runs, ['npx -y "$ZDD_ENGINE" derive --check', 'npx -y "$ZDD_ENGINE" render --check', 'npx -y "$ZDD_ENGINE" lint', 'npx -y "$ZDD_ENGINE" freshness >> "$GITHUB_STEP_SUMMARY"']);
+  const pins = lines.filter((l) => l.includes("@rich-rees/zdd-engine@"));
+  assert.deepEqual(pins, [`  ZDD_ENGINE: "@rich-rees/zdd-engine@${PLUGIN_VERSION}"`], "the pin appears exactly once, in env");
+  // A contributor's local extractor runs in this job (decision 0001): the token
+  // it can reach is read-only and is not left in the checkout.
+  const job = wf.slice(wf.indexOf("jobs:"));
+  assert.match(job, /^\s+permissions:\n\s+contents: read$/m, "job-level permissions: contents: read");
+  const checkout = job.slice(job.indexOf("actions/checkout"), job.indexOf("actions/setup-node"));
+  assert.match(checkout, /^\s+persist-credentials: false$/m, "checkout does not persist credentials");
+  assert.match(checkout, /^\s+fetch-depth: 0$/m, "full history is still fetched");
+  // Actions are pinned to a full commit SHA with the tag as a comment (CR-110).
+  const uses = lines.filter((l) => /^\s*-\s*uses:/.test(l)).map((l) => l.replace(/^\s*-\s*uses:\s*/, ""));
+  assert.equal(uses.length, 2, uses.join("\n"));
+  for (const u of uses) assert.match(u, /^actions\/(checkout|setup-node)@[0-9a-f]{40} # v\d+\.\d+\.\d+$/, u);
 });
 
 test("apply is idempotent and byte-stable: a second run keeps everything; two fresh runs produce identical trees", () => {
@@ -229,12 +285,31 @@ test("apply validates the whole answer set before the first write", () => {
     [{ extractors: ["supabase", "supabase"] }, /twice/],
     [{ stack: [{ name: "FastAPI", path: "../api" }] }, /must not contain/],
     [{ repoBase: "ftp://x" }, /repoBase/],
+    // CR-078: the engine's rule exactly — `^https?:\/\/\S+$` — so a base the
+    // engine would refuse never reaches config.json.
+    [{ repoBase: "https://" }, /repoBase/],
+    [{ repoBase: "https://example.test/ bad" }, /repoBase/],
+    // CR-078: every path-bearing extractor option is validated with the
+    // engine's repo-relative rule before the first write.
+    [{ extractorOptions: { fastapi: { roots: ["../outside"] } } }, /fastapi\.roots/],
+    [{ extractorOptions: { fastapi: { roots: ["C:/tmp"] } } }, /fastapi\.roots/],
+    [{ extractorOptions: { nextjs: { appDir: "/abs/app" } } }, /nextjs\.appDir/],
+    [{ extractorOptions: { nextjs: { middlewarePath: "src\\middleware.ts" } } }, /nextjs\.middlewarePath/],
+    [{ extractorOptions: { nextjs: { srcAliasRoot: "javascript:x" } } }, /nextjs\.srcAliasRoot/],
+    [{ extractorOptions: { nextjs: { refs: { roots: ["src", "a b"] } } } }, /nextjs\.refs\.roots/],
+    [{ extractorOptions: { supabase: { migrationNamespaces: [{ name: "db", dir: "../../m" }] } } }, /supabase\.migrationNamespaces\[0\]\.dir/],
+    [{ extractorOptions: { supabase: { migrationNamespaces: [{ name: "db" }] } } }, /supabase\.migrationNamespaces\[0\]\.dir/],
+    [{ extractorOptions: { fastapi: { roots: "api" } } }, /fastapi\.roots/],
     [{ codex: "true" }, /codex must be/],
     [[], /must be a JSON object/],
   ]) {
     assert.match(bootstrapFails(repo, ["apply", `--answers=${answersFile("ba", answers)}`]), re, JSON.stringify(answers));
   }
   assert.deepEqual(readdirSync(repo), [], "nothing written by any of them");
+  // What the engine accepts, bootstrap accepts: "." is the fastapi default root.
+  const ok = fresh("ok-paths");
+  bootstrap(ok, ["apply", `--answers=${answersFile("ok", { repoBase: "https://github.com/o/r/tree/main/", extractors: ["fastapi"], extractorOptions: { fastapi: { roots: ["."] } } })}`]);
+  assert.deepEqual(JSON.parse(readFileSync(join(ok, "zdd", "config.json"), "utf8")).extractorOptions.fastapi.roots, ["."]);
 });
 
 // --- greenfield ------------------------------------------------------------------
@@ -399,11 +474,41 @@ test("Pocock recommendation: names the plugin, the install route, and the conseq
 
 // --- upgrade ---------------------------------------------------------------------------
 
-const legacySnippet = "## Documentation — Zero-Drift Docs (ZDD)\n\nThis repo uses ZDD.\n\n- **Before building:** run `/zdd:orient`.\n- **Before finishing:** run `/zdd:update`.\n\n";
+// The snippet v0.3.1 shipped, byte for byte (git show v0.3.1:plugins/zdd/templates/claude-md-snippet.md).
+const legacySnippet = readFileSync(join(PLUGIN, "test", "fixtures", "v0.3.1", "claude-md-snippet.md"), "utf8") + "\n";
+
+test("upgrade replaces the pre-0.4 section only when it IS the v0.3.1 snippet modulo whitespace; an adopter's line inside it keeps the section (CR-080)", () => {
+  const stock = fresh("legacy-stock");
+  mkdirSync(join(stock, "zdd"));
+  writeFileSync(join(stock, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], engine: PLUGIN_VERSION }));
+  // Reflowed and CRLF: whitespace differences alone do not make it the adopter's.
+  const reflowed = legacySnippet.replace(/ +\n/g, "\n").replace(/([a-z,])\n([a-z`])/g, "$1 $2").replace(/\n/g, "\r\n");
+  writeFileSync(join(stock, "CLAUDE.md"), "# Repo\r\n\r\n" + reflowed + "## After\r\n\r\nkeep\r\n");
+  const j1 = JSON.parse(bootstrap(stock, ["upgrade", "--json"]));
+  const c1 = readFileSync(join(stock, "CLAUDE.md"), "utf8");
+  assert.ok(!c1.includes("/zdd:orient") && c1.includes("<!-- zdd:begin -->") && c1.includes("## After\r\n\r\nkeep"), c1);
+  assert.ok(j1.notes.some((n) => n.includes("replaced the pre-0.4 snippet")), JSON.stringify(j1.notes));
+
+  const edited = fresh("legacy-edited");
+  mkdirSync(join(edited, "zdd"));
+  writeFileSync(join(edited, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], engine: PLUGIN_VERSION }));
+  const mine = legacySnippet.trimEnd() + "\n- **House rule:** ADRs need two reviewers.\n\n";
+  const before = "# Repo\n\n" + mine + "## After\n\nkeep\n";
+  writeFileSync(join(edited, "CLAUDE.md"), before);
+  const j2 = JSON.parse(bootstrap(edited, ["upgrade", "--json"]));
+  const c2 = readFileSync(join(edited, "CLAUDE.md"), "utf8");
+  assert.ok(c2.startsWith(before), "the section with the adopter's line is kept verbatim");
+  assert.ok(c2.includes("House rule") && c2.includes("/zdd:orient"), "nothing of the adopter's text is lost");
+  assert.ok(c2.includes("<!-- zdd:begin -->"), "the marked block is appended instead");
+  assert.ok(j2.notes.some((n) => n.includes("CLAUDE.md") && n.includes("legacy section left in place")), JSON.stringify(j2.notes));
+});
 
 test("upgrade a v0.3.1 repo: adapter → extractors, every owned file rewritten and named, curated + generated artifacts untouched", () => {
   const repo = fresh("upgrade", join(ENGINE_FIXTURES, "fixture"));
-  engine(repo, ["derive"]); // populate metadata + generated artifacts so "untouched" means something
+  // Populate metadata + generated artifacts so "untouched" means something. The
+  // legacy adapter config prints a deprecation note (on stderr) — the positive
+  // control for the "no note after migration" assertion below (CR-112).
+  assert.match(engine(repo, ["derive"]), /deprecated/i, "the pre-upgrade adapter config is announced as deprecated");
   engine(repo, ["render"]);
   const configBefore = JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8"));
   assert.equal(configBefore.adapter, "nextjs-supabase");
@@ -472,6 +577,37 @@ test("upgrade leaves alone what it does not own: a customised legacy section, an
   }
 });
 
+test("upgrade recognises the exact v0.3.1 workflow (no owner line, floating npx) as ours and replaces it with the pinned template (CR-081)", () => {
+  const v031 = readFileSync(join(PLUGIN, "test", "fixtures", "v0.3.1", "zdd.yml"), "utf8");
+  const template = readFileSync(join(PLUGIN, "templates", "zdd.yml"), "utf8");
+  for (const [label, text] of [
+    ["LF", v031],
+    ["CRLF", v031.replace(/\n/g, "\r\n")],
+    ["trailing whitespace", v031.replace(/\n/g, "  \n") + "\n\n"],
+  ]) {
+    const repo = fresh(`upgrade-v031-${label.replace(/\s/g, "-")}`);
+    mkdirSync(join(repo, "zdd"));
+    writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], engine: PLUGIN_VERSION }));
+    mkdirSync(join(repo, ".github", "workflows"), { recursive: true });
+    writeFileSync(join(repo, ".github", "workflows", "zdd.yml"), text);
+    const out = bootstrap(repo, ["upgrade"]);
+    assert.equal(readFileSync(join(repo, ".github", "workflows", "zdd.yml"), "utf8"), template, label);
+    assert.match(out, /changed \.github\/workflows\/zdd\.yml/, label);
+    assert.match(out, /v0\.3\.1 workflow.*replaced/i, label);
+    assert.ok(template.includes(`@rich-rees/zdd-engine@${PLUGIN_VERSION}`) && template.includes(OWNER));
+  }
+  // One edit away from v0.3.1 is the adopter's: left untouched and called out.
+  const edited = fresh("upgrade-v031-edited");
+  mkdirSync(join(edited, "zdd"));
+  writeFileSync(join(edited, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], engine: PLUGIN_VERSION }));
+  mkdirSync(join(edited, ".github", "workflows"), { recursive: true });
+  const mine = v031.replace("node-version: \"20\"", "node-version: \"22\"");
+  writeFileSync(join(edited, ".github", "workflows", "zdd.yml"), mine);
+  const j = JSON.parse(bootstrap(edited, ["upgrade", "--json"]));
+  assert.equal(readFileSync(join(edited, ".github", "workflows", "zdd.yml"), "utf8"), mine);
+  assert.ok(j.kept.some((k) => k.startsWith(".github/workflows/zdd.yml") && k.includes("not managed")), JSON.stringify(j.kept));
+});
+
 test("upgrade refuses a repo that never adopted, a config it cannot read, and a mixed adapter+extractors config", () => {
   const repo = fresh("never");
   assert.match(bootstrapFails(repo, ["upgrade"]), /nothing to upgrade/);
@@ -482,4 +618,14 @@ test("upgrade refuses a repo that never adopted, a config it cannot read, and a 
   writeFileSync(join(repo, "zdd", "config.json"), mixed);
   assert.match(bootstrapFails(repo, ["upgrade"]), /both 'adapter' and 'extractors'/);
   assert.equal(readFileSync(join(repo, "zdd", "config.json"), "utf8"), mixed, "untouched");
+});
+
+test("without --date, apply dates ADR-0001 with today's date (the default today() path — CR-114)", () => {
+  const repo = fresh("no-date-flag");
+  writeFileSync(join(repo, "answers.json"), JSON.stringify({ extractors: ["generic"] }));
+  execFileSync(process.execPath, [SCRIPT, "apply", `--answers=${join(repo, "answers.json")}`, `--root=${repo}`, `--home=${fakeHome}`], { encoding: "utf8" });
+  // Local calendar date, as today() computes it — not toISOString() (UTC), which differs around local midnight (CR-119).
+  const d = new Date();
+  const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  assert.match(readFileSync(join(repo, "zdd", "adr", "0001-adopt-zero-drift-docs.md"), "utf8"), new RegExp(today.replace(/-/g, "\-")));
 });

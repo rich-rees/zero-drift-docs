@@ -48,6 +48,23 @@ test("requireRefs: dropped when nothing resolves, kept otherwise, and inbound re
   assert.ok(!("requireRefs" in records.find((r) => r.id === "module:live.ts")));
 });
 
+test("CR-065: requireRefs pruning runs to a fixed point — a record kept only by a ref to a dropped record is dropped too, transitively", () => {
+  // c -> b -> a -> (nothing resolvable). Single-pass pruning kept b and c
+  // with empty refs; each round must re-check what the previous round emptied.
+  const { records } = resolveRefs([
+    rec("table", "table:db/t"),
+    rec("module", "module:a.ts", ["?from:nope"], { requireRefs: true }),
+    rec("module", "module:b.ts", ["module:a.ts"], { requireRefs: true }),
+    rec("module", "module:c.ts", ["module:b.ts"], { requireRefs: true }),
+    rec("module", "module:live.ts", ["module:c.ts", "?from:t"], { requireRefs: true }),
+    rec("route", "route:/x", ["module:a.ts", "module:b.ts", "module:c.ts", "module:live.ts"]),
+  ]);
+  assert.deepEqual(records.map((r) => r.id).sort(), ["module:live.ts", "route:/x", "table:db/t"]);
+  assert.deepEqual(records.find((r) => r.id === "module:live.ts").refs, ["table:db/t"]);
+  assert.deepEqual(records.find((r) => r.id === "route:/x").refs, ["module:live.ts"]);
+  for (const r of records) assert.ok(!("requireRefs" in r), `${r.id} flag removed`);
+});
+
 test("ambiguous function/bucket names drop with a diagnostic naming the candidates; namespace-qualified refs resolve (CR-008)", () => {
   const { records, diagnostics } = resolveRefs([
     rec("function", "function:env/set_updated_at"),

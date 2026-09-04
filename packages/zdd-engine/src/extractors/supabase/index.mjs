@@ -32,17 +32,37 @@ export function derive({ repoRoot, options }) {
 
   // ---- Schema replay (per namespace, independent) ----
   const schemas = new Map(); // ns -> { tables, functions, buckets, triggers }
+  const nsDirs = new Map(); // ns -> dir, to name both sides of a duplicate
   for (const { name: ns, dir: dirOpt } of migrationNamespaces) {
     if (typeof ns !== "string" || !ns) throw new Error(`supabase: every migrationNamespaces entry needs a string 'name'`);
     const dir = repoRelative(dirOpt, `supabase.migrationNamespaces[${ns}].dir`);
+    // Two entries with one name would replace each other in `schemas`: the
+    // first namespace's tables vanish and their metadata is pruned as
+    // orphaned (CR-064). Checked before the greenfield tolerance below so a
+    // missing first dir cannot hide the duplicate.
+    if (nsDirs.has(ns)) {
+      throw new Error(`supabase: migrationNamespaces: name '${ns}' is used twice (${nsDirs.get(ns)} and ${dir}) — every namespace needs its own name`);
+    }
+    nsDirs.set(ns, dir);
     const abs = join(repoRoot, dir);
     if (!existsSync(abs)) {
       diagnostics.push(`${ns}: ${dir} not found — nothing to inventory`);
       continue;
     }
-    const files = sortMigrations(
-      readdirSync(abs).filter((f) => f.endsWith(".sql") && statSync(join(abs, f)).isFile()),
-    ).map((f) => ({ name: `${dir}/${f}`, text: readFileSync(join(abs, f), "utf8") }));
+    // A .sql symlink pointing nowhere is skipped with a note, never thrown
+    // (CR-062); a valid one is read like any migration.
+    const isFile = (f) => {
+      try {
+        return statSync(join(abs, f)).isFile();
+      } catch {
+        diagnostics.push(`${ns}: ${dir}/${f} is a dangling symlink — skipped`);
+        return false;
+      }
+    };
+    const files = sortMigrations(readdirSync(abs).filter((f) => f.endsWith(".sql") && isFile(f))).map((f) => ({
+      name: `${dir}/${f}`,
+      text: readFileSync(join(abs, f), "utf8"),
+    }));
     const replayed = replayMigrations(files);
     for (const s of replayed.skipped) {
       diagnostics.push(`${ns}: unrecognized schema-like statement in ${s.file}: ${s.statement}`);

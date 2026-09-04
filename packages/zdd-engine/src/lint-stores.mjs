@@ -15,11 +15,14 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { loadConfig } from "./lib/config.mjs";
+import { loadConfig, absentStoreNotes } from "./lib/config.mjs";
 
 export function run(args) {
   const { repoRoot: REPO, paths } = loadConfig(args);
   const ADR_DIR = resolve(REPO, paths.adrDir);
+  // A missing adrDir is greenfield-tolerated (empty corpus passes); say so
+  // when the rest of the bundle exists, so a typo is not a silent pass (CR-068).
+  for (const note of absentStoreNotes(REPO, paths, ["adrDir"])) console.error(note);
 
   const problems = [];
 
