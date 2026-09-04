@@ -100,7 +100,9 @@ test("CR-067: insideRepo compares by path segments and folds case only where the
   outside(resolve("/srv/Repo2/x")); // string prefix, different directory
   outside(resolve("/srv"));
   outside(resolve(root, "..", "other"));
-  if (process.platform === "win32") outside("D:\\srv\\Repo\\x"); // another drive: relative() answers an absolute path
+  // Another drive than the root's — the GitHub Windows runner works on D:, so
+  // the letter is chosen, not assumed: relative() answers an absolute path.
+  if (process.platform === "win32") outside(`${root[0].toUpperCase() === "D" ? "E" : "D"}:\\srv\\Repo\\x`);
   // The case rule: `/srv/repo` is the same directory as `/srv/Repo` on Windows
   // and macOS, and a DIFFERENT one on Linux — where the old lowercase-everywhere
   // compare let a case-variant sibling checkout pass as "inside" (CR-067).
