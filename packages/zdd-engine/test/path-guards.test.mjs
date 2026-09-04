@@ -262,6 +262,45 @@ test("CR-060: a symlink inside metadataDir is neither read, overwritten nor prun
 });
 
 // ---------------------------------------------------------------------------
+// CR-108: the input side of symlinks. A repo REACHED through a link (a
+// symlinked checkout, /tmp -> /private/tmp on macOS) is legitimate: real
+// paths are compared on both sides, so derive/render work and land in the
+// real tree. A scanned root that is a link to a dir inside the repo is
+// followed (CR-016, documented). Only links that leave the repo are refused.
+// ---------------------------------------------------------------------------
+
+test("CR-108: a repo reached through a symlinked root derives and renders into the real tree; an in-repo linked source dir is inventoried", (t) => {
+  const real = mkRepo(FIXTURE);
+  const linkParent = mkdtempSync(join(tmpdir(), "zdd-link-"));
+  const viaLink = join(linkParent, "checkout");
+  if (!symlinkOrSkip(t, real, viaLink, "junction")) {
+    rmSync(real, { recursive: true, force: true });
+    rmSync(linkParent, { recursive: true, force: true });
+    return;
+  }
+  // Invoked with cwd = the link: every write lands in the real tree, --check is green.
+  assert.match(run(viaLink, ["derive"]), /Wrote 15 records/);
+  run(viaLink, ["render"]);
+  assert.match(run(viaLink, ["derive", "--check"]), /in sync/);
+  assert.match(run(viaLink, ["render", "--check"]), /in sync/);
+  assert.ok(existsSync(join(real, "zdd", "metadata", "route", "things.json")));
+  assert.ok(existsSync(join(real, "zdd", "graph.json")));
+  // The same from the real path stays in sync — one tree, two names.
+  assert.match(run(real, ["derive", "--check"]), /in sync/);
+  // A scanned root that is a link to an in-repo directory is followed: the
+  // fixture's migrations reached through `db-link` yield the same tables.
+  symlinkSync(join(real, "migrations"), join(real, "db-link"), "junction");
+  const config = readConfig(real);
+  config.adapterOptions.migrationNamespaces = [{ name: "db", dir: "db-link" }];
+  writeConfig(real, config);
+  assert.match(run(real, ["derive"]), /Wrote 15 records/);
+  const things = JSON.parse(readFileSync(join(real, "zdd", "metadata", "table", "db--things.json"), "utf8"));
+  assert.deepEqual(things.resource, ["db-link/00001_init.sql", "db-link/00002_things.sql"], "migrations reached through the link, named by the configured path");
+  rmSync(real, { recursive: true, force: true });
+  rmSync(linkParent, { recursive: true, force: true });
+});
+
+// ---------------------------------------------------------------------------
 // CR-068 / CR-099: a mistyped store dir lints and renders as an empty corpus,
 // indistinguishable from greenfield. One stderr line when the bundle is
 // otherwise populated; silence — and exit 0 — when it is truly greenfield.
