@@ -411,6 +411,15 @@ test("CR-069: cytoscape edge ids are injective — two edges that collide under 
   assert.deepEqual(bundle.edges.map((e) => [e.data.source, e.data.target]), [["map/a", "map/b__map/c"], ["map/a__map/b", "map/c"]]);
 });
 
+test("CR-100: the query-selected view is looked up as an own property — `?view=constructor` falls back to lanes", () => {
+  // showView() runs against a DOM, so this pins the source: every VIEWS
+  // lookup keyed by the URL value goes through Object.hasOwn, never a bare
+  // `VIEWS[v]` truthiness test (which found Object.prototype.constructor).
+  const viz = readFileSync(join(PKG, "src", "viewers", "cytoscape", "viz.js"), "utf8");
+  assert.match(viz, /Object\.hasOwn\(VIEWS,\s*v\)/, "view routing uses Object.hasOwn");
+  assert.ok(!/if\s*\(\s*!VIEWS\[v\]\s*\)/.test(viz), "no bare VIEWS[v] existence test");
+});
+
 test("CR-007: source-derived markdown cannot execute script in the Cytoscape viewer", () => {
   // Same load order as viz.html: the vendored marked, then the sanitiser, in
   // one browser-like global scope.
