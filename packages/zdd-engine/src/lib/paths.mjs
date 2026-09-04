@@ -26,6 +26,15 @@ export function repoRelative(value, label) {
   return segs.length ? segs.join("/") : ".";
 }
 
+// Two repoRelative() names overlap when one is the other or an ancestor of
+// it (`.` is the root, so it overlaps everything). The layout rule in
+// lib/config.mjs is built on this: a folder the engine prunes or a file it
+// writes may not share ground with anything else it is told about (CR-059).
+export function overlaps(a, b) {
+  if (a === "." || b === ".") return true;
+  return a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
+}
+
 // Resolve <repoRoot>/<rel> and prove the result stays inside repoRoot — the
 // belt behind repoRelative's braces, for paths assembled from several parts.
 export function insideRepo(repoRoot, abs, label) {

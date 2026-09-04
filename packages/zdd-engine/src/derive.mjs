@@ -18,8 +18,8 @@
 // may declare (`localExtractorDir`), the single sanctioned place config can
 // point at code. A path in the extractors list is refused.
 
-import { readFileSync, writeFileSync, readdirSync, statSync, mkdirSync, rmSync, existsSync } from "node:fs";
-import { join, dirname, relative, resolve, sep } from "node:path";
+import { readFileSync, writeFileSync, readdirSync, statSync, lstatSync, mkdirSync, rmSync, existsSync } from "node:fs";
+import { join, dirname, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { loadConfig, resolveExtractors } from "./lib/config.mjs";
 import { resolveRefs } from "./lib/resolve-refs.mjs";
@@ -152,6 +152,43 @@ async function loadExtractor(name, repoRoot, config) {
   fail(`Unknown extractor '${name}' (known: ${known}${localList})`);
 }
 
+// What is on disk under metadataDir. The folder holds exactly
+// `<kind>/<record>.json` and derive manages nothing else: any other JSON file
+// — or any directory that is not a kind — is FOREIGN, and the caller refuses
+// to run rather than prune it as an orphaned record (CR-059: a non-dedicated
+// metadataDir once deleted config.json). Non-JSON bystanders (a README, a
+// .gitkeep) are neither read nor pruned. Symlinks are skipped, never followed
+// (CR-060) — reported so `--verbose` shows why a linked file is ignored.
+function scanMetadata(metadataDir) {
+  const existing = new Map(); // "<kind>/<file>.json" -> content
+  const foreign = [];
+  const links = [];
+  if (!existsSync(metadataDir)) return { existing, foreign, links };
+  for (const name of readdirSync(metadataDir).sort()) {
+    const p = join(metadataDir, name);
+    const st = lstatSync(p);
+    if (st.isSymbolicLink()) {
+      links.push(name);
+    } else if (st.isDirectory()) {
+      if (!KIND_RE.test(name)) {
+        foreign.push(`${name}/`);
+        continue;
+      }
+      for (const file of readdirSync(p).sort()) {
+        const rel = `${name}/${file}`;
+        const fp = join(p, file);
+        const fst = lstatSync(fp);
+        if (fst.isSymbolicLink()) links.push(rel);
+        else if (fst.isDirectory()) foreign.push(`${rel}/`);
+        else if (file.endsWith(".json")) existing.set(rel, readFileSync(fp, "utf8"));
+      }
+    } else if (name.endsWith(".json")) {
+      foreign.push(name);
+    }
+  }
+  return { existing, foreign, links };
+}
+
 // Run every configured extractor, merge, resolve refs. Exported so tests can
 // observe records without the filesystem write.
 export async function deriveRecords({ repoRoot, config }) {
@@ -209,20 +246,16 @@ export async function run(args) {
     expected.set(`${r.kind}/${r.filename}`, stableStringify(r, factsOrder[r.kind] ?? []));
   }
 
-  const existing = new Map();
-  if (existsSync(metadataDir)) {
-    const walk = (dir) => {
-      for (const name of readdirSync(dir).sort()) {
-        const p = join(dir, name);
-        if (statSync(p).isDirectory()) walk(p);
-        else if (name.endsWith(".json")) {
-          const rel = relative(metadataDir, p).split(/[\\/]/).join("/");
-          existing.set(rel, readFileSync(p, "utf8"));
-        }
-      }
-    };
-    walk(metadataDir);
+  const { existing, foreign, links } = scanMetadata(metadataDir);
+  if (foreign.length) {
+    fail(
+      `${metadataRel} is not a dedicated metadata folder — it holds ${foreign.length} file(s) derive did not write:\n` +
+        foreign.map((f) => `  ${f}`).join("\n") +
+        `\nderive manages only <kind>/<record>.json under paths.metadataDir and prunes the rest; ` +
+        `move these out or point paths.metadataDir at an empty folder.`,
+    );
   }
+  if (VERBOSE) for (const l of links) console.error(`[derive] ${metadataRel}/${l} is a symlink — skipped (never read, written or pruned)`);
 
   // Normalize CRLF so a core.autocrlf checkout doesn't fail the compare
   // (.gitattributes pins these files to LF, this is belt-and-braces).
