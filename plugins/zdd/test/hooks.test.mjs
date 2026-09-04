@@ -75,9 +75,18 @@ test("fence reads the paths from config.json (moved index) and compares canonica
   setConfig(VALID);
 });
 
-test("fence: a configured path that escapes the checkout makes the hook a silent no-op (never a read outside)", () => {
+test("fence: one invalid or unknown paths.* key never unfences the rest — the bad key falls back to its default (CR-070)", () => {
   setConfig({ extractors: ["generic"], hooks: { fence: true }, paths: { agentIndex: "../../outside.md" } });
-  silent(fence("Write", { file_path: join(repo, "zdd", "agent-index.md") }), "escape");
+  blocked(fence("Write", { file_path: join(repo, "zdd", "graph.json") }), "the other artifacts stay fenced");
+  blocked(fence("Write", { file_path: join(repo, "zdd", "agent-index.md") }), "the invalid key falls back to its default");
+  silent(fence("Write", { file_path: join(scratch, "outside.md") }), "the escaping value itself is never fenced (never a read outside)");
+  setConfig({ extractors: ["generic"], hooks: { fence: true }, paths: { bogus: "../x" } });
+  blocked(fence("Write", { file_path: join(repo, "zdd", "graph.json") }), "an unknown key is ignored");
+  setConfig({ extractors: ["generic"], hooks: { fence: true }, paths: "nope" });
+  blocked(fence("Write", { file_path: join(repo, "zdd", "graph.json") }), "a non-object paths block means the defaults");
+  setConfig({ extractors: ["generic"], hooks: { fence: true }, paths: { graph: 42, metadataDir: null } });
+  blocked(fence("Write", { file_path: join(repo, "zdd", "graph.json") }), "wrong-typed value falls back");
+  blocked(fence("Write", { file_path: join(repo, "zdd", "metadata", "x.json") }), "null value falls back");
   setConfig(VALID);
 });
 
@@ -206,7 +215,9 @@ test("session-start is silent with no config, malformed config, no index, an esc
   silent(runHook(INJECT, undefined, { projectDir: empty }), "malformed config");
   writeFileSync(join(empty, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], paths: { agentIndex: "../../outside.md" } }));
   writeFileSync(join(scratch, "outside.md"), "SECRET\n");
-  silent(runHook(INJECT, undefined, { projectDir: empty }), "escaping path");
+  const escaped = runHook(INJECT, undefined, { projectDir: empty });
+  assert.doesNotMatch(escaped.stdout, /SECRET/, "escaping path is never read");
+  assert.match(escaped.stdout, /# stale/, "the invalid key falls back to its default (CR-070)");
   writeFileSync(join(empty, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], paths: { agentIndex: "zdd/big.md" } }));
   writeFileSync(join(empty, "zdd", "big.md"), "x".repeat(600 * 1024));
   silent(runHook(INJECT, undefined, { projectDir: empty }), "oversized");

@@ -24,7 +24,7 @@ try {
   const { state, config } = readConfig(root);
   if (state !== "valid" || config.hooks?.autoLoad === false) process.exit(0);
 
-  const body = readInside(root, artifactPaths(config).agentIndex, MAX_INDEX_BYTES, "paths.agentIndex");
+  const body = readInside(root, artifactPaths(config, { lenient: true }).agentIndex, MAX_INDEX_BYTES, "paths.agentIndex");
   if (body === null) process.exit(0);
 
   const safe = body.replace(/<\/(zdd-agent-index)/gi, "<\\/$1");

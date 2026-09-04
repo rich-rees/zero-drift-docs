@@ -109,7 +109,9 @@ function main() {
   const { state, config } = readConfig(root);
   if (state !== "valid" || config.hooks?.fence !== true) return 0;
 
-  const paths = artifactPaths(config);
+  // Lenient: a bad `paths.*` value falls back to its default on its own; one
+  // typo never unfences the rest (CR-070).
+  const paths = artifactPaths(config, { lenient: true });
   // Each generated path proven inside the checkout with no symlinked segment
   // (CR-004). One that fails — a symlinked artifact — is dropped on its own;
   // the others stay fenced (CR-051).
