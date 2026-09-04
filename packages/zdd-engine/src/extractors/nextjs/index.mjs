@@ -1,6 +1,7 @@
-// nextjs extractor — routes (app-router route.ts), surfaces (page.tsx +
-// layout.tsx) and modules (any other scanned file that references something)
-// from a Next.js App Router tree. One convention: the App Router file layout.
+// nextjs extractor — routes (app-router route.ts/.js), surfaces (page +
+// layout in .tsx/.ts/.jsx/.js) and modules (any other scanned file that
+// references something) from a Next.js App Router tree. One convention: the
+// App Router file layout.
 // Options (extractorOptions.nextjs):
 //   appDir          repo-relative app-router root (default "src/app")
 //   apiPrefix       URL prefix under which route.ts files are API routes
@@ -28,6 +29,12 @@ export { slugify };
 const posixify = (p) => p.split(/[\\/]/).join("/");
 
 const HTTP_METHOD_ORDER = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
+
+// The App Router's special files in every extension Next.js accepts. A
+// JavaScript project bootstrapped as "nextjs" derived nothing while the
+// matchers knew only the TypeScript names (CR-095).
+const ROUTE_FILE = /^route\.(ts|js)$/;
+const SURFACE_FILE = /^(page|layout)\.(tsx|ts|jsx|js)$/;
 
 export const FACTS_KEY_ORDER = {
   route: ["methods", "dynamicSegments", "auth"],
@@ -65,7 +72,7 @@ export function leadingComment(text) {
     const t = line.trim();
     if (!t.startsWith("//")) break;
     const c = t.replace(/^\/\/\s?/, "").trim();
-    if (!c || /(^|\s)[\w./\[\]-]*\/(route|page|layout)\.tsx?$/.test(c)) continue;
+    if (!c || /(^|\s)[\w./\[\]-]*\/(route|page|layout)\.(tsx?|jsx?)$/.test(c)) continue;
     return c;
   }
   return "";
@@ -214,11 +221,11 @@ export function derive({ repoRoot, options }) {
     const inApp = rel.slice(appDir.length + 1);
     const segs = inApp.split("/");
     const base = segs.pop();
-    if (rel.startsWith(apiDirRel + "/") && base === "route.ts") {
+    if (rel.startsWith(apiDirRel + "/") && ROUTE_FILE.test(base)) {
       const urlPath = "/" + stripGroups(segs).join("/");
       routes.push({ rel, dir: segs.join("/"), urlPath, segs });
-    } else if (!rel.startsWith(apiDirRel + "/") && (base === "page.tsx" || base === "layout.tsx")) {
-      surfaces.push({ rel, dir: segs.join("/"), segs, file: base === "page.tsx" ? "page" : "layout" });
+    } else if (!rel.startsWith(apiDirRel + "/") && SURFACE_FILE.test(base)) {
+      surfaces.push({ rel, dir: segs.join("/"), segs, file: base.startsWith("page.") ? "page" : "layout" });
     }
   }
 
@@ -328,7 +335,7 @@ export function derive({ repoRoot, options }) {
         // `@/` maps to srcAliasRoot (tsconfig paths; configurable because not
         // every repo aliases to appDir's parent).
         const base = posixify(join(srcAliasRoot, target.slice(2)));
-        const hit = [".tsx", ".ts", "/index.tsx", "/index.ts"]
+        const hit = [".tsx", ".ts", ".jsx", ".js", "/index.tsx", "/index.ts", "/index.jsx", "/index.js"]
           .map((ext) => base + ext)
           .find((p) => existsSync(join(repoRoot, p)));
         if (hit) resource.unshift(hit);
