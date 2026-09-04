@@ -4,7 +4,11 @@
   "title": "ZDD repo config (zdd/config.json)",
   "description": "Per-repo ZDD configuration: which extractors to run, where the artifacts live, and per-extractor source paths. Artifact CONTENTS never live here — this is the small, portable config tier only.",
   "type": "object",
-  "anyOf": [{ "required": ["extractors"] }, { "required": ["adapter"] }],
+  "$comment": "Exactly one config tier: `extractors` (+ extractorOptions) OR the deprecated `adapter` (+ adapterOptions). The engine refuses a config carrying both, and so does this schema.",
+  "oneOf": [
+    { "required": ["extractors"], "not": { "anyOf": [{ "required": ["adapter"] }, { "required": ["adapterOptions"] }] } },
+    { "required": ["adapter"], "not": { "anyOf": [{ "required": ["extractors"] }, { "required": ["extractorOptions"] }] } }
+  ],
   "additionalProperties": true,
   "properties": {
     "extractors": {
@@ -50,9 +54,9 @@
               "additionalProperties": false,
               "properties": {
                 "roots": { "type": "array", "items": { "type": "string" } },
-                "extensions": { "type": "array", "items": { "type": "string" }, "default": [".ts", ".tsx"] },
+                "extensions": { "type": "array", "items": { "type": "string" }, "default": [".ts", ".tsx", ".js", ".jsx"] },
                 "excludeDirs": { "type": "array", "items": { "type": "string" }, "default": ["node_modules"] },
-                "excludeSuffixes": { "type": "array", "items": { "type": "string" }, "default": [".test.ts", ".test.tsx", ".d.ts"] }
+                "excludeSuffixes": { "type": "array", "items": { "type": "string" }, "default": [".test.ts", ".test.tsx", ".test.js", ".test.jsx", ".d.ts"] }
               }
             }
           }
@@ -91,7 +95,7 @@
       "type": "string",
       "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(\\.(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*))?(\\+([0-9a-zA-Z-]+(\\.[0-9a-zA-Z-]+)*))?$",
       "description": "The @rich-rees/zdd-engine version this repo was bootstrapped for — written by bootstrap, rewritten by bootstrap --upgrade, compared against the plugin by load (skew warning). Mirrors the pin in the CI workflow / pre-push hook so a repo without CI still has one.",
-      "examples": ["0.4.0"]
+      "examples": ["1.0.0"]
     },
     "hooks": {
       "type": "object",
@@ -110,7 +114,7 @@
     "repoBase": {
       "type": "string",
       "default": "",
-      "pattern": "^(https?://.+)?$",
+      "pattern": "^(https?://\\S+)?$",
       "description": "GitHub tree URL prefix for source links in the human index, e.g. https://github.com/org/repo/tree/main/. Empty = relative links. Must be http(s) — the renderer refuses anything else, since it becomes every source link's scheme."
     },
     "nonAreaTags": {

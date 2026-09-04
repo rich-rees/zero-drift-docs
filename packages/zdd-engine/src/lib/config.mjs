@@ -12,8 +12,8 @@
 // the config, but the config itself is found at the conventional spot.
 
 import { readFileSync, existsSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { repoRelative } from "./paths.mjs";
+import { dirname, join, resolve, relative } from "node:path";
+import { repoRelative, overlaps } from "./paths.mjs";
 
 export const DEFAULT_PATHS = {
   glossary: "zdd/glossary.md",
@@ -82,6 +82,63 @@ export function validateRepoBase(repoBase) {
   return null;
 }
 
+// Layout rule over the resolved paths, checked once for every command.
+//
+// 1. `derive` prunes metadataDir, so it must be a dedicated folder: a
+//    metadataDir that equals, contains or sits inside any other configured
+//    path — or the config file itself — would let a one-line config typo
+//    (`"metadataDir": "zdd"`) delete the glossary, the map and config.json
+//    as "orphaned records" (CR-059).
+// 2. `render` writes its four outputs last and unconditionally, so they must
+//    be pairwise distinct and disjoint from everything it reads: two outputs
+//    on one file leave `--check` permanently red, and an output on the
+//    glossary or config.json clobbers a curated store (CR-061).
+//
+// bundleDir is the one deliberate ancestor (everything lives under zdd/) and
+// is not in the set. `configRel` is the config file's repo-relative name (it
+// may start with `..` when --config= points elsewhere; then it overlaps
+// nothing). Returns an error string or null.
+const OUTPUT_KEYS = ["graph", "humanIndex", "agentIndex", "adrIndex"];
+const INPUT_KEYS = ["glossary", "adrDir", "mapDir", "metadataDir"];
+export function validatePathLayout(paths, configRel) {
+  const label = (key) => (key === "config" ? "the config file" : `paths.${key}`);
+  const value = (key) => (key === "config" ? configRel : paths[key]);
+  const clash = (a, b, why) => `${label(a)} '${value(a)}' overlaps ${label(b)} '${value(b)}' — ${why}`;
+  const metadataWhy = "metadataDir must be a dedicated folder (derive prunes everything in it that is not a current record)";
+  for (const key of ["glossary", "adrDir", "mapDir", ...OUTPUT_KEYS, "config"]) {
+    if (overlaps(paths.metadataDir, value(key))) return clash("metadataDir", key, metadataWhy);
+  }
+  const outputWhy = "render's outputs must be distinct files, apart from every store and the config it reads";
+  for (let i = 0; i < OUTPUT_KEYS.length; i++) {
+    for (let j = i + 1; j < OUTPUT_KEYS.length; j++) {
+      if (overlaps(paths[OUTPUT_KEYS[i]], paths[OUTPUT_KEYS[j]])) return clash(OUTPUT_KEYS[i], OUTPUT_KEYS[j], outputWhy);
+    }
+    for (const key of [...INPUT_KEYS, "config"]) {
+      if (overlaps(paths[OUTPUT_KEYS[i]], value(key))) return clash(OUTPUT_KEYS[i], key, outputWhy);
+    }
+  }
+  return null;
+}
+
+// Greenfield tolerance has a blind spot: a mistyped store dir lints and
+// renders as an EMPTY corpus, exactly like a bundle that has none yet
+// (CR-068 / CR-099). So: for each asked-for store dir that is absent, one
+// WARNING line when any other store (adr, map, metadata, glossary) is
+// present — the bundle is not greenfield, the path is probably wrong. A
+// truly greenfield bundle gets no line. Advisory: exit codes are unchanged.
+const STORE_KEYS = ["adrDir", "mapDir", "metadataDir", "glossary"];
+export function absentStoreNotes(repoRoot, paths, keys) {
+  const present = STORE_KEYS.filter((k) => existsSync(resolve(repoRoot, paths[k])));
+  if (!present.length) return [];
+  return keys
+    .filter((k) => !present.includes(k))
+    .map(
+      (k) =>
+        `WARNING: paths.${k} '${paths[k]}' does not exist, but ${present.map((p) => `paths.${p}`).join(" + ")} ${present.length > 1 ? "do" : "does"} ` +
+        `(not greenfield) — a mistyped path reads as an empty store`,
+    );
+}
+
 function argValue(args, name) {
   const hit = args.find((a) => a.startsWith(`--${name}=`));
   return hit ? hit.slice(name.length + 3) : null;
@@ -121,6 +178,12 @@ export function loadConfig(args, cwd = process.cwd()) {
   // point outside the checkout (CR-006). Same rule for localExtractorDir.
   for (const [key, value] of Object.entries(paths)) paths[key] = repoRelative(value, `paths.${key}`);
   if (config.localExtractorDir !== undefined) config.localExtractorDir = repoRelative(config.localExtractorDir, "localExtractorDir");
+  const configRel = relative(repoRoot, configPath).split(/[\\/]/).join("/");
+  const layoutError = validatePathLayout(paths, configRel);
+  if (layoutError) {
+    console.error(layoutError);
+    process.exit(1);
+  }
   return {
     repoRoot,
     configPath,
@@ -154,14 +217,25 @@ export const LEGACY_ADAPTERS = {
   },
 };
 
+const isPlainObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+
 export function resolveExtractors(config) {
   const diagnostics = [];
   const hasNew = config.extractors !== undefined;
-  const hasLegacy = config.adapter !== undefined || config.adapterOptions !== undefined;
   // Both forms at once would mean one silently wins and the other's options
   // are ignored (CR-019: 15 records quietly became 9). Refuse.
-  if (hasNew && hasLegacy) {
+  if (hasNew && config.adapter !== undefined) {
     return { error: `zdd/config.json has both 'adapter' and 'extractors' — keep 'extractors' + 'extractorOptions' and delete the deprecated 'adapter' / 'adapterOptions' keys` };
+  }
+  // The cross-tier options are the same hole one key over: `extractorOptions`
+  // beside `adapter` (or `adapterOptions` beside `extractors`) was read by
+  // nobody and ignored without a word (CR-117). The plugin's schema refuses
+  // the shape; the engine must agree.
+  if (config.adapter !== undefined && config.extractorOptions !== undefined) {
+    return { error: `zdd/config.json has both 'adapter' and 'extractorOptions' — keep one tier: 'extractors' + 'extractorOptions', or the deprecated 'adapter' + 'adapterOptions'` };
+  }
+  if (hasNew && config.adapterOptions !== undefined) {
+    return { error: `zdd/config.json has both 'extractors' and 'adapterOptions' — keep one tier: 'extractors' + 'extractorOptions', or the deprecated 'adapter' + 'adapterOptions'` };
   }
   if (hasNew) {
     const list = config.extractors;
@@ -170,9 +244,21 @@ export function resolveExtractors(config) {
     if (list.some((n) => typeof n !== "string")) return { error: `'extractors' entries must be strings (names)` };
     const dup = list.find((n, i) => list.indexOf(n) !== i);
     if (dup) return { error: `extractor '${dup}' is listed twice` };
-    const options = config.extractorOptions ?? {};
+    // `extractorOptions: null` / `[]` / a string, or a per-extractor entry
+    // that is not an object, reached the extractor's destructuring as-is
+    // (CR-107). Refuse with the key named.
+    const options = config.extractorOptions === undefined ? {} : config.extractorOptions;
+    if (!isPlainObject(options)) return { error: `'extractorOptions' must be an object keyed by extractor name, got ${JSON.stringify(options)}` };
+    // hasOwn: an extractor named `constructor` must read its own options,
+    // not Object.prototype's (CR-022).
+    const own = (name) => (Object.hasOwn(options, name) ? options[name] : undefined);
+    for (const name of list) {
+      if (own(name) !== undefined && !isPlainObject(own(name))) {
+        return { error: `'extractorOptions.${name}' must be an object, got ${JSON.stringify(own(name))}` };
+      }
+    }
     return {
-      extractors: list.map((name) => ({ name, options: options[name] ?? {} })),
+      extractors: list.map((name) => ({ name, options: own(name) ?? {} })),
       diagnostics,
     };
   }
@@ -184,6 +270,9 @@ export function resolveExtractors(config) {
     diagnostics.push(
       `[config] 'adapter' is deprecated — use "extractors": ${JSON.stringify(legacy.extractors)} with "extractorOptions" (split adapterOptions by key: migrationNamespaces + externalBuckets under supabase, the rest under nextjs)`,
     );
+    if (config.adapterOptions !== undefined && !isPlainObject(config.adapterOptions)) {
+      return { error: `'adapterOptions' must be an object, got ${JSON.stringify(config.adapterOptions)}` };
+    }
     const split = legacy.split(config.adapterOptions);
     return { extractors: legacy.extractors.map((name) => ({ name, options: split[name] ?? {} })), diagnostics };
   }

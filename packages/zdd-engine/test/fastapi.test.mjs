@@ -82,6 +82,36 @@ test("include_router: prefixes propagate transitively and a router mounted twice
   rmSync(root, { recursive: true, force: true });
 });
 
+test("CR-066: a package-qualified include_router target resolves against the file path when the bare module name is ambiguous", () => {
+  const root = scratch({
+    "main.py": `app = FastAPI()\napp.include_router(a.routes.router, prefix="/api")\n`,
+    "a/routes.py": `router = APIRouter(prefix="/r")\n\n@router.get("/x")\ndef x(): pass\n`,
+    "b/routes.py": `router = APIRouter(prefix="/r")\n\n@router.get("/y")\ndef y(): pass\n`,
+  });
+  const { records, diagnostics } = derive({ repoRoot: root, options: { roots: ["."] } });
+  // a/ is mounted under /api; b/ is an ordinary unmounted root router.
+  assert.deepEqual(records.map((r) => r.id).sort(), ["route:/api/r/x", "route:/r/y"]);
+  assert.deepEqual(diagnostics, []);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("CR-066: a still-ambiguous include_router target roots neither candidate — their handlers are skipped with a diagnostic", () => {
+  const root = scratch({
+    "main.py": `app = FastAPI()\napp.include_router(routes.router, prefix="/api")\napp.include_router(health.router)\n`,
+    "a/routes.py": `router = APIRouter(prefix="/r")\n\n@router.get("/x")\ndef x(): pass\n`,
+    "b/routes.py": `router = APIRouter(prefix="/r")\n\n@router.get("/y")\ndef y(): pass\n`,
+    "health.py": `router = APIRouter()\n\n@router.get("/health")\ndef health(): pass\n`,
+  });
+  const { records, diagnostics } = derive({ repoRoot: root, options: { roots: ["."] } });
+  // Before: both candidates were emitted as if mounted at the root (/r/x, /r/y)
+  // — a wrong prefix presented as fact. Now neither is emitted.
+  assert.deepEqual(records.map((r) => r.id), ["route:/health"]);
+  assert.ok(diagnostics.some((d) => /main\.py: include_router\(routes\.router\).*ambiguous.*a\/routes\.py.*b\/routes\.py/.test(d)), JSON.stringify(diagnostics));
+  assert.ok(diagnostics.some((d) => /a\/routes\.py: @router\.\* on x .*skipped/.test(d)), JSON.stringify(diagnostics));
+  assert.ok(diagnostics.some((d) => /b\/routes\.py: @router\.\* on y .*skipped/.test(d)), JSON.stringify(diagnostics));
+  rmSync(root, { recursive: true, force: true });
+});
+
 test("missing configured roots produce a diagnostic, never an error (CR-002)", () => {
   const root = scratch({ "keep.txt": "" });
   const { records, diagnostics } = derive({ repoRoot: root, options: { roots: ["api", "main.py"] } });

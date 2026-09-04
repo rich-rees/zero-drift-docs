@@ -1,6 +1,6 @@
 # 0006 — One repo, two manifests: Claude Code and Codex share the skills and the hooks
 
-**Date:** 2026-09-03 · **Status:** accepted · **Origin:** the 1.0 design grilling, built under 0.4.0.
+**Date:** 2026-09-03 · **Status:** accepted; point 3's block signal superseded by [0007](0007-fence-blocks-with-the-json-deny-reply.md) (exit 2 fails open in Codex — the fence now replies with the JSON deny shape); point 1 amended in practice: the Claude manifest carries no `hooks` key because Claude Code auto-loads `hooks/hooks.json` and refuses a manifest that names it again, while Codex needs the explicit entry — one file, two ways of reaching it (1.0.0 smoke test) · **Origin:** the 1.0 design grilling, built under 0.4.0.
 
 ## Context
 

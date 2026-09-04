@@ -46,7 +46,9 @@ The plugin's skills (`plugins/zdd/skills/*/SKILL.md`) are the product. The
 kernel is two spoken verbs — "load ZDD" (`load`) and "update ZDD" (`update`) —
 plus `bootstrap` (the runbook) and the optional `grill`. The runbook's writer is
 `plugins/zdd/scripts/bootstrap.mjs`: the skill asks, the script detects and
-writes, and nothing else ever writes into an adopter's repo (decision 0003). When a
+writes, and it is the only writer of *adopter-owned* files — config, skeleton,
+opt-ins, the instruction block (decision 0003). The engine's `derive` / `render`
+write the generated artifacts, and nothing else writes into an adopter's repo. When a
 skill wraps an upstream one (`grill` wraps Matt Pocock's grilling +
 domain-modeling), it self-checks and degrades with a clear message — **never
 improvise a substitute** for the wrapped skill. Skills are executed by reading

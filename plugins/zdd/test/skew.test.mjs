@@ -96,6 +96,49 @@ test("exit 0 and silent when pins are unreadable: a directory at the workflow pa
   assert.equal(run(), "");
 });
 
+test("an unversioned engine invocation is reported as unpinned (floating), with the upgrade hint (CR-081)", () => {
+  config({ extractors: ["generic"], engine: VERSION });
+  mkdirSync(join(repo, ".github", "workflows"), { recursive: true });
+  writeFileSync(join(repo, ".github", "workflows", "zdd.yml"), readFileSync(join(PLUGIN, "test", "fixtures", "v0.3.1", "zdd.yml"), "utf8"));
+  const out = run();
+  assert.match(out, /^ZDD engine skew/);
+  assert.match(out, /\.github\/workflows\/zdd\.yml/);
+  assert.match(out, /unpinned \(floating\)/);
+  assert.match(out, /bootstrap --upgrade/);
+  const j = JSON.parse(run("--json"));
+  assert.equal(j.skew, true);
+  assert.deepEqual(j.unpinned.map((p) => p.where), [".github/workflows/zdd.yml"]);
+  assert.deepEqual(j.invalid, []);
+  // A scoped path or a longer package name is not this package.
+  writeFileSync(join(repo, ".github", "workflows", "zdd.yml"), "run: npx -y @rich-rees/zdd-engine-extras lint\nrun: node @rich-rees/zdd-engine/bin/x.mjs\n");
+  assert.equal(run(), "");
+});
+
+test("several kinds of skew at once: every applicable line is printed, behind first (CR-101)", () => {
+  config({ extractors: ["generic"], engine: prev(VERSION) }); // behind
+  mkdirSync(join(repo, ".github", "workflows"), { recursive: true });
+  workflow(next(VERSION)); // ahead
+  mkdirSync(join(repo, ".githooks"), { recursive: true });
+  writeFileSync(join(repo, ".githooks", "pre-push"), "#!/bin/sh\nnpx -y @rich-rees/zdd-engine lint\n"); // unpinned
+  const lines = run().trim().split("\n");
+  assert.equal(lines.length, 3, lines.join("\n"));
+  assert.match(lines[0], /behind plugin/);
+  assert.match(lines[1], /ahead of plugin/);
+  assert.match(lines[2], /unpinned \(floating\)/);
+  assert.ok(lines.every((l) => l.startsWith("ZDD engine skew")));
+  rmSync(join(repo, ".githooks"), { recursive: true });
+});
+
+test("a prerelease of the plugin's own number is skew: compareSemver only labels direction, exact-string decides (CR-104)", () => {
+  config({ extractors: ["generic"], engine: `${VERSION}-rc.1` });
+  workflow(VERSION);
+  const out = run();
+  assert.match(out, /^ZDD engine skew/);
+  assert.match(out, /zdd\/config\.json \(engine\) pins @rich-rees\/zdd-engine@\d+\.\d+\.\d+-rc\.1/);
+  assert.match(out, /behind plugin|ahead of plugin/, "the direction label is advisory; the skew line is the contract");
+  assert.equal(JSON.parse(run("--json")).skew, true);
+});
+
 test("--json reports every pin with its state", () => {
   config({ extractors: ["generic"], engine: prev(VERSION) });
   const j = JSON.parse(run("--json"));

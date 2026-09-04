@@ -9,8 +9,11 @@
 # but it is not a merge gate: without CI, ZDD's guarantee is a habit, not a
 # proof. The engine version is PINNED below, in step with the plugin's other
 # pins.
-ZDD_ENGINE="@rich-rees/zdd-engine@0.4.0"
+ZDD_ENGINE="@rich-rees/zdd-engine@1.0.0"
 
+# No npx ⇒ exit 0 on purpose (CR-111): this hook is a habit, not a gate. A
+# machine without Node cannot run the engine, and blocking every push there
+# would only get the hook deleted; CI is the check that actually refuses drift.
 if ! command -v npx >/dev/null 2>&1; then
   echo "zdd: npx not found — engine checks skipped (install Node 20+, or re-run zdd:bootstrap)"
   exit 0

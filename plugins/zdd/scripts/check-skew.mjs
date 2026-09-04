@@ -27,7 +27,13 @@ export function findPins(root) {
   const pins = [];
   const { state, config } = readConfig(root);
   if (state === "valid" && config.engine !== undefined) pins.push({ where: "zdd/config.json (engine)", raw: config.engine });
-  const re = new RegExp(ENGINE_PACKAGE.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&") + "@([^\"'\\s]*)");
+  const pkg = ENGINE_PACKAGE.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+  const re = new RegExp(pkg + "@([^\"'\\s]*)");
+  // The package name with no `@<version>` after it — the v0.3.1 workflow's
+  // `npx -y @rich-rees/zdd-engine derive` — floats to whatever npm serves
+  // today (CR-081). A longer package name or a path into the package is not
+  // an invocation of it.
+  const floating = new RegExp(pkg + "(?![@/\\w-])");
   for (const rel of [".github/workflows/zdd.yml", ".githooks/pre-push"]) {
     const p = join(root, rel);
     let text;
@@ -40,10 +46,16 @@ export function findPins(root) {
     }
     const m = re.exec(text);
     if (m) pins.push({ where: rel, raw: m[1] });
+    else if (floating.test(text)) pins.push({ where: rel, raw: undefined, unpinned: true });
   }
-  return pins.map((p) => ({ where: p.where, version: typeof p.raw === "string" && SEMVER.test(p.raw) ? p.raw : null }));
+  return pins.map((p) => ({ where: p.where, version: typeof p.raw === "string" && SEMVER.test(p.raw) ? p.raw : null, ...(p.unpinned ? { unpinned: true } : {}) }));
 }
 
+// Direction only — major.minor.patch, no prerelease precedence (CR-104). Skew
+// is decided by exact string inequality before this is consulted, so
+// `1.0.0-rc.1` against plugin `1.0.0` is skew either way; this merely chooses
+// the "behind" or "ahead" wording (here: equal numbers ⇒ 0 ⇒ "behind", whose
+// fix — `bootstrap --upgrade` — is the right one for a prerelease pin too).
 export function compareSemver(a, b) {
   const pa = SEMVER.exec(a);
   const pb = SEMVER.exec(b);
@@ -59,28 +71,32 @@ function main() {
   const root = adopterRoot(flags);
   const plugin = pluginVersion();
   const pins = findPins(root);
-  const invalid = pins.filter((p) => p.version === null);
+  const unpinned = pins.filter((p) => p.unpinned);
+  const invalid = pins.filter((p) => p.version === null && !p.unpinned);
   const behind = pins.filter((p) => p.version !== null && p.version !== plugin && compareSemver(p.version, plugin) <= 0);
   const ahead = pins.filter((p) => p.version !== null && p.version !== plugin && compareSemver(p.version, plugin) > 0);
   const upgrade = "Run `bootstrap --upgrade` (the bootstrap skill with --upgrade) to rewrite every pin, then run `render` and commit the result in the same PR.";
 
   if (flags.json) {
-    process.stdout.write(JSON.stringify({ plugin, pins, skew: behind.length + ahead.length + invalid.length > 0, behind, ahead, invalid }) + "\n");
+    process.stdout.write(JSON.stringify({ plugin, pins, skew: behind.length + ahead.length + invalid.length + unpinned.length > 0, behind, ahead, invalid, unpinned }) + "\n");
     return;
   }
+  // One line per kind of skew that applies, behind first (its fix is the
+  // cheapest); a repo can be in several states at once (CR-101).
   const say = (p) => `${p.where} pins ${ENGINE_PACKAGE}@${p.version}`;
-  if (behind.length) {
-    process.stdout.write(`ZDD engine skew: ${behind.map(say).join(", ")} — behind plugin ${plugin}. ${upgrade}\n`);
-  } else if (ahead.length) {
-    process.stdout.write(`ZDD engine skew: ${ahead.map(say).join(", ")} — ahead of plugin ${plugin}. Update the plugin.\n`);
-  } else if (invalid.length) {
-    process.stdout.write(`ZDD engine skew: ${invalid.map((p) => p.where).join(", ")} — not a well-formed version (plugin is ${plugin}). ${upgrade}\n`);
-  }
+  const lines = [];
+  if (behind.length) lines.push(`ZDD engine skew: ${behind.map(say).join(", ")} — behind plugin ${plugin}. ${upgrade}`);
+  if (ahead.length) lines.push(`ZDD engine skew: ${ahead.map(say).join(", ")} — ahead of plugin ${plugin}. Update the plugin.`);
+  if (invalid.length) lines.push(`ZDD engine skew: ${invalid.map((p) => p.where).join(", ")} — not a well-formed version (plugin is ${plugin}). ${upgrade}`);
+  if (unpinned.length) lines.push(`ZDD engine skew: ${unpinned.map((p) => p.where).join(", ")} — ${ENGINE_PACKAGE} unpinned (floating): CI picks up whatever npm serves today (plugin is ${plugin}). ${upgrade}`);
+  if (lines.length) process.stdout.write(lines.join("\n") + "\n");
 }
 
 try {
   main();
 } catch {
-  // A broken repo must not break `load`; the skill carries on without the check.
+  // Advisory by design (CR-020, CR-115): this check is `load`'s first step and
+  // must never stop it, so every error — unreadable config, odd filesystem,
+  // a bug here — is swallowed and the skill carries on without the warning.
 }
 process.exitCode = 0;

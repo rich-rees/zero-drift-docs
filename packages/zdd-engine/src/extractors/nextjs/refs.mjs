@@ -13,11 +13,14 @@ import { walkDir } from "../../lib/walk.mjs";
 
 const posixify = (p) => p.split(/[\\/]/).join("/");
 
+// JS and TS alike (CR-095): a JavaScript App Router repo has the same
+// `.from()` / `fetch('/api/…')` shapes in .js/.jsx files. A config that
+// names its own `refs.extensions` keeps exactly those.
 export const DEFAULT_REFS = {
   roots: null, // filled from srcAliasRoot by the caller
-  extensions: [".ts", ".tsx"],
+  extensions: [".ts", ".tsx", ".js", ".jsx"],
   excludeDirs: ["node_modules"],
-  excludeSuffixes: [".test.ts", ".test.tsx", ".d.ts"],
+  excludeSuffixes: [".test.ts", ".test.tsx", ".test.js", ".test.jsx", ".d.ts"],
 };
 
 // Default-deny walk: only configured extensions, minus excluded dirs/suffixes.
@@ -46,6 +49,7 @@ export function walkSourceFiles(repoRoot, { roots, extensions, excludeDirs, excl
         const rel = posixify(p.slice(repoRoot.length + 1));
         return !excludeDirs.some((d) => rel === d || rel.endsWith(`/${d}`) || name === d);
       },
+      (p, reason) => diagnostics.push(`${posixify(p.slice(repoRoot.length + 1))}: ${reason} — skipped`),
     );
   }
   return out;

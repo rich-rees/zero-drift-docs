@@ -18,8 +18,8 @@
 // may declare (`localExtractorDir`), the single sanctioned place config can
 // point at code. A path in the extractors list is refused.
 
-import { readFileSync, writeFileSync, readdirSync, statSync, mkdirSync, rmSync, existsSync } from "node:fs";
-import { join, dirname, relative, resolve, sep } from "node:path";
+import { readFileSync, writeFileSync, readdirSync, statSync, lstatSync, realpathSync, mkdirSync, rmSync, existsSync } from "node:fs";
+import { join, dirname, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { loadConfig, resolveExtractors } from "./lib/config.mjs";
 import { resolveRefs } from "./lib/resolve-refs.mjs";
@@ -47,26 +47,31 @@ function fail(msg) {
 // Canonical serializer: fixed top-level key order, per-kind facts key order
 // (unknown facts keys sort last, alphabetically), 2-space indent, LF, trailing
 // newline. Hand-rolled so byte-stability is a property of this file, not of
-// JSON.stringify implementation details.
+// JSON.stringify implementation details. Fails closed on a value JSON has no
+// form for (undefined, a function, a symbol): JSON.stringify answers
+// `undefined` for those and the literal text `undefined` landed in a .json
+// file that no parser could read back (CR-093). The error names the path.
 function stableStringify(record, factsKeyOrder) {
   const orderKeys = (obj, order) => {
     const known = order.filter((k) => k in obj);
     const unknown = Object.keys(obj).filter((k) => !order.includes(k)).sort();
     return [...known, ...unknown];
   };
-  const write = (value, indent) => {
+  const write = (value, indent, path) => {
     if (Array.isArray(value)) {
       if (!value.length) return "[]";
-      const inner = value.map((v) => `${indent}  ${write(v, indent + "  ")}`).join(",\n");
+      const inner = value.map((v, i) => `${indent}  ${write(v, indent + "  ", `${path}[${i}]`)}`).join(",\n");
       return `[\n${inner}\n${indent}]`;
     }
     if (value && typeof value === "object") {
       const keys = Object.keys(value);
       if (!keys.length) return "{}";
-      const inner = keys.map((k) => `${indent}  ${JSON.stringify(k)}: ${write(value[k], indent + "  ")}`).join(",\n");
+      const inner = keys.map((k) => `${indent}  ${JSON.stringify(k)}: ${write(value[k], indent + "  ", `${path}.${k}`)}`).join(",\n");
       return `{\n${inner}\n${indent}}`;
     }
-    return JSON.stringify(value);
+    const out = JSON.stringify(value);
+    if (out === undefined) throw new Error(`Record ${record.id}: ${path} is ${typeof value} — not serialisable as JSON`);
+    return out;
   };
   const ordered = {};
   for (const key of RECORD_KEYS) {
@@ -78,7 +83,7 @@ function stableStringify(record, factsKeyOrder) {
       ordered[key] = record[key];
     }
   }
-  return write(ordered, "") + "\n";
+  return write(ordered, "", "record") + "\n";
 }
 
 function validateRecords(records) {
@@ -152,6 +157,77 @@ async function loadExtractor(name, repoRoot, config) {
   fail(`Unknown extractor '${name}' (known: ${known}${localList})`);
 }
 
+// The lexical check above is the braces; this is the belt (CR-060). A
+// metadataDir that is itself a symlink, or that sits under one, would carry
+// every write and the prune wherever the link points — a sibling checkout,
+// the user's home — while the string still starts with the repo root. So:
+// metadataDir must not be a link, and the real path of it (or, before the
+// first derive creates it, of its nearest existing ancestor) must sit under
+// the real path of the repo. Same discipline as render's safeOutputPath.
+function assertMetadataDirContained(repoRoot, metadataDir, metadataRel) {
+  let probe = metadataDir;
+  for (;;) {
+    let st = null;
+    try {
+      st = lstatSync(probe);
+    } catch {
+      /* not there yet — look one level up */
+    }
+    if (st) {
+      if (st.isSymbolicLink()) {
+        const what = probe === metadataDir ? "is a symlink" : `sits under a symlink (${probe})`;
+        fail(`metadataDir '${metadataRel}' ${what} — derive writes and prunes only through real directories inside the repo`);
+      }
+      break;
+    }
+    const up = dirname(probe);
+    if (up === probe) break;
+    probe = up;
+  }
+  try {
+    insideRepo(realpathSync(repoRoot), realpathSync(probe), `metadataDir '${metadataRel}'`);
+  } catch (e) {
+    fail(e.message);
+  }
+}
+
+// What is on disk under metadataDir. The folder holds exactly
+// `<kind>/<record>.json` and derive manages nothing else: any other JSON file
+// — or any directory that is not a kind — is FOREIGN, and the caller refuses
+// to run rather than prune it as an orphaned record (CR-059: a non-dedicated
+// metadataDir once deleted config.json). Non-JSON bystanders (a README, a
+// .gitkeep) are neither read nor pruned. Symlinks are skipped, never followed
+// (CR-060) — reported so `--verbose` shows why a linked file is ignored.
+function scanMetadata(metadataDir) {
+  const existing = new Map(); // "<kind>/<file>.json" -> content
+  const foreign = [];
+  const links = [];
+  if (!existsSync(metadataDir)) return { existing, foreign, links };
+  for (const name of readdirSync(metadataDir).sort()) {
+    const p = join(metadataDir, name);
+    const st = lstatSync(p);
+    if (st.isSymbolicLink()) {
+      links.push(name);
+    } else if (st.isDirectory()) {
+      if (!KIND_RE.test(name)) {
+        foreign.push(`${name}/`);
+        continue;
+      }
+      for (const file of readdirSync(p).sort()) {
+        const rel = `${name}/${file}`;
+        const fp = join(p, file);
+        const fst = lstatSync(fp);
+        if (fst.isSymbolicLink()) links.push(rel);
+        else if (fst.isDirectory()) foreign.push(`${rel}/`);
+        else if (file.endsWith(".json")) existing.set(rel, readFileSync(fp, "utf8"));
+      }
+    } else if (name.endsWith(".json")) {
+      foreign.push(name);
+    }
+  }
+  return { existing, foreign, links };
+}
+
 // Run every configured extractor, merge, resolve refs. Exported so tests can
 // observe records without the filesystem write.
 export async function deriveRecords({ repoRoot, config }) {
@@ -197,6 +273,7 @@ export async function run(args) {
   // Refuse to prune outside the repo — a config typo must not delete
   // arbitrary trees.
   if (!metadataDir.startsWith(REPO + sep)) fail(`metadataDir '${metadataRel}' resolves outside the repo`);
+  assertMetadataDirContained(REPO, metadataDir, metadataRel);
 
   const { records, factsOrder, diagnostics, configDiagnostics } = await deriveRecords({ repoRoot: REPO, config });
   // Config-level notes (deprecations) always print; extractor diagnostics are
@@ -205,24 +282,22 @@ export async function run(args) {
   if (VERBOSE) for (const d of diagnostics) console.error(d);
 
   const expected = new Map(); // rel path under metadataDir -> content
-  for (const r of records) {
-    expected.set(`${r.kind}/${r.filename}`, stableStringify(r, factsOrder[r.kind] ?? []));
+  try {
+    for (const r of records) expected.set(`${r.kind}/${r.filename}`, stableStringify(r, factsOrder[r.kind] ?? []));
+  } catch (e) {
+    fail(e.message);
   }
 
-  const existing = new Map();
-  if (existsSync(metadataDir)) {
-    const walk = (dir) => {
-      for (const name of readdirSync(dir).sort()) {
-        const p = join(dir, name);
-        if (statSync(p).isDirectory()) walk(p);
-        else if (name.endsWith(".json")) {
-          const rel = relative(metadataDir, p).split(/[\\/]/).join("/");
-          existing.set(rel, readFileSync(p, "utf8"));
-        }
-      }
-    };
-    walk(metadataDir);
+  const { existing, foreign, links } = scanMetadata(metadataDir);
+  if (foreign.length) {
+    fail(
+      `${metadataRel} is not a dedicated metadata folder — it holds ${foreign.length} file(s) derive did not write:\n` +
+        foreign.map((f) => `  ${f}`).join("\n") +
+        `\nderive manages only <kind>/<record>.json under paths.metadataDir and prunes the rest; ` +
+        `move these out or point paths.metadataDir at an empty folder.`,
+    );
   }
+  if (VERBOSE) for (const l of links) console.error(`[derive] ${metadataRel}/${l} is a symlink — skipped (never read, written or pruned)`);
 
   // Normalize CRLF so a core.autocrlf checkout doesn't fail the compare
   // (.gitattributes pins these files to LF, this is belt-and-braces).
@@ -247,6 +322,22 @@ export async function run(args) {
     }
     console.log(`codebase metadata in sync (${records.length} records)`);
   } else {
+    // A link AT a record path (or a linked kind dir above it) would be
+    // followed by writeFileSync — scanMetadata skips links, but skipping is
+    // not enough where derive is about to write (CR-060). Fail closed before
+    // the first write: lstat each target and its kind dir, refuse anything
+    // that is not a plain file / plain directory.
+    const notPlain = (p, rel, want) => {
+      const st = lstatSync(p, { throwIfNoEntry: false }); // lstat, not exists: a dangling link must still count
+      if (!st) return;
+      const what = st.isSymbolicLink() ? "is a symlink" : want === "file" && !st.isFile() ? "is not a regular file" : want === "dir" && !st.isDirectory() ? "is not a directory" : null;
+      if (what) fail(`${metadataRel}/${rel} ${what} — derive writes only through plain files inside metadataDir; remove it and re-run`);
+    };
+    for (const rel of expected.keys()) {
+      const p = insideRepo(metadataDir, join(metadataDir, rel), `metadata path ${rel}`);
+      notPlain(dirname(p), rel.slice(0, rel.lastIndexOf("/")), "dir");
+      notPlain(p, rel, "file");
+    }
     for (const [rel, content] of expected) {
       const p = insideRepo(metadataDir, join(metadataDir, rel), `metadata path ${rel}`);
       mkdirSync(dirname(p), { recursive: true });

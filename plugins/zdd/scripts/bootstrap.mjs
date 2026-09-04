@@ -48,6 +48,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, lstatSync, chmodSync, openSync, writeSync, closeSync } from "node:fs";
 import { join, dirname, basename, relative } from "node:path";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   PLUGIN_ROOT,
   ENGINE_PACKAGE,
@@ -67,14 +68,17 @@ const TEMPLATES = join(PLUGIN_ROOT, "templates");
 const SNIPPET_BEGIN = "<!-- zdd:begin -->";
 const SNIPPET_END = "<!-- zdd:end -->";
 const LEGACY_SNIPPET_HEADING = "## Documentation — Zero-Drift Docs (ZDD)";
-// The v0.3.1 snippet's fingerprint: the section must carry BOTH of these
-// bullets to be recognised as ours (CR-011). Anything else under that heading
-// is the adopter's and is left alone.
+// The v0.3.1 snippet's fingerprint. Replacement needs the whole section to
+// equal the v0.3.1 snippet modulo whitespace (CR-080, isLegacySnippet below);
+// the fingerprint only decides whether a section that is NOT replaced gets
+// the "legacy section left in place" note (both bullets present ⇒ it started
+// as ours and was edited) or is simply the adopter's own heading (CR-011).
 const LEGACY_FINGERPRINT = ["/zdd:orient", "/zdd:update"];
 // Ownership line carried by every file the plugin writes besides config.
 export const OWNER_MARK = "Managed by Zero-Drift Docs (zdd)";
 const SKIP_DIRS = new Set(["node_modules", ".git", ".next", "dist", "build", "coverage", ".venv", "venv", "__pycache__", ".expo", "zdd"]);
 const MAX_NAME = 120;
+const MAX_SCAN_BYTES = 1024 * 1024; // detection never reads a file larger than this (CR-091)
 
 // Mirror of the engine's LEGACY_ADAPTERS (src/lib/config.mjs): the one legacy
 // adapter and how its options split. The engine expands it at derive time;
@@ -115,7 +119,12 @@ function walk(root, onFile, maxDepth = 6) {
       if (st.isSymbolicLink()) continue;
       if (st.isDirectory()) {
         if (!SKIP_DIRS.has(name) && !name.startsWith(".")) rec(p, depth + 1);
-      } else if (st.isFile()) onFile(p, name, posixify(relative(root, p)));
+      } else if (st.isFile()) {
+        // A file over the cap is not a convention to inventory (a generated
+        // blob, a vendored bundle) and is never read (CR-091).
+        if (st.size > MAX_SCAN_BYTES) continue;
+        onFile(p, name, posixify(relative(root, p)));
+      }
     }
   };
   rec(root, 0);
@@ -124,7 +133,8 @@ function walk(root, onFile, maxDepth = 6) {
 function readPackageJson(root) {
   const p = join(root, "package.json");
   try {
-    if (!lstatSync(p).isFile()) return null;
+    const st = lstatSync(p);
+    if (!st.isFile() || st.size > MAX_SCAN_BYTES) return null; // CR-091: same bound as the walk
     return readJson(p);
   } catch {
     return null;
@@ -298,15 +308,63 @@ const fail = (msg) => {
   throw new Error(`answers: ${msg}`);
 };
 
+// Mirrors of the ENGINE's rules (src/lib/config.mjs validateRepoBase and
+// src/lib/paths.mjs repoRelative), applied to the answers so a config the
+// engine's first derive would refuse is never written (CR-078). The engine's
+// path rule is stricter than the plugin's repoRelative in lib/repo.mjs (no
+// whitespace, no backslash) and looser in one spot (`.` is a valid root — the
+// fastapi default), and the option values land in config.json verbatim, so
+// the engine's rule is the one that applies here.
+const ENGINE_REPO_BASE = /^https?:\/\/\S+$/i;
+function enginePath(value, label) {
+  const bad = () => fail(`${label} ${JSON.stringify(value)} must be repo-relative (no absolute path, drive letter, URL scheme, backslash, whitespace or '..')`);
+  if (typeof value !== "string" || !value.length) bad();
+  if (/[\s\x00-\x1f\x7f]/.test(value)) bad();
+  if (value.includes("\\") || value.startsWith("/") || /^[A-Za-z]:/.test(value)) bad();
+  if (/^[A-Za-z][A-Za-z0-9+.-]*:/.test(value)) bad();
+  if (value.split("/").some((s) => s === "..")) bad();
+  return value;
+}
+// The path-bearing option keys of the built-in extractors, by extractor name.
+// A local extractor's options are its own; only these are inspected.
+function validateExtractorOptions(all) {
+  const obj = (v) => v && typeof v === "object" && !Array.isArray(v);
+  const list = (v, label) => {
+    if (!Array.isArray(v)) fail(`${label} must be an array of repo-relative paths`);
+    v.forEach((p, i) => enginePath(p, `${label}[${i}]`));
+  };
+  for (const [name, opts] of Object.entries(all)) {
+    if (!obj(opts)) fail(`extractorOptions.${name} must be an object`);
+    if (name === "nextjs") {
+      for (const k of ["appDir", "middlewarePath", "srcAliasRoot"]) if (opts[k] !== undefined) enginePath(opts[k], `nextjs.${k}`);
+      if (opts.refs !== undefined) {
+        if (!obj(opts.refs)) fail("nextjs.refs must be an object");
+        if (opts.refs.roots !== undefined) list(opts.refs.roots, "nextjs.refs.roots");
+      }
+    } else if (name === "fastapi") {
+      if (opts.roots !== undefined) list(opts.roots, "fastapi.roots");
+    } else if (name === "supabase" && opts.migrationNamespaces !== undefined) {
+      if (!Array.isArray(opts.migrationNamespaces)) fail("supabase.migrationNamespaces must be an array");
+      opts.migrationNamespaces.forEach((ns, i) => {
+        if (!obj(ns)) fail(`supabase.migrationNamespaces[${i}] must be an object`);
+        enginePath(ns.dir, `supabase.migrationNamespaces[${i}].dir`);
+      });
+    }
+  }
+}
+
 export function validateAnswers(a) {
   if (!a || typeof a !== "object" || Array.isArray(a)) fail("must be a JSON object");
   for (const k of ["name", "repoBase", "baseBranch"]) if (a[k] !== undefined && !isName(a[k])) fail(`${k} must be a single-line string (≤${MAX_NAME} chars)`);
-  if (a.repoBase !== undefined && a.repoBase !== "" && !/^https?:\/\//.test(a.repoBase)) fail("repoBase must be an http(s) URL or empty");
+  if (a.repoBase !== undefined && a.repoBase !== "" && !ENGINE_REPO_BASE.test(a.repoBase)) fail("repoBase must be an http(s) URL with no whitespace, or empty (the engine's rule)");
   if (a.extractors !== undefined) {
     if (!Array.isArray(a.extractors) || !a.extractors.every((n) => typeof n === "string" && /^[a-z][a-z0-9-]*$/.test(n))) fail("extractors must be an array of extractor names");
     if (new Set(a.extractors).size !== a.extractors.length) fail("extractors lists a name twice");
   }
-  if (a.extractorOptions !== undefined && (!a.extractorOptions || typeof a.extractorOptions !== "object" || Array.isArray(a.extractorOptions))) fail("extractorOptions must be an object");
+  if (a.extractorOptions !== undefined) {
+    if (!a.extractorOptions || typeof a.extractorOptions !== "object" || Array.isArray(a.extractorOptions)) fail("extractorOptions must be an object");
+    validateExtractorOptions(a.extractorOptions);
+  }
   if (a.stack !== undefined) {
     if (!Array.isArray(a.stack)) fail("stack must be an array");
     for (const e of a.stack) {
@@ -412,6 +470,28 @@ function snippetText() {
 // phrase anywhere in the file (CR-006).
 const isOwned = (text) => text.split(/\r?\n/, 3).some((l) => l.includes(OWNER_MARK));
 
+// The v0.3.1 workflow template carried neither the ownership line nor a pin,
+// so ownership of it is decided by content: sha256 of the file normalised to
+// LF, trailing whitespace stripped, one final newline. Regenerate the constant
+// with `git show v0.3.1:plugins/zdd/templates/zdd.yml` through normaliseText
+// (the test fixture at test/fixtures/v0.3.1/zdd.yml is that exact file).
+const LEGACY_WORKFLOW_SHA256 = "a5e8672339dc570c8c154ffed09f01e715f627116f96ec1ef508895a3b906653";
+const normaliseText = (s) =>
+  s
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((l) => l.trimEnd())
+    .join("\n")
+    .trim() + "\n";
+const isLegacyWorkflow = (text) => createHash("sha256").update(normaliseText(text)).digest("hex") === LEGACY_WORKFLOW_SHA256;
+// Same idea for the v0.3.1 CLAUDE.md snippet, compared modulo ALL whitespace
+// (editors reflow prose; a reflowed stock section is still stock — CR-080).
+// Regenerate with `git show v0.3.1:plugins/zdd/templates/claude-md-snippet.md`
+// through collapseWhitespace (fixture: test/fixtures/v0.3.1/claude-md-snippet.md).
+const LEGACY_SNIPPET_SHA256 = "d4dca24f9b590def6ba926a8bb6660b91b74e72bc792a1d1bc32c85aadcb887d";
+const collapseWhitespace = (s) => s.replace(/\s+/g, " ").trim();
+const isLegacySnippet = (text) => createHash("sha256").update(collapseWhitespace(text)).digest("hex") === LEGACY_SNIPPET_SHA256;
+
 // A marker counts only as a whole line (CR-011): `<!-- zdd:begin --> extra`
 // is not a marker.
 const MARKER_LINE = (m) => new RegExp("^" + m.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\r?$", "gm");
@@ -444,23 +524,31 @@ export function upsertSnippet(existing, snippet) {
     return { text: next, changed: next !== existing, how: "refreshed" };
   }
   const h = existing.indexOf(LEGACY_SNIPPET_HEADING);
+  let legacyKept = false;
   if (h !== -1) {
     const after = existing.indexOf("\n## ", h + LEGACY_SNIPPET_HEADING.length);
     const end = after === -1 ? existing.length : after + 1;
     const section = existing.slice(h, end);
-    if (LEGACY_FINGERPRINT.every((f) => section.includes(f))) {
+    if (isLegacySnippet(section)) {
       const next = existing.slice(0, h) + body + existing.slice(end);
       return { text: next, changed: true, how: "replaced the pre-0.4 snippet" };
     }
-    // The heading is there but the content is not ours: leave it, append.
+    // The heading is there but the section is not the stock snippet — an
+    // adopter's line inside it, or their own section: leave it, append.
+    legacyKept = LEGACY_FINGERPRINT.every((f) => section.includes(f));
   }
   const sep = existing.endsWith("\n") ? (/\r?\n\r?\n$/.test(existing) ? "" : norm("\n")) : norm("\n\n");
-  return { text: existing + sep + body, changed: true, how: "appended" };
+  return {
+    text: existing + sep + body,
+    changed: true,
+    how: "appended",
+    note: legacyKept ? `legacy section left in place: the "${LEGACY_SNIPPET_HEADING}" section differs from the v0.3.1 snippet, so it is yours — fold what you want into the marked block and delete the rest by hand` : undefined,
+  };
 }
 
 function writeSnippet(ledger, file) {
   const existing = ledger.exists(file) ? ledger.read(file) : "";
-  const { text, changed, how } = upsertSnippet(existing, snippetText());
+  const { text, changed, how, note } = upsertSnippet(existing, snippetText());
   if (!changed) {
     ledger.kept.push(file);
     if (how.startsWith("refused")) ledger.notes.push(`${file}: ${how}`);
@@ -469,6 +557,7 @@ function writeSnippet(ledger, file) {
   if (existing) ledger.overwrite(file, text);
   else if (!ledger.create(file, text)) return;
   ledger.notes.push(`${file}: ${how} the ZDD instruction block`);
+  if (note) ledger.notes.push(`${file}: ${note}`);
 }
 
 function pinEngine(text, version) {
@@ -693,6 +782,13 @@ export function upgrade(root) {
     if (!ledger.exists(rel)) continue;
     const cur = ledger.read(rel);
     if (!isOwned(cur)) {
+      // The v0.3.1 template had no ownership line and no pin; the exact file
+      // (modulo line endings / trailing whitespace) is still ours (CR-081).
+      if (rel.endsWith("zdd.yml") && isLegacyWorkflow(cur)) {
+        ledger.overwrite(rel, fresh());
+        ledger.notes.push(`${rel}: the unmodified v0.3.1 workflow (unpinned npx, no ownership line) replaced with the pinned template (${version})`);
+        continue;
+      }
       ledger.kept.push(`${rel} (not managed by zdd — left untouched; check its engine pin by hand)`);
       continue;
     }
@@ -717,9 +813,15 @@ export function upgrade(root) {
 }
 
 // ---------------------------------------------------------------------------
-// Narration
+// Narration. Every line is one ledger entry; evidence and paths inside it come
+// from the checkout (directory names, config values), which on POSIX may hold
+// a newline or an ANSI escape. The skill reads this output, so a control
+// character is replaced before it can forge a line or restyle the terminal
+// (CR-092). `--json` output is JSON-quoted and needs no such step.
 // ---------------------------------------------------------------------------
-function narrateDetect(d, pocock) {
+const printable = (line) => line.replace(/[\x00-\x1f\x7f]/g, "?");
+
+export function narrateDetect(d, pocock) {
   const out = [];
   if (d.mode === "greenfield") {
     out.push("Mode: GREENFIELD — no source to read. Ask for the intended stack and configure extractors ahead of the code.");
@@ -733,7 +835,7 @@ function narrateDetect(d, pocock) {
     for (const a of d.apps) out.push(`  - map only: ${a.name} — ${a.evidence}; extractor ${a.extractor}`);
   }
   out.push(narratePocock(pocock));
-  return out.join("\n");
+  return out.map(printable).join("\n");
 }
 
 function narratePocock(p) {
@@ -746,7 +848,7 @@ function narratePocock(p) {
   );
 }
 
-function narrateApply(r) {
+export function narrateApply(r) {
   const out = [`Bootstrap (${r.mode}) — plugin ${r.version}, ${r.date}`];
   for (const f of r.wrote) out.push(`  wrote   ${f}`);
   for (const f of r.kept) out.push(`  kept    ${f}`);
@@ -767,16 +869,16 @@ function narrateApply(r) {
     );
   }
   out.push(narratePocock(r.pocock));
-  return out.join("\n");
+  return out.map(printable).join("\n");
 }
 
-function narrateUpgrade(r) {
+export function narrateUpgrade(r) {
   const out = [`Upgrade to plugin ${r.version}`];
   if (!r.wrote.length) out.push("  nothing to change — every plugin-owned file is already at this version");
   for (const f of r.wrote) out.push(`  changed ${f}`);
   for (const f of r.kept) out.push(`  kept    ${f}`);
   for (const n of r.notes) out.push(`  note    ${n}`);
-  return out.join("\n");
+  return out.map(printable).join("\n");
 }
 
 // ---------------------------------------------------------------------------

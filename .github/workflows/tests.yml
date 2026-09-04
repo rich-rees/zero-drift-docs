@@ -1,0 +1,36 @@
+# The plugin repo's own CI: the engine and plugin test suites on every PR.
+# Determinism is the contract (same source bytes in ⇒ byte-identical artifacts
+# out), and the golden diffs that prove it only mean something if they run on
+# every change. No LLM, no secrets, no network beyond checkout and Node.
+name: tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  engine:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: ["20", "22"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      # bash on both runners: Node 20's --test takes file paths, not glob
+      # patterns (22 accepts either), so the shell expands the glob.
+      - name: Engine tests (determinism, goldens, extractors, viewers)
+        working-directory: packages/zdd-engine
+        shell: bash
+        run: node --test test/*.test.mjs
+      - name: Plugin tests (runbook, hooks, skew, manifests)
+        shell: bash
+        run: node --test plugins/zdd/test/*.test.mjs

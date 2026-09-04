@@ -868,7 +868,7 @@
   });
 
   function showView(v) {
-    if (!VIEWS[v]) v = "lanes";
+    if (!Object.hasOwn(VIEWS, v)) v = "lanes"; // `?view=constructor` must not reach Object.prototype (CR-100)
     currentView = v;
     indexEl.hidden = true;
     crumbsEl.hidden = true;
