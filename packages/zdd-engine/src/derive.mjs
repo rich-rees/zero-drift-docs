@@ -47,26 +47,31 @@ function fail(msg) {
 // Canonical serializer: fixed top-level key order, per-kind facts key order
 // (unknown facts keys sort last, alphabetically), 2-space indent, LF, trailing
 // newline. Hand-rolled so byte-stability is a property of this file, not of
-// JSON.stringify implementation details.
+// JSON.stringify implementation details. Fails closed on a value JSON has no
+// form for (undefined, a function, a symbol): JSON.stringify answers
+// `undefined` for those and the literal text `undefined` landed in a .json
+// file that no parser could read back (CR-093). The error names the path.
 function stableStringify(record, factsKeyOrder) {
   const orderKeys = (obj, order) => {
     const known = order.filter((k) => k in obj);
     const unknown = Object.keys(obj).filter((k) => !order.includes(k)).sort();
     return [...known, ...unknown];
   };
-  const write = (value, indent) => {
+  const write = (value, indent, path) => {
     if (Array.isArray(value)) {
       if (!value.length) return "[]";
-      const inner = value.map((v) => `${indent}  ${write(v, indent + "  ")}`).join(",\n");
+      const inner = value.map((v, i) => `${indent}  ${write(v, indent + "  ", `${path}[${i}]`)}`).join(",\n");
       return `[\n${inner}\n${indent}]`;
     }
     if (value && typeof value === "object") {
       const keys = Object.keys(value);
       if (!keys.length) return "{}";
-      const inner = keys.map((k) => `${indent}  ${JSON.stringify(k)}: ${write(value[k], indent + "  ")}`).join(",\n");
+      const inner = keys.map((k) => `${indent}  ${JSON.stringify(k)}: ${write(value[k], indent + "  ", `${path}.${k}`)}`).join(",\n");
       return `{\n${inner}\n${indent}}`;
     }
-    return JSON.stringify(value);
+    const out = JSON.stringify(value);
+    if (out === undefined) throw new Error(`Record ${record.id}: ${path} is ${typeof value} — not serialisable as JSON`);
+    return out;
   };
   const ordered = {};
   for (const key of RECORD_KEYS) {
@@ -78,7 +83,7 @@ function stableStringify(record, factsKeyOrder) {
       ordered[key] = record[key];
     }
   }
-  return write(ordered, "") + "\n";
+  return write(ordered, "", "record") + "\n";
 }
 
 function validateRecords(records) {
@@ -277,8 +282,10 @@ export async function run(args) {
   if (VERBOSE) for (const d of diagnostics) console.error(d);
 
   const expected = new Map(); // rel path under metadataDir -> content
-  for (const r of records) {
-    expected.set(`${r.kind}/${r.filename}`, stableStringify(r, factsOrder[r.kind] ?? []));
+  try {
+    for (const r of records) expected.set(`${r.kind}/${r.filename}`, stableStringify(r, factsOrder[r.kind] ?? []));
+  } catch (e) {
+    fail(e.message);
   }
 
   const { existing, foreign, links } = scanMetadata(metadataDir);

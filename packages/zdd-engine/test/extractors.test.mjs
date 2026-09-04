@@ -152,6 +152,26 @@ test("record guards: a local extractor cannot write outside metadataDir via kind
   rmSync(repo, { recursive: true, force: true });
 });
 
+test("CR-093: a record carrying undefined / a function / a symbol fails derive naming the record — never `undefined` written into a .json", () => {
+  const repo = mkRepo(FIXTURE_GREENFIELD);
+  mkdirSync(join(repo, "zdd", "extractors"), { recursive: true });
+  writeConfig(repo, { ...readConfig(repo), localExtractorDir: "zdd/extractors", extractors: ["sloppy"] });
+  const sloppy = (facts) => `export function derive() { return { records: [{ kind: "job", id: "job:1", title: "x", description: "", resource: [], refs: [], facts: ${facts}, filename: "x.json" }], diagnostics: [] }; }`;
+  for (const [facts, where] of [
+    ["{ auth: undefined }", /facts\.auth/],
+    ["{ nested: { deep: [1, undefined] } }", /facts\.nested\.deep\[1\]/],
+    ["{ fn: () => 1 }", /facts\.fn/],
+    ["{ sym: Symbol('s') }", /facts\.sym/],
+  ]) {
+    writeFileSync(join(repo, "zdd", "extractors", "sloppy.mjs"), sloppy(facts));
+    const err = runFail(repo, ["derive"]);
+    assert.match(err, /Record job:1: .*not serialisable/, facts);
+    assert.match(err, where, facts);
+    assert.ok(!existsSync(join(repo, "zdd", "metadata", "job", "x.json")), `nothing written for ${facts}`);
+  }
+  rmSync(repo, { recursive: true, force: true });
+});
+
 test("two extractors emitting one kind: facts orders merge in config order; duplicate ids and case-variant filenames fail (CR-023)", () => {
   const repo = mkRepo(FIXTURE_GREENFIELD);
   mkdirSync(join(repo, "zdd", "extractors"), { recursive: true });

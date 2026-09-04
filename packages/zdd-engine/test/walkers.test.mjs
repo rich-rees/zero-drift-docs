@@ -2,7 +2,7 @@
 // Run: node --test "test/*.test.mjs"
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { slugify, extractMethods, leadingComment } from "../src/extractors/nextjs/index.mjs";
+import { slugify, extractMethods, leadingComment, derive as nextjs } from "../src/extractors/nextjs/index.mjs";
 import { scanFileText, normalizeFetchUrl } from "../src/extractors/nextjs/refs.mjs";
 import { makeRouteMatcher } from "../src/lib/resolve-refs.mjs";
 
@@ -13,6 +13,21 @@ test("slugify: dynamic + catch-all + groups + dots", () => {
   assert.equal(slugify("apps/backoffice/src/lib/journey-api.ts"), "apps--backoffice--src--lib--journey-api-ts");
   assert.equal(slugify("(app)/_layout"), "(app)--_layout");
   assert.equal(slugify("/jobs/{id}/files/{p:path}"), "jobs--_id--files--___p");
+});
+
+test("CR-093: authPatterns entries must be { includes: string, auth: string } — checked before any file is read", () => {
+  const re = /nextjs: 'authPatterns\[(\d+)\]' must be \{ includes: string, auth: string \}/;
+  for (const bad of [[{ includes: "verifySignature" }], [{ auth: "hmac" }], [{ includes: 1, auth: "hmac" }], ["hmac"], [null]]) {
+    assert.throws(() => nextjs({ repoRoot: "/nope", options: { authPatterns: bad } }), re, JSON.stringify(bad));
+  }
+  const err = (() => {
+    try {
+      nextjs({ repoRoot: "/nope", options: { authPatterns: [{ includes: "a", auth: "b" }, { includes: "c" }] } });
+    } catch (e) {
+      return e.message;
+    }
+  })();
+  assert.match(err, /authPatterns\[1\]/, "names the offending index");
 });
 
 test("extractMethods: three export forms, canonical order", () => {
