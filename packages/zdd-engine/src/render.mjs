@@ -699,6 +699,8 @@ export async function run(args) {
         }
         staged.push([tmp, path]);
       }
+      // Ceiling: four renames are not one transaction — a crash between them
+      // leaves a mixed generation, which the next `render --check` reports as stale.
       for (const [tmp, path] of staged) renameSync(tmp, path);
     } catch (e) {
       for (const [tmp] of staged) rmSync(tmp, { force: true });
