@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
-import { resolveExtractors } from "../src/lib/config.mjs";
+import { resolveExtractors, validateRepoBase } from "../src/lib/config.mjs";
 import { repoRelative, insideRepo } from "../src/lib/paths.mjs";
 
 test("extractors list: names + per-name options; missing options default to {}", () => {
@@ -58,6 +58,17 @@ test("CR-107: extractorOptions / adapterOptions and each per-extractor entry mus
   // Absent is fine on both forms.
   assert.ok(!resolveExtractors({ extractors: ["supabase"] }).error);
   assert.ok(!resolveExtractors({ adapter: "nextjs-supabase" }).error);
+});
+
+test("CR-103: validateRepoBase accepts empty or an http(s) URL with no whitespace; refuses a bare scheme, other schemes, non-strings", () => {
+  for (const ok of [undefined, "", "https://github.com/example/repo/tree/main/", "http://localhost:3000/x", "HTTPS://Example.test/"]) {
+    assert.equal(validateRepoBase(ok), null, JSON.stringify(ok));
+  }
+  // The plugin's bootstrap once accepted `https://` and a URL with an inner
+  // space (CR-078); the engine's rule — `^https?:\/\/\S+$` — is the contract.
+  for (const bad of ["https://", "https://example.test/ bad", " https://example.test", "https://example.test\n", "ftp://x", "javascript:alert(1)", "example.test", 42, null, {}]) {
+    assert.match(validateRepoBase(bad) ?? "", /'repoBase' must be empty or an http\(s\) URL/, JSON.stringify(bad));
+  }
 });
 
 test("repoRelative: accepts repo-relative POSIX, rejects absolute, traversal and backslashes (CR-005/CR-006)", () => {
