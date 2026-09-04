@@ -5,7 +5,10 @@
 // transitively (app -> api router -> jobs router) and for every mount (one
 // router included under both /v1 and /v2 yields both route sets). Purely
 // textual — no Python parsing, no import resolution beyond "which scanned
-// file is called <mod>.py". Options (extractorOptions.fastapi):
+// file is called <mod>.py" (a package-qualified `a.routes.router` prefers
+// `a/routes.py`; a target that is still ambiguous mounts nothing and its
+// routers' handlers are skipped rather than emitted at a guessed prefix).
+// Options (extractorOptions.fastapi):
 //   roots        repo-relative files or directories to scan (default ["."])
 //   excludeDirs  directory names skipped during the walk
 //   appVar       the FastAPI() variable name (default "app")
@@ -157,18 +160,38 @@ export function derive({ repoRoot, options }) {
   }
   const key = (rel, v) => `${rel}#${v}`;
   const edges = new Map(); // child key -> [{ parent: key | null (app), prefix }]
+  // Router keys named by an include we could not attribute to one file. A
+  // router whose ONLY mention is such an include must not fall through to
+  // "unmounted root" — that emitted its routes at the wrong prefix as fact
+  // (CR-066). Its handlers are skipped with a diagnostic instead.
+  const suppressed = new Set();
   for (const [rel, { routers, includes }] of parsed) {
     for (const inc of includes) {
       const parent = inc.receiver === appVar ? null : routers.has(inc.receiver) ? key(rel, inc.receiver) : undefined;
       if (parent === undefined) continue; // included into an unknown receiver
       const parts = inc.target.split(".");
       const varName = parts.pop();
-      const mod = parts.pop();
       let targetRel = rel;
-      if (mod) {
-        const candidates = byModule.get(mod) ?? [];
-        if (candidates.length !== 1) {
-          diagnostics.push(`${rel}: include_router(${inc.target}) — module '${mod}' resolves to ${candidates.length} files, prefix not applied`);
+      if (parts.length) {
+        const dotted = parts.join(".");
+        let candidates = byModule.get(parts[parts.length - 1]) ?? [];
+        // Package-qualified (`a.routes.router`): the dotted path names a file
+        // path (`a/routes.py`) — prefer the candidates that end that way.
+        if (candidates.length > 1) {
+          const suffix = `${parts.join("/")}.py`;
+          const qualified = candidates.filter((c) => c === suffix || c.endsWith(`/${suffix}`));
+          if (qualified.length) candidates = qualified;
+        }
+        if (candidates.length === 0) {
+          diagnostics.push(`${rel}: include_router(${inc.target}) — module '${dotted}' is not among the scanned files, mount ignored`);
+          continue;
+        }
+        if (candidates.length > 1) {
+          diagnostics.push(
+            `${rel}: include_router(${inc.target}) — module '${dotted}' is ambiguous (${candidates.join(", ")}); ` +
+              `qualify it with its package, else those routers' handlers are skipped rather than rooted at the wrong prefix`,
+          );
+          for (const c of candidates) suppressed.add(key(c, varName));
           continue;
         }
         targetRel = candidates[0];
@@ -201,8 +224,14 @@ export function derive({ repoRoot, options }) {
       for (const d of h.decorators) {
         let prefixes;
         if (d.receiver === appVar) prefixes = [""];
-        else if (routers.has(d.receiver)) prefixes = mounts(key(rel, d.receiver)).map((m) => `${m}${routers.get(d.receiver)}`);
-        else {
+        else if (routers.has(d.receiver)) {
+          const k = key(rel, d.receiver);
+          if (suppressed.has(k) && !edges.has(k)) {
+            diagnostics.push(`${rel}: @${d.receiver}.* on ${h.name} — this router's only include_router is ambiguous, skipped (its mount prefix is unknown)`);
+            continue;
+          }
+          prefixes = mounts(k).map((m) => `${m}${routers.get(d.receiver)}`);
+        } else {
           diagnostics.push(`${rel}: @${d.receiver}.* on ${h.name} — receiver is neither '${appVar}' nor a router declared in this file, skipped`);
           continue;
         }
