@@ -30,19 +30,32 @@ const EDIT_TOOLS = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit", "write
 const SHELL_TOOLS = new Set(["Bash", "PowerShell", "Shell", "shell", "shell_command", "exec_command", "local_shell"]);
 const PATCH_TOOLS = new Set(["apply_patch"]);
 
-// Write-shaped shell (case-insensitive): redirection anywhere, in-place edits,
-// copies/moves/removes/links, git working-tree writes, PowerShell writers,
-// and script-language one-liners (which can write anything).
-const WRITE_SHAPED =
-  /(>|(^|[\s;&|(])(tee|sed\s+(-[a-z]*i|--in-place)|cp|mv|rm|del|erase|rmdir|truncate|dd|install|ln|touch|git\s+(checkout|restore|clean|rm|mv)|set-content|out-file|add-content|clear-content|remove-item|move-item|copy-item|new-item|rename-item|python3?|node|perl|ruby|php)(\s|$))/i;
+// What counts as a write in a simple command (all case-insensitive). Only a
+// redirect DESTINATION and an explicit write verb's operands are candidates;
+// a read verb with its output redirected elsewhere (`cat zdd/graph.json >
+// /tmp/x`) is a read (CR-074).
+//
 // Commands whose LAST operand is the destination and the others are read-only
 // sources. A move is NOT one of them: `mv zdd/graph.json elsewhere` removes
 // the artifact, so every operand of mv/move-item/rename-item/git mv is a
 // candidate (CR-072).
-const LAST_OPERAND_IS_TARGET = /^(cp|copy-item|install|ln)$/i;
+const LAST_OPERAND_IS_TARGET = /^(cp|copy-item|cpi|copy|install|ln)$/i;
 // Verbs that take a whole tree with them: an ancestor of a generated path is
 // as good as the path (CR-071). `git clean` / `git rm` are handled by sub-verb.
 const DESTRUCTIVE = /^(rm|rmdir|rd|del|erase|unlink|remove-item|ri)$/i;
+// Every other verb that writes its operands: moves, in-place edits, the
+// PowerShell writers, touch/truncate/dd/tee. `sed` only with -i (checked
+// separately); `git` by sub-verb.
+const WRITE_VERB = /^(mv|move-item|mi|move|rename-item|rni|ren|rename|tee|truncate|dd|touch|set-content|sc|out-file|add-content|ac|clear-content|clc|new-item|ni)$/i;
+const GIT_WRITE_SUBVERB = /^(checkout|restore|clean|rm|mv)$/i;
+// Script-language one-liners can write anything they name — but they read
+// far more often than they write, so a path literal in one is a candidate
+// only when a write API is named alongside it (CR-074). `>` inside the script
+// text is deliberately NOT in this list (`=>` and comparisons are everywhere);
+// a redirect outside the quotes is caught by the tokenizer regardless.
+const INTERPRETER = /^(node|nodejs|deno|bun|python3?|py|perl|ruby|php)$/i;
+const WRITE_API =
+  /(writeFile|createWriteStream|appendFile|copyFile|open\s*\([^)]*,\s*['"][wax]|Set-Content|Out-File|Add-Content|unlink|\brm(Sync|dir|tree|Dir)?\b|\brename|truncate|write_text|write_bytes|os\.remove|shutil\.(move|copy)|File\.(write|delete)|file_put_contents)/i;
 
 function readStdin() {
   try {
@@ -52,18 +65,63 @@ function readStdin() {
   }
 }
 
-// Quote-aware tokens: "a b", 'a b', or bare runs. Leading redirection glued
-// to a path (`>zdd/graph.json`) is split off.
-function tokens(command) {
+// Split a command line into simple commands on `;`, `|`, `||`, `&&` and
+// newlines — outside quotes only, so a one-liner's script body
+// (`python -c "import os; os.remove(...)"`) stays one command.
+function simpleCommands(command) {
   const out = [];
+  let cur = "";
+  let quote = null;
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i];
+    if (quote) {
+      cur += ch;
+      if (ch === quote) quote = null;
+    } else if (ch === '"' || ch === "'") {
+      quote = ch;
+      cur += ch;
+    } else if (ch === ";" || ch === "|" || ch === "\n" || (ch === "&" && command[i + 1] === "&")) {
+      out.push(cur);
+      cur = "";
+      if (ch === "&" || (ch === "|" && command[i + 1] === "|")) i++;
+    } else cur += ch;
+  }
+  out.push(cur);
+  return out;
+}
+
+// Quote-aware lexing of one simple command: "a b", 'a b', or bare runs. Returns
+// the WORDS (redirection operators removed) and the redirect DESTINATIONS
+// separately — `>f`, `> f`, `>>f`, `1>f`, `2> f`, `&>f`; `2>&1` is a dup, not
+// a file; `<f` / `<<EOF` are input and dropped. Only bare (unquoted) tokens
+// carry operators, so `echo "a > b"` has no redirect.
+function lex(command) {
+  const words = [];
+  const redirects = [];
   const re = /"([^"]*)"|'([^']*)'|(\S+)/g;
+  let pending = false;
   let m;
   while ((m = re.exec(command))) {
-    let t = m[1] ?? m[2] ?? m[3];
-    t = t.replace(/^[><]+|^[0-9]>+/, "").replace(/^["']|["']$/g, "");
-    if (t) out.push(t);
+    const t = m[1] ?? m[2] ?? m[3];
+    const bare = m[3] !== undefined;
+    if (pending) {
+      pending = false;
+      if (!t.startsWith("&")) redirects.push(t.replace(/^["']|["']$/g, ""));
+      continue;
+    }
+    if (bare) {
+      const r = /^(?:&>>?|\d*>>?\|?)(.*)$/.exec(t);
+      if (r) {
+        const rest = r[1].replace(/^["']|["']$/g, "");
+        if (!rest) pending = true;
+        else if (!rest.startsWith("&")) redirects.push(rest);
+        continue;
+      }
+      if (t.startsWith("<")) continue;
+    }
+    if (t) words.push(t);
   }
-  return out;
+  return { words, redirects };
 }
 
 // The real path of a target that may not exist yet: realpath of the nearest
@@ -112,39 +170,50 @@ function patchTarget(text, cwd, hit) {
 }
 
 // The shell half. Split on command separators so each simple command's
-// operands are judged on their own; for copy-like verbs only the last operand
-// is a destination (CR-019).
+// operands are judged on their own. Candidates per simple command: every
+// redirect destination; for a write verb its operands (copy-like verbs: the
+// last operand or the -t dir only — CR-019/CR-071; moves: all — CR-072); for
+// an interpreter, its operands and path literals only when a write API is
+// named (CR-074). Anything else — an unknown verb, a read verb — contributes
+// nothing but its redirects.
 function shellTarget(command, cwd, hit) {
-  if (!command || !WRITE_SHAPED.test(command)) return null;
-  for (const simple of command.split(/\|\||&&|;|\||\n/)) {
-    const toks = tokens(simple);
-    if (!toks.length) continue;
-    const verb = toks[0].replace(/^.*[\\/]/, "");
-    const operands = toks.slice(1).filter((t) => !t.startsWith("-"));
-    // Path-shaped runs anywhere in the command (`node -e "...('zdd/graph.json')"`)
-    // are candidates too — a script can write anything it names.
-    const literals = [...simple.matchAll(/[\w.:-]*[\\/][\w.\\/:-]*/g)].map((m) => m[0]);
+  if (!command) return null;
+  for (const simple of simpleCommands(command)) {
+    const { words, redirects } = lex(simple);
+    if (!words.length && !redirects.length) continue;
+    const verb = (words[0] ?? "").replace(/^.*[\\/]/, "");
+    const sub = words[1] ?? "";
+    const operands = words.slice(1).filter((t) => !t.startsWith("-"));
+    const candidates = [...redirects];
     // `-t DIR` / `--target-directory[= ]DIR` names the destination up front
     // (CR-071); it is a candidate whatever the operand order.
     const targetDirs = [];
-    toks.forEach((t, i) => {
+    words.forEach((t, i) => {
       const eq = /^--target-directory=(.+)$/.exec(t);
       if (eq) targetDirs.push(eq[1]);
-      else if ((t === "-t" || t === "--target-directory") && toks[i + 1]) targetDirs.push(toks[i + 1]);
+      else if ((t === "-t" || t === "--target-directory") && words[i + 1]) targetDirs.push(words[i + 1]);
     });
-    const copyLike = LAST_OPERAND_IS_TARGET.test(verb);
-    const candidates =
-      copyLike && targetDirs.length
-        ? targetDirs // every operand is a source
-        : copyLike && operands.length > 1
-          ? operands.slice(-1)
-          : /^(cat|less|head|tail|grep|diff|type|get-content)$/i.test(verb) && !/>/.test(simple)
-            ? []
-            : operands.concat(toks[0], literals, targetDirs);
-    // A destructive verb over an ANCESTOR of a generated path takes the
-    // artifact with it (`rm -rf zdd`), so for those verbs an ancestor is a hit
-    // too (CR-071). Globs and variables stay opaque — decision 0003's ceiling.
-    const destructive = DESTRUCTIVE.test(verb) || (/^git$/i.test(verb) && /^(clean|rm)$/i.test(toks[1] ?? ""));
+    // Path-shaped runs anywhere in the text (`node -e "...('zdd/graph.json')"`,
+    // `dd of=zdd/graph.json`).
+    const literals = () => [...simple.matchAll(/[\w.:-]*[\\/][\w.\\/:-]*/g)].map((m) => m[0]);
+    const isGit = /^git$/i.test(verb);
+    const sedInPlace = /^sed$/i.test(verb) && words.some((t) => /^(-[a-z]*i|--in-place)/i.test(t));
+    let destructive = false;
+    if (LAST_OPERAND_IS_TARGET.test(verb)) {
+      if (targetDirs.length) candidates.push(...targetDirs); // every operand is a source
+      else if (operands.length > 1) candidates.push(operands[operands.length - 1]);
+      else candidates.push(...operands);
+    } else if (DESTRUCTIVE.test(verb) || (isGit && /^(clean|rm)$/i.test(sub))) {
+      // A destructive verb over an ANCESTOR of a generated path takes the
+      // artifact with it (`rm -rf zdd`), so an ancestor is a hit too (CR-071).
+      // Globs and variables stay opaque — decision 0003's ceiling.
+      destructive = true;
+      candidates.push(...operands, ...literals());
+    } else if (WRITE_VERB.test(verb) || sedInPlace || (isGit && GIT_WRITE_SUBVERB.test(sub))) {
+      candidates.push(...operands, ...literals(), ...targetDirs);
+    } else if (INTERPRETER.test(verb) && WRITE_API.test(simple)) {
+      candidates.push(...operands, ...literals());
+    }
     for (const c of candidates) {
       const t = hit(c, cwd, { ancestor: destructive });
       if (t) return t;

@@ -171,6 +171,53 @@ test("fence: moving a generated file away is a write to it — mv/move-item/rena
   silent(fence("Bash", { command: "cp zdd/graph.json /tmp/g.json" }), "cp FROM a generated file stays a read");
 });
 
+test("fence: only a redirect DESTINATION or a write verb's operand is a write — reads with redirection elsewhere pass (CR-074)", () => {
+  for (const command of [
+    "cat zdd/graph.json > /tmp/debug.json",
+    "cat zdd/graph.json >> notes.txt",
+    "diff zdd/graph.json expected.json > report.txt",
+    "jq . zdd/graph.json 2> errors.log",
+    "grep -c foo zdd/agent-index.md > count.txt",
+    "cat zdd/graph.json 2>&1 | tee /tmp/out.txt",
+    'echo "a > b" zdd/graph.json',
+    "node scripts/report.mjs zdd/graph.json",
+    "node -e \"console.log(require('fs').readFileSync('zdd/graph.json','utf8'))\"",
+    "node -e \"const j = require('./zdd/graph.json'); console.log(j.nodes.filter(n => n.kind === 'table').length)\"",
+    "python -c \"print(open('zdd/graph.json').read())\"",
+    "python3 -c \"import json; print(json.load(open('zdd/graph.json'))['nodes'][0])\"",
+    "perl -ne 'print if /foo/' zdd/agent-index.md",
+    "ruby -e \"puts File.read('zdd/graph.json')\"",
+    "php -r \"echo file_get_contents('zdd/graph.json');\"",
+    "cat <<EOF > notes.txt\nzdd/graph.json\nEOF",
+  ]) {
+    silent(fence("Bash", { command }), command);
+    silent(fence("PowerShell", { command }), `pwsh: ${command}`);
+  }
+  for (const command of [
+    "echo x > zdd/graph.json",
+    "echo x 1> zdd/graph.json",
+    "cat expected.json 2> zdd/graph.json",
+    "cmd &> zdd/graph.json",
+    "cat <<EOF > zdd/graph.json\n{}\nEOF",
+    "node scripts/report.mjs > zdd/graph.json",
+    "node -e \"require('fs').writeFileSync('zdd/graph.json','{}')\"",
+    "node -e \"fs.unlinkSync('zdd/graph.json')\"",
+    "node -e \"fs.rmSync('zdd/metadata',{recursive:true})\"",
+    "node -e \"fs.createWriteStream('zdd/agent-index.md')\"",
+    "python -c \"open('zdd/graph.json','w').write('x')\"",
+    "python -c \"open('zdd/graph.json', 'a').write('x')\"",
+    "python -c \"import os; os.remove('zdd/graph.json')\"",
+    "python -c \"import shutil; shutil.rmtree('zdd/metadata')\"",
+    "perl -e \"rename 'zdd/graph.json','x'\"",
+    "ruby -e \"File.open('zdd/graph.json','w')\"",
+    "php -r \"unlink('zdd/graph.json');\"",
+    "cat zdd/graph.json | Out-File zdd/adr-index.md",
+  ]) {
+    blocked(fence("Bash", { command }), command);
+    blocked(fence("PowerShell", { command }), `pwsh: ${command}`);
+  }
+});
+
 test("fence: removing an ANCESTOR of a generated path is a hit for destructive verbs; -t/--target-directory is the destination (CR-071)", () => {
   for (const command of ["rm -rf zdd", "rm -r ./zdd/", "rmdir zdd", "Remove-Item -Recurse -Force zdd", "git clean -fdx zdd", "git rm -r zdd", "rm -rf .", "cp -t zdd/metadata/table x.json", "mv --target-directory=zdd/metadata/table x.json", "cp --target-directory zdd/metadata x.json", "install -t zdd/metadata/table x.json"]) {
     blocked(fence("Bash", { command }), command);
