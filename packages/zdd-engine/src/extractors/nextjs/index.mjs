@@ -39,8 +39,14 @@ export const FACTS_KEY_ORDER = {
 // Route & surface walkers
 // ---------------------------------------------------------------------------
 
-function walkTree(dir, out = []) {
-  walkDir(dir, (p) => out.push(p));
+function walkTree(dir, repoRoot, diagnostics, out = []) {
+  walkDir(
+    dir,
+    (p) => out.push(p),
+    new Set(),
+    () => true,
+    (p, reason) => diagnostics.push(`${posixify(p.slice(repoRoot.length + 1))}: ${reason} — skipped`),
+  );
   return out;
 }
 
@@ -192,7 +198,7 @@ export function derive({ repoRoot, options }) {
   // ---- Route & surface trees ----
   const appAbs = join(repoRoot, appDir);
   if (!existsSync(appAbs)) diagnostics.push(`${appDir} not found — nothing to inventory`);
-  const appFiles = walkTree(appAbs).map((p) => posixify(p.slice(repoRoot.length + 1)));
+  const appFiles = walkTree(appAbs, repoRoot, diagnostics).map((p) => posixify(p.slice(repoRoot.length + 1)));
   const apiDirRel = posixify(join(appDir, apiPrefix.replace(/^\//, "")));
 
   const routes = [];

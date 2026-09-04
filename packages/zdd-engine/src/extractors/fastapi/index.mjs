@@ -54,6 +54,7 @@ function walkPython(repoRoot, roots, excludeDirs, diagnostics) {
       },
       seen,
       (_p, name) => !excludeDirs.includes(name),
+      (p, reason) => diagnostics.push(`${posixify(p.slice(repoRoot.length + 1))}: ${reason} — skipped`),
     );
   }
   return [...new Set(out)].sort();
