@@ -171,6 +171,15 @@ test("fence: moving a generated file away is a write to it — mv/move-item/rena
   silent(fence("Bash", { command: "cp zdd/graph.json /tmp/g.json" }), "cp FROM a generated file stays a read");
 });
 
+test("fence: removing an ANCESTOR of a generated path is a hit for destructive verbs; -t/--target-directory is the destination (CR-071)", () => {
+  for (const command of ["rm -rf zdd", "rm -r ./zdd/", "rmdir zdd", "Remove-Item -Recurse -Force zdd", "git clean -fdx zdd", "git rm -r zdd", "rm -rf .", "cp -t zdd/metadata/table x.json", "mv --target-directory=zdd/metadata/table x.json", "cp --target-directory zdd/metadata x.json", "install -t zdd/metadata/table x.json"]) {
+    blocked(fence("Bash", { command }), command);
+  }
+  for (const command of ["rm -rf docs", "rm -rf node_modules", "ls zdd", "touch zdd", "cat zdd", "git clean -fdx docs", "cp -t docs zdd/graph.json", "mkdir -p zdd"]) {
+    silent(fence("Bash", { command }), command);
+  }
+});
+
 test("fence resolves shell-relative paths against the command's cwd, inside the checkout", () => {
   const sub = join(repo, "packages", "app");
   mkdirSync(sub, { recursive: true });
