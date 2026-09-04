@@ -165,6 +165,24 @@ test("apply on the FastAPI+Supabase fixture with all defaults: config, owned wor
   assert.match(engine(repo, ["derive", "--check"]), /in sync/);
 });
 
+test("the written workflow: exact ordered command list, the pin once in env, read-only token, no persisted credentials (CR-094, CR-084)", () => {
+  const repo = fastapiRepo("workflow-shape");
+  bootstrap(repo, ["apply", `--answers=${answersFile("wf", {})}`]);
+  const wf = readFileSync(join(repo, ".github", "workflows", "zdd.yml"), "utf8");
+  const lines = wf.split("\n");
+  const runs = lines.filter((l) => /^\s*run:\s/.test(l)).map((l) => l.replace(/^\s*run:\s*/, "").trim());
+  assert.deepEqual(runs, ['npx -y "$ZDD_ENGINE" derive --check', 'npx -y "$ZDD_ENGINE" render --check', 'npx -y "$ZDD_ENGINE" lint', 'npx -y "$ZDD_ENGINE" freshness >> "$GITHUB_STEP_SUMMARY"']);
+  const pins = lines.filter((l) => l.includes("@rich-rees/zdd-engine@"));
+  assert.deepEqual(pins, [`  ZDD_ENGINE: "@rich-rees/zdd-engine@${PLUGIN_VERSION}"`], "the pin appears exactly once, in env");
+  // A contributor's local extractor runs in this job (decision 0001): the token
+  // it can reach is read-only and is not left in the checkout.
+  const job = wf.slice(wf.indexOf("jobs:"));
+  assert.match(job, /^\s+permissions:\n\s+contents: read$/m, "job-level permissions: contents: read");
+  const checkout = job.slice(job.indexOf("actions/checkout"), job.indexOf("actions/setup-node"));
+  assert.match(checkout, /^\s+persist-credentials: false$/m, "checkout does not persist credentials");
+  assert.match(checkout, /^\s+fetch-depth: 0$/m, "full history is still fetched");
+});
+
 test("apply is idempotent and byte-stable: a second run keeps everything; two fresh runs produce identical trees", () => {
   const a = fastapiRepo("stable-a");
   const b = fastapiRepo("stable-b");
