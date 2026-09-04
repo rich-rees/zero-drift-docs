@@ -114,6 +114,21 @@ test("an unversioned engine invocation is reported as unpinned (floating), with 
   assert.equal(run(), "");
 });
 
+test("several kinds of skew at once: every applicable line is printed, behind first (CR-101)", () => {
+  config({ extractors: ["generic"], engine: prev(VERSION) }); // behind
+  mkdirSync(join(repo, ".github", "workflows"), { recursive: true });
+  workflow(next(VERSION)); // ahead
+  mkdirSync(join(repo, ".githooks"), { recursive: true });
+  writeFileSync(join(repo, ".githooks", "pre-push"), "#!/bin/sh\nnpx -y @rich-rees/zdd-engine lint\n"); // unpinned
+  const lines = run().trim().split("\n");
+  assert.equal(lines.length, 3, lines.join("\n"));
+  assert.match(lines[0], /behind plugin/);
+  assert.match(lines[1], /ahead of plugin/);
+  assert.match(lines[2], /unpinned \(floating\)/);
+  assert.ok(lines.every((l) => l.startsWith("ZDD engine skew")));
+  rmSync(join(repo, ".githooks"), { recursive: true });
+});
+
 test("--json reports every pin with its state", () => {
   config({ extractors: ["generic"], engine: prev(VERSION) });
   const j = JSON.parse(run("--json"));

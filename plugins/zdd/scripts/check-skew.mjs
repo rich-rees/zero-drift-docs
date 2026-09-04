@@ -76,16 +76,15 @@ function main() {
     process.stdout.write(JSON.stringify({ plugin, pins, skew: behind.length + ahead.length + invalid.length + unpinned.length > 0, behind, ahead, invalid, unpinned }) + "\n");
     return;
   }
+  // One line per kind of skew that applies, behind first (its fix is the
+  // cheapest); a repo can be in several states at once (CR-101).
   const say = (p) => `${p.where} pins ${ENGINE_PACKAGE}@${p.version}`;
-  if (behind.length) {
-    process.stdout.write(`ZDD engine skew: ${behind.map(say).join(", ")} — behind plugin ${plugin}. ${upgrade}\n`);
-  } else if (ahead.length) {
-    process.stdout.write(`ZDD engine skew: ${ahead.map(say).join(", ")} — ahead of plugin ${plugin}. Update the plugin.\n`);
-  } else if (invalid.length) {
-    process.stdout.write(`ZDD engine skew: ${invalid.map((p) => p.where).join(", ")} — not a well-formed version (plugin is ${plugin}). ${upgrade}\n`);
-  } else if (unpinned.length) {
-    process.stdout.write(`ZDD engine skew: ${unpinned.map((p) => p.where).join(", ")} — ${ENGINE_PACKAGE} unpinned (floating): CI picks up whatever npm serves today (plugin is ${plugin}). ${upgrade}\n`);
-  }
+  const lines = [];
+  if (behind.length) lines.push(`ZDD engine skew: ${behind.map(say).join(", ")} — behind plugin ${plugin}. ${upgrade}`);
+  if (ahead.length) lines.push(`ZDD engine skew: ${ahead.map(say).join(", ")} — ahead of plugin ${plugin}. Update the plugin.`);
+  if (invalid.length) lines.push(`ZDD engine skew: ${invalid.map((p) => p.where).join(", ")} — not a well-formed version (plugin is ${plugin}). ${upgrade}`);
+  if (unpinned.length) lines.push(`ZDD engine skew: ${unpinned.map((p) => p.where).join(", ")} — ${ENGINE_PACKAGE} unpinned (floating): CI picks up whatever npm serves today (plugin is ${plugin}). ${upgrade}`);
+  if (lines.length) process.stdout.write(lines.join("\n") + "\n");
 }
 
 try {
