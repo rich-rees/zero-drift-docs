@@ -298,15 +298,63 @@ const fail = (msg) => {
   throw new Error(`answers: ${msg}`);
 };
 
+// Mirrors of the ENGINE's rules (src/lib/config.mjs validateRepoBase and
+// src/lib/paths.mjs repoRelative), applied to the answers so a config the
+// engine's first derive would refuse is never written (CR-078). The engine's
+// path rule is stricter than the plugin's repoRelative in lib/repo.mjs (no
+// whitespace, no backslash) and looser in one spot (`.` is a valid root — the
+// fastapi default), and the option values land in config.json verbatim, so
+// the engine's rule is the one that applies here.
+const ENGINE_REPO_BASE = /^https?:\/\/\S+$/i;
+function enginePath(value, label) {
+  const bad = () => fail(`${label} ${JSON.stringify(value)} must be repo-relative (no absolute path, drive letter, URL scheme, backslash, whitespace or '..')`);
+  if (typeof value !== "string" || !value.length) bad();
+  if (/[\s\x00-\x1f\x7f]/.test(value)) bad();
+  if (value.includes("\\") || value.startsWith("/") || /^[A-Za-z]:/.test(value)) bad();
+  if (/^[A-Za-z][A-Za-z0-9+.-]*:/.test(value)) bad();
+  if (value.split("/").some((s) => s === "..")) bad();
+  return value;
+}
+// The path-bearing option keys of the built-in extractors, by extractor name.
+// A local extractor's options are its own; only these are inspected.
+function validateExtractorOptions(all) {
+  const obj = (v) => v && typeof v === "object" && !Array.isArray(v);
+  const list = (v, label) => {
+    if (!Array.isArray(v)) fail(`${label} must be an array of repo-relative paths`);
+    v.forEach((p, i) => enginePath(p, `${label}[${i}]`));
+  };
+  for (const [name, opts] of Object.entries(all)) {
+    if (!obj(opts)) fail(`extractorOptions.${name} must be an object`);
+    if (name === "nextjs") {
+      for (const k of ["appDir", "middlewarePath", "srcAliasRoot"]) if (opts[k] !== undefined) enginePath(opts[k], `nextjs.${k}`);
+      if (opts.refs !== undefined) {
+        if (!obj(opts.refs)) fail("nextjs.refs must be an object");
+        if (opts.refs.roots !== undefined) list(opts.refs.roots, "nextjs.refs.roots");
+      }
+    } else if (name === "fastapi") {
+      if (opts.roots !== undefined) list(opts.roots, "fastapi.roots");
+    } else if (name === "supabase" && opts.migrationNamespaces !== undefined) {
+      if (!Array.isArray(opts.migrationNamespaces)) fail("supabase.migrationNamespaces must be an array");
+      opts.migrationNamespaces.forEach((ns, i) => {
+        if (!obj(ns)) fail(`supabase.migrationNamespaces[${i}] must be an object`);
+        enginePath(ns.dir, `supabase.migrationNamespaces[${i}].dir`);
+      });
+    }
+  }
+}
+
 export function validateAnswers(a) {
   if (!a || typeof a !== "object" || Array.isArray(a)) fail("must be a JSON object");
   for (const k of ["name", "repoBase", "baseBranch"]) if (a[k] !== undefined && !isName(a[k])) fail(`${k} must be a single-line string (≤${MAX_NAME} chars)`);
-  if (a.repoBase !== undefined && a.repoBase !== "" && !/^https?:\/\//.test(a.repoBase)) fail("repoBase must be an http(s) URL or empty");
+  if (a.repoBase !== undefined && a.repoBase !== "" && !ENGINE_REPO_BASE.test(a.repoBase)) fail("repoBase must be an http(s) URL with no whitespace, or empty (the engine's rule)");
   if (a.extractors !== undefined) {
     if (!Array.isArray(a.extractors) || !a.extractors.every((n) => typeof n === "string" && /^[a-z][a-z0-9-]*$/.test(n))) fail("extractors must be an array of extractor names");
     if (new Set(a.extractors).size !== a.extractors.length) fail("extractors lists a name twice");
   }
-  if (a.extractorOptions !== undefined && (!a.extractorOptions || typeof a.extractorOptions !== "object" || Array.isArray(a.extractorOptions))) fail("extractorOptions must be an object");
+  if (a.extractorOptions !== undefined) {
+    if (!a.extractorOptions || typeof a.extractorOptions !== "object" || Array.isArray(a.extractorOptions)) fail("extractorOptions must be an object");
+    validateExtractorOptions(a.extractorOptions);
+  }
   if (a.stack !== undefined) {
     if (!Array.isArray(a.stack)) fail("stack must be an array");
     for (const e of a.stack) {
