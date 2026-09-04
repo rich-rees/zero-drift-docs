@@ -48,6 +48,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, lstatSync, chmodSync, openSync, writeSync, closeSync } from "node:fs";
 import { join, dirname, basename, relative } from "node:path";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   PLUGIN_ROOT,
   ENGINE_PACKAGE,
@@ -460,6 +461,21 @@ function snippetText() {
 // phrase anywhere in the file (CR-006).
 const isOwned = (text) => text.split(/\r?\n/, 3).some((l) => l.includes(OWNER_MARK));
 
+// The v0.3.1 workflow template carried neither the ownership line nor a pin,
+// so ownership of it is decided by content: sha256 of the file normalised to
+// LF, trailing whitespace stripped, one final newline. Regenerate the constant
+// with `git show v0.3.1:plugins/zdd/templates/zdd.yml` through normaliseText
+// (the test fixture at test/fixtures/v0.3.1/zdd.yml is that exact file).
+const LEGACY_WORKFLOW_SHA256 = "a5e8672339dc570c8c154ffed09f01e715f627116f96ec1ef508895a3b906653";
+const normaliseText = (s) =>
+  s
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((l) => l.trimEnd())
+    .join("\n")
+    .trim() + "\n";
+const isLegacyWorkflow = (text) => createHash("sha256").update(normaliseText(text)).digest("hex") === LEGACY_WORKFLOW_SHA256;
+
 // A marker counts only as a whole line (CR-011): `<!-- zdd:begin --> extra`
 // is not a marker.
 const MARKER_LINE = (m) => new RegExp("^" + m.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\r?$", "gm");
@@ -741,6 +757,13 @@ export function upgrade(root) {
     if (!ledger.exists(rel)) continue;
     const cur = ledger.read(rel);
     if (!isOwned(cur)) {
+      // The v0.3.1 template had no ownership line and no pin; the exact file
+      // (modulo line endings / trailing whitespace) is still ours (CR-081).
+      if (rel.endsWith("zdd.yml") && isLegacyWorkflow(cur)) {
+        ledger.overwrite(rel, fresh());
+        ledger.notes.push(`${rel}: the unmodified v0.3.1 workflow (unpinned npx, no ownership line) replaced with the pinned template (${version})`);
+        continue;
+      }
       ledger.kept.push(`${rel} (not managed by zdd — left untouched; check its engine pin by hand)`);
       continue;
     }

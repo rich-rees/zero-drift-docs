@@ -27,7 +27,13 @@ export function findPins(root) {
   const pins = [];
   const { state, config } = readConfig(root);
   if (state === "valid" && config.engine !== undefined) pins.push({ where: "zdd/config.json (engine)", raw: config.engine });
-  const re = new RegExp(ENGINE_PACKAGE.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&") + "@([^\"'\\s]*)");
+  const pkg = ENGINE_PACKAGE.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+  const re = new RegExp(pkg + "@([^\"'\\s]*)");
+  // The package name with no `@<version>` after it — the v0.3.1 workflow's
+  // `npx -y @rich-rees/zdd-engine derive` — floats to whatever npm serves
+  // today (CR-081). A longer package name or a path into the package is not
+  // an invocation of it.
+  const floating = new RegExp(pkg + "(?![@/\\w-])");
   for (const rel of [".github/workflows/zdd.yml", ".githooks/pre-push"]) {
     const p = join(root, rel);
     let text;
@@ -40,8 +46,9 @@ export function findPins(root) {
     }
     const m = re.exec(text);
     if (m) pins.push({ where: rel, raw: m[1] });
+    else if (floating.test(text)) pins.push({ where: rel, raw: undefined, unpinned: true });
   }
-  return pins.map((p) => ({ where: p.where, version: typeof p.raw === "string" && SEMVER.test(p.raw) ? p.raw : null }));
+  return pins.map((p) => ({ where: p.where, version: typeof p.raw === "string" && SEMVER.test(p.raw) ? p.raw : null, ...(p.unpinned ? { unpinned: true } : {}) }));
 }
 
 export function compareSemver(a, b) {
@@ -59,13 +66,14 @@ function main() {
   const root = adopterRoot(flags);
   const plugin = pluginVersion();
   const pins = findPins(root);
-  const invalid = pins.filter((p) => p.version === null);
+  const unpinned = pins.filter((p) => p.unpinned);
+  const invalid = pins.filter((p) => p.version === null && !p.unpinned);
   const behind = pins.filter((p) => p.version !== null && p.version !== plugin && compareSemver(p.version, plugin) <= 0);
   const ahead = pins.filter((p) => p.version !== null && p.version !== plugin && compareSemver(p.version, plugin) > 0);
   const upgrade = "Run `bootstrap --upgrade` (the bootstrap skill with --upgrade) to rewrite every pin, then run `render` and commit the result in the same PR.";
 
   if (flags.json) {
-    process.stdout.write(JSON.stringify({ plugin, pins, skew: behind.length + ahead.length + invalid.length > 0, behind, ahead, invalid }) + "\n");
+    process.stdout.write(JSON.stringify({ plugin, pins, skew: behind.length + ahead.length + invalid.length + unpinned.length > 0, behind, ahead, invalid, unpinned }) + "\n");
     return;
   }
   const say = (p) => `${p.where} pins ${ENGINE_PACKAGE}@${p.version}`;
@@ -75,6 +83,8 @@ function main() {
     process.stdout.write(`ZDD engine skew: ${ahead.map(say).join(", ")} — ahead of plugin ${plugin}. Update the plugin.\n`);
   } else if (invalid.length) {
     process.stdout.write(`ZDD engine skew: ${invalid.map((p) => p.where).join(", ")} — not a well-formed version (plugin is ${plugin}). ${upgrade}\n`);
+  } else if (unpinned.length) {
+    process.stdout.write(`ZDD engine skew: ${unpinned.map((p) => p.where).join(", ")} — ${ENGINE_PACKAGE} unpinned (floating): CI picks up whatever npm serves today (plugin is ${plugin}). ${upgrade}\n`);
   }
 }
 

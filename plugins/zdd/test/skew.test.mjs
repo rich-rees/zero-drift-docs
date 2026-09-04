@@ -96,6 +96,24 @@ test("exit 0 and silent when pins are unreadable: a directory at the workflow pa
   assert.equal(run(), "");
 });
 
+test("an unversioned engine invocation is reported as unpinned (floating), with the upgrade hint (CR-081)", () => {
+  config({ extractors: ["generic"], engine: VERSION });
+  mkdirSync(join(repo, ".github", "workflows"), { recursive: true });
+  writeFileSync(join(repo, ".github", "workflows", "zdd.yml"), readFileSync(join(PLUGIN, "test", "fixtures", "v0.3.1", "zdd.yml"), "utf8"));
+  const out = run();
+  assert.match(out, /^ZDD engine skew/);
+  assert.match(out, /\.github\/workflows\/zdd\.yml/);
+  assert.match(out, /unpinned \(floating\)/);
+  assert.match(out, /bootstrap --upgrade/);
+  const j = JSON.parse(run("--json"));
+  assert.equal(j.skew, true);
+  assert.deepEqual(j.unpinned.map((p) => p.where), [".github/workflows/zdd.yml"]);
+  assert.deepEqual(j.invalid, []);
+  // A scoped path or a longer package name is not this package.
+  writeFileSync(join(repo, ".github", "workflows", "zdd.yml"), "run: npx -y @rich-rees/zdd-engine-extras lint\nrun: node @rich-rees/zdd-engine/bin/x.mjs\n");
+  assert.equal(run(), "");
+});
+
 test("--json reports every pin with its state", () => {
   config({ extractors: ["generic"], engine: prev(VERSION) });
   const j = JSON.parse(run("--json"));
