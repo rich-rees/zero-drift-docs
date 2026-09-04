@@ -178,6 +178,14 @@ test("fence resolves shell-relative paths against the command's cwd, inside the 
   silent(fence("Bash", { command: "rm zdd/graph.json" }, { cwd: sub }), "relative to the subdir, not the root");
   // A cwd outside the checkout falls back to the root.
   blocked(fence("Bash", { command: "rm zdd/graph.json" }, { cwd: scratch }), "cwd outside");
+  // Codex's shell_command carries the command's own directory as tool_input.workdir
+  // (Claude Code: tool_input.cwd on some tools); it wins over the session cwd (CR-076).
+  blocked(fence("shell_command", { command: "rm ../../zdd/graph.json", workdir: sub }), "workdir subdir");
+  blocked(fence("shell_command", { command: "rm ../../zdd/graph.json", workdir: sub }, { cwd: repo }), "workdir beats the session cwd");
+  blocked(fence("Bash", { command: "rm ../../zdd/graph.json", cwd: sub }), "tool_input.cwd subdir");
+  silent(fence("shell_command", { command: "rm zdd/graph.json", workdir: sub }), "relative to workdir, not the root");
+  blocked(fence("shell_command", { command: "rm zdd/graph.json", workdir: scratch }), "workdir outside the checkout falls back to the root");
+  blocked(fence("shell_command", { command: "rm zdd/graph.json", workdir: 42 }), "non-string workdir is ignored");
 });
 
 test("fence finds the repo by walking up from cwd when the host gives no project dir", () => {

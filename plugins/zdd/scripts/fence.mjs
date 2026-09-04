@@ -162,9 +162,14 @@ function main() {
       /* not a path the fence can vouch for */
     }
   }
-  // Shell-relative paths resolve against the command's cwd when it is inside
-  // the checkout (CR-023); anything else resolves against the root.
-  const cwd = cwdIn && (samePath(cwdIn, root) || isUnder(cwdIn, root)) ? resolve(cwdIn) : root;
+  // Shell-relative paths resolve against the command's own directory when it
+  // is inside the checkout (CR-023); anything else resolves against the root.
+  // The command's directory is the tool's own field first — Codex's
+  // `shell_command` carries `workdir`, some tools `cwd` — and the session cwd
+  // only as the fallback (CR-076).
+  const toolInput = input.tool_input && typeof input.tool_input === "object" ? input.tool_input : {};
+  const cmdDir = [toolInput.workdir, toolInput.cwd, cwdIn].find((v) => typeof v === "string" && v.length);
+  const cwd = cmdDir && (samePath(cmdDir, root) || isUnder(cmdDir, root)) ? resolve(cmdDir) : root;
   const hit = (candidate, base) => {
     // Compared by REAL path, so an alias link to the artifact or its parent
     // still matches (CR-004).
