@@ -13,7 +13,7 @@ import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { extractBlessings, forwardStamps, extractLinks, structuralLines } from "../src/lib/map-links.mjs";
-import { walkMarkdown, readBounded } from "../src/lib/walk-markdown.mjs";
+import { walkMarkdown, readBounded, regularFileInside } from "../src/lib/walk-markdown.mjs";
 
 const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const BIN = join(PKG, "bin", "zdd-engine.mjs");
@@ -33,6 +33,10 @@ test("structuralLines: fenced code (``` and ~~~, indented up to 3 spaces, closed
   const lines = structuralLines(body);
   assert.equal(lines.length, 17, "one entry per line");
   assert.deepEqual(lines.filter(Boolean), ["a", "b", "c", "d", "e"]);
+  // CR-033: a comment opener inside a fence is code; a fence marker inside a comment is commentary; an unclosed comment blanks to the end.
+  assert.deepEqual(extractBlessings("# Blessings\n```md\n<!-- literal in code\n```\n- stale, per ADR-0001\n-->").map((b) => b.adrs), [["0001"]]);
+  assert.deepEqual(structuralLines("x <!-- ```\n# Blessings\n--> y\n- after, ADR-0002\n<!-- open\n- gone ADR-0003").filter(Boolean), ["x ", " y", "- after, ADR-0002"]);
+  assert.deepEqual(extractBlessings("# Blessings\n- a <!-- ADR-0009 --> per ADR-0002\n").map((b) => b.adrs), [["0002"]]);
 });
 
 test("extractBlessings (CR-020, CR-022): fenced examples are neither headings nor items, an indented heading counts, a comment is invisible, CR-only files parse", () => {
@@ -84,7 +88,7 @@ test("forwardStamps (CR-021): only a line that OPENS with the stamp counts — b
 test("extractLinks (CR-023): a target on another drive, a UNC share, or above the bundle is not an edge; a fenced link still is (render bytes unchanged)", () => {
   const bundle = process.platform === "win32" ? "C:\\r\\zdd" : "/r/zdd";
   const doc = join(bundle, "map", "features");
-  const body = "[a](/metadata/route/a.json) [b](../../../outside.md) [d](D:/x.json) [e](https://x/y.json)\n```\n[f](/metadata/route/f.json)\n```\n";
+  const body = "[a](/metadata/route/a.json) [b](../../../outside.md) [c](//server/share/x.json) [c2](\\\\server\\share\\x.json) [d](D:/x.json) [e](https://x/y.json)\n```\n[f](/metadata/route/f.json)\n```\n";
   const ids = extractLinks(body, doc, bundle);
   assert.ok(ids.includes("metadata/route/a"));
   assert.ok(ids.includes("metadata/route/f"), "links inside fences are still edges — extractLinks is byte-identical with 1.0 by design");
@@ -112,6 +116,13 @@ test("walkMarkdown / readBounded: symlinks are skipped (file, directory, danglin
   assert.equal(readBounded(join(root, "a", "one.md")), "x");
   assert.equal(readBounded(join(root, "a", "one.md"), 0), null, "over the cap");
   assert.equal(readBounded(join(root, "a")), null, "a directory is not a file");
+  // CR-013: the root handed to regularFileInside may not itself be a symlink.
+  if (linked) {
+    symlinkSync(join(root, "a"), join(root, "aliased"), "junction");
+    assert.equal(regularFileInside(join(root, "aliased"), join(root, "aliased", "one.md")), false, "symlinked root refused");
+    assert.equal(regularFileInside(join(root, "a"), join(root, "a", "one.md")), true);
+    assert.equal(regularFileInside(join(root, "a"), join(root, "a", "link.md")), false, "symlinked leaf refused");
+  }
   rmSync(root, { recursive: true, force: true });
 });
 

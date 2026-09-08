@@ -31,6 +31,7 @@ export function extractLinks(body, docDir, bundleDir) {
   for (const m of body.matchAll(LINK_RE)) {
     const target = m[1];
     if (target.includes("://")) continue;
+    if (/^(\/\/|\\\\)/.test(target)) continue; // a UNC spelling is not a bundle-absolute link (CR-023)
     const abs = target.startsWith("/") ? join(bundleDir, target.slice(1)) : resolve(docDir, target);
     const rel = posixify(relative(bundleDir, abs));
     if (rel === ".." || rel.startsWith("../") || isAbsolute(rel) || /^[A-Za-z]:/.test(rel)) continue;
@@ -48,13 +49,26 @@ export function extractLinks(body, docDir, bundleDir) {
 // as long) and not inside an HTML comment. Non-structure lines are returned
 // as empty strings so line numbers are preserved.
 export function structuralLines(body) {
-  const withoutComments = normalise(body).replace(/<!--[\s\S]*?-->/g, (c) => c.replace(/[^\n]/g, ""));
   const out = [];
   let fence = null; // { char, len }
-  for (const line of withoutComments.split("\n")) {
-    const f = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+  let inComment = false;
+  // One pass, one state machine: a comment opener inside a fence is code, a
+  // fence marker inside a comment is commentary (CR-033). An unclosed comment
+  // blanks everything to the end.
+  for (const raw of normalise(body).split("\n")) {
+    if (inComment) {
+      const close = raw.indexOf("-->");
+      if (close === -1) {
+        out.push("");
+        continue;
+      }
+      inComment = false;
+      out.push(stripComments(raw.slice(close + 3), (v) => (inComment = v)));
+      continue;
+    }
+    const f = /^ {0,3}(`{3,}|~{3,})/.exec(raw);
     if (fence) {
-      if (f && f[1][0] === fence.char && f[1].length >= fence.len && !/[^\s`~]/.test(line.slice(f[0].length))) fence = null;
+      if (f && f[1][0] === fence.char && f[1].length >= fence.len && !/[^\s`~]/.test(raw.slice(f[0].length))) fence = null;
       out.push("");
       continue;
     }
@@ -63,9 +77,26 @@ export function structuralLines(body) {
       out.push("");
       continue;
     }
+    const line = stripComments(raw, (v) => (inComment = v));
     out.push(line);
   }
   return out;
+}
+
+// Remove every closed `<!-- … -->` from one line; if an opener is left
+// unclosed, drop the rest of the line and report the comment as open.
+function stripComments(line, setOpen) {
+  let s = line;
+  for (;;) {
+    const open = s.indexOf("<!--");
+    if (open === -1) return s;
+    const close = s.indexOf("-->", open + 4);
+    if (close === -1) {
+      setOpen(true);
+      return s.slice(0, open);
+    }
+    s = s.slice(0, open) + s.slice(close + 3);
+  }
 }
 
 // A blessing is one list item under a heading whose text is "Blessings" (any
