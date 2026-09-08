@@ -40,7 +40,7 @@
 //     "extractorOptions": { ... },                     // else defaults per extractor
 //     "stack": ["FastAPI", "Supabase", "React web", "Expo"],   // greenfield answers; strings or {name, path}
 //     "apps": ["Web", "Mobile"],                       // map skeleton (Application concepts); else from `stack` / detection
-//     "optIns": { "autoLoad": true, "fence": true, "ci": true, "prePush": true },   // defaults: all on (repair: current state)
+//     "optIns": { "autoLoad": true, "fence": true, "stop": true, "ci": true, "prePush": true },   // defaults: all on (repair: current state)
 //     "codex": false,                                  // also write AGENTS.md
 //     "seedAdr": true                                  // ADR-0001 "Adopt Zero-Drift Docs"
 //   }
@@ -377,7 +377,7 @@ export function validateAnswers(a) {
   if (a.optIns !== undefined) {
     if (!a.optIns || typeof a.optIns !== "object" || Array.isArray(a.optIns)) fail("optIns must be an object");
     for (const [k, v] of Object.entries(a.optIns)) {
-      if (!["autoLoad", "fence", "ci", "prePush"].includes(k)) fail(`optIns.${k} is not an opt-in`);
+      if (!["autoLoad", "fence", "stop", "ci", "prePush"].includes(k)) fail(`optIns.${k} is not an opt-in`);
       if (typeof v !== "boolean") fail(`optIns.${k} must be true or false`);
     }
   }
@@ -627,10 +627,11 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
     ? {
         autoLoad: existingConfig.hooks?.autoLoad ?? true,
         fence: existingConfig.hooks?.fence ?? false,
+        stop: existingConfig.hooks?.stop ?? false,
         ci: owned(".github/workflows/zdd.yml"),
         prePush: owned(".githooks/pre-push"),
       }
-    : { autoLoad: true, fence: true, ci: true, prePush: true };
+    : { autoLoad: true, fence: true, stop: true, ci: true, prePush: true };
   const optIns = { ...current, ...(answers.optIns ?? {}) };
 
   // --- config.json -------------------------------------------------------
@@ -659,13 +660,13 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
       engine: version,
       extractors,
       extractorOptions: Object.fromEntries(extractors.map((n) => [n, extractorOptions[n] ?? {}])),
-      hooks: { autoLoad: optIns.autoLoad, fence: optIns.fence },
+      hooks: { autoLoad: optIns.autoLoad, fence: optIns.fence, stop: optIns.stop },
     };
     if (!hasGit(root)) config.render = { storeChanges: false };
     ledger.create("zdd/config.json", JSON.stringify(config, null, 2) + "\n");
-  } else if (optIns.autoLoad !== current.autoLoad || optIns.fence !== current.fence) {
+  } else if (optIns.autoLoad !== current.autoLoad || optIns.fence !== current.fence || optIns.stop !== current.stop) {
     // Repair with an explicit new answer: the hooks block is plugin-owned.
-    existingConfig.hooks = { autoLoad: optIns.autoLoad, fence: optIns.fence };
+    existingConfig.hooks = { autoLoad: optIns.autoLoad, fence: optIns.fence, stop: optIns.stop };
     ledger.overwrite("zdd/config.json", JSON.stringify(existingConfig, null, 2) + "\n");
     ledger.notes.push("zdd/config.json: hooks block updated to the new answers");
   } else ledger.kept.push("zdd/config.json");
@@ -697,7 +698,7 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
   mkdirSync(ledger.abs(paths.metadataDir), { recursive: true });
 
   // --- opt-ins ------------------------------------------------------------
-  ledger.notes.push(`hooks: autoLoad ${optIns.autoLoad ? "on" : "off"}, fence ${optIns.fence ? "on" : "off"} (recorded in zdd/config.json; the plugin's hooks.json reads it)`);
+  ledger.notes.push(`hooks: autoLoad ${optIns.autoLoad ? "on" : "off"}, fence ${optIns.fence ? "on" : "off"}, stop ${optIns.stop ? "on" : "off"} (recorded in zdd/config.json; the plugin's hooks.json reads it)`);
 
   if (optIns.ci) {
     ensureOwned(ledger, ".github/workflows/zdd.yml", workflowText(version));
@@ -768,6 +769,9 @@ export function upgrade(root) {
     changes.push(`engine pin ${typeof config.engine === "string" ? config.engine : "(none)"} → ${version}`);
     config.engine = version;
   }
+  // The Stop hook (plugin 1.1, decision 0008) is a new opt-in; upgrade names
+  // it but never answers it — the skill asks, and a repair `apply` records it.
+  const stopUnset = !(config.hooks && typeof config.hooks === "object" && !Array.isArray(config.hooks) && typeof config.hooks.stop === "boolean");
   if (JSON.stringify(config) !== before) {
     ledger.overwrite("zdd/config.json", JSON.stringify(config, null, 2) + "\n");
     for (const c of changes) ledger.notes.push(`zdd/config.json: ${c}`);
@@ -807,6 +811,7 @@ export function upgrade(root) {
     }
     writeSnippet(ledger, file);
   }
+  if (stopUnset) ledger.notes.push('hooks.stop is not set (new in 1.1: the Stop hook prompts for the curated half once per session) — it stays OFF until answered: run bootstrap apply with {"optIns":{"stop":true}} (repair mode), or set "hooks": {"stop": true} by hand');
   ledger.notes.push("curated artifacts (glossary, ADRs, map, metadata) untouched — upgrade never writes them");
   ledger.notes.push("if the engine pin moved: run `render` and commit the regenerated artifacts in the same PR");
   return { version, ...ledgerOut(ledger) };
