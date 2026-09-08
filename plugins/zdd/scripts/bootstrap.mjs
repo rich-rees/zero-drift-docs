@@ -664,7 +664,16 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
     };
     if (!hasGit(root)) config.render = { storeChanges: false };
     ledger.create("zdd/config.json", JSON.stringify(config, null, 2) + "\n");
-  } else if (optIns.autoLoad !== current.autoLoad || optIns.fence !== current.fence || optIns.stop !== current.stop) {
+  } else if (
+    optIns.autoLoad !== current.autoLoad ||
+    optIns.fence !== current.fence ||
+    optIns.stop !== current.stop ||
+    // An explicit answer to a question the config has never recorded is a
+    // change even when the effective value stays the same: a 1.0 config with
+    // no `hooks.stop` answered "no" must say so, or --upgrade asks again
+    // forever (CR-008).
+    (answers.optIns && Object.hasOwn(answers.optIns, "stop") && typeof existingConfig.hooks?.stop !== "boolean")
+  ) {
     // Repair with an explicit new answer: the hooks block is plugin-owned.
     existingConfig.hooks = { autoLoad: optIns.autoLoad, fence: optIns.fence, stop: optIns.stop };
     ledger.overwrite("zdd/config.json", JSON.stringify(existingConfig, null, 2) + "\n");
@@ -811,7 +820,8 @@ export function upgrade(root) {
     }
     writeSnippet(ledger, file);
   }
-  if (stopUnset) ledger.notes.push('hooks.stop is not set (new in 1.1: the Stop hook prompts for the curated half once per session) — it stays OFF until answered: run bootstrap apply with {"optIns":{"stop":true}} (repair mode), or set "hooks": {"stop": true} by hand');
+  if (stopUnset) ledger.notes.push('hooks.stop is not set (new in 1.1: the Stop hook prompts for the curated half once per session) — it stays OFF until answered: run bootstrap apply with {"optIns":{"stop":true}} (repair mode, keeps every other choice), or add "stop": true inside the existing "hooks" object by hand');
+  ledger.notes.push("1.1 adds a blocking lint (a blessing citing a superseded or missing ADR fails `lint`) — run `npx -y " + ENGINE_PACKAGE + "@" + version + " lint` before pushing; a red result is the lint doing its job on a stale blessing");
   ledger.notes.push("curated artifacts (glossary, ADRs, map, metadata) untouched — upgrade never writes them");
   ledger.notes.push("if the engine pin moved: run `render` and commit the regenerated artifacts in the same PR");
   return { version, ...ledgerOut(ledger) };

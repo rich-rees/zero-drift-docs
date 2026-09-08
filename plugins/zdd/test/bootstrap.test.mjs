@@ -262,9 +262,14 @@ test("repair: an omitted opt-in keeps the current choice; an explicit one change
   mkdirSync(join(v10, "zdd"));
   writeFileSync(join(v10, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], hooks: { autoLoad: true, fence: true } }));
   assert.equal(applyJson(v10, "r5", {}).optIns.stop, false, "absent stop key is off, never silently on");
+  // An explicit "no" on a config that never recorded the question is persisted even though the effective value does not change (CR-008).
+  const j4 = applyJson(v10, "r5b", { optIns: { stop: false } });
+  assert.ok(j4.wrote.includes("zdd/config.json"), "explicit false is recorded");
+  assert.deepEqual(JSON.parse(readFileSync(join(v10, "zdd", "config.json"), "utf8")).hooks, { autoLoad: true, fence: true, stop: false });
   const j5 = applyJson(v10, "r6", { optIns: { stop: true } });
   assert.deepEqual(JSON.parse(readFileSync(join(v10, "zdd", "config.json"), "utf8")).hooks, { autoLoad: true, fence: true, stop: true });
   assert.ok(j5.wrote.includes("zdd/config.json"));
+  assert.ok(!applyJson(v10, "r7", { optIns: { stop: true } }).wrote.includes("zdd/config.json"), "the same answer again is a no-op");
 });
 
 test("apply refuses to write when an existing config cannot be read, or points outside the checkout", () => {
@@ -533,6 +538,9 @@ test("upgrade a v0.3.1 repo: adapter → extractors, every owned file rewritten 
 
   const out = bootstrap(repo, ["upgrade"]);
   const json = JSON.parse(bootstrap(repo, ["upgrade", "--json"])); // second run: nothing to do
+  // 1.1's two migration notes: the unanswered Stop opt-in, and the lint that can newly go red (CR-031, CR-027).
+  assert.ok(json.notes.some((n) => /hooks\.stop is not set .*stays OFF until answered/.test(n)), json.notes.join("\n"));
+  assert.ok(json.notes.some((n) => n.includes(`@rich-rees/zdd-engine@${PLUGIN_VERSION} lint`) && /blessing/.test(n)), "the lint note names the pinned command");
 
   const config = JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8"));
   assert.deepEqual(config.extractors, ["supabase", "nextjs"]);
