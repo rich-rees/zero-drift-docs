@@ -28,9 +28,13 @@ npx @rich-rees/zdd-engine freshness [--base <ref>]
   artifacts #6–7.
 - **lint** — deterministic curated-store lints: duplicate ADR numbers,
   supersession symmetry (a "supersedes" claim without the matching forward
-  stamp fails), and — with `--tempstate` — a tracked `TEMPSTATE.md` fails.
-- **freshness** — advisory (always exits 0): semantic-map concepts whose
-  `resource:` paths a diff touches without updating the concept. Markdown on
+  stamp fails), blessing citations (a blessing in a semantic-map concept that
+  cites a superseded or non-existent ADR fails; a citation-less blessing or a
+  partial supersession is a warning), and — with `--tempstate` — a tracked
+  `TEMPSTATE.md` fails.
+- **freshness** — advisory (always exits 0): semantic-map concepts whose code a
+  diff touches without updating the concept — the `resource:` path, and the
+  source behind every metadata record the concept links to. Markdown on
   stdout, made for `$GITHUB_STEP_SUMMARY`.
 
 Every command locates the repo by walking up from the working directory to the
