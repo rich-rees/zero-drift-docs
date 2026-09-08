@@ -2,7 +2,7 @@
 // Report SEMANTIC-MAP concepts whose code is touched by a diff but whose
 // concept files were not updated in the same diff.
 //
-//   zdd-engine freshness [--base origin/<base-branch>]
+//   zdd-engine freshness [--base <ref>]
 //
 // Narrowed to the semantic map (config paths.mapDir) on purpose: the codebase
 // metadata has a BLOCKING deterministic check (`zdd-engine derive --check`) —
@@ -15,51 +15,116 @@
 // and each record carries the file(s) it was derived from. Before this, a
 // concept whose resource was one folder never fired when a blessed route in
 // another folder changed; PressPlay's video-pipeline concept sat on four such
-// changes. Still advisory: output is GitHub-flavored markdown on stdout (pipe
-// into $GITHUB_STEP_SUMMARY) and the exit code is always 0 — staleness is a
-// nudge, not a gate; the ritual (/zdd:update), not the nudge, is the guarantee.
+// changes.
+//
+// Advisory means advisory: output is GitHub-flavored markdown on stdout (pipe
+// into $GITHUB_STEP_SUMMARY) and the exit code is 0 whatever the checkout
+// looks like — no git, no origin, an unborn branch, a `--base` that does not
+// resolve — with one line saying what could not be compared (CR-011).
+// Staleness is a nudge, not a gate; the ritual (/zdd:update), not the nudge,
+// is the guarantee. Paths come from git NUL-delimited so a quoted name still
+// matches its resource (CR-012), are made adopter-relative when the adopter
+// root sits inside a larger checkout (CR-016), and everything read from the
+// stores is bounded and never reached through a symlink (CR-013/CR-014).
 
 import { execFileSync } from "node:child_process";
-import { readFileSync, readdirSync, statSync, existsSync, lstatSync } from "node:fs";
-import { join, resolve, relative, dirname } from "node:path";
+import { readFileSync } from "node:fs";
+import { resolve, relative, dirname, isAbsolute } from "node:path";
 import { loadConfig } from "./lib/config.mjs";
 import { parseFrontmatter } from "./lib/frontmatter.mjs";
 import { extractLinks } from "./lib/map-links.mjs";
+import { walkMarkdown, readBounded, regularFileInside, MAX_STORE_FILE_BYTES } from "./lib/walk-markdown.mjs";
 
 const posixify = (p) => p.split(/[\\/]/).join("/");
 
-// The repo paths a concept describes, each with where it came from: the
-// frontmatter resource, or the id of the linked metadata record. A link that
-// does not resolve to a regular file inside metadataDir is not a metadata
-// link (a map-to-map link, a broken one — render's job to refuse) and
-// contributes nothing. Exported for the unit test.
-export function watchedPaths(conceptPath, text, { bundleDir, metadataDir }) {
+// The repo paths a concept describes, each with the ways it came in: the
+// frontmatter resource, and/or the ids of the linked metadata records that
+// carry it. A link that does not resolve to a regular file physically inside
+// metadataDir (a map-to-map link, a broken one — render's job to refuse — or
+// a symlinked parent) contributes nothing; a record over the size cap is not
+// a record. `cache` is shared across concepts so a record linked from many is
+// read once. Exported for the unit test.
+export function watchedPaths(conceptPath, text, { bundleDir, metadataDir, cache = new Map() }) {
   const parsed = parseFrontmatter(text);
-  const out = [];
-  const seen = new Set();
+  const out = new Map(); // path -> [via, ...] in document order
   const add = (path, via) => {
     const p = String(path).trim().replace(/\/+$/, "");
-    if (!p || seen.has(p)) return;
-    seen.add(p);
-    out.push({ path: p, via });
+    if (!p) return;
+    if (!out.has(p)) out.set(p, []);
+    if (!out.get(p).includes(via)) out.get(p).push(via);
   };
   if (parsed?.frontmatter.resource) add(parsed.frontmatter.resource, "resource");
   const body = parsed ? parsed.body : text;
   for (const id of extractLinks(body, dirname(conceptPath), bundleDir)) {
     const file = resolve(bundleDir, `${id}.json`);
     const inside = relative(metadataDir, file);
-    if (!inside || inside.startsWith("..") || resolve(inside) === inside) continue;
-    let record;
-    try {
-      if (!lstatSync(file).isFile()) continue;
-      record = JSON.parse(readFileSync(file, "utf8"));
-    } catch {
-      continue;
+    if (!inside || inside === ".." || inside.startsWith(`..${inside[2] ?? ""}`) || isAbsolute(inside)) continue;
+    if (!cache.has(file)) {
+      let resources = [];
+      if (regularFileInside(metadataDir, file)) {
+        const raw = readBounded(file, MAX_STORE_FILE_BYTES);
+        try {
+          const record = raw === null ? null : JSON.parse(raw);
+          const r = record?.resource;
+          resources = Array.isArray(r) ? r.filter((x) => typeof x === "string") : typeof r === "string" ? [r] : [];
+        } catch {
+          resources = [];
+        }
+      }
+      cache.set(file, resources);
     }
-    const resources = Array.isArray(record?.resource) ? record.resource : typeof record?.resource === "string" ? [record.resource] : [];
-    for (const r of resources) if (typeof r === "string") add(r, id);
+    for (const r of cache.get(file)) add(r, id);
   }
-  return out;
+  return [...out].map(([path, via]) => ({ path, via }));
+}
+
+// Table cells and code spans are built from checkout-controlled names; a
+// pipe, a backtick or a control character in one must not restyle the
+// summary (CR-015).
+export const cell = (s) => String(s).replace(/[\x00-\x1f\x7f]/g, "?").replace(/\|/g, "\\|").replace(/`/g, "'");
+
+const gitBuf = (cwd, args) => execFileSync("git", args, { cwd, encoding: "buffer", stdio: ["ignore", "pipe", "ignore"], timeout: 30_000, maxBuffer: 64 * 1024 * 1024 });
+const gitText = (cwd, args) => gitBuf(cwd, args).toString("utf8").trim();
+
+// The diff to judge: files changed between the base and HEAD, NUL-delimited,
+// made adopter-relative (dropping anything outside the adopter root). Returns
+// { base, changed } or { note } when nothing can be compared.
+export function changedAgainstBase(repoRoot, requestedBase, baseBranch) {
+  let top;
+  try {
+    top = resolve(gitText(repoRoot, ["rev-parse", "--show-toplevel"]));
+  } catch {
+    return { note: "No git checkout here — nothing to compare the semantic map against." };
+  }
+  const candidates = requestedBase ? [requestedBase] : [`origin/${baseBranch}`, baseBranch];
+  let base = null;
+  for (const ref of candidates) {
+    try {
+      gitText(repoRoot, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]);
+      base = ref;
+      break;
+    } catch {
+      /* next */
+    }
+  }
+  if (!base) return { note: `No base to diff against (tried ${candidates.join(", ")}) — nothing to compare the semantic map against.` };
+  let raw;
+  try {
+    raw = gitBuf(repoRoot, ["diff", "--name-only", "-z", `${base}...HEAD`]);
+  } catch {
+    return { note: `git diff ${base}...HEAD failed (unborn branch, or unrelated histories?) — nothing to compare the semantic map against.` };
+  }
+  const rootRel = posixify(relative(top, resolve(repoRoot)));
+  const prefix = rootRel && rootRel !== "." && !rootRel.startsWith("..") ? rootRel + "/" : "";
+  const changed = [];
+  for (const f of raw.toString("utf8").split("\0")) {
+    if (!f) continue;
+    if (prefix) {
+      if (!f.startsWith(prefix)) continue;
+      changed.push(f.slice(prefix.length));
+    } else changed.push(f);
+  }
+  return { base, changed };
 }
 
 export function run(args) {
@@ -68,38 +133,33 @@ export function run(args) {
   const METADATA = resolve(REPO, paths.metadataDir);
 
   const baseIdx = args.indexOf("--base");
-  const base = baseIdx > -1 ? args[baseIdx + 1] : `origin/${baseBranch}`;
+  const requested = baseIdx > -1 ? args[baseIdx + 1] : undefined;
+  if (baseIdx > -1 && (typeof requested !== "string" || !requested || requested.startsWith("-"))) {
+    console.log("`--base` needs a ref (e.g. `--base origin/main`) — nothing compared.");
+    return;
+  }
 
-  const changed = execFileSync("git", ["diff", "--name-only", `${base}...HEAD`], {
-    cwd: REPO,
-    encoding: "utf8",
-  })
-    .split("\n")
-    .filter(Boolean);
-
+  const diff = changedAgainstBase(REPO, requested, baseBranch);
+  if (diff.note) {
+    console.log(diff.note);
+    return;
+  }
+  const { base, changed } = diff;
   if (changed.length === 0) {
     console.log("No changes against " + base + ".");
     return;
   }
   const changedSet = new Set(changed);
 
-  function walkMarkdown(dir, out = []) {
-    if (!existsSync(dir)) return out;
-    for (const name of readdirSync(dir).sort()) {
-      const p = join(dir, name);
-      if (statSync(p).isDirectory()) walkMarkdown(p, out);
-      else if (name.endsWith(".md")) out.push(p);
-    }
-    return out;
-  }
-
   const stale = [];
+  const cache = new Map();
   for (const path of walkMarkdown(SEMANTIC)) {
     const conceptRel = posixify(relative(REPO, path));
     if (changedSet.has(conceptRel)) continue; // concept updated in the same diff
-    const text = readFileSync(path, "utf8");
+    const text = readBounded(path);
+    if (text === null) continue; // over the cap: not a concept the nudge can read
     const hits = [];
-    for (const { path: watched, via } of watchedPaths(path, text, { bundleDir, metadataDir: METADATA })) {
+    for (const { path: watched, via } of watchedPaths(path, text, { bundleDir, metadataDir: METADATA, cache })) {
       // a watched path may be a file or a directory prefix
       for (const f of changed) if (f === watched || f.startsWith(watched + "/")) hits.push({ file: f, via });
     }
@@ -108,7 +168,7 @@ export function run(args) {
     const via = [];
     for (const h of hits) {
       if (!files.includes(h.file)) files.push(h.file);
-      if (!via.includes(h.via)) via.push(h.via);
+      for (const v of h.via) if (!via.includes(v)) via.push(v);
     }
     stale.push({ concept: conceptRel, touched: files, via });
   }
@@ -127,8 +187,8 @@ export function run(args) {
   console.log("| Concept | Touched files | Via |");
   console.log("|---|---|---|");
   for (const s of stale) {
-    const files = s.touched.slice(0, 3).join("<br>") + (s.touched.length > 3 ? `<br>…+${s.touched.length - 3}` : "");
-    const via = s.via.map((v) => (v === "resource" ? "`resource:`" : `\`${v}\``)).join("<br>");
-    console.log(`| \`${s.concept}\` | ${files} | ${via} |`);
+    const files = s.touched.slice(0, 3).map(cell).join("<br>") + (s.touched.length > 3 ? `<br>…+${s.touched.length - 3}` : "");
+    const via = s.via.map((v) => (v === "resource" ? "`resource:`" : `\`${cell(v)}\``)).join("<br>");
+    console.log(`| \`${cell(s.concept)}\` | ${files} | ${via} |`);
   }
 }
