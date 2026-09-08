@@ -94,7 +94,7 @@ test("forwardStamps (CR-021): only a line that OPENS with the stamp counts — b
   ]);
 });
 
-test("extractLinks (CR-023): a target on another drive, a UNC share, or above the bundle is not an edge; a fenced link still is (render bytes unchanged)", () => {
+test("extractLinks (CR-023): a target on another drive, a UNC share, or above the bundle is not an edge on any platform; a fenced link still is (render bytes unchanged)", () => {
   const bundle = process.platform === "win32" ? "C:\\r\\zdd" : "/r/zdd";
   const doc = join(bundle, "map", "features");
   const body = "[a](/metadata/route/a.json) [b](../../../outside.md) [c](//server/share/x.json) [c2](\\\\server\\share\\x.json) [d](D:/x.json) [e](https://x/y.json)\n```\n[f](/metadata/route/f.json)\n```\n";

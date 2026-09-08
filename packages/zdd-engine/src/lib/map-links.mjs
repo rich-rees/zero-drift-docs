@@ -31,7 +31,7 @@ export function extractLinks(body, docDir, bundleDir) {
   for (const m of body.matchAll(LINK_RE)) {
     const target = m[1];
     if (target.includes("://")) continue;
-    if (/^(\/\/|\\\\)/.test(target)) continue; // a UNC spelling is not a bundle-absolute link (CR-023)
+    if (/^(\/\/|\\\\|[A-Za-z]:)/.test(target)) continue; // a UNC or drive-letter spelling is never a bundle link, on any platform (CR-023)
     const abs = target.startsWith("/") ? join(bundleDir, target.slice(1)) : resolve(docDir, target);
     const rel = posixify(relative(bundleDir, abs));
     if (rel === ".." || rel.startsWith("../") || isAbsolute(rel) || /^[A-Za-z]:/.test(rel)) continue;
