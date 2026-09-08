@@ -286,11 +286,13 @@ warning can say "behind".
   bump the major: on the engine, a config-schema or metadata-contract break,
   or a new *mandatory* generated file (it breaks adopters' CI —
   [decision 0002](docs/decisions/0002-graph-artifact-and-viewers.md)).
-- **`1.1.0` — the curated half gets a prompt and a lint.** Additive: a third
-  hook that is off until opted in, a lint that goes red only where a blessing is
-  already wrong (say so when upgrading a repo that carries one), a wider
-  advisory nudge. No config or contract change; `bootstrap --upgrade` moves
-  the pins and names the new opt-in.
+- **`1.1.0` — the curated half gets a prompt and a lint.** A third hook that
+  is off until opted in; a wider advisory nudge; and one tightening of the
+  blocking tier — a blessing citing a superseded or missing ADR now fails
+  `lint`, so a repo carrying a stale blessing goes red on its first push after
+  the pin moves (the lint doing its job; `--upgrade` says so and the fix is to
+  re-bless or drop the line). No config-schema or metadata-contract change, so
+  a minor.
 
 ## Contributing
 
