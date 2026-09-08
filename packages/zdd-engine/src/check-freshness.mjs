@@ -114,13 +114,14 @@ export function changedAgainstBase(repoRoot, requestedBase, baseBranch) {
   } catch {
     return { note: `git diff ${base}...HEAD failed (unborn branch, or unrelated histories?) — nothing to compare the semantic map against.` };
   }
-  // Both sides through realpath: git reports the canonical long path, while
-  // the adopter root may be spelled through a short (8.3) or differently-cased
-  // segment — on the D:-drive CI runner the two disagreed and the prefix
-  // filter dropped nothing.
+  // Both sides through the OS realpath: git reports the canonical long path,
+  // while the adopter root may be spelled through an 8.3 short name
+  // (`RUNNER~1` on the Windows CI runner's temp dir) — and only the native
+  // realpath expands those; the JavaScript one left the two trees unequal and
+  // the prefix filter dropped nothing.
   const real = (p) => {
     try {
-      return realpathSync(p);
+      return realpathSync.native(p);
     } catch {
       return resolve(p);
     }
