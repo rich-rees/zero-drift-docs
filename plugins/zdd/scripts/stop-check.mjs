@@ -173,7 +173,17 @@ const fold = (p) => (process.platform === "win32" ? p.toLowerCase() : p); // CR-
 // code, dropping everything outside the adopter root (CR-009). Returned paths
 // are adopter-relative.
 export function classify(changed, root, config) {
-  const rootRel = posixify(relative(changed.top, resolve(root)));
+  // Both sides through realpath: git's top level is the canonical long path,
+  // the adopter root may be spelled via a short (8.3) or differently-cased
+  // segment (the D:-drive CI runner), and `relative` would then see two trees.
+  const real = (p) => {
+    try {
+      return fsModule.realpathSync(p);
+    } catch {
+      return resolve(p);
+    }
+  };
+  const rootRel = posixify(relative(real(changed.top), real(root)));
   if (rootRel.startsWith("..") || isAbsolute(rootRel)) return null; // the adopter root is not inside this git checkout
   const prefix = rootRel && rootRel !== "." ? rootRel + "/" : "";
   const paths = artifactPaths(config, { lenient: true });

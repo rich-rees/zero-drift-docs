@@ -28,7 +28,7 @@
 // stores is bounded and never reached through a symlink (CR-013/CR-014).
 
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { resolve, relative, dirname, isAbsolute } from "node:path";
 import { loadConfig } from "./lib/config.mjs";
 import { parseFrontmatter } from "./lib/frontmatter.mjs";
@@ -114,7 +114,18 @@ export function changedAgainstBase(repoRoot, requestedBase, baseBranch) {
   } catch {
     return { note: `git diff ${base}...HEAD failed (unborn branch, or unrelated histories?) — nothing to compare the semantic map against.` };
   }
-  const rootRel = posixify(relative(top, resolve(repoRoot)));
+  // Both sides through realpath: git reports the canonical long path, while
+  // the adopter root may be spelled through a short (8.3) or differently-cased
+  // segment — on the D:-drive CI runner the two disagreed and the prefix
+  // filter dropped nothing.
+  const real = (p) => {
+    try {
+      return realpathSync(p);
+    } catch {
+      return resolve(p);
+    }
+  };
+  const rootRel = posixify(relative(real(top), real(repoRoot)));
   const prefix = rootRel && rootRel !== "." && !rootRel.startsWith("..") ? rootRel + "/" : "";
   const changed = [];
   for (const f of raw.toString("utf8").split("\0")) {
