@@ -55,6 +55,11 @@ export function readBounded(path, maxBytes = MAX_STORE_FILE_BYTES) {
 // physical version of "inside": a linked parent directory would otherwise
 // carry a lexically-inside path anywhere on disk (CR-013).
 export function regularFileInside(root, abs) {
+  try {
+    if (!lstatSync(root).isDirectory()) return false; // the root itself may not be a symlink (CR-013)
+  } catch {
+    return false;
+  }
   const rel = abs.slice(root.length).split(/[\\/]/).filter(Boolean);
   let cur = root;
   for (const seg of rel) {
