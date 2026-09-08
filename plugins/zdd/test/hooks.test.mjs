@@ -473,6 +473,10 @@ test("manifests: Claude and Codex reference the same skills and hooks; hooks.jso
     assert.ok(m, c.command);
     assert.ok(existsSync(join(PLUGIN, m[1])), `${m[1]} exists`);
   }
+  // The Stop hook has no matcher (the event has no tool) and reaches its script the same way.
+  assert.equal(hooks.hooks.Stop.length, 1);
+  assert.equal(hooks.hooks.Stop[0].matcher, undefined);
+  assert.match(hooks.hooks.Stop[0].hooks[0].command, /stop-check\.mjs/);
   const pre = hooks.hooks.PreToolUse[0].matcher.split("|");
   for (const t of ["Write", "Edit", "Bash", "apply_patch", "shell_command"]) assert.ok(pre.includes(t), `matcher covers ${t}`);
   // The matcher is exactly the union of the tool names the fence handles —
