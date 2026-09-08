@@ -53,33 +53,40 @@ export function structuralLines(body) {
   let fence = null; // { char, len }
   let inComment = false;
   // One pass, one state machine: a comment opener inside a fence is code, a
-  // fence marker inside a comment is commentary (CR-033). An unclosed comment
-  // blanks everything to the end.
-  for (const raw of normalise(body).split("\n")) {
+  // fence marker inside a comment is commentary (CR-033), and whatever is
+  // left of a line after a comment closes is judged like a fresh line — so a
+  // fence opener right after `-->` still opens a fence (CR-034). An unclosed
+  // comment blanks everything to the end.
+  const step = (raw) => {
     if (inComment) {
       const close = raw.indexOf("-->");
-      if (close === -1) {
-        out.push("");
-        continue;
-      }
+      if (close === -1) return "";
       inComment = false;
-      out.push(stripComments(raw.slice(close + 3), (v) => (inComment = v)));
-      continue;
+      return step(raw.slice(close + 3));
     }
     const f = /^ {0,3}(`{3,}|~{3,})/.exec(raw);
     if (fence) {
       if (f && f[1][0] === fence.char && f[1].length >= fence.len && !/[^\s`~]/.test(raw.slice(f[0].length))) fence = null;
-      out.push("");
-      continue;
+      return "";
     }
     if (f) {
       fence = { char: f[1][0], len: f[1].length };
-      out.push("");
-      continue;
+      return "";
     }
-    const line = stripComments(raw, (v) => (inComment = v));
-    out.push(line);
-  }
+    const stripped = stripComments(raw, (v) => (inComment = v));
+    if (stripped === raw) return raw;
+    // A comment was removed: what remains is judged like a fresh line (a
+    // fence opener after `<!-- x -->` still opens one). The prefix before an
+    // unclosed opener is judged without the comment state, which then resumes.
+    if (inComment) {
+      inComment = false;
+      const judged = step(stripped);
+      inComment = true;
+      return judged;
+    }
+    return step(stripped);
+  };
+  for (const raw of normalise(body).split("\n")) out.push(step(raw));
   return out;
 }
 

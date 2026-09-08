@@ -37,6 +37,11 @@ test("structuralLines: fenced code (``` and ~~~, indented up to 3 spaces, closed
   assert.deepEqual(extractBlessings("# Blessings\n```md\n<!-- literal in code\n```\n- stale, per ADR-0001\n-->").map((b) => b.adrs), [["0001"]]);
   assert.deepEqual(structuralLines("x <!-- ```\n# Blessings\n--> y\n- after, ADR-0002\n<!-- open\n- gone ADR-0003").filter(Boolean), ["x ", " y", "- after, ADR-0002"]);
   assert.deepEqual(extractBlessings("# Blessings\n- a <!-- ADR-0009 --> per ADR-0002\n").map((b) => b.adrs), [["0002"]]);
+  // CR-034: a fence opener right after a comment closes still opens a fence, so the fenced example stays an example.
+  assert.deepEqual(extractBlessings("# Blessings\n<!-- note\n-->```md\n- fenced, per ADR-9999\n```\n- real, per ADR-0002\n").map((b) => b.adrs), [["0002"]]);
+  assert.deepEqual(forwardStamps("<!-- x -->```\nSuperseded by ADR-0044\n```\n"), [], "a stamp inside a fence that opened after a comment is not a stamp");
+  assert.deepEqual(structuralLines("```<!-- open\ncommentary\n-->\nstill code\n```\nafter").filter(Boolean), ["after"], "a fence opener before an unclosed comment opens, the comment runs, the fence resumes");
+  assert.deepEqual(structuralLines("<!-- a --> text <!-- b --> more").filter(Boolean), [" text  more"]);
 });
 
 test("extractBlessings (CR-020, CR-022): fenced examples are neither headings nor items, an indented heading counts, a comment is invisible, CR-only files parse", () => {
