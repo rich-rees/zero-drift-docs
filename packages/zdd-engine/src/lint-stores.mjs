@@ -21,11 +21,12 @@
 //    Enforced by construction, not ritual.
 
 import { execFileSync } from "node:child_process";
-import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join, resolve, relative } from "node:path";
 import { loadConfig, absentStoreNotes } from "./lib/config.mjs";
 import { parseFrontmatter } from "./lib/frontmatter.mjs";
 import { extractBlessings, forwardStamps } from "./lib/map-links.mjs";
+import { walkMarkdown, readBounded, MAX_STORE_FILE_BYTES } from "./lib/walk-markdown.mjs";
 
 export function run(args) {
   const { repoRoot: REPO, paths } = loadConfig(args);
@@ -88,28 +89,31 @@ for (const file of adrFiles) {
 // ---- 2. Blessing citations ----
 // Every blessing in every map concept, against the ADR corpus as it stands.
 // Stamps are read from the cited ADR's own text (the forward half of the
-// supersession contract, which lint 1 keeps honest).
+// supersession contract, which lint 1 keeps honest). The map is walked the
+// hardened way — symlinks skipped, reads bounded (CR-018/CR-019) — and a
+// concept over the cap is a lint failure, not a silent pass. Excerpts of
+// map text in diagnostics have control characters neutralised (CR-025).
+const printable = (t) => t.replace(/[\x00-\x1f\x7f]/g, "?");
 const stampsByNum = new Map();
 const stampsOf = (num) => {
   if (!stampsByNum.has(num)) stampsByNum.set(num, forwardStamps(readFileSync(join(ADR_DIR, byNum.get(num)), "utf8")));
   return stampsByNum.get(num);
 };
-const walkMarkdown = (dir, out = []) => {
-  if (!existsSync(dir)) return out;
-  for (const name of readdirSync(dir).sort()) {
-    const p = join(dir, name);
-    if (statSync(p).isDirectory()) walkMarkdown(p, out);
-    else if (name.endsWith(".md")) out.push(p);
-  }
-  return out;
-};
 for (const path of walkMarkdown(MAP_DIR)) {
-  const text = readFileSync(path, "utf8");
+  const rel = relative(REPO, path).split(/[\\/]/).join("/");
+  const text = readBounded(path, MAX_STORE_FILE_BYTES);
+  if (text === null) {
+    problems.push(`${rel}: over ${MAX_STORE_FILE_BYTES / 1024} KiB — a semantic-map concept is a short document; split it or move the bulk out of the map`);
+    continue;
+  }
   const parsed = parseFrontmatter(text);
   const body = parsed ? parsed.body : text;
-  const rel = relative(REPO, path).split(/[\\/]/).join("/");
+  // Blessing line numbers are body-relative; report them file-relative.
+  const normalised = text.replace(/\r\n?/g, "\n");
+  const offset = parsed ? (normalised.slice(0, normalised.length - parsed.body.length).match(/\n/g) ?? []).length : 0;
   for (const b of extractBlessings(body)) {
-    const where = `${rel} (blessing: "${b.text.length > 60 ? b.text.slice(0, 59) + "…" : b.text}")`;
+    const excerpt = printable(b.text.length > 60 ? b.text.slice(0, 59) + "…" : b.text);
+    const where = `${rel}:${b.line + offset} (blessing: "${excerpt}")`;
     if (!b.adrs.length) {
       console.error(`WARNING: ${where} cites no ADR — a blessing always names the decision that blessed it`);
       continue;

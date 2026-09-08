@@ -77,7 +77,7 @@ test("lint: a blessing citing a fully superseded ADR fails, naming the concept, 
   const r = lint(repo);
   assert.equal(r.status, 1, r.stdout + r.stderr);
   assert.match(r.stderr, /Store lints failed \(1\)/);
-  assert.match(r.stderr, /zdd\/map\/features\/widgets\.md \(blessing: "Adding a widget\? copy/);
+  assert.match(r.stderr, /zdd\/map\/features\/widgets\.md:10 \(blessing: "Adding a widget\? copy/, "concept, line, excerpt");
   assert.match(r.stderr, /cites ADR-0001, which is superseded by ADR-0002/);
   assert.match(r.stderr, /re-bless under the current decision, or drop the blessing/);
   rmSync(repo, { recursive: true, force: true });
@@ -93,7 +93,7 @@ test("lint: a blessing citing the current ADR passes; citing a non-existent ADR 
   concept(repo, "ghost", "# Blessings\n- Per ADR-0042, copy nothing.\n");
   r = lint(repo);
   assert.equal(r.status, 1);
-  assert.match(r.stderr, /ghost\.md .*cites ADR-0042, which does not exist/);
+  assert.match(r.stderr, /ghost\.md:10 .*cites ADR-0042, which does not exist/);
   rmSync(repo, { recursive: true, force: true });
 });
 
@@ -106,8 +106,8 @@ test("lint: a partial supersession and a citation-less blessing are WARNING line
   const r = lint(repo);
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /store lints passed/);
-  assert.match(r.stderr, /^WARNING: zdd\/map\/features\/things\.md .*cites ADR-0002, superseded in part by ADR-0003/m);
-  assert.match(r.stderr, /^WARNING: zdd\/map\/features\/things\.md .*cites no ADR/m);
+  assert.match(r.stderr, /^WARNING: zdd\/map\/features\/things\.md:10 .*cites ADR-0002, superseded in part by ADR-0003/m);
+  assert.match(r.stderr, /^WARNING: zdd\/map\/features\/things\.md:11 .*cites no ADR/m);
   rmSync(repo, { recursive: true, force: true });
 });
 
