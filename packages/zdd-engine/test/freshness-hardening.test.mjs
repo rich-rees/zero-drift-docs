@@ -7,7 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { writeFileSync, rmSync, mkdtempSync, cpSync, mkdirSync, symlinkSync, appendFileSync } from "node:fs";
+import { writeFileSync, rmSync, mkdtempSync, cpSync, mkdirSync, symlinkSync, appendFileSync, realpathSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -100,7 +100,9 @@ test("CR-016: an adopter root inside a larger checkout compares adopter-relative
   writeFileSync(join(mono, "packages", "other", "x.ts"), "changed");
   commit(mono, "sibling");
   let out = ok(engine(app, "freshness", "--base", "main"), "sibling only");
-  assert.match(out, /No changes against main/, "the sibling change is not this adopter's");
+  const debug = () =>
+    JSON.stringify({ top: git(app, "rev-parse", "--show-toplevel"), realTop: realpathSync(git(app, "rev-parse", "--show-toplevel")), app, realApp: realpathSync(app), diff: changedAgainstBase(app, "main", "main") });
+  assert.match(out, /No changes against main/, `the sibling change is not this adopter's: ${debug()}`);
   appendFileSync(join(app, "src", "components", "HomePage.tsx"), "\n// touched\n");
   commit(mono, "app");
   out = ok(engine(app, "freshness", "--base", "main"), "app change");
