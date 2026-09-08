@@ -19,9 +19,9 @@ Run this as the definition of done for every unit of work — the spoken form is
    - **Code comments** — new non-obvious constraints, at the code site. A gotcha
      spanning multiple sites becomes an ADR instead.
    - **Semantic map** — feature / edge / blessing changes. A blessing names
-     the exemplar to copy and cites its ADR; if a decision was superseded in
-     this unit of work, re-bless or drop every blessing that cited it (the
-     lint fails otherwise).
+     the exemplar to copy and cites its ADR; if a decision was fully
+     superseded in this unit of work, re-bless or drop every blessing that
+     cited it (the lint fails otherwise; a partial supersession only warns).
 2. **Run the deriver.** Regenerates the codebase metadata from source:
    ```
    npx -y @rich-rees/zdd-engine@1.1.0 derive

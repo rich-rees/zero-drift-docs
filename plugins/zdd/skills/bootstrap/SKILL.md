@@ -140,7 +140,11 @@ nothing lands unannounced.
 3. **Render** — `npx -y @rich-rees/zdd-engine@1.1.0 render`. Commit the
    generated artifacts (`zdd/graph.json`, both indexes, the human index);
    never edit them.
-4. **The Pocock recommendation** — the script already printed it. If
+4. **Lint** — `npx -y @rich-rees/zdd-engine@1.1.0 lint`. The same blocking
+   lint CI runs: ADR numbering, supersession symmetry, and every blessing's
+   citation. A failure here is fixed now, in the mapping session, not
+   discovered on the first PR.
+5. **The Pocock recommendation** — the script already printed it. If
    `mattpocock-skills` is absent, say in plain words: the curated artifacts
    will only be as good as the design sessions that fill them; `grill` needs
    that plugin (`/plugin marketplace add mattpocock/skills`, then
@@ -188,7 +192,11 @@ node "$PLUGIN/scripts/bootstrap.mjs" upgrade
 - **Never** the glossary, ADRs, map, or metadata.
 
 If the engine pin moved, run `render` and commit the regenerated artifacts in
-the same PR — a pin bump that lands without them fails the next CI run.
+the same PR — a pin bump that lands without them fails the next CI run. Then
+run `lint`: 1.1 adds the blessing-citation check to the blocking tier, so a
+map that carries a blessing citing a superseded or missing ADR goes red on
+the first push after upgrading — the lint doing its job; re-bless or drop the
+line in the upgrade PR, and say so.
 
 ## Boundary reminder
 

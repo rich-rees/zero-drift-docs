@@ -76,7 +76,8 @@ Format (one list item per blessing, under the heading):
 
 - **Always cite the ADR.** A blessing with no decision behind it is an opinion;
   `zdd-engine lint` warns on it. A blessing citing an ADR that has been
-  **superseded** (or that does not exist) **fails** the lint — a stale blessing
+  **fully superseded** (or that does not exist) **fails** the lint; one citing
+  an ADR superseded *in part* gets a warning to check the blessed pattern — a stale blessing
   is worse than none, because it sends the agent to copy the refused pattern
   with a citation attached. When an ADR is superseded, re-bless under the new
   decision or drop the line, in the same unit of work.
