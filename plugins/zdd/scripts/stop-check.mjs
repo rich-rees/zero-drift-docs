@@ -173,12 +173,13 @@ const fold = (p) => (process.platform === "win32" ? p.toLowerCase() : p); // CR-
 // code, dropping everything outside the adopter root (CR-009). Returned paths
 // are adopter-relative.
 export function classify(changed, root, config) {
-  // Both sides through realpath: git's top level is the canonical long path,
-  // the adopter root may be spelled via a short (8.3) or differently-cased
-  // segment (the D:-drive CI runner), and `relative` would then see two trees.
+  // Both sides through the OS realpath: git's top level is the canonical long
+  // path, the adopter root may be spelled via an 8.3 short name (`RUNNER~1`
+  // on the Windows CI runner), and only the native realpath expands those —
+  // `relative` would otherwise see two trees.
   const real = (p) => {
     try {
-      return fsModule.realpathSync(p);
+      return fsModule.realpathSync.native(p);
     } catch {
       return resolve(p);
     }
