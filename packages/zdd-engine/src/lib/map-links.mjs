@@ -81,7 +81,9 @@ export function structuralLines(body) {
     if (inComment) {
       inComment = false;
       const judged = step(stripped);
-      inComment = true;
+      // If the prefix opened a fence, the "comment" after it sits inside the
+      // fence and is code, not a comment (CR-035); otherwise it is open.
+      inComment = fence === null;
       return judged;
     }
     return step(stripped);

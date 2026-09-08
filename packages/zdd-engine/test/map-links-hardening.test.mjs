@@ -42,6 +42,10 @@ test("structuralLines: fenced code (``` and ~~~, indented up to 3 spaces, closed
   assert.deepEqual(forwardStamps("<!-- x -->```\nSuperseded by ADR-0044\n```\n"), [], "a stamp inside a fence that opened after a comment is not a stamp");
   assert.deepEqual(structuralLines("```<!-- open\ncommentary\n-->\nstill code\n```\nafter").filter(Boolean), ["after"], "a fence opener before an unclosed comment opens, the comment runs, the fence resumes");
   assert.deepEqual(structuralLines("<!-- a --> text <!-- b --> more").filter(Boolean), [" text  more"]);
+  // CR-035: a comment opener after a fence opener on the same line is code, so the fence closes normally and later structure is seen.
+  assert.deepEqual(structuralLines("<!-- first -->```<!-- second\n```\n-->\n# Blessings\n- real, per ADR-0007\nSuperseded by ADR-0044").filter(Boolean), ["-->", "# Blessings", "- real, per ADR-0007", "Superseded by ADR-0044"]);
+  assert.deepEqual(extractBlessings("<!-- first -->```<!-- second\n```\n-->\n# Blessings\n- real, per ADR-0007\n").map((b) => b.adrs), [["0007"]]);
+  assert.deepEqual(structuralLines("```<!-- open\ncommentary\n```\n# after").filter(Boolean), ["# after"], "…and the fence closes on its own line even with the stray opener before it");
 });
 
 test("extractBlessings (CR-020, CR-022): fenced examples are neither headings nor items, an indented heading counts, a comment is invisible, CR-only files parse", () => {
