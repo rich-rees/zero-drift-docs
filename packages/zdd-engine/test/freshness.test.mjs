@@ -60,11 +60,19 @@ test("watchedPaths: the resource plus every linked metadata record's source, ded
   const conceptPath = join(repo, "zdd", "map", "features", "things.md");
   const text = readFileSync(conceptPath, "utf8");
   const watched = watchedPaths(conceptPath, text, { bundleDir: join(repo, "zdd"), metadataDir: join(repo, "zdd", "metadata") });
-  assert.deepEqual(watched[0], { path: "src/components", via: "resource" });
-  assert.ok(watched.some((w) => w.path === "src/app/api/things/route.ts" && w.via === "metadata/route/things"), JSON.stringify(watched));
-  assert.ok(watched.some((w) => w.path === "src/app/api/things/[id]/route.ts" && w.via === "metadata/route/things--_id"));
-  assert.ok(watched.some((w) => w.via === "metadata/table/db--things"), "a table record's migration file is watched too");
+  assert.deepEqual(watched[0], { path: "src/components", via: ["resource"] });
+  assert.ok(watched.some((w) => w.path === "src/app/api/things/route.ts" && w.via.includes("metadata/route/things")), JSON.stringify(watched));
+  assert.ok(watched.some((w) => w.path === "src/app/api/things/[id]/route.ts" && w.via.includes("metadata/route/things--_id")));
+  assert.ok(watched.some((w) => w.via.includes("metadata/table/db--things")), "a table record's migration file is watched too");
   assert.equal(new Set(watched.map((w) => w.path)).size, watched.length, "no duplicate paths");
+  // A path reached through several records keeps every attribution (CR-030).
+  const twice = text + "\n- [things again](/metadata/route/things.json)\n- [helper](/metadata/module/src--lib--things-api-ts.json)\n";
+  const w2 = watchedPaths(conceptPath, twice, { bundleDir: join(repo, "zdd"), metadataDir: join(repo, "zdd", "metadata") });
+  assert.deepEqual(w2.find((w) => w.path === "src/lib/things-api.ts").via, ["metadata/module/src--lib--things-api-ts"]);
+  // A record shared by two ids is read once per run (the cache), and a record over the cap is not a record.
+  const cache = new Map();
+  watchedPaths(conceptPath, text, { bundleDir: join(repo, "zdd"), metadataDir: join(repo, "zdd", "metadata"), cache });
+  assert.ok(cache.size >= 3, "records cached by path");
   const withMapLink = text + "\n- [app](../apps/fixture-app.md)\n- [nowhere](/metadata/route/nope.json)\n- [outside](../../../../etc/passwd.json)\n";
   assert.deepEqual(
     watchedPaths(conceptPath, withMapLink, { bundleDir: join(repo, "zdd"), metadataDir: join(repo, "zdd", "metadata") }),
@@ -101,10 +109,16 @@ test("freshness: a change to the source behind a LINKED metadata record fires, n
     assert.match(out, /possibly stale concepts/);
     assert.match(out, /\| `zdd\/map\/features\/things\.md` \| src\/app\/api\/things\/\[id\]\/route\.ts \| `metadata\/route\/things--_id` \|/);
     assert.match(out, APP_ROW);
-    // A file under both a resource and a linked record lists both routes in.
+    // One file reached two ways lists both routes in: HomePage.tsx is under the
+    // feature's `resource:` AND is the source of a linked module record.
+    appendFileSync(join(repo, "zdd", "map", "features", "things.md"), "\n- [HomePage](../../metadata/module/src--components--HomePage-tsx.json)\n");
+    commit("link the module");
     appendFileSync(join(repo, "src", "components", "HomePage.tsx"), "\n// touched\n");
     commit("touch component too");
-    assert.match(freshness(), /\| `zdd\/map\/features\/things\.md` \| [^|]*HomePage\.tsx[^|]*\| `resource:`<br>`metadata\/route\/things--_id` \|/);
+    // Diff only the last commit, so the concept edit is not in the range and cannot exempt itself.
+    const r = engine("freshness", "--base", "HEAD~1");
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /\| `zdd\/map\/features\/things\.md` \| src\/components\/HomePage\.tsx \| `resource:`<br>`metadata\/module\/src--components--HomePage-tsx` \|/);
   }));
 
 test("freshness: an unrelated change fires nothing", () =>
