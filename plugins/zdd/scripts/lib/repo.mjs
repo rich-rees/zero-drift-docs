@@ -74,9 +74,13 @@ export const posixify = (p) => p.split(/[\\/]/).join("/");
 // session's credentials (CR-089, the same rule as the fence's CR-052) — the
 // walk starts from the process cwd instead.
 export const REMOTE_OR_DEVICE = /^(\\\\|\/\/)/;
+// CLAUDE_PROJECT_DIR is host-set but still a path we are about to probe, so
+// the same UNC/device rule applies to it (CR-010, DIO-313): such a value is
+// ignored and the walk starts from the process cwd.
 export function adopterRoot(flags = {}) {
   if (flags.root) return resolve(flags.root);
-  if (process.env.CLAUDE_PROJECT_DIR) return resolve(process.env.CLAUDE_PROJECT_DIR);
+  const projectDir = process.env.CLAUDE_PROJECT_DIR;
+  if (projectDir && !REMOTE_OR_DEVICE.test(projectDir)) return resolve(projectDir);
   const start = flags.cwd && !REMOTE_OR_DEVICE.test(flags.cwd) ? flags.cwd : process.cwd();
   let dir = resolve(start);
   for (;;) {
