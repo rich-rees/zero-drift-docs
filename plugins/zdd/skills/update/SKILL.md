@@ -18,17 +18,24 @@ Run this as the definition of done for every unit of work — the spoken form is
      offer them only when hard-to-reverse *and* surprising *and* a real trade-off.
    - **Code comments** — new non-obvious constraints, at the code site. A gotcha
      spanning multiple sites becomes an ADR instead.
-   - **Semantic map** — feature / edge / blessing changes.
+   - **Semantic map** — feature / edge / blessing changes. A blessing names
+     the exemplar to copy and cites its ADR; if a decision was fully
+     superseded in this unit of work, re-bless or drop every blessing that
+     cited it (the lint fails otherwise; a partial supersession only warns).
 2. **Run the deriver.** Regenerates the codebase metadata from source:
    ```
-   npx -y @rich-rees/zdd-engine@1.0.0 derive
+   npx -y @rich-rees/zdd-engine@1.1.0 derive
    ```
 3. **Run the renderer.** Rebuilds the graph artifact (`zdd/graph.json`), the
    agent index, the ADR index, and the human index:
    ```
-   npx -y @rich-rees/zdd-engine@1.0.0 render
+   npx -y @rich-rees/zdd-engine@1.1.0 render
    ```
-4. **Commit all of it in the PR.** Code and docs merge atomically; the doc delta
+4. **Lint the stores.** Supersession symmetry and blessing citations:
+   ```
+   npx -y @rich-rees/zdd-engine@1.1.0 lint
+   ```
+5. **Commit all of it in the PR.** Code and docs merge atomically; the doc delta
    is reviewed alongside the code delta.
 
 ## Notes
@@ -41,6 +48,9 @@ Run this as the definition of done for every unit of work — the spoken form is
 - Read back any working file (`TEMPSTATE.md`) and delete it before merge —
   durable residue moves to an artifact first.
 - The curated half is judgment CI can't gate — [authoring.md](../authoring.md) is
-  the discipline that stands in for a gate. Prefer to have driven the decisions out
+  the discipline that stands in for a gate. The Stop hook (if opted in) asks
+  once per session when code changed and nothing in `zdd/` moved: run this
+  ritual, or say plainly that nothing met the three-part test. Either answer,
+  said out loud, is the point. Prefer to have driven the decisions out
   with `grill` (if the mattpocock-skills plugin is installed) or plan mode;
   by PR-finish this step is capture, not fresh design.

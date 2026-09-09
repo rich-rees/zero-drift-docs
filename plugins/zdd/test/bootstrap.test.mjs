@@ -174,7 +174,7 @@ test("apply on the FastAPI+Supabase fixture with all defaults: config, owned wor
   assert.deepEqual(config.extractorOptions.supabase.migrationNamespaces, [{ name: "db", dir: "supabase/migrations" }]);
   assert.deepEqual(config.extractorOptions.fastapi.roots, ["api", "main.py"]);
   assert.equal(config.engine, PLUGIN_VERSION);
-  assert.deepEqual(config.hooks, { autoLoad: true, fence: true }, "auto-load + fence registrations recorded");
+  assert.deepEqual(config.hooks, { autoLoad: true, fence: true, stop: true }, "auto-load + fence + stop registrations recorded");
 
   const wf = readFileSync(join(repo, ".github", "workflows", "zdd.yml"), "utf8");
   assert.ok(wf.includes(`@rich-rees/zdd-engine@${PLUGIN_VERSION}`));
@@ -242,21 +242,34 @@ test("apply is idempotent and byte-stable: a second run keeps everything; two fr
 
 test("repair: an omitted opt-in keeps the current choice; an explicit one changes it", () => {
   const repo = fresh("repair-optins");
-  applyJson(repo, "r1", { optIns: { autoLoad: false, fence: false, ci: false, prePush: false } });
+  applyJson(repo, "r1", { optIns: { autoLoad: false, fence: false, stop: false, ci: false, prePush: false } });
   const j1 = applyJson(repo, "r2", {});
-  assert.deepEqual(j1.optIns, { autoLoad: false, fence: false, ci: false, prePush: false }, "omitted answers inherit");
+  assert.deepEqual(j1.optIns, { autoLoad: false, fence: false, stop: false, ci: false, prePush: false }, "omitted answers inherit");
   assert.ok(!existsSync(join(repo, ".github", "workflows", "zdd.yml")));
-  assert.deepEqual(JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8")).hooks, { autoLoad: false, fence: false });
+  assert.deepEqual(JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8")).hooks, { autoLoad: false, fence: false, stop: false });
   const j2 = applyJson(repo, "r3", { optIns: { fence: true } });
-  assert.deepEqual(JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8")).hooks, { autoLoad: false, fence: true });
+  assert.deepEqual(JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8")).hooks, { autoLoad: false, fence: true, stop: false });
   assert.ok(j2.wrote.includes("zdd/config.json"));
   // A pre-opt-in config (no hooks key) reads as autoLoad on, fence off.
   const legacy = fresh("repair-legacy");
   mkdirSync(join(legacy, "zdd"));
   writeFileSync(join(legacy, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"] }));
   const j3 = applyJson(legacy, "r4", {});
-  assert.deepEqual(j3.optIns, { autoLoad: true, fence: false, ci: false, prePush: false });
+  assert.deepEqual(j3.optIns, { autoLoad: true, fence: false, stop: false, ci: false, prePush: false });
   assert.equal(JSON.parse(readFileSync(join(legacy, "zdd", "config.json"), "utf8")).hooks, undefined, "config untouched when nothing changed");
+  // A 1.0 repo (hooks block without `stop`) reads as stop off; answering it once records it — the route --upgrade's note points at.
+  const v10 = fresh("repair-v10");
+  mkdirSync(join(v10, "zdd"));
+  writeFileSync(join(v10, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], hooks: { autoLoad: true, fence: true } }));
+  assert.equal(applyJson(v10, "r5", {}).optIns.stop, false, "absent stop key is off, never silently on");
+  // An explicit "no" on a config that never recorded the question is persisted even though the effective value does not change (CR-008).
+  const j4 = applyJson(v10, "r5b", { optIns: { stop: false } });
+  assert.ok(j4.wrote.includes("zdd/config.json"), "explicit false is recorded");
+  assert.deepEqual(JSON.parse(readFileSync(join(v10, "zdd", "config.json"), "utf8")).hooks, { autoLoad: true, fence: true, stop: false });
+  const j5 = applyJson(v10, "r6", { optIns: { stop: true } });
+  assert.deepEqual(JSON.parse(readFileSync(join(v10, "zdd", "config.json"), "utf8")).hooks, { autoLoad: true, fence: true, stop: true });
+  assert.ok(j5.wrote.includes("zdd/config.json"));
+  assert.ok(!applyJson(v10, "r7", { optIns: { stop: true } }).wrote.includes("zdd/config.json"), "the same answer again is a no-op");
 });
 
 test("apply refuses to write when an existing config cannot be read, or points outside the checkout", () => {
@@ -390,7 +403,7 @@ test("CI declined and pre-push declined: neither written, still narrated", () =>
   const json = applyJson(repo, "nn", { optIns: { ci: false, prePush: false, fence: false } });
   assert.ok(!existsSync(join(repo, ".githooks", "pre-push")));
   assert.ok(json.skipped.some((s) => s.startsWith(".githooks/pre-push")));
-  assert.deepEqual(json.config.hooks, { autoLoad: true, fence: false });
+  assert.deepEqual(json.config.hooks, { autoLoad: true, fence: false, stop: true });
 });
 
 test("a same-named file the plugin does not own is kept and called out, never overwritten", () => {
@@ -525,6 +538,9 @@ test("upgrade a v0.3.1 repo: adapter → extractors, every owned file rewritten 
 
   const out = bootstrap(repo, ["upgrade"]);
   const json = JSON.parse(bootstrap(repo, ["upgrade", "--json"])); // second run: nothing to do
+  // 1.1's two migration notes: the unanswered Stop opt-in, and the lint that can newly go red (CR-031, CR-027).
+  assert.ok(json.notes.some((n) => /hooks\.stop is not set .*stays OFF until answered/.test(n)), json.notes.join("\n"));
+  assert.ok(json.notes.some((n) => n.includes(`@rich-rees/zdd-engine@${PLUGIN_VERSION} lint`) && /blessing/.test(n)), "the lint note names the pinned command");
 
   const config = JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8"));
   assert.deepEqual(config.extractors, ["supabase", "nextjs"]);

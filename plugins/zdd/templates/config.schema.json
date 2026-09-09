@@ -95,15 +95,16 @@
       "type": "string",
       "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(\\.(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*))?(\\+([0-9a-zA-Z-]+(\\.[0-9a-zA-Z-]+)*))?$",
       "description": "The @rich-rees/zdd-engine version this repo was bootstrapped for — written by bootstrap, rewritten by bootstrap --upgrade, compared against the plugin by load (skew warning). Mirrors the pin in the CI workflow / pre-push hook so a repo without CI still has one.",
-      "examples": ["1.0.0"]
+      "examples": ["1.1.0"]
     },
     "hooks": {
       "type": "object",
       "additionalProperties": false,
-      "description": "The hook opt-ins recorded by bootstrap. The plugin's hooks.json registers both hooks for every repo and each script reads this block to decide whether to act, so opting in or out is a config change, not a host-settings change.",
+      "description": "The hook opt-ins recorded by bootstrap. The plugin's hooks.json registers all three hooks for every repo and each script reads this block to decide whether to act, so opting in or out is a config change, not a host-settings change.",
       "properties": {
         "autoLoad": { "type": "boolean", "default": true, "description": "SessionStart: inject the agent index. Absent means on (pre-opt-in repos keep loading)." },
-        "fence": { "type": "boolean", "default": false, "description": "PreToolUse: refuse hand edits (Write/Edit and write-shaped shell) to the generated artifacts at their configured paths. Only an explicit true fences." }
+        "fence": { "type": "boolean", "default": false, "description": "PreToolUse: refuse hand edits (Write/Edit and write-shaped shell) to the generated artifacts at their configured paths. Only an explicit true fences." },
+        "stop": { "type": "boolean", "default": false, "description": "Stop (plugin 1.1+): when the agent ends a turn with code changed against the base branch and nothing in the ZDD bundle moved, block once per session with a one-line prompt to run the finish ritual or state that nothing met the three-part test. A prompt for the curated half, not a check. Only an explicit true enables it." }
       }
     },
     "name": {

@@ -1,6 +1,6 @@
 ---
 name: bootstrap
-description: Adopt Zero-Drift Docs in a repo — the install runbook. Detects the stack of an existing codebase (or grills for the intended stack on a greenfield repo), proposes the extractors with evidence, offers the opt-ins (auto-load hook, generated-artifact fence, CI workflow, pre-push hook) as yes/no with defaults on, and WRITES them plus the instruction snippet and a seeded ADR-0001. Idempotent — a second run repairs missing pieces and never overwrites curated content. With --upgrade, migrates a repo bootstrapped by an older plugin (adapter → extractors, engine pins, snippet), narrating every file it changes. Run once when adopting; run --upgrade after updating the plugin.
+description: Adopt Zero-Drift Docs in a repo — the install runbook. Detects the stack of an existing codebase (or grills for the intended stack on a greenfield repo), proposes the extractors with evidence, offers the opt-ins (auto-load hook, generated-artifact fence, Stop prompt, CI workflow, pre-push hook) as yes/no with defaults on, and WRITES them plus the instruction snippet and a seeded ADR-0001. Idempotent — a second run repairs missing pieces and never overwrites curated content. With --upgrade, migrates a repo bootstrapped by an older plugin (adapter → extractors, engine pins, snippet), narrating every file it changes. Run once when adopting; run --upgrade after updating the plugin.
 ---
 
 # zdd:bootstrap — day one in a repo (and `--upgrade` later)
@@ -70,8 +70,12 @@ omission:
 2. **Generated-artifact fence** — refuse hand edits to the generated artifacts
    (metadata, graph, both indexes, human index) with a reason that names
    `update`.
-3. **CI workflow** — `.github/workflows/zdd.yml`, the blocking drift check.
-4. **Pre-push hook** — *offered only when CI is declined*: the same checks,
+3. **Stop prompt** — when the agent ends a turn with code changed on the
+   branch and nothing in `zdd/` moved, block once per session with one line:
+   run `update`, or say that nothing met the three-part ADR test. A prompt for
+   the curated half, not a check (decision 0008).
+4. **CI workflow** — `.github/workflows/zdd.yml`, the blocking drift check.
+5. **Pre-push hook** — *offered only when CI is declined*: the same checks,
    run locally before a push. Weaker than CI (it makes a forgotten update
    loud; it gates nothing).
 
@@ -90,7 +94,7 @@ omitted keys take the detection / the defaults):
   "extractors": ["supabase", "fastapi"], "extractorOptions": { "fastapi": { "roots": ["api"] } },
   "stack": ["FastAPI", { "name": "Supabase", "path": "db/migrations" }, "React web", "Expo"],
   "apps": ["Web (React)", "Mobile (Expo)"],
-  "optIns": { "autoLoad": true, "fence": true, "ci": true, "prePush": true },
+  "optIns": { "autoLoad": true, "fence": true, "stop": true, "ci": true, "prePush": true },
   "codex": false, "seedAdr": true
 }
 ```
@@ -117,8 +121,8 @@ hand). Then it narrates every file as **wrote / kept / skipped** and writes:
 - The instruction block into `CLAUDE.md` and, for Codex users, `AGENTS.md` —
   one tool-neutral block between `<!-- zdd:begin -->` / `<!-- zdd:end -->`
   markers, leading with the two spoken verbs. Existing content is kept.
-- Hook registrations: the plugin's own `hooks.json` carries both hooks and
-  reads the opt-ins from `zdd/config.json`, so nothing is written into the
+- Hook registrations: the plugin's own `hooks.json` carries all three hooks
+  and reads the opt-ins from `zdd/config.json`, so nothing is written into the
   host's settings.
 
 Relay the narration to the user verbatim — the point of the ledger is that
@@ -126,17 +130,21 @@ nothing lands unannounced.
 
 ## Step 4 — the engine, the mapping session, and the recommendation
 
-1. **Derive** — `npx -y @rich-rees/zdd-engine@1.0.0 derive`. On a greenfield
+1. **Derive** — `npx -y @rich-rees/zdd-engine@1.1.0 derive`. On a greenfield
    repo this writes nothing and passes; that is correct.
 2. **Mapping session** (the only LLM-heavy step, paid once; skip on greenfield
    beyond the declared apps) — scan the code with the glossary + ADRs loaded,
    propose feature groupings, and **ask** wherever evidence is thin. Answers
    route by kind, per [authoring.md](../authoring.md): verdicts → ADRs,
    vocabulary → glossary, pure connective fact → the map.
-3. **Render** — `npx -y @rich-rees/zdd-engine@1.0.0 render`. Commit the
+3. **Render** — `npx -y @rich-rees/zdd-engine@1.1.0 render`. Commit the
    generated artifacts (`zdd/graph.json`, both indexes, the human index);
    never edit them.
-4. **The Pocock recommendation** — the script already printed it. If
+4. **Lint** — `npx -y @rich-rees/zdd-engine@1.1.0 lint`. The same blocking
+   lint CI runs: ADR numbering, supersession symmetry, and every blessing's
+   citation. A failure here is fixed now, in the mapping session, not
+   discovered on the first PR.
+5. **The Pocock recommendation** — the script already printed it. If
    `mattpocock-skills` is absent, say in plain words: the curated artifacts
    will only be as good as the design sessions that fill them; `grill` needs
    that plugin (`/plugin marketplace add mattpocock/skills`, then
@@ -175,10 +183,20 @@ node "$PLUGIN/scripts/bootstrap.mjs" upgrade
   and a fresh block appended.
 - A config holding both `adapter` and `extractors` is refused — keep one by
   hand first, as the engine demands.
+- **The Stop prompt is a new opt-in (1.1).** `upgrade` names it when
+  `hooks.stop` is unset but never answers it. Ask the question as in step 2
+  (default yes), then record the answer with a repair `apply`:
+  `node "$PLUGIN/scripts/bootstrap.mjs" apply --answers=<file>` where the
+  file is `{ "optIns": { "stop": true } }` (or `false`). Repair mode keeps
+  every other choice as it is.
 - **Never** the glossary, ADRs, map, or metadata.
 
 If the engine pin moved, run `render` and commit the regenerated artifacts in
-the same PR — a pin bump that lands without them fails the next CI run.
+the same PR — a pin bump that lands without them fails the next CI run. Then
+run `lint`: 1.1 adds the blessing-citation check to the blocking tier, so a
+map that carries a blessing citing a superseded or missing ADR goes red on
+the first push after upgrading — the lint doing its job; re-bless or drop the
+line in the upgrade PR, and say so.
 
 ## Boundary reminder
 
