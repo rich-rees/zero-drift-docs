@@ -473,6 +473,10 @@ test("manifests: Claude and Codex reference the same skills and hooks; hooks.jso
     assert.ok(m, c.command);
     assert.ok(existsSync(join(PLUGIN, m[1])), `${m[1]} exists`);
   }
+  // The Stop hook has no matcher (the event has no tool) and reaches its script the same way.
+  assert.equal(hooks.hooks.Stop.length, 1);
+  assert.equal(hooks.hooks.Stop[0].matcher, undefined);
+  assert.match(hooks.hooks.Stop[0].hooks[0].command, /stop-check\.mjs/);
   const pre = hooks.hooks.PreToolUse[0].matcher.split("|");
   for (const t of ["Write", "Edit", "Bash", "apply_patch", "shell_command"]) assert.ok(pre.includes(t), `matcher covers ${t}`);
   // The matcher is exactly the union of the tool names the fence handles —
@@ -483,6 +487,9 @@ test("manifests: Claude and Codex reference the same skills and hooks; hooks.jso
   for (const t of ["write_file", "edit_file", "exec_command", "local_shell"]) assert.ok(pre.includes(t), `matcher covers ${t}`);
   const market = JSON.parse(readFileSync(resolve(PLUGIN, "..", "..", ".claude-plugin", "marketplace.json"), "utf8"));
   assert.equal(market.plugins.find((p) => p.name === "zdd").version, claude.version);
+  // The plugin and the engine share one version line (README "Versioning"; decision 0003).
+  const enginePkg = JSON.parse(readFileSync(resolve(PLUGIN, "..", "..", "packages", "zdd-engine", "package.json"), "utf8"));
+  assert.equal(enginePkg.version, claude.version, "engine package.json version equals the plugin version");
   for (const s of ["bootstrap", "load", "update", "grill"]) assert.ok(existsSync(join(PLUGIN, "skills", s, "SKILL.md")), s);
   assert.ok(!existsSync(join(PLUGIN, "skills", "orient")));
 });

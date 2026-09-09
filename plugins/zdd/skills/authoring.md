@@ -55,6 +55,38 @@ replaces an old one: the new one says it supersedes ADR-NNNN, and you stamp the 
 one at the top — `**Superseded [in part] by ADR-MMMM**` — never edit a frozen ADR
 into a new truth. History doesn't lie; it accretes.
 
+## Semantic map — blessings
+
+The map says *where, what-connects, what-to-copy*; never what the code does.
+Groupings and non-textual edges are the first two. The third is the
+**blessing**: a one-line entry under a `# Blessings` heading in a concept,
+naming the **exemplar to copy** and the **pattern to refuse**, always citing the
+ADR that blessed it. Pattern frequency in code is never a verdict — the most
+common pattern is often the deprecated one — so a blessing is how the map
+outranks "copy the nearest example".
+
+Format (one list item per blessing, under the heading):
+
+```markdown
+# Blessings
+- Adding an endpoint here? Copy [POST /api/things](/metadata/route/things.json),
+  per ADR-0012 — never inline the auth check.
+- Saving a graph? Go through the RPC, per ADR-0005 — never client-side diffing.
+```
+
+- **Always cite the ADR.** A blessing with no decision behind it is an opinion;
+  `zdd-engine lint` warns on it. A blessing citing an ADR that has been
+  **fully superseded** (or that does not exist) **fails** the lint; one citing
+  an ADR superseded *in part* gets a warning to check the blessed pattern — a stale blessing
+  is worse than none, because it sends the agent to copy the refused pattern
+  with a citation attached. When an ADR is superseded, re-bless under the new
+  decision or drop the line, in the same unit of work.
+- **Link the exemplar.** A metadata link (`/metadata/route/….json`) is what
+  lets the freshness nudge notice when the blessed code changes; a bare path
+  in backticks is fine for something the extractors do not inventory.
+- **Name the refusal.** "Copy X" alone is a pointer; "copy X, never Y" is the
+  judgment the reader needs.
+
 ## Code comments
 
 A non-obvious *constraint* goes as a comment at the code site. A gotcha spanning

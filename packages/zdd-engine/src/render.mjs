@@ -25,6 +25,7 @@ import { insideRepo, repoRelative } from "./lib/paths.mjs";
 import { join, dirname, resolve, relative } from "node:path";
 import { execFileSync } from "node:child_process";
 import { parseFrontmatter } from "./lib/frontmatter.mjs";
+import { extractLinks as extractMapLinks } from "./lib/map-links.mjs";
 import { changedTerms, parseNameStatus } from "./lib/store-changes.mjs";
 import { refreshOriginBase } from "./lib/fetch-freshness.mjs";
 import { buildAdrIndex } from "./lib/adr-index.mjs";
@@ -231,27 +232,9 @@ function linkifyAdrCitations(text, adrs, hrefOf) {
   );
 }
 
-// Map bodies link bundle-absolutely to .md (map) and .json (metadata)
-// targets. Node ids are bundle-relative paths minus extension for BOTH layers,
-// so links resolve to ids by simple path arithmetic.
-const LINK_RE = /\]\(([^)\s]+\.(?:md|json))(?:#[A-Za-z0-9_-]*)?\)/g;
-function extractLinks(body, docDir) {
-  const out = [];
-  const seen = new Set();
-  for (const m of body.matchAll(LINK_RE)) {
-    const target = m[1];
-    if (target.includes("://")) continue;
-    const abs = target.startsWith("/") ? join(BUNDLE, target.slice(1)) : resolve(docDir, target);
-    const rel = posixify(relative(BUNDLE, abs));
-    if (rel.startsWith("..")) continue;
-    const id = rel.replace(/\.(md|json)$/, "");
-    if (id && !seen.has(id)) {
-      seen.add(id);
-      out.push(id);
-    }
-  }
-  return out;
-}
+// Map-body links (bundle-absolute or relative, .md and .json) resolve to node
+// ids by path arithmetic — lib/map-links.mjs, shared with lint and freshness.
+const extractLinks = (body, docDir) => extractMapLinks(body, docDir, BUNDLE);
 
 // ---------------------------------------------------------------------------
 // Derived record -> synthesized markdown body (detail panel renders this via

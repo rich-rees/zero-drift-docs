@@ -1,28 +1,41 @@
 #!/usr/bin/env node
 // Deterministic lints over the curated stores (blocking CI tier).
 //
-//   zdd-engine lint               # ADR-number + supersession-symmetry lints
+//   zdd-engine lint               # ADR-number, supersession-symmetry and
+//                                 # blessing-citation lints
 //   zdd-engine lint --tempstate   # + TEMPSTATE.md must not exist
 //
 // 1. Supersession symmetry: an ADR that claims to supersede another fails
 //    unless the target carries the matching forward stamp ("Superseded [in
 //    part] by ... ADR-NNNN"), so a reader can never land on a dead decision
 //    unsignposted.
-// 2. TEMPSTATE lint (--tempstate, PRs only — tautological on the base
+// 2. Blessing citations (DIO-313): a blessing in a semantic-map concept — the
+//    one-liner naming the exemplar to copy, always citing the ADR that
+//    blessed it — fails when the ADR it cites carries a full "Superseded by"
+//    stamp, or does not exist. A stale blessing is worse than none: it sends
+//    the agent to copy the pattern a later decision refused. The map's first
+//    hard check. A citation of an ADR superseded IN PART, or a blessing with
+//    no citation at all, is a WARNING line on stderr, never a failure.
+// 3. TEMPSTATE lint (--tempstate, PRs only — tautological on the base
 //    branch): the branch working file must be deleted before merge.
 //    Enforced by construction, not ritual.
 
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, resolve, relative } from "node:path";
 import { loadConfig, absentStoreNotes } from "./lib/config.mjs";
+import { parseFrontmatter } from "./lib/frontmatter.mjs";
+import { extractBlessings, forwardStamps } from "./lib/map-links.mjs";
+import { walkMarkdown, readBounded, MAX_STORE_FILE_BYTES } from "./lib/walk-markdown.mjs";
 
 export function run(args) {
   const { repoRoot: REPO, paths } = loadConfig(args);
   const ADR_DIR = resolve(REPO, paths.adrDir);
-  // A missing adrDir is greenfield-tolerated (empty corpus passes); say so
-  // when the rest of the bundle exists, so a typo is not a silent pass (CR-068).
-  for (const note of absentStoreNotes(REPO, paths, ["adrDir"])) console.error(note);
+  const MAP_DIR = resolve(REPO, paths.mapDir);
+  // A missing adrDir or mapDir is greenfield-tolerated (empty corpus passes);
+  // say so when the rest of the bundle exists, so a typo is not a silent pass
+  // (CR-068).
+  for (const note of absentStoreNotes(REPO, paths, ["adrDir", "mapDir"])) console.error(note);
 
   const problems = [];
 
@@ -73,7 +86,58 @@ for (const file of adrFiles) {
   }
 }
 
-// ---- 2. TEMPSTATE lint ----
+// ---- 2. Blessing citations ----
+// Every blessing in every map concept, against the ADR corpus as it stands.
+// Stamps are read from the cited ADR's own text (the forward half of the
+// supersession contract, which lint 1 keeps honest). The map is walked the
+// hardened way — symlinks skipped, reads bounded (CR-018/CR-019) — and a
+// concept over the cap is a lint failure, not a silent pass. Excerpts of
+// map text in diagnostics have control characters neutralised (CR-025).
+const printable = (t) => t.replace(/[\x00-\x1f\x7f]/g, "?");
+const stampsByNum = new Map();
+const stampsOf = (num) => {
+  if (!stampsByNum.has(num)) stampsByNum.set(num, forwardStamps(readFileSync(join(ADR_DIR, byNum.get(num)), "utf8")));
+  return stampsByNum.get(num);
+};
+for (const path of walkMarkdown(MAP_DIR)) {
+  const rel = relative(REPO, path).split(/[\\/]/).join("/");
+  const text = readBounded(path, MAX_STORE_FILE_BYTES);
+  if (text === null) {
+    problems.push(`${rel}: over ${MAX_STORE_FILE_BYTES / 1024} KiB — a semantic-map concept is a short document; split it or move the bulk out of the map`);
+    continue;
+  }
+  const parsed = parseFrontmatter(text);
+  const body = parsed ? parsed.body : text;
+  // Blessing line numbers are body-relative; report them file-relative.
+  const normalised = text.replace(/\r\n?/g, "\n");
+  const offset = parsed ? (normalised.slice(0, normalised.length - parsed.body.length).match(/\n/g) ?? []).length : 0;
+  for (const b of extractBlessings(body)) {
+    const excerpt = printable(b.text.length > 60 ? b.text.slice(0, 59) + "…" : b.text);
+    const where = `${rel}:${b.line + offset} (blessing: "${excerpt}")`;
+    if (!b.adrs.length) {
+      console.error(`WARNING: ${where} cites no ADR — a blessing always names the decision that blessed it`);
+      continue;
+    }
+    for (const num of b.adrs) {
+      if (!byNum.has(num)) {
+        problems.push(`${where}: cites ADR-${num}, which does not exist`);
+        continue;
+      }
+      const full = stampsOf(num).filter((s) => !s.partial);
+      const partial = stampsOf(num).filter((s) => s.partial);
+      if (full.length) {
+        problems.push(
+          `${where}: cites ADR-${num}, which is superseded by ADR-${full.map((s) => s.by).join(", ADR-")} — ` +
+            `re-bless under the current decision, or drop the blessing`,
+        );
+      } else if (partial.length) {
+        console.error(`WARNING: ${where} cites ADR-${num}, superseded in part by ADR-${partial.map((s) => s.by).join(", ADR-")} — check the blessed pattern still stands`);
+      }
+    }
+  }
+}
+
+// ---- 3. TEMPSTATE lint ----
 if (args.includes("--tempstate")) {
   const tracked = execFileSync("git", ["ls-files"], { cwd: REPO, encoding: "utf8" })
     .split("\n")

@@ -4,7 +4,7 @@ A documentation architecture for repos built by **human + agent pairs**. ZDD kee
 seven documentation artifacts *at most one unit of work behind the code* — and, with
 CI, makes drift in the machine-generated ones **un-mergeable**.
 
-> **Status: 1.0.0 — first public release.** The plugin installs in Claude Code
+> **Status: 1.1.0.** The plugin installs in Claude Code
 > and in Codex from this one repo; `bootstrap` detects your stack (or grills
 > for it on a greenfield repo), proposes extractors with evidence, and *writes*
 > the opt-ins; the engine (`packages/zdd-engine`, npm `@rich-rees/zdd-engine`)
@@ -19,6 +19,18 @@ regenerate the docs before you finish. It is only truly *zero*-drift on the
 runbook's defaults, which include a CI check that refuses to merge stale
 generated artifacts. Everything else in this repo exists to make those two
 things cheap and the defaults the easy path.
+
+### A knowing tool, not a quality tool
+
+ZDD does nothing about code quality. It does not review, lint, constrain style
+or check correctness. Every component — glossary, ADRs, map, index, fence, CI
+gate, Stop prompt — exists so the agent *knows* the vocabulary, the decisions
+and the shape of the system before it touches anything. The failure it targets
+is specific: code from a model that does not know your decisions is locally
+plausible and globally inconsistent — it reintroduces the approach you rejected
+in March, and calls a refund a "reversal" because that is what it grepped for.
+That is a failure of knowing, not of coding, and it is invisible from inside the
+session. ZDD closes that gap and nothing else.
 
 ## The idea in one screen
 
@@ -42,16 +54,30 @@ of artifacts 5–7, not an eighth and ninth.
 | 1 | Glossary — the ubiquitous language | Curated | `zdd/glossary.md` |
 | 2 | ADRs — decisions + rejected alternatives | Curated | `zdd/adr/` |
 | 3 | Code comments — constraints at the site | Curated | the source |
-| 4 | Semantic map — groupings + non-textual edges | Curated | `zdd/map/` |
+| 4 | Semantic map — groupings, non-textual edges, blessings | Curated | `zdd/map/` |
 | 5 | Codebase metadata — mechanical inventory | Generated | `zdd/metadata/` |
 | 6 | Agent index — feature-first orientation | Generated | `zdd/agent-index.md` |
 | 7 | Human index — hosted graph view | Generated | `zdd/human-index.html` |
+
+The semantic map is more than grouping that folder structure already does. It
+is where the **blessings** live: one-liners in a concept naming the **exemplar
+to copy** and the **pattern to refuse** — "adding an endpoint? copy this one;
+never inline the auth check" — each citing the ADR that blessed it. They answer
+a failure mode grep makes worse, not better: **pattern frequency in code is
+never a verdict.** The most common pattern is often the deprecated one, and an
+agent that copies the nearest example copies the wrong one with confidence. A
+blessing is the curated answer; the engine's lint refuses a blessing whose ADR
+has since been superseded, so a stale blessing cannot sit quietly (the format is
+in [`skills/authoring.md`](plugins/zdd/skills/authoring.md)).
 
 Two spoken verbs carry it, and both work with any coding agent: **"load ZDD"**
 before you work (the `load` skill, plus an auto-injected index) and **"update
 ZDD"** before you finish (the `update` skill). With the CI check in place the unit
 of work is the PR and stale generated artifacts cannot merge; without it, ZDD is
-the two verbs and the guarantee is a habit.
+the two verbs and the guarantee is a habit. A third hook guards the moment the
+habit slips: when the agent declares done with code changed and nothing in
+`zdd/` moved, the **Stop prompt** asks once — run the ritual, or say that nothing
+met the ADR test ([decision 0008](docs/decisions/0008-stop-hook-prompts-the-curated-half.md)).
 
 ## What the plugin is (and is not)
 
@@ -66,7 +92,8 @@ extractor's convention and shows you the evidence ("SQL migrations under
 describe; on a greenfield repo it asks for the intended stack and configures the
 extractors ahead of the code. Then it offers the opt-ins as yes/no with defaults
 on and **writes** them — the session-start auto-load, the generated-artifact
-fence, the CI workflow (or, if you decline CI, a pre-push hook), the instruction
+fence, the Stop prompt for the curated half, the CI workflow (or, if you decline
+CI, a pre-push hook), the instruction
 block in `CLAUDE.md` (and `AGENTS.md` for Codex) — plus an empty `zdd/` and one
 seeded **ADR-0001** recording *your* decision to adopt ZDD: the corpus's first
 entry *and* a worked example of the format. Branch protection is the one step it
@@ -76,7 +103,7 @@ generated artifacts are the engine's: `derive` and `render` write them on every
 "update ZDD"; nothing else touches your repo.)
 
 Contents: four skills (`bootstrap`, `load`, `update`, `grill`), a shared authoring
-guide, two hooks (auto-load, fence), the runbook script, the engine + composed
+guide, three hooks (auto-load, fence, Stop prompt), the runbook script, the engine + composed
 extractors + viewers (`packages/zdd-engine`, also the npm package
 `@rich-rees/zdd-engine`), and templates (instruction block, CI workflow, pre-push
 hook, config schema + example, and the seed ADR-0001).
@@ -131,7 +158,8 @@ In branch protection: require the **zdd** check to pass, and require branches to
 be up to date before merging. Now stale generated artifacts **cannot merge**. Note
 the split this enforces: CI makes *drift in the generated artifacts* un-mergeable —
 the curated artifacts stay one unit of work behind on the ritual (no script can
-judge "should this have been an ADR?").
+judge "should this have been an ADR?"). The Stop prompt makes sure that judgment
+is *made and said* before the agent finishes; it cannot check the answer.
 
 ### …without CI — the two verbs
 
@@ -156,10 +184,10 @@ block — every changed file named, curated artifacts untouched.
 plugins/zdd/
   .claude-plugin/plugin.json        # two manifests, one body
   .codex-plugin/plugin.json
-  hooks/hooks.json                  # SessionStart auto-load + PreToolUse fence (opt-ins read from zdd/config.json)
+  hooks/hooks.json                  # SessionStart auto-load + PreToolUse fence + Stop prompt (opt-ins read from zdd/config.json)
   scripts/
     bootstrap.mjs                   # the runbook's writer: detect / apply / upgrade
-    inject-agent-index.mjs  fence.mjs  check-skew.mjs
+    inject-agent-index.mjs  fence.mjs  stop-check.mjs  check-skew.mjs
   skills/{bootstrap,load,update,grill}/SKILL.md
   skills/authoring.md               # shared curated-docs authoring discipline
   templates/
@@ -175,6 +203,31 @@ packages/zdd-engine/                # deriver / renderer / checks + extractors +
   test/fixture*/                    # the miniature proving repos
 LICENSE   CONTRIBUTING.md   README.md
 ```
+
+## Who needs which parts — solo versus team
+
+ZDD is a team answer first. A solo developer on a conventional framework is the
+single point of coherence — they *are* the enforcement, and they know when the
+docs are stale. That stops being true with a second person, a second agent, or
+a six-week gap. The table (lifted from an external review of this repo, 2026-09)
+is the honest adoption guide; `bootstrap` offers every part as a yes/no, so
+saying no to a row is a visible choice, not a fork.
+
+| Component | Solo, conventional stack | Team, or large / unconventional repo |
+|---|---|---|
+| Instruction block in `CLAUDE.md` / `AGENTS.md` | **Required.** This is the product at solo scale. | Required. |
+| ADRs with the three-part test | **Required.** Solo devs forget their own reasoning within a quarter. | Required. |
+| Constraint comments at the site | Required, and probably already happening. | Required. |
+| Glossary | Start it the first time you correct a word. | **Required.** This is where vocabulary drift actually begins. |
+| Semantic map (groupings, edges, blessings) | Skip the grouping; keep a blessing the first time you catch yourself copying the wrong example. | Worth it when someone will maintain it. The blessings are the part that pays; the lint keeps them honest. |
+| Generated inventory (metadata) | Skip, or a ten-line pre-commit script. | Useful when the repo is big enough that orientation costs real tokens. |
+| Agent index, auto-injected | Skip; `CLAUDE.md` is already loaded. | Measure first, then decide. |
+| Human index / graph viewer | Skip. | Earns its place when someone must understand a system they didn't build. |
+| `update` finish ritual + Stop prompt | Keep the idea; the Stop prompt is the enforcement that matters. | Same. |
+| `load` skill / auto-load hook | Redundant without the index. | Comes with the index. |
+| `bootstrap` runbook | Only if installing the rest. | Yes — it's what makes adoption survivable. |
+| `grill` | Optional; plan mode with a good prompt gets most of it. | Useful for greenfield design sessions. |
+| Engine, extractors, viewers, fence, CI check, pins, skew | Skip. | Only with the generated half. |
 
 ## Roadmap
 
@@ -206,6 +259,13 @@ LICENSE   CONTRIBUTING.md   README.md
 - [x] **1.0.0** — live smoke test in both hosts against `rich-rees/zdd-smoke-test`,
       one review campaign over the whole 0.3.1 → 1.0 diff, tag `v1.0.0`,
       engine 1.0.0 on npm, repo public (DIO-312).
+- [x] **1.1.0** — the Stop prompt for the curated half (third hook, opt-in,
+      once per session); the blessing-citation lint (a blessing citing a
+      superseded or missing ADR fails `lint` — the map's first hard check); the
+      freshness nudge watches the source behind every metadata link, not just
+      `resource:`; blessings defined, the "knowing tool" framing and the
+      solo-versus-team table lifted from an external review *(engine + plugin
+      1.1.0, DIO-313; [decision 0008](docs/decisions/0008-stop-hook-prompts-the-curated-half.md))*.
 - [ ] Next: `react-router` and `expo-router` extractors on their first real
       adoption; a second viewer.
 
@@ -226,6 +286,13 @@ warning can say "behind".
   bump the major: on the engine, a config-schema or metadata-contract break,
   or a new *mandatory* generated file (it breaks adopters' CI —
   [decision 0002](docs/decisions/0002-graph-artifact-and-viewers.md)).
+- **`1.1.0` — the curated half gets a prompt and a lint.** A third hook that
+  is off until opted in; a wider advisory nudge; and one tightening of the
+  blocking tier — a blessing citing a superseded or missing ADR now fails
+  `lint`, so a repo carrying a stale blessing goes red on its first push after
+  the pin moves (the lint doing its job; `--upgrade` says so and the fix is to
+  re-bless or drop the line). No config-schema or metadata-contract change, so
+  a minor.
 
 ## Contributing
 
