@@ -296,6 +296,8 @@ test("CR-001: a symlinked routes file, element file or one-hop module is never r
   // `./other.mjs`, `./styles.css`: not modules the extractor reads); one that does not is probed with the
   // code extensions, which is how `./Widget.client` reaches `Widget.client.tsx` (CR-032).
   writeFileSync(join(root, "src", "B.tsx"), `import { x } from "./data.tsx";\nimport { y } from "./other.mjs";\nimport "./styles.css";\nimport { w } from "./Widget.client";\nexport const B = () => api.get("/b");\n`);
+  rmSync(join(root, "src", "data.tsx"), { force: true }); // a link on POSIX by now; a real file on every platform from here
+  writeFileSync(join(root, "src", "data.tsx"), `export const x = 1;\n`);
   writeFileSync(join(root, "src", "data.tsx.ts"), `export const x = api.get("/double-ext-ghost");\n`);
   writeFileSync(join(root, "src", "other.mjs"), `export const y = api.get("/mjs-not-a-module");\n`);
   writeFileSync(join(root, "src", "other.mjs.ts"), `export const y = api.get("/mjs-ghost");\n`);
