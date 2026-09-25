@@ -295,7 +295,7 @@ export function detect(root) {
   // A dependency-only proposal sits at the convention's default path INSIDE
   // the workspace package that declares it (CR-021), else the root.
   const rrDir = rrDeps.some((d) => deps[d]) ? "" : (rrDeps.map((d) => nestedDeps.get(d)).find(Boolean) ?? "");
-  if (routesFiles.length || reactRouterDep) {
+  if (routesFiles.length || reactRouterDep || skippedRoutesFiles.length) {
     const ev = [];
     if (routesFiles.length) ev.push(`route tree declared in \`${routesFiles[0]}\`${routesFiles.length > 1 ? ` (also: ${routesFiles.slice(1).map((f) => `\`${f}\``).join(", ")} — one routesFile per extractor; confirm which)` : ""}`);
     if (reactRouterDep) ev.push(`\`react-router\` in ${rrDir ? `\`${rrDir}/package.json\`` : "package.json"} dependencies`);
@@ -306,7 +306,7 @@ export function detect(root) {
 
   const apps = [];
   if (deps.expo || deps["expo-router"] || nestedDeps.has("expo") || nestedDeps.has("expo-router")) apps.push({ name: "Mobile (Expo)", evidence: "`expo` in package.json", extractor: "expo-router (not yet shipped — the map carries the surfaces)" });
-  if (routesFiles.length || reactRouterDep) apps.push({ name: "Web (React)", evidence: routesFiles.length ? `route tree in \`${routesFiles[0]}\`` : "`react-router` in package.json", extractor: "react-router (proposed above)" });
+  if (routesFiles.length || reactRouterDep || skippedRoutesFiles.length) apps.push({ name: "Web (React)", evidence: routesFiles.length ? `route tree in \`${routesFiles[0]}\`` : "`react-router` in package.json", extractor: "react-router (proposed above)" });
 
   const mode = sourceFiles === 0 && !pkg ? "greenfield" : "existing";
   if (mode === "existing" && !proposals.length) {
