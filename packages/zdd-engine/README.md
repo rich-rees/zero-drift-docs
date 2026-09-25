@@ -31,7 +31,10 @@ npx @rich-rees/zdd-engine freshness [--base <ref>]
   stamp fails), blessing citations (a blessing in a semantic-map concept that
   cites a superseded or non-existent ADR fails; a citation-less blessing or a
   partial supersession is a warning), and — with `--tempstate` — a tracked
-  `TEMPSTATE.md` fails.
+  `TEMPSTATE.md` fails. It also lists the **unclaimed records** — every
+  route, table, function and surface no feature slice links — as a warning,
+  never a failure (a repo adopting ZDD starts with everything unclaimed); the
+  same count sits in the human index header.
 - **freshness** — advisory (always exits 0): semantic-map concepts whose code a
   diff touches without updating the concept — the `resource:` path, and the
   source behind every metadata record the concept links to. Markdown on
@@ -48,8 +51,8 @@ version:
 
 | Key | Default | What it is |
 |---|---|---|
-| `extractors` | *(required, unless legacy `adapter`)* | Extractors to run, composed per convention: `supabase`, `nextjs`, `fastapi`, `generic` (built-in), or a name from `localExtractorDir`. Names only, never paths |
-| `extractorOptions` | — | Per-extractor source layout, keyed by name — `supabase`: `migrationNamespaces`, `externalBuckets`; `nextjs`: `appDir`, `apiPrefix`, `middlewarePath`, `authPatterns`, `refs`, `srcAliasRoot`; `fastapi`: `roots`, `excludeDirs`, `appVar` |
+| `extractors` | *(required, unless legacy `adapter`)* | Extractors to run, composed per convention: `supabase`, `nextjs`, `fastapi`, `react-router`, `generic` (built-in), or a name from `localExtractorDir`. Names only, never paths |
+| `extractorOptions` | — | Per-extractor source layout, keyed by name — `supabase`: `migrationNamespaces`, `externalBuckets`; `nextjs`: `appDir`, `apiPrefix`, `middlewarePath`, `authPatterns`, `refs`, `srcAliasRoot`; `fastapi`: `roots`, `excludeDirs`, `appVar`; `react-router`: `routesFile`, `srcAliasRoot` |
 | `localExtractorDir` | — | Repo-relative folder of repo-local extractors (`<name>.mjs` or `<name>/index.mjs`) — the one place config may point at code |
 | `adapter` / `adapterOptions` | *(deprecated)* | The pre-1.0 single adapter; `nextjs-supabase` still expands to `[supabase, nextjs]` with a deprecation note |
 | `name` | `"Codebase"` | Display name for the indexes |
@@ -104,7 +107,8 @@ npm test        # node --test "test/*.test.mjs"
 Pure-logic units plus end-to-end canaries and determinism checks against
 `test/fixture/` — a miniature Next.js + Supabase repo exercising renames, FK
 sweeps, triggers, wrapper pages, middleware auth, buckets, and module records —
-`test/fixture-fastapi/` (FastAPI + Supabase) and `test/fixture-greenfield/`
-(config only). `test/golden/` pins v0.3.1 output: the composed `[supabase, nextjs]` pair must
+`test/fixture-fastapi/` (FastAPI + Supabase), `test/fixture-react-router/`
+(FastAPI + a React Router route tree declared in code, one feature claiming
+three of twelve records) and `test/fixture-greenfield/` (config only). `test/golden/` pins v0.3.1 output: the composed `[supabase, nextjs]` pair must
 reproduce the adapter's metadata byte for byte, and the `cytoscape` viewer must
 embed the same `BUNDLE` the pre-registry renderer did.
