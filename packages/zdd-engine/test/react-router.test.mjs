@@ -149,6 +149,8 @@ test("API call scan: get/post/put/patch/delete on any receiver and fetch; a lead
     client.post('/users/invite', body);
     fetch(\`\${baseUrl}/tenants?limit=\${PAGE}\`);
     http.delete(\`/things/\${id}\`);
+    api.post<User>("/users/invite", invitation); // TypeScript generic between method and call
+    api.get<{ users: User[] }>("/users");
     api.get(path); // not a literal
     api.get("users"); // no leading slash: not a path
     map.get("/"); // the root alone is noise
