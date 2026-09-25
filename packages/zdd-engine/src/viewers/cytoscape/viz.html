@@ -24,6 +24,7 @@
   <div class="title">
     <strong id="bundle-name"></strong>
     <span class="muted">codebase map</span>
+    <span id="unclaimed" class="muted" hidden title="Routes, tables, functions and surfaces no feature slice links — `zdd-engine lint` lists them"></span>
   </div>
   <div class="controls">
     <input id="search" type="search" placeholder="Search title / id / tag">
@@ -101,6 +102,22 @@
 window.BUNDLE_NAME = __BUNDLE_NAME__;
 window.BUNDLE = __BUNDLE_DATA__;
 document.getElementById("bundle-name").textContent = window.BUNDLE_NAME;
+// Unclaimed count: metadata nodes no Feature node has an edge to — the same
+// rule as the engine's lint (src/lib/claims.mjs), computed here from the
+// graph so the artifact carries no derived number.
+(function () {
+  var CLAIMABLE = { "API Endpoint": 1, "Table": 1, "Database Function": 1, "UI Surface": 1 };
+  var features = {}, claimed = {}, total = 0, unclaimed = 0;
+  window.BUNDLE.nodes.forEach(function (n) { if (n.data.type === "Feature") features[n.data.id] = 1; });
+  window.BUNDLE.edges.forEach(function (e) { if (Object.prototype.hasOwnProperty.call(features, e.data.source)) claimed[e.data.target] = 1; });
+  window.BUNDLE.nodes.forEach(function (n) {
+    if (!Object.prototype.hasOwnProperty.call(CLAIMABLE, n.data.type)) return;
+    total++;
+    if (!Object.prototype.hasOwnProperty.call(claimed, n.data.id)) unclaimed++;
+  });
+  var el = document.getElementById("unclaimed");
+  if (total) { el.textContent = "· " + unclaimed + " of " + total + " unclaimed"; el.hidden = false; }
+})();
 </script>
 <script>
 /*__VIZ_JS__*/

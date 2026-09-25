@@ -29,6 +29,7 @@ const EXTRACTORS = {
   supabase: "./extractors/supabase/index.mjs",
   nextjs: "./extractors/nextjs/index.mjs",
   fastapi: "./extractors/fastapi/index.mjs",
+  "react-router": "./extractors/react-router/index.mjs",
   generic: "./extractors/generic/index.mjs",
 };
 const NAME_RE = /^[a-z][a-z0-9-]*$/;
