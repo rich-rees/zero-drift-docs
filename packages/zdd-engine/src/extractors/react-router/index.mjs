@@ -621,7 +621,7 @@ export function derive({ repoRoot, options }) {
     if (base.startsWith("../") || base === "..") return null;
     // An explicitly suffixed specifier (`./data.tsx`) is tried as spelled and
     // nowhere else — never `data.tsx.ts` (CR-030).
-    const spellings = /\.[A-Za-z0-9]+$/.test(base.split("/").pop()) ? [""] : ["", ...RESOLVE_EXTS];
+    const spellings = /\.[^./]+$/.test(base.split("/").pop()) ? [""] : ["", ...RESOLVE_EXTS];
     for (const ext of spellings) {
       const candidate = base + ext;
       if (!/\.(tsx?|jsx?)$/.test(candidate)) continue;
