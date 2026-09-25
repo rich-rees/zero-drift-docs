@@ -274,6 +274,12 @@ test("CR-001: a symlinked routes file, element file or one-hop module is never r
     const { records, diagnostics } = derive({ repoRoot: root, options: {} });
     assert.deepEqual(records.find((r) => r.id === "surface:/a").refs, ["?route:/a"], "the linked data module contributes nothing");
     assert.ok(diagnostics.some((d) => /src\/data\.ts is not a regular file inside the repo/.test(d)), diagnostics.join("\n"));
+    // CR-029: a linked earlier spelling does not shadow a real later one (`./data` -> data.tsx link, data.js real).
+    symlinkSync(join(root, "outside.ts"), join(root, "src", "data.tsx"));
+    rmSync(join(root, "src", "data.ts"));
+    writeFileSync(join(root, "src", "data.js"), `export const x = api.get("/real-data");\n`);
+    const again = derive({ repoRoot: root, options: {} });
+    assert.deepEqual(again.records.find((r) => r.id === "surface:/a").refs, ["?route:/a", "?route:/real-data"]);
     // A linked routes file is "not found".
     rmSync(join(root, "src", "routes.tsx"));
     symlinkSync(join(root, "outside.ts"), join(root, "src", "routes.tsx"));
