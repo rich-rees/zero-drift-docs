@@ -377,7 +377,9 @@ export function normalizeApiPath(raw) {
 // literal, path starting with `/` once a leading `${base}` is dropped.
 export function scanApiCalls(text) {
   const out = new Set();
-  const re = /\b(?:fetch|\.(?:get|post|put|patch|delete|request))\(\s*(['"`])((?:\\.|(?!\1).)*)\1/g;
+  // A TypeScript generic between the method and the call (`api.post<User>(`)
+  // is skipped — Cascade's every write is shaped that way.
+  const re = /\b(?:fetch|\.(?:get|post|put|patch|delete|request)(?:<[^<>()]*>)?)\(\s*(['"`])((?:\\.|(?!\1).)*)\1/g;
   for (const m of text.matchAll(re)) {
     const path = normalizeApiPath(m[2]);
     if (path.startsWith("/") && path !== "/") out.add(path);
