@@ -141,9 +141,10 @@ const doc = "createBrowserRouter([{ path: '/in-string' }])";
 export const routes: RouteObject[] = [
   { path: "/real", loader: () => /[}]{2}/.test(x), element: <Real /> },
   { path: "/tpl", element: <Tpl />, handle: \`{ "path": "/in-template" }\` },
+  { path: "/stmt", loader: () => { if (x) /[}]/.test(y); return 1; }, element: <Stmt /> },
 ];`;
   const d = [];
-  assert.deepEqual(flat(arr, d).map((r) => r.slice(0, 2)), [["/real", "Real"], ["/tpl", "Tpl"]]);
+  assert.deepEqual(flat(arr, d).map((r) => r.slice(0, 2)), [["/real", "Real"], ["/tpl", "Tpl"], ["/stmt", "Stmt"]]);
   assert.deepEqual(d, []);
   const jsx = `
 // <Route path="/old" element={<Old />} />
@@ -190,7 +191,7 @@ export const router = createBrowserRouter(appRoutes);`;
   assert.match(d[1], /route \/x: children is not a local array literal/);
   // The typed `adminRoutes` binding is NOT the root just because it comes first.
   const d2 = [];
-  assert.deepEqual(flat(`const r = createBrowserRouter(nope);`, d2), []);
+  assert.deepEqual(flat(`const routes = [{ path: "/wrong", element: <W /> }];\nconst r = createBrowserRouter(nope);`, d2), [], "an unresolved router argument never falls through to another binding");
   assert.match(d2[0], /'nope', which is not a local array literal/);
 });
 

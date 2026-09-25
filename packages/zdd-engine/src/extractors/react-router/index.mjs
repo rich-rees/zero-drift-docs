@@ -80,7 +80,23 @@ export function lex(text) {
     if (k < 0) return true;
     const ch = mask[k];
     if (/[(,=:[!&|?{};<>+\-*%^~]/.test(ch)) return true;
-    if (/[A-Za-z_$\d)\]]/.test(ch)) {
+    if (ch === ")") {
+      // `if (x) /re/.test(y)`: the `)` closes a statement head, so what
+      // follows is an expression start (review CR-006, round 2). Find the
+      // matching `(` on the mask and the word before it.
+      let depth = 0;
+      let j = k;
+      for (; j >= 0; j--) {
+        if (mask[j] === ")") depth++;
+        else if (mask[j] === "(" && --depth === 0) break;
+      }
+      let w = j - 1;
+      while (w >= 0 && /\s/.test(mask[w])) w--;
+      let ws = w;
+      while (ws >= 0 && /[A-Za-z_$\d]/.test(mask[ws])) ws--;
+      return ["if", "while", "for", "with"].includes(text.slice(ws + 1, w + 1));
+    }
+    if (/[A-Za-z_$\d\]]/.test(ch)) {
       let s = k;
       while (s >= 0 && /[A-Za-z_$\d]/.test(mask[s])) s--;
       const word = text.slice(s + 1, k + 1);
@@ -264,8 +280,8 @@ function model(text) {
   };
   const commentAbove = (at) => {
     const found = [];
-    for (let k = lineOf(at) - 1; k >= 0 && commentLine[k] !== null; k--) found.unshift(commentLine[k]);
-    return found.filter(Boolean).join(" ");
+    for (let k = lineOf(at) - 1; k >= 0 && commentLine[k] !== null; k--) found.push(commentLine[k]);
+    return found.reverse().filter(Boolean).join(" ");
   };
   return { text, code, mask, commentAbove };
 }
@@ -484,7 +500,11 @@ export function parseRouteTree(text, diagnostics = []) {
     else {
       const id = /^[A-Za-z_$][\w$]*/.exec(m.mask.slice(i));
       if (id) open = arrayBinding(m, id[0]);
-      if (open === -1) diagnostics.push(`create*Router(...) is handed ${id ? `'${id[0]}', which is not a local array literal` : "an expression, not an array literal"} — nothing to inventory from it`);
+      if (open === -1) {
+        // The router names its tree; another binding is not it (CR-018).
+        diagnostics.push(`create*Router(...) is handed ${id ? `'${id[0]}', which is not a local array literal` : "an expression, not an array literal"} — nothing to inventory from it`);
+        return out;
+      }
     }
   }
   if (open === -1) open = arrayBinding(m, "routes");
