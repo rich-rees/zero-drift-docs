@@ -636,7 +636,11 @@ export function derive({ repoRoot, options }) {
         continue; // nothing at this spelling
       }
       if (st.isDirectory()) continue; // `./admin` -> admin/index.ts comes later in the list
-      const exact = ext === "";
+      // "As spelled" is final only when the spelling carries an extension: an
+      // extensionless entry named `data` (a file or a link) is not what
+      // `./data` means, and must not shadow `data.tsx` (CR-033).
+      const exact = ext === "" && /\.[^./]+$/.test(candidate.split("/").pop());
+      if (ext === "" && !exact) continue;
       if (!/\.(tsx?|jsx?)$/.test(candidate)) {
         if (exact) return null;
         continue;

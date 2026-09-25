@@ -304,8 +304,13 @@ test("CR-001: a symlinked routes file, element file or one-hop module is never r
   writeFileSync(join(root, "src", "styles.css"), `.b {}\n`);
   writeFileSync(join(root, "src", "styles.css.tsx"), `export const z = api.get("/css-ghost");\n`);
   writeFileSync(join(root, "src", "Widget.client.tsx"), `export const w = api.get("/widget");\n`);
+  // CR-033: an extensionless entry spelled exactly like the specifier (`data2`, a file here, a link on
+  // POSIX in the branch above) is not the module `./data2` names and never shadows `data2.tsx`.
+  writeFileSync(join(root, "src", "data2"), "not a module\n");
+  writeFileSync(join(root, "src", "data2.tsx"), `export const v = api.get("/data2");\n`);
+  writeFileSync(join(root, "src", "B.tsx"), readFileSync(join(root, "src", "B.tsx"), "utf8").replace("export const B", `import { v } from "./data2";\nexport const B`));
   const suffixed = derive({ repoRoot: root, options: {} });
-  assert.deepEqual(suffixed.records.find((r) => r.id === "surface:/b").refs, ["?route:/b", "?route:/widget"]);
+  assert.deepEqual(suffixed.records.find((r) => r.id === "surface:/b").refs, ["?route:/b", "?route:/widget", "?route:/data2"]);
   const big = derive({ repoRoot: root, options: { routesFile: "src/big.tsx" } });
   assert.deepEqual(big.records, []);
   assert.match(big.diagnostics[0], /is over 1024 KiB — not read/);
