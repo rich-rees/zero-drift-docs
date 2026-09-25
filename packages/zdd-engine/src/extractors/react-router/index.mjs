@@ -621,7 +621,20 @@ export function derive({ repoRoot, options }) {
     if (base.startsWith("../") || base === "..") return null;
     for (const ext of ["", ...RESOLVE_EXTS]) {
       const candidate = base + ext;
-      if (/\.(tsx?|jsx?)$/.test(candidate) && exists(candidate)) return candidate;
+      if (!/\.(tsx?|jsx?)$/.test(candidate)) continue;
+      let st = null;
+      try {
+        st = lstatSync(join(realRoot, candidate));
+      } catch {
+        continue; // nothing at this spelling
+      }
+      if (st.isDirectory()) continue;
+      if (regularFileInside(realRoot, join(realRoot, candidate))) return candidate;
+      // Something is there but it is a link (or sits under one): named,
+      // never followed (CR-001) — silence here looked like "no such import".
+      if (!reported.has(candidate)) diagnostics.push(`${candidate} is not a regular file inside the repo (a symlink, or under one) — not read`);
+      reported.add(candidate);
+      return null;
     }
     return null;
   };
