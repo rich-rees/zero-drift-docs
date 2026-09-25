@@ -280,6 +280,11 @@ test("CR-001: a symlinked routes file, element file or one-hop module is never r
     writeFileSync(join(root, "src", "data.js"), `export const x = api.get("/real-data");\n`);
     const again = derive({ repoRoot: root, options: {} });
     assert.deepEqual(again.records.find((r) => r.id === "surface:/a").refs, ["?route:/a", "?route:/real-data"]);
+    // CR-030: an explicitly suffixed specifier never probes a synthetic double extension past a linked exact hit.
+    writeFileSync(join(root, "src", "A.tsx"), `import { x } from "./data.tsx";\nexport const A = () => api.get("/a");\n`);
+    writeFileSync(join(root, "src", "data.tsx.ts"), `export const x = api.get("/double-ext-ghost");\n`);
+    const suffixed = derive({ repoRoot: root, options: {} });
+    assert.deepEqual(suffixed.records.find((r) => r.id === "surface:/a").refs, ["?route:/a"]);
     // A linked routes file is "not found".
     rmSync(join(root, "src", "routes.tsx"));
     symlinkSync(join(root, "outside.ts"), join(root, "src", "routes.tsx"));
