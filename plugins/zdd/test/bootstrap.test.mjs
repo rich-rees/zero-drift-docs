@@ -11,7 +11,7 @@ import { readFileSync, writeFileSync, existsSync, rmSync, mkdtempSync, cpSync, m
 import { createHash } from "node:crypto";
 import { dirname, resolve, join, relative } from "node:path";
 import { tmpdir } from "node:os";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const PLUGIN = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SCRIPT = join(PLUGIN, "scripts", "bootstrap.mjs");
@@ -106,9 +106,105 @@ test("detect: Next.js App Router + middleware + migrations (the engine's Next.js
   writeFileSync(join(bare, "package.json"), JSON.stringify({ dependencies: { next: "15", expo: "52", "react-router-dom": "7" } }));
   writeFileSync(join(bare, "index.ts"), "");
   const j2 = JSON.parse(bootstrap(bare, ["detect", "--json"]));
-  assert.deepEqual(j2.proposals.map((p) => p.name), ["nextjs"]);
+  // A bare react-router dependency proposes the extractor at its default path (CAS-63), like `next`.
+  assert.deepEqual(j2.proposals.map((p) => p.name), ["nextjs", "react-router"]);
   assert.equal(j2.proposals[0].options.appDir, "src/app");
+  assert.deepEqual(j2.proposals[1].options, { routesFile: "src/routes.tsx" });
   assert.deepEqual(j2.apps.map((a) => a.name), ["Mobile (Expo)", "Web (React)"]);
+  assert.match(j2.apps[1].extractor, /proposed above/);
+  assert.match(j2.apps[0].extractor, /not yet shipped/);
+});
+
+test("detect: a React Router route tree in a workspace package (the engine's react-router fixture) — routes file as evidence, FastAPI beside it", () => {
+  const repo = fresh("detect-rr", join(ENGINE_FIXTURES, "fixture-react-router"));
+  rmSync(join(repo, "zdd"), { recursive: true });
+  const text = bootstrap(repo, ["detect"]);
+  assert.match(text, /route tree declared in `apps\/web\/src\/routes\.tsx`/);
+  assert.match(text, /`react-router` in `apps\/web\/package\.json` dependencies/, "the nested apps/web/package.json counts, and is named");
+  const json = JSON.parse(bootstrap(repo, ["detect", "--json"]));
+  assert.deepEqual(json.proposals.map((p) => p.name), ["fastapi", "react-router"]);
+  assert.deepEqual(json.proposals[1].options, { routesFile: "apps/web/src/routes.tsx" });
+  assert.deepEqual(json.apps.map((a) => a.name), ["Web (React)"]);
+  // apply with the defaults: the config drives the engine, and the surfaces land.
+  bootstrap(repo, ["apply", `--answers=${answersFile("rr", { name: "RR" })}`]);
+  const config = JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8"));
+  assert.deepEqual(config.extractorOptions["react-router"], { routesFile: "apps/web/src/routes.tsx" });
+  assert.match(engine(repo, ["derive"]), /7 surfaces/);
+  assert.match(engine(repo, ["render"]), /Wrote \d+ concepts/);
+  // Dependency-only in a workspace package: the default path sits inside that package (CR-021).
+  const ws = fresh("detect-rr-ws");
+  mkdirSync(join(ws, "apps", "web"), { recursive: true });
+  writeFileSync(join(ws, "apps", "web", "package.json"), JSON.stringify({ dependencies: { "react-router-dom": "7" } }));
+  writeFileSync(join(ws, "apps", "web", "index.ts"), "");
+  const jws = JSON.parse(bootstrap(ws, ["detect", "--json"]));
+  assert.deepEqual(jws.proposals.map((p) => p.name), ["react-router"]);
+  assert.deepEqual(jws.proposals[0].options, { routesFile: "apps/web/src/routes.tsx" });
+  assert.ok(jws.proposals[0].evidence.some((e) => e.includes("`apps/web/package.json`")), jws.proposals[0].evidence.join("|"));
+  // A routes file at a path the engine refuses is skipped and named, never proposed (CR-009); stories files are not evidence (CR-024).
+  if (process.platform !== "win32") {
+    const odd = fresh("detect-rr-odd");
+    mkdirSync(join(odd, "src"), { recursive: true });
+    writeFileSync(join(odd, "src", "a bad.tsx"), 'import { Route } from "react-router";\nexport const r = <Route path="/x" />;\n');
+    writeFileSync(join(odd, "src", "Nav.stories.tsx"), 'import { Route } from "react-router";\nexport const r = <Route path="/story" />;\n');
+    const jodd = JSON.parse(bootstrap(odd, ["detect", "--json"]));
+    const rrp = jodd.proposals.find((p) => p.name === "react-router");
+    assert.ok(rrp, "the dependency-less tree still proposes the extractor at the default path");
+    assert.equal(rrp.options.routesFile, "src/routes.tsx");
+    assert.ok(rrp.evidence.some((e) => /`src\/a bad\.tsx` skipped/.test(e)), rrp.evidence.join("|"));
+    assert.ok(!rrp.evidence.some((e) => e.includes("stories")), rrp.evidence.join("|"));
+  }
+  // A malformed react-router path is refused before any write, like every other path option.
+  const bad = fresh("detect-rr-bad");
+  assert.match(bootstrapFails(bad, ["apply", `--answers=${answersFile("rrb", { extractors: ["react-router"], extractorOptions: { "react-router": { routesFile: "../routes.tsx" } } })}`]), /react-router\.routesFile/);
+  assert.deepEqual(readdirSync(bad), []);
+});
+
+test("apply seeds one example feature slice from the configured stack; a repair keeps it; a folder that already holds a slice gets none", async () => {
+  const repo = fastapiRepo("seed-slice");
+  const first = applyJson(repo, "seed1", {});
+  assert.ok(first.wrote.includes("zdd/map/features/example-feature.md"), first.wrote.join(", "));
+  const slice = readFileSync(join(repo, "zdd", "map", "features", "example-feature.md"), "utf8");
+  assert.ok(slice.startsWith("---\ntype: Feature\ntitle: Example feature\n"));
+  assert.match(slice, /resource: "supabase\/migrations"/, "resource is the first configured root");
+  assert.match(slice, /a table: `\.\.\/\.\.\/metadata\/table\/db--things\.json`/);
+  assert.match(slice, /an API route: `\.\.\/\.\.\/metadata\/route\/things--_id\.json`/);
+  assert.ok(!/\]\([^)]*\.json\)/.test(slice), "no resolvable-looking link: render must not be blocked before derive");
+  assert.match(slice, /CLAIMS a record by linking it/);
+  // The whole engine runs on the fresh bundle, and the slice is a feature section in the agent index.
+  engine(repo, ["derive"]);
+  engine(repo, ["render"]);
+  assert.match(readFileSync(join(repo, "zdd", "agent-index.md"), "utf8"), /^## Example feature/m);
+  assert.match(engine(repo, ["lint"]), /records unclaimed/, "the example claims nothing, so the lint lists the inventory");
+  // Repair: kept, never rewritten — and never re-seeded once deleted (CR-013): a repair apply
+  // (the documented Stop-opt-in answer after --upgrade) writes nothing into the map.
+  writeFileSync(join(repo, "zdd", "map", "features", "example-feature.md"), "edited by the adopter\n");
+  const second = applyJson(repo, "seed2", {});
+  assert.ok(!second.wrote.includes("zdd/map/features/example-feature.md"));
+  assert.equal(readFileSync(join(repo, "zdd", "map", "features", "example-feature.md"), "utf8"), "edited by the adopter\n");
+  rmSync(join(repo, "zdd", "map", "features", "example-feature.md"));
+  const third0 = applyJson(repo, "seed2b", { optIns: { stop: true } });
+  assert.ok(!existsSync(join(repo, "zdd", "map", "features", "example-feature.md")), "repair never seeds");
+  assert.ok(!third0.kept.some((k) => /a slice is present/.test(k)));
+  // Custom artifact paths: the example's targets are relative to the configured layout (CR-022).
+  const custom = fresh("seed-custom");
+  writeFileSync(join(custom, "index.ts"), "");
+  mkdirSync(join(custom, "zdd"), { recursive: true });
+  writeFileSync(join(custom, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], extractorOptions: { generic: {} }, paths: { mapDir: "docs/map", metadataDir: "docs/generated/records" } }));
+  rmSync(join(custom, "zdd", "config.json"));
+  bootstrap(custom, ["apply", `--answers=${answersFile("sc", { extractors: ["generic"] })}`]);
+  // (paths are not an answer; prove the arithmetic on the exported function instead)
+  const { exampleFeature } = await import(pathToFileURL(SCRIPT).href);
+  const text = exampleFeature({ extractors: ["fastapi"], extractorOptions: { fastapi: { roots: ["api"] } } }, { mapDir: "docs/map", metadataDir: "docs/generated/records" });
+  assert.match(text, /an API route: `\.\.\/\.\.\/generated\/records\/route\/things--_id\.json`/);
+  const same = exampleFeature({ extractors: ["fastapi"], extractorOptions: { fastapi: { roots: ["api"] } } }, { mapDir: "zdd/map", metadataDir: "zdd/metadata" });
+  assert.match(same, /`\.\.\/\.\.\/metadata\/route\/things--_id\.json`/);
+  // A features folder that already has a slice (renamed, or the adopter's own) gets no example.
+  const own = fastapiRepo("seed-own");
+  mkdirSync(join(own, "zdd", "map", "features"), { recursive: true });
+  writeFileSync(join(own, "zdd", "map", "features", "jobs.md"), "---\ntype: Feature\ntitle: Jobs\ndescription: x\nresource: api\ntags: [jobs]\n---\n");
+  const third = applyJson(own, "seed3", {});
+  assert.ok(!existsSync(join(own, "zdd", "map", "features", "example-feature.md")));
+  assert.ok(third.kept.some((k) => /features\/ \(a slice is present/.test(k)), third.kept.join(", "));
 });
 
 test("detect: several migration dirs get distinct namespace names; symlinked dirs are not followed", (t) => {
@@ -334,9 +430,16 @@ test("apply on an empty repo with the greenfield stack: extractors at the future
   bootstrap(repo, ["apply", `--answers=${answers}`]);
 
   const config = JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8"));
+  // "React web" alone is an Application; only an explicit React Router entry selects the extractor (CR-014).
   assert.deepEqual(config.extractors, ["fastapi", "supabase"]);
   assert.deepEqual(config.extractorOptions.fastapi, { roots: ["api"] });
   assert.deepEqual(config.extractorOptions.supabase, { migrationNamespaces: [{ name: "db", dir: "supabase/migrations" }] });
+  const rr = fresh("greenfield-rr");
+  bootstrap(rr, ["apply", `--answers=${answersFile("grr", { stack: ["FastAPI", { name: "React Router web", path: "apps/web/src/routes.tsx" }, "Vite + Vue"] })}`]);
+  const rrConfig = JSON.parse(readFileSync(join(rr, "zdd", "config.json"), "utf8"));
+  assert.deepEqual(rrConfig.extractors, ["fastapi", "react-router"]);
+  assert.deepEqual(rrConfig.extractorOptions["react-router"], { routesFile: "apps/web/src/routes.tsx" });
+  assert.deepEqual(readdirSync(join(rr, "zdd", "map", "apps")).sort(), [".gitkeep", "web.md"], "one Web application for both web entries");
   assert.equal(config.render.storeChanges, false, "no .git → render without git");
 
   const apps = readdirSync(join(repo, "zdd", "map", "apps")).sort();
