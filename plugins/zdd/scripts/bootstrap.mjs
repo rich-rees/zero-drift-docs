@@ -174,10 +174,13 @@ export function detect(root) {
   const pyRoots = new Set();
   let appDir = null;
   let middlewarePath = null;
+  const routesFiles = []; // react-router: files declaring a route tree in code
+  const packageJsons = []; // nested package.json files (workspaces)
   let sourceFiles = 0;
 
   walk(root, (abs, name, rel) => {
     if (/\.(ts|tsx|js|jsx|py|sql|go|rb|rs|java|cs)$/.test(name)) sourceFiles++;
+    if (name === "package.json" && rel !== "package.json") packageJsons.push(rel);
     if (name.endsWith(".sql") && /(^|\/)migrations\//.test(rel + "/")) {
       const dir = posixify(dirname(rel));
       sqlDirs.set(dir, (sqlDirs.get(dir) ?? 0) + 1);
@@ -206,10 +209,29 @@ export function detect(root) {
       if (m && (!appDir || m[1].length < appDir.length)) appDir = m[1];
     }
     if (/^middleware\.(ts|js)$/.test(name) && rel.split("/").length <= 2) middlewarePath = rel;
+    // A React Router route tree declared in code: the array form or the JSX
+    // form, in a .tsx/.jsx/.ts/.js file that imports react-router.
+    if (/\.(tsx|jsx|ts|js)$/.test(name) && !/\.(test|spec)\.[tj]sx?$/.test(name)) {
+      let text = "";
+      try {
+        text = readFileSync(abs, "utf8");
+      } catch {
+        return;
+      }
+      if (/from\s*['"]react-router(-dom)?['"]/.test(text) && /\bcreate(?:Browser|Hash|Memory)Router\s*\(|:\s*RouteObject\[\]\s*=|<Route\b/.test(text)) routesFiles.push(rel);
+    }
   });
+  routesFiles.sort();
 
   const pkg = readPackageJson(root);
   const deps = { ...(pkg?.dependencies ?? {}), ...(pkg?.devDependencies ?? {}) };
+  // Workspace packages' dependencies too (`apps/web/package.json`) — a
+  // monorepo's web app declares react-router in its own manifest.
+  const nestedDeps = new Set();
+  for (const rel of packageJsons.sort()) {
+    const sub = readPackageJson(join(root, dirname(rel)));
+    for (const d of Object.keys({ ...(sub?.dependencies ?? {}), ...(sub?.devDependencies ?? {}) })) nestedDeps.add(d);
+  }
   const proposals = [];
 
   if (sqlDirs.size) {
@@ -239,9 +261,19 @@ export function detect(root) {
     proposals.push({ name: "fastapi", evidence: ev, options: { roots: [...pyRoots].sort() } });
   }
 
+  // react-router: the routes file is the evidence; a bare dependency with no
+  // tree yet is proposed at the convention's default path (like `next`).
+  const reactRouterDep = ["react-router", "react-router-dom"].some((d) => deps[d] || nestedDeps.has(d));
+  if (routesFiles.length || reactRouterDep) {
+    const ev = [];
+    if (routesFiles.length) ev.push(`route tree declared in \`${routesFiles[0]}\`${routesFiles.length > 1 ? ` (also: ${routesFiles.slice(1).map((f) => `\`${f}\``).join(", ")} — one routesFile per extractor; confirm which)` : ""}`);
+    if (reactRouterDep) ev.push("`react-router` in package.json dependencies");
+    proposals.push({ name: "react-router", evidence: ev, options: { routesFile: routesFiles[0] ?? "src/routes.tsx" } });
+  }
+
   const apps = [];
-  if (deps.expo || deps["expo-router"]) apps.push({ name: "Mobile (Expo)", evidence: "`expo` in package.json", extractor: "expo-router (not yet shipped — the map carries the surfaces)" });
-  if (deps["react-router"] || deps["react-router-dom"]) apps.push({ name: "Web (React)", evidence: "`react-router` in package.json", extractor: "react-router (not yet shipped — the map carries the surfaces)" });
+  if (deps.expo || deps["expo-router"] || nestedDeps.has("expo") || nestedDeps.has("expo-router")) apps.push({ name: "Mobile (Expo)", evidence: "`expo` in package.json", extractor: "expo-router (not yet shipped — the map carries the surfaces)" });
+  if (routesFiles.length || reactRouterDep) apps.push({ name: "Web (React)", evidence: routesFiles.length ? `route tree in \`${routesFiles[0]}\`` : "`react-router` in package.json", extractor: "react-router (proposed above)" });
 
   const mode = sourceFiles === 0 && !pkg ? "greenfield" : "existing";
   if (mode === "existing" && !proposals.length) {
@@ -260,7 +292,9 @@ const STACK_RULES = [
   { match: /supabase|postgres/i, extractor: "supabase", options: (path) => ({ migrationNamespaces: [{ name: "db", dir: path || "supabase/migrations" }] }) },
   { match: /next(\.js)?/i, extractor: "nextjs", options: (path) => ({ appDir: path || "src/app", apiPrefix: "/api" }) },
   { match: /expo|react.?native/i, app: "Mobile (Expo)" },
-  { match: /react|web|vite/i, app: "Web (React)" },
+  // A React web app gets the react-router extractor at its future routes file
+  // AND its Application concept: the extractor reads the tree once it exists.
+  { match: /react|web|vite/i, extractor: "react-router", options: (path) => ({ routesFile: path || "src/routes.tsx" }), app: "Web (React)" },
 ];
 
 function fromStack(stack = []) {
@@ -275,6 +309,7 @@ function fromStack(stack = []) {
       apps.push(name);
       continue;
     }
+    if (rule.app && !apps.includes(rule.app)) apps.push(rule.app);
     if (rule.extractor) {
       const opts = rule.options(path);
       if (!extractors.includes(rule.extractor)) {
@@ -295,7 +330,7 @@ function fromStack(stack = []) {
           cur.migrationNamespaces.forEach((m, i) => (m.name = names[i]));
         }
       }
-    } else apps.push(rule.app);
+    }
   }
   return { extractors, extractorOptions, apps };
 }
@@ -341,6 +376,8 @@ function validateExtractorOptions(all) {
         if (!obj(opts.refs)) fail("nextjs.refs must be an object");
         if (opts.refs.roots !== undefined) list(opts.refs.roots, "nextjs.refs.roots");
       }
+    } else if (name === "react-router") {
+      for (const k of ["routesFile", "srcAliasRoot"]) if (opts[k] !== undefined) enginePath(opts[k], `react-router.${k}`);
     } else if (name === "fastapi") {
       if (opts.roots !== undefined) list(opts.roots, "fastapi.roots");
     } else if (name === "supabase" && opts.migrationNamespaces !== undefined) {
@@ -697,6 +734,14 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
       `---\ntype: Application\ntitle: ${yamlScalar(app)}\ndescription: ${yamlScalar(`${app} — declared at bootstrap; fill in as the code lands.`)}\nresource: .\ntags: []\n---\n\n${app.replace(/[<>]/g, "")}: planned at adoption, before any code existed. Link its features here as they appear.\n`,
     );
   });
+  // One example feature slice, so `features/` never sits as an unexplained
+  // .gitkeep: it shows the shape (a feature CLAIMS records by linking them)
+  // with example lines drawn from the configured extractors. Created only
+  // when the folder holds no slice yet; the adopter renames or deletes it.
+  const featuresDir = ledger.abs(`${paths.mapDir}/features`);
+  const hasSlice = readdirSync(featuresDir).some((f) => f.endsWith(".md"));
+  if (!hasSlice) ledger.create(`${paths.mapDir}/features/example-feature.md`, exampleFeature(config));
+  else ledger.kept.push(`${paths.mapDir}/features/ (a slice is present — example skipped)`);
   const adrDir = ledger.abs(paths.adrDir);
   mkdirSync(adrDir, { recursive: true });
   const adrFiles = readdirSync(adrDir).filter((f) => /^\d{4}-.*\.md$/.test(f));
@@ -729,6 +774,55 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
 
   const pocock = findPocock(root, home);
   return { mode, version, date, config, optIns, pocock, detection, ...ledgerOut(ledger) };
+}
+
+// The example feature slice's text, from the configured extractors. The
+// example TARGETS are shown as bare paths, never in the `[x](y.json)` shape:
+// the render's link scanner reads that shape wherever it appears (inline
+// code included), and a link it cannot resolve blocks the render — and at
+// bootstrap no metadata exists yet.
+const EXAMPLE_TARGETS = {
+  supabase: ["a table: `../../metadata/table/db--things.json`"],
+  nextjs: ["an API route: `../../metadata/route/things.json`", "a page: `../../metadata/surface/things--_id.json`"],
+  fastapi: ["an API route: `../../metadata/route/things--_id.json`"],
+  "react-router": ["a screen: `../../metadata/surface/things--_id.json`"],
+};
+export function exampleFeature(config) {
+  const targets = [];
+  for (const name of config.extractors ?? []) for (const t of EXAMPLE_TARGETS[name] ?? []) if (!targets.includes(t)) targets.push(t);
+  if (!targets.length) targets.push("a record: `../../metadata/<kind>/<file>.json`");
+  const roots = [];
+  for (const name of config.extractors ?? []) {
+    const o = config.extractorOptions?.[name] ?? {};
+    const candidates = [o.appDir, o.routesFile && posixify(dirname(o.routesFile)), ...(Array.isArray(o.roots) ? o.roots : []), ...(Array.isArray(o.migrationNamespaces) ? o.migrationNamespaces.map((m) => m?.dir) : [])];
+    for (const r of candidates) if (typeof r === "string" && r && !roots.includes(r)) roots.push(r);
+  }
+  return [
+    "---",
+    "type: Feature",
+    "title: Example feature",
+    'description: "A worked example of a feature slice - rename it to a real feature, or delete it."',
+    `resource: ${yamlScalar(roots[0] ?? ".")}`,
+    "tags: [example]",
+    "---",
+    "",
+    "A **feature slice** is one file here per user-facing capability. It says",
+    "*where* the capability lives (`resource:`), *what connects* (links to the",
+    "records `derive` inventoried - a feature CLAIMS a record by linking it, and",
+    "`zdd-engine lint` lists every route, table, function and surface no slice",
+    "claims), and *what to copy* (a `# Blessings` section citing the ADR that",
+    "blessed the pattern). A unit of work that adds or changes user-facing",
+    "behaviour adds a slice or extends one.",
+    "",
+    "Claim a record with a markdown link, `[title](path)`, the path relative to",
+    "this file - for this stack, for example:",
+    "",
+    ...targets.map((t) => `- ${t}`),
+    "",
+    "(Shown as bare paths: no metadata exists at bootstrap, and a link that does",
+    "not resolve blocks `render`. Run `derive`, then link what it wrote.)",
+    "",
+  ].join("\n");
 }
 
 function ledgerOut(l) {

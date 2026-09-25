@@ -106,9 +106,65 @@ test("detect: Next.js App Router + middleware + migrations (the engine's Next.js
   writeFileSync(join(bare, "package.json"), JSON.stringify({ dependencies: { next: "15", expo: "52", "react-router-dom": "7" } }));
   writeFileSync(join(bare, "index.ts"), "");
   const j2 = JSON.parse(bootstrap(bare, ["detect", "--json"]));
-  assert.deepEqual(j2.proposals.map((p) => p.name), ["nextjs"]);
+  // A bare react-router dependency proposes the extractor at its default path (CAS-63), like `next`.
+  assert.deepEqual(j2.proposals.map((p) => p.name), ["nextjs", "react-router"]);
   assert.equal(j2.proposals[0].options.appDir, "src/app");
+  assert.deepEqual(j2.proposals[1].options, { routesFile: "src/routes.tsx" });
   assert.deepEqual(j2.apps.map((a) => a.name), ["Mobile (Expo)", "Web (React)"]);
+  assert.match(j2.apps[1].extractor, /proposed above/);
+  assert.match(j2.apps[0].extractor, /not yet shipped/);
+});
+
+test("detect: a React Router route tree in a workspace package (the engine's react-router fixture) — routes file as evidence, FastAPI beside it", () => {
+  const repo = fresh("detect-rr", join(ENGINE_FIXTURES, "fixture-react-router"));
+  rmSync(join(repo, "zdd"), { recursive: true });
+  const text = bootstrap(repo, ["detect"]);
+  assert.match(text, /route tree declared in `apps\/web\/src\/routes\.tsx`/);
+  assert.match(text, /`react-router` in package\.json dependencies/, "the nested apps/web/package.json counts");
+  const json = JSON.parse(bootstrap(repo, ["detect", "--json"]));
+  assert.deepEqual(json.proposals.map((p) => p.name), ["fastapi", "react-router"]);
+  assert.deepEqual(json.proposals[1].options, { routesFile: "apps/web/src/routes.tsx" });
+  assert.deepEqual(json.apps.map((a) => a.name), ["Web (React)"]);
+  // apply with the defaults: the config drives the engine, and the surfaces land.
+  bootstrap(repo, ["apply", `--answers=${answersFile("rr", { name: "RR" })}`]);
+  const config = JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8"));
+  assert.deepEqual(config.extractorOptions["react-router"], { routesFile: "apps/web/src/routes.tsx" });
+  assert.match(engine(repo, ["derive"]), /7 surfaces/);
+  assert.match(engine(repo, ["render"]), /Wrote \d+ concepts/);
+  // A malformed react-router path is refused before any write, like every other path option.
+  const bad = fresh("detect-rr-bad");
+  assert.match(bootstrapFails(bad, ["apply", `--answers=${answersFile("rrb", { extractors: ["react-router"], extractorOptions: { "react-router": { routesFile: "../routes.tsx" } } })}`]), /react-router\.routesFile/);
+  assert.deepEqual(readdirSync(bad), []);
+});
+
+test("apply seeds one example feature slice from the configured stack; a repair keeps it; a folder that already holds a slice gets none", () => {
+  const repo = fastapiRepo("seed-slice");
+  const first = applyJson(repo, "seed1", {});
+  assert.ok(first.wrote.includes("zdd/map/features/example-feature.md"), first.wrote.join(", "));
+  const slice = readFileSync(join(repo, "zdd", "map", "features", "example-feature.md"), "utf8");
+  assert.ok(slice.startsWith("---\ntype: Feature\ntitle: Example feature\n"));
+  assert.match(slice, /resource: "supabase\/migrations"/, "resource is the first configured root");
+  assert.match(slice, /a table: `\.\.\/\.\.\/metadata\/table\/db--things\.json`/);
+  assert.match(slice, /an API route: `\.\.\/\.\.\/metadata\/route\/things--_id\.json`/);
+  assert.ok(!/\]\([^)]*\.json\)/.test(slice), "no resolvable-looking link: render must not be blocked before derive");
+  assert.match(slice, /CLAIMS a record by linking it/);
+  // The whole engine runs on the fresh bundle, and the slice is a feature section in the agent index.
+  engine(repo, ["derive"]);
+  engine(repo, ["render"]);
+  assert.match(readFileSync(join(repo, "zdd", "agent-index.md"), "utf8"), /^## Example feature/m);
+  assert.match(engine(repo, ["lint"]), /records unclaimed/, "the example claims nothing, so the lint lists the inventory");
+  // Repair: kept, never rewritten.
+  writeFileSync(join(repo, "zdd", "map", "features", "example-feature.md"), "edited by the adopter\n");
+  const second = applyJson(repo, "seed2", {});
+  assert.ok(!second.wrote.includes("zdd/map/features/example-feature.md"));
+  assert.equal(readFileSync(join(repo, "zdd", "map", "features", "example-feature.md"), "utf8"), "edited by the adopter\n");
+  // A features folder that already has a slice (renamed, or the adopter's own) gets no example.
+  const own = fastapiRepo("seed-own");
+  mkdirSync(join(own, "zdd", "map", "features"), { recursive: true });
+  writeFileSync(join(own, "zdd", "map", "features", "jobs.md"), "---\ntype: Feature\ntitle: Jobs\ndescription: x\nresource: api\ntags: [jobs]\n---\n");
+  const third = applyJson(own, "seed3", {});
+  assert.ok(!existsSync(join(own, "zdd", "map", "features", "example-feature.md")));
+  assert.ok(third.kept.some((k) => /features\/ \(a slice is present/.test(k)), third.kept.join(", "));
 });
 
 test("detect: several migration dirs get distinct namespace names; symlinked dirs are not followed", (t) => {
@@ -334,9 +390,11 @@ test("apply on an empty repo with the greenfield stack: extractors at the future
   bootstrap(repo, ["apply", `--answers=${answers}`]);
 
   const config = JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8"));
-  assert.deepEqual(config.extractors, ["fastapi", "supabase"]);
+  // "React web" is an extractor at its future routes file AND an Application concept (CAS-63).
+  assert.deepEqual(config.extractors, ["fastapi", "supabase", "react-router"]);
   assert.deepEqual(config.extractorOptions.fastapi, { roots: ["api"] });
   assert.deepEqual(config.extractorOptions.supabase, { migrationNamespaces: [{ name: "db", dir: "supabase/migrations" }] });
+  assert.deepEqual(config.extractorOptions["react-router"], { routesFile: "src/routes.tsx" });
   assert.equal(config.render.storeChanges, false, "no .git → render without git");
 
   const apps = readdirSync(join(repo, "zdd", "map", "apps")).sort();
