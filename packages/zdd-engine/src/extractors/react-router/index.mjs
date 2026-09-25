@@ -634,7 +634,8 @@ export function derive({ repoRoot, options }) {
       // never followed (CR-001) — silence here looked like "no such import".
       if (!reported.has(candidate)) diagnostics.push(`${candidate} is not a regular file inside the repo (a symlink, or under one) — not read`);
       reported.add(candidate);
-      return null;
+      // Keep looking: a linked `data.tsx` must not shadow a real `data.ts`
+      // (CR-029) — the link is skipped, the next spelling still counts.
     }
     return null;
   };
