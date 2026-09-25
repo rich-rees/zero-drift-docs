@@ -17,7 +17,7 @@
       "minItems": 1,
       "uniqueItems": true,
       "description": "Extractors to run, composed: one per convention in the stack (built-in: supabase, nextjs, fastapi, react-router, generic). Selected by NAME from the engine's registry or from localExtractorDir — never by path. Records from every extractor are merged and cross-extractor refs resolved after the merge.",
-      "examples": [["supabase", "nextjs"], ["supabase", "fastapi"], ["generic"]]
+      "examples": [["supabase", "nextjs"], ["supabase", "fastapi"], ["fastapi", "react-router"], ["generic"]]
     },
     "extractorOptions": {
       "type": "object",
