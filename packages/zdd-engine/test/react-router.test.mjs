@@ -280,11 +280,6 @@ test("CR-001: a symlinked routes file, element file or one-hop module is never r
     writeFileSync(join(root, "src", "data.js"), `export const x = api.get("/real-data");\n`);
     const again = derive({ repoRoot: root, options: {} });
     assert.deepEqual(again.records.find((r) => r.id === "surface:/a").refs, ["?route:/a", "?route:/real-data"]);
-    // CR-030: an explicitly suffixed specifier never probes a synthetic double extension past a linked exact hit.
-    writeFileSync(join(root, "src", "A.tsx"), `import { x } from "./data.tsx";\nexport const A = () => api.get("/a");\n`);
-    writeFileSync(join(root, "src", "data.tsx.ts"), `export const x = api.get("/double-ext-ghost");\n`);
-    const suffixed = derive({ repoRoot: root, options: {} });
-    assert.deepEqual(suffixed.records.find((r) => r.id === "surface:/a").refs, ["?route:/a"]);
     // A linked routes file is "not found".
     rmSync(join(root, "src", "routes.tsx"));
     symlinkSync(join(root, "outside.ts"), join(root, "src", "routes.tsx"));
@@ -292,6 +287,15 @@ test("CR-001: a symlinked routes file, element file or one-hop module is never r
     assert.deepEqual(linked.records, []);
     assert.match(linked.diagnostics[0], /not found — nothing to inventory/);
   } else t.diagnostic("symlink cases skipped on win32");
+  // CR-030: an explicitly suffixed specifier (any extension) is tried as spelled only — never a synthetic
+  // double extension. Every platform: no symlink involved.
+  writeFileSync(join(root, "src", "routes.tsx"), `import { B } from "./B";\nexport const routes = [{ path: "/b", element: <B /> }];\n`);
+  writeFileSync(join(root, "src", "B.tsx"), `import { x } from "./data.tsx";\nimport { y } from "./other.mjs";\nimport "./styles.css";\nexport const B = () => api.get("/b");\n`);
+  writeFileSync(join(root, "src", "data.tsx.ts"), `export const x = api.get("/double-ext-ghost");\n`);
+  writeFileSync(join(root, "src", "other.mjs.ts"), `export const y = api.get("/mjs-ghost");\n`);
+  writeFileSync(join(root, "src", "styles.css.tsx"), `export const z = api.get("/css-ghost");\n`);
+  const suffixed = derive({ repoRoot: root, options: {} });
+  assert.deepEqual(suffixed.records.find((r) => r.id === "surface:/b").refs, ["?route:/b"]);
   const big = derive({ repoRoot: root, options: { routesFile: "src/big.tsx" } });
   assert.deepEqual(big.records, []);
   assert.match(big.diagnostics[0], /is over 1024 KiB — not read/);
