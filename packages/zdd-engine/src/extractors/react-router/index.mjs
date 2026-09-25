@@ -619,7 +619,10 @@ export function derive({ repoRoot, options }) {
   const resolveImport = (fromRel, source) => {
     const base = source.startsWith("@/") ? posix.join(srcAliasRoot, source.slice(2)) : posix.normalize(posix.join(posix.dirname(fromRel), source));
     if (base.startsWith("../") || base === "..") return null;
-    for (const ext of ["", ...RESOLVE_EXTS]) {
+    // An explicitly suffixed specifier (`./data.tsx`) is tried as spelled and
+    // nowhere else — never `data.tsx.ts` (CR-030).
+    const spellings = /\.(tsx?|jsx?)$/.test(base) ? [""] : ["", ...RESOLVE_EXTS];
+    for (const ext of spellings) {
       const candidate = base + ext;
       if (!/\.(tsx?|jsx?)$/.test(candidate)) continue;
       let st = null;
