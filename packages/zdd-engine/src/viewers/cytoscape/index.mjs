@@ -72,10 +72,26 @@ function toBundle(graph, docs, changed, options, repoBase) {
   };
 }
 
+// Unclaimed records (decision 0009): metadata nodes of a claimable display
+// type with no inbound edge from a Feature node — the engine lint's rule,
+// computed here from the graph (which carries `layer`; the private bundle
+// does not, and a map concept may be typed `Table` — review CR-010) and
+// written into the header as text. Nothing is added to the bundle.
+const CLAIMABLE_TYPES = ["API Endpoint", "Table", "Database Function", "UI Surface"];
+function unclaimedHeader(graph) {
+  const features = new Set(graph.nodes.filter((n) => n.type === "Feature").map((n) => n.id));
+  const claimed = new Set(graph.edges.filter((e) => features.has(e.source)).map((e) => e.target));
+  const claimable = graph.nodes.filter((n) => n.layer === "metadata" && CLAIMABLE_TYPES.includes(n.type));
+  if (!claimable.length) return "";
+  const unclaimed = claimable.filter((n) => !claimed.has(n.id)).length;
+  return `    <span id="unclaimed" class="muted" title="Routes, tables, functions and surfaces no feature slice links — zdd-engine lint lists them">${unclaimed} of ${claimable.length} unclaimed</span>`;
+}
+
 export function render({ graph, docs, changed, options, bundleName, repoBase }) {
   const bundle = toBundle(graph, docs, changed, options, repoBase);
   const read = (...p) => readFileSync(join(HERE, ...p), "utf8");
   return read("viz.html")
+    .replace("__UNCLAIMED__", () => unclaimedHeader(graph))
     .replace("/*__CYTOSCAPE_JS__*/", () => read("vendor", "cytoscape.min.js"))
     .replace("/*__MARKED_JS__*/", () => read("vendor", "marked.min.js"))
     .replace("/*__SAFE_MARKED_JS__*/", () => read("safe-marked.js"))
