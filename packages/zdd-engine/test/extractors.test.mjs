@@ -289,7 +289,7 @@ test("unknown extractor name lists the known names: registry + local dir", () =>
   writeConfig(repo, { ...readConfig(repo), localExtractorDir: "zdd/extractors", extractors: ["rails"] });
   const err = runFail(repo, ["derive"]);
   assert.match(err, /Unknown extractor 'rails'/);
-  for (const name of ["supabase", "nextjs", "fastapi", "generic", "demo"]) assert.ok(err.includes(name), `${name} listed: ${err}`);
+  for (const name of ["supabase", "nextjs", "fastapi", "react-router", "generic", "demo"]) assert.ok(err.includes(name), `${name} listed: ${err}`);
   rmSync(repo, { recursive: true, force: true });
 });
 
@@ -297,6 +297,7 @@ test("determinism: derive + render on two fresh copies of every fixture, and twi
   const cases = [
     ["nextjs-supabase composed", FIXTURE, (r) => writeConfig(r, composedConfig(readConfig(r)))],
     ["fastapi", FIXTURE_FASTAPI, () => {}],
+    ["react-router", join(PKG, "test", "fixture-react-router"), () => {}],
     ["greenfield", FIXTURE_GREENFIELD, () => {}],
   ];
   for (const [label, fixture, prep] of cases) {
@@ -307,6 +308,8 @@ test("determinism: derive + render on two fresh copies of every fixture, and twi
     for (const r of [a, b]) {
       run(r, ["derive"]);
       run(r, ["render"]);
+      assert.match(run(r, ["derive", "--check"]), /in sync/, label);
+      assert.match(run(r, ["render", "--check"]), /in sync/, label);
     }
     assertTreesEqual(tree(join(a, "zdd")), tree(join(b, "zdd")), label);
     const once = tree(join(a, "zdd"));

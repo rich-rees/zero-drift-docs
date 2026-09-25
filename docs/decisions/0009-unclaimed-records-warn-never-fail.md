@@ -42,7 +42,9 @@ makes the gap visible; it does not close it.
 ## Consequences
 
 - Adopters see one new warning block and a `(claimed/total)` suffix on the
-  lint's success line; no CI changes colour on the pin bump.
+  lint's success line. The lint's exit code does not change on the pin
+  bump; the human index's bytes do (the header), so the bump PR regenerates
+  it like any engine bump.
 - Modules and buckets are not listed: they are plumbing a feature reaches
   through its routes and tables, and listing them would bury the checklist.
 - The `react-router` extractor (same release) attributes a data module's API

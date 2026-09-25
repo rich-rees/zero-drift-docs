@@ -267,7 +267,7 @@ saying no to a row is a visible choice, not a fork.
       solo-versus-team table lifted from an external review *(engine + plugin
       1.1.0, DIO-313; [decision 0008](docs/decisions/0008-stop-hook-prompts-the-curated-half.md))*.
 - [x] **1.2.0** — the `react-router` extractor (a route tree declared in
-      code: one surface per route, layout ancestors as guards, a screen's
+      code: one surface per leaf route, layout ancestors as guards, a screen's
       API calls resolved to the API extractor's routes); the unclaimed-records
       lint (every route, table, function and surface no feature slice links,
       a warning with the count in the human index header); bootstrap seeds
@@ -303,9 +303,12 @@ warning can say "behind".
   a minor.
 - **`1.2.0` — the map learns what it has not placed.** A new extractor
   (`react-router`, backward-compatible: a config line), a new *warning* tier
-  in `lint` (unclaimed records — never a failure, so no adopter's CI changes
-  colour), a count in the human index header, and one more seeded file at
-  bootstrap. No config-schema or metadata-contract change, so a minor.
+  in `lint` (unclaimed records — exit 0, never a failure), a count in the
+  human index header, and one more seeded file at fresh bootstrap. The
+  header changes the human index's bytes, so a pin bump regenerates and
+  commits it in the same PR as every engine bump does (`render --check` is
+  red until then — the drift check doing its job, not the lint). Additive
+  config-schema fields only, no metadata-contract change, so a minor.
 
 ## Contributing
 
