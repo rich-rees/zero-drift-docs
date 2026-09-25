@@ -144,9 +144,10 @@ export const routes: RouteObject[] = [
   { path: "/stmt", loader: () => { if (x) /[}]/.test(y); return 1; }, element: <Stmt /> },
   { path: "/await", loader: async () => { for await (const c of s) /[}]/.test(c); }, element: <Aw /> },
   { path: "/member", loader: () => client.if(x) / 2 + /[}]/.test(y), element: <Mem /> },
+  { path: "/member2", loader: () => client. if(x) / 2 + client./*c*/if(y) / 3 + /[}]/.test(z), element: <Mem2 /> },
 ];`;
   const d = [];
-  assert.deepEqual(flat(arr, d).map((r) => r.slice(0, 2)), [["/real", "Real"], ["/tpl", "Tpl"], ["/stmt", "Stmt"], ["/await", "Aw"], ["/member", "Mem"]]);
+  assert.deepEqual(flat(arr, d).map((r) => r.slice(0, 2)), [["/real", "Real"], ["/tpl", "Tpl"], ["/stmt", "Stmt"], ["/await", "Aw"], ["/member", "Mem"], ["/member2", "Mem2"]]);
   assert.deepEqual(d, []);
   const jsx = `
 // <Route path="/old" element={<Old />} />

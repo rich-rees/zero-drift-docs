@@ -95,8 +95,11 @@ export function lex(text) {
         while (w >= 0 && /\s/.test(mask[w])) w--;
         let ws = w;
         while (ws >= 0 && /[A-Za-z_$\d]/.test(mask[ws])) ws--;
-        // `client.if(x)` is a member call, not a keyword (round 3, CR-027).
-        return { word: mask[ws] === "." ? "" : text.slice(ws + 1, w + 1), before: ws };
+        // `client.if(x)` — or `client. if(x)`, `client./*c*/if(x)` (the mask
+        // has blanked the comment) — is a member call, not a keyword (CR-027).
+        let dot = ws;
+        while (dot >= 0 && /\s/.test(mask[dot])) dot--;
+        return { word: mask[dot] === "." ? "" : text.slice(ws + 1, w + 1), before: ws };
       };
       const { word, before } = wordBefore(j - 1);
       if (["if", "while", "for", "with"].includes(word)) return true;
