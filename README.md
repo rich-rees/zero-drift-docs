@@ -4,7 +4,7 @@ A documentation architecture for repos built by **human + agent pairs**. ZDD kee
 seven documentation artifacts *at most one unit of work behind the code* — and, with
 CI, makes drift in the machine-generated ones **un-mergeable**.
 
-> **Status: 1.1.0.** The plugin installs in Claude Code
+> **Status: 1.2.0.** The plugin installs in Claude Code
 > and in Codex from this one repo; `bootstrap` detects your stack (or grills
 > for it on a greenfield repo), proposes extractors with evidence, and *writes*
 > the opt-ins; the engine (`packages/zdd-engine`, npm `@rich-rees/zdd-engine`)
@@ -198,7 +198,7 @@ plugins/zdd/
   test/                             # seam 2: the runbook and hooks observed as files + processes
 packages/zdd-engine/                # deriver / renderer / checks + extractors + viewers
   bin/zdd-engine.mjs                # the CLI (derive / render / lint / freshness)
-  src/extractors/{supabase,nextjs,fastapi,generic}/   # input end: one per convention
+  src/extractors/{supabase,nextjs,fastapi,react-router,generic}/   # input end: one per convention
   src/viewers/{cytoscape,minimal}/  # output end: human-index viewers over graph.json
   test/fixture*/                    # the miniature proving repos
 LICENSE   CONTRIBUTING.md   README.md
@@ -266,8 +266,16 @@ saying no to a row is a visible choice, not a fork.
       `resource:`; blessings defined, the "knowing tool" framing and the
       solo-versus-team table lifted from an external review *(engine + plugin
       1.1.0, DIO-313; [decision 0008](docs/decisions/0008-stop-hook-prompts-the-curated-half.md))*.
-- [ ] Next: `react-router` and `expo-router` extractors on their first real
-      adoption; a second viewer.
+- [x] **1.2.0** — the `react-router` extractor (a route tree declared in
+      code: one surface per route, layout ancestors as guards, a screen's
+      API calls resolved to the API extractor's routes); the unclaimed-records
+      lint (every route, table, function and surface no feature slice links,
+      a warning with the count in the human index header); bootstrap seeds
+      one example feature slice and `update` names the slice as the unit of
+      work's checklist *(engine + plugin 1.2.0, CAS-63;
+      [decision 0009](docs/decisions/0009-unclaimed-records-warn-never-fail.md))*.
+- [ ] Next: an `expo-router` extractor on its first real adoption; a second
+      viewer.
 
 ## Versioning
 
@@ -293,6 +301,11 @@ warning can say "behind".
   the pin moves (the lint doing its job; `--upgrade` says so and the fix is to
   re-bless or drop the line). No config-schema or metadata-contract change, so
   a minor.
+- **`1.2.0` — the map learns what it has not placed.** A new extractor
+  (`react-router`, backward-compatible: a config line), a new *warning* tier
+  in `lint` (unclaimed records — never a failure, so no adopter's CI changes
+  colour), a count in the human index header, and one more seeded file at
+  bootstrap. No config-schema or metadata-contract change, so a minor.
 
 ## Contributing
 
