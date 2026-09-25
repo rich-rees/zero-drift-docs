@@ -90,11 +90,17 @@ export function lex(text) {
         if (mask[j] === ")") depth++;
         else if (mask[j] === "(" && --depth === 0) break;
       }
-      let w = j - 1;
-      while (w >= 0 && /\s/.test(mask[w])) w--;
-      let ws = w;
-      while (ws >= 0 && /[A-Za-z_$\d]/.test(mask[ws])) ws--;
-      return ["if", "while", "for", "with"].includes(text.slice(ws + 1, w + 1));
+      const wordBefore = (end) => {
+        let w = end;
+        while (w >= 0 && /\s/.test(mask[w])) w--;
+        let ws = w;
+        while (ws >= 0 && /[A-Za-z_$\d]/.test(mask[ws])) ws--;
+        // `client.if(x)` is a member call, not a keyword (round 3, CR-027).
+        return { word: mask[ws] === "." ? "" : text.slice(ws + 1, w + 1), before: ws };
+      };
+      const { word, before } = wordBefore(j - 1);
+      if (["if", "while", "for", "with"].includes(word)) return true;
+      return word === "await" && wordBefore(before).word === "for"; // `for await (...) /re/`
     }
     if (/[A-Za-z_$\d\]]/.test(ch)) {
       let s = k;

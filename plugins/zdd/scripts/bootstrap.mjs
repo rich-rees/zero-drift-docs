@@ -306,7 +306,7 @@ export function detect(root) {
 
   const apps = [];
   if (deps.expo || deps["expo-router"] || nestedDeps.has("expo") || nestedDeps.has("expo-router")) apps.push({ name: "Mobile (Expo)", evidence: "`expo` in package.json", extractor: "expo-router (not yet shipped — the map carries the surfaces)" });
-  if (routesFiles.length || reactRouterDep || skippedRoutesFiles.length) apps.push({ name: "Web (React)", evidence: routesFiles.length ? `route tree in \`${routesFiles[0]}\`` : "`react-router` in package.json", extractor: "react-router (proposed above)" });
+  if (routesFiles.length || reactRouterDep || skippedRoutesFiles.length) apps.push({ name: "Web (React)", evidence: routesFiles.length ? `route tree in \`${routesFiles[0]}\`` : reactRouterDep ? "`react-router` in package.json" : `route tree at a refused path (\`${skippedRoutesFiles[0]}\`)`, extractor: "react-router (proposed above)" });
 
   const mode = sourceFiles === 0 && !pkg ? "greenfield" : "existing";
   if (mode === "existing" && !proposals.length) {
