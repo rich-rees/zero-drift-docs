@@ -79,6 +79,10 @@ export const OWNER_MARK = "Managed by Zero-Drift Docs (zdd)";
 const SKIP_DIRS = new Set(["node_modules", ".git", ".next", "dist", "build", "coverage", ".venv", "venv", "__pycache__", ".expo", "zdd"]);
 const MAX_NAME = 120;
 const MAX_SCAN_BYTES = 1024 * 1024; // detection never reads a file larger than this (CR-091)
+// The react-router probe reads JS/TS source to find a route tree; this is the
+// most it reads in total (CAS-63 review CR-008). Past it, detection stops
+// reading and says so — a proposal, not an inventory.
+const MAX_PROBE_BYTES = 64 * 1024 * 1024;
 
 // Mirror of the engine's LEGACY_ADAPTERS (src/lib/config.mjs): the one legacy
 // adapter and how its options split. The engine expands it at derive time;
@@ -176,6 +180,9 @@ export function detect(root) {
   let middlewarePath = null;
   const routesFiles = []; // react-router: files declaring a route tree in code
   const packageJsons = []; // nested package.json files (workspaces)
+  let probeBytes = 0;
+  let probeTruncated = false;
+  const skippedRoutesFiles = []; // route trees at paths the engine would refuse
   let sourceFiles = 0;
 
   walk(root, (abs, name, rel) => {
@@ -211,14 +218,34 @@ export function detect(root) {
     if (/^middleware\.(ts|js)$/.test(name) && rel.split("/").length <= 2) middlewarePath = rel;
     // A React Router route tree declared in code: the array form or the JSX
     // form, in a .tsx/.jsx/.ts/.js file that imports react-router.
-    if (/\.(tsx|jsx|ts|js)$/.test(name) && !/\.(test|spec)\.[tj]sx?$/.test(name)) {
+    if (/\.(tsx|jsx|ts|js)$/.test(name) && !/\.(test|spec|stories|story)\.[tj]sx?$/.test(name) && !/\.d\.ts$/.test(name)) {
+      let st;
+      try {
+        st = lstatSync(abs);
+      } catch {
+        return;
+      }
+      if (probeBytes + st.size > MAX_PROBE_BYTES) {
+        probeTruncated = true;
+        return;
+      }
+      probeBytes += st.size;
       let text = "";
       try {
         text = readFileSync(abs, "utf8");
       } catch {
         return;
       }
-      if (/from\s*['"]react-router(-dom)?['"]/.test(text) && /\bcreate(?:Browser|Hash|Memory)Router\s*\(|:\s*RouteObject\[\]\s*=|<Route\b/.test(text)) routesFiles.push(rel);
+      // A detected path must be one the engine will accept (CR-009): the
+      // engine's path rule refuses whitespace and control characters.
+      if (/from\s*['"]react-router(-dom)?['"]/.test(text) && /\bcreate(?:Browser|Hash|Memory)Router\s*\(|:\s*RouteObject\[\]\s*=|<Route\b/.test(text)) {
+        try {
+          enginePath(rel, "routesFile");
+          routesFiles.push(rel);
+        } catch {
+          skippedRoutesFiles.push(rel);
+        }
+      }
     }
   });
   routesFiles.sort();
@@ -227,10 +254,10 @@ export function detect(root) {
   const deps = { ...(pkg?.dependencies ?? {}), ...(pkg?.devDependencies ?? {}) };
   // Workspace packages' dependencies too (`apps/web/package.json`) — a
   // monorepo's web app declares react-router in its own manifest.
-  const nestedDeps = new Set();
+  const nestedDeps = new Map(); // dep name -> first workspace dir declaring it (sorted)
   for (const rel of packageJsons.sort()) {
     const sub = readPackageJson(join(root, dirname(rel)));
-    for (const d of Object.keys({ ...(sub?.dependencies ?? {}), ...(sub?.devDependencies ?? {}) })) nestedDeps.add(d);
+    for (const d of Object.keys({ ...(sub?.dependencies ?? {}), ...(sub?.devDependencies ?? {}) })) if (!nestedDeps.has(d)) nestedDeps.set(d, posixify(dirname(rel)));
   }
   const proposals = [];
 
@@ -263,12 +290,18 @@ export function detect(root) {
 
   // react-router: the routes file is the evidence; a bare dependency with no
   // tree yet is proposed at the convention's default path (like `next`).
-  const reactRouterDep = ["react-router", "react-router-dom"].some((d) => deps[d] || nestedDeps.has(d));
+  const rrDeps = ["react-router", "react-router-dom"];
+  const reactRouterDep = rrDeps.some((d) => deps[d] || nestedDeps.has(d));
+  // A dependency-only proposal sits at the convention's default path INSIDE
+  // the workspace package that declares it (CR-021), else the root.
+  const rrDir = rrDeps.some((d) => deps[d]) ? "" : (rrDeps.map((d) => nestedDeps.get(d)).find(Boolean) ?? "");
   if (routesFiles.length || reactRouterDep) {
     const ev = [];
     if (routesFiles.length) ev.push(`route tree declared in \`${routesFiles[0]}\`${routesFiles.length > 1 ? ` (also: ${routesFiles.slice(1).map((f) => `\`${f}\``).join(", ")} — one routesFile per extractor; confirm which)` : ""}`);
-    if (reactRouterDep) ev.push("`react-router` in package.json dependencies");
-    proposals.push({ name: "react-router", evidence: ev, options: { routesFile: routesFiles[0] ?? "src/routes.tsx" } });
+    if (reactRouterDep) ev.push(`\`react-router\` in ${rrDir ? `\`${rrDir}/package.json\`` : "package.json"} dependencies`);
+    if (skippedRoutesFiles.length) ev.push(`route tree at ${skippedRoutesFiles.map((f) => `\`${f}\``).join(", ")} skipped — the path has whitespace or control characters the engine refuses; rename it`);
+    if (probeTruncated) ev.push(`detection stopped reading source after ${MAX_PROBE_BYTES / (1024 * 1024)} MiB — confirm the routes file by hand`);
+    proposals.push({ name: "react-router", evidence: ev, options: { routesFile: routesFiles[0] ?? posixify(join(rrDir, "src/routes.tsx")) } });
   }
 
   const apps = [];
@@ -292,9 +325,12 @@ const STACK_RULES = [
   { match: /supabase|postgres/i, extractor: "supabase", options: (path) => ({ migrationNamespaces: [{ name: "db", dir: path || "supabase/migrations" }] }) },
   { match: /next(\.js)?/i, extractor: "nextjs", options: (path) => ({ appDir: path || "src/app", apiPrefix: "/api" }) },
   { match: /expo|react.?native/i, app: "Mobile (Expo)" },
-  // A React web app gets the react-router extractor at its future routes file
-  // AND its Application concept: the extractor reads the tree once it exists.
-  { match: /react|web|vite/i, extractor: "react-router", options: (path) => ({ routesFile: path || "src/routes.tsx" }), app: "Web (React)" },
+  // Only an EXPLICIT React Router entry selects the extractor (at its future
+  // routes file) — "React web", "Vite", "web" could be Vue, Svelte or another
+  // router (CR-014); those stay an Application concept until the router is
+  // named. Both get the Application.
+  { match: /react.?router/i, extractor: "react-router", options: (path) => ({ routesFile: path || "src/routes.tsx" }), app: "Web (React)" },
+  { match: /react|web|vite/i, app: "Web (React)" },
 ];
 
 function fromStack(stack = []) {
@@ -738,10 +774,14 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
   // .gitkeep: it shows the shape (a feature CLAIMS records by linking them)
   // with example lines drawn from the configured extractors. Created only
   // when the folder holds no slice yet; the adopter renames or deletes it.
-  const featuresDir = ledger.abs(`${paths.mapDir}/features`);
-  const hasSlice = readdirSync(featuresDir).some((f) => f.endsWith(".md"));
-  if (!hasSlice) ledger.create(`${paths.mapDir}/features/example-feature.md`, exampleFeature(config));
-  else ledger.kept.push(`${paths.mapDir}/features/ (a slice is present — example skipped)`);
+  // Fresh adoption only (CR-013): a repair `apply` (the documented way to
+  // answer a new opt-in after --upgrade) never writes into an adopter's map.
+  if (!existingConfig) {
+    const featuresDir = ledger.abs(`${paths.mapDir}/features`);
+    const hasSlice = readdirSync(featuresDir).some((f) => /\.md$/i.test(f));
+    if (!hasSlice) ledger.create(`${paths.mapDir}/features/example-feature.md`, exampleFeature(config, paths));
+    else ledger.kept.push(`${paths.mapDir}/features/ (a slice is present — example skipped)`);
+  }
   const adrDir = ledger.abs(paths.adrDir);
   mkdirSync(adrDir, { recursive: true });
   const adrFiles = readdirSync(adrDir).filter((f) => /^\d{4}-.*\.md$/.test(f));
@@ -787,10 +827,12 @@ const EXAMPLE_TARGETS = {
   fastapi: ["an API route: `../../metadata/route/things--_id.json`"],
   "react-router": ["a screen: `../../metadata/surface/things--_id.json`"],
 };
-export function exampleFeature(config) {
+export function exampleFeature(config, paths) {
+  // Relative to the slice's own folder, whatever the configured layout (CR-022).
+  const toMeta = posixify(relative(join(paths.mapDir, "features"), paths.metadataDir)) || ".";
   const targets = [];
-  for (const name of config.extractors ?? []) for (const t of EXAMPLE_TARGETS[name] ?? []) if (!targets.includes(t)) targets.push(t);
-  if (!targets.length) targets.push("a record: `../../metadata/<kind>/<file>.json`");
+  for (const name of config.extractors ?? []) for (const t of EXAMPLE_TARGETS[name] ?? []) if (!targets.includes(t)) targets.push(t.replaceAll("../../metadata", toMeta));
+  if (!targets.length) targets.push(`a record: \`${toMeta}/<kind>/<file>.json\``);
   const roots = [];
   for (const name of config.extractors ?? []) {
     const o = config.extractorOptions?.[name] ?? {};
