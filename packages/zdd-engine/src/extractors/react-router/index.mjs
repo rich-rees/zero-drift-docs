@@ -619,26 +619,32 @@ export function derive({ repoRoot, options }) {
   const resolveImport = (fromRel, source) => {
     const base = source.startsWith("@/") ? posix.join(srcAliasRoot, source.slice(2)) : posix.normalize(posix.join(posix.dirname(fromRel), source));
     if (base.startsWith("../") || base === "..") return null;
-    // An explicitly suffixed specifier (`./data.tsx`) is tried as spelled and
-    // nowhere else — never `data.tsx.ts` (CR-030).
-    const spellings = /\.[^./]+$/.test(base.split("/").pop()) ? [""] : ["", ...RESOLVE_EXTS];
-    for (const ext of spellings) {
+    // Resolution as bundlers do it: a specifier that exists exactly as
+    // spelled is FINAL — a module if it has a code extension, else not one
+    // the extractor reads (`./styles.css`), and never probed further
+    // (`data.tsx.ts` — CR-030); a spelling that does not exist is probed with
+    // the code extensions, which is how `./Widget.client` reaches
+    // `Widget.client.tsx` (CR-032). A linked candidate is named, never
+    // followed (CR-001); linked as spelled it is final, linked as a probe it
+    // is skipped so a linked `data.tsx` cannot shadow a real `data.js` (CR-029).
+    for (const ext of ["", ...RESOLVE_EXTS]) {
       const candidate = base + ext;
-      if (!/\.(tsx?|jsx?)$/.test(candidate)) continue;
       let st = null;
       try {
         st = lstatSync(join(realRoot, candidate));
       } catch {
         continue; // nothing at this spelling
       }
-      if (st.isDirectory()) continue;
+      if (st.isDirectory()) continue; // `./admin` -> admin/index.ts comes later in the list
+      const exact = ext === "";
+      if (!/\.(tsx?|jsx?)$/.test(candidate)) {
+        if (exact) return null;
+        continue;
+      }
       if (regularFileInside(realRoot, join(realRoot, candidate))) return candidate;
-      // Something is there but it is a link (or sits under one): named,
-      // never followed (CR-001) — silence here looked like "no such import".
       if (!reported.has(candidate)) diagnostics.push(`${candidate} is not a regular file inside the repo (a symlink, or under one) — not read`);
       reported.add(candidate);
-      // Keep looking: a linked `data.tsx` must not shadow a real `data.ts`
-      // (CR-029) — the link is skipped, the next spelling still counts.
+      if (exact) return null;
     }
     return null;
   };

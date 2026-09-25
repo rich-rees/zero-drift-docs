@@ -292,13 +292,18 @@ test("CR-001: a symlinked routes file, element file or one-hop module is never r
   // (a link on POSIX by now) is removed first, never written through (CR-031).
   rmSync(join(root, "src", "routes.tsx"), { force: true });
   writeFileSync(join(root, "src", "routes.tsx"), `import { B } from "./B";\nexport const routes = [{ path: "/b", element: <B /> }];\n`);
-  writeFileSync(join(root, "src", "B.tsx"), `import { x } from "./data.tsx";\nimport { y } from "./other.mjs";\nimport "./styles.css";\nimport { w } from "./w.custom-ext";\nexport const B = () => api.get("/b");\n`);
+  // A specifier that exists exactly as spelled is final (`./data.tsx` — even when that exact file is a link,
+  // `./other.mjs`, `./styles.css`: not modules the extractor reads); one that does not is probed with the
+  // code extensions, which is how `./Widget.client` reaches `Widget.client.tsx` (CR-032).
+  writeFileSync(join(root, "src", "B.tsx"), `import { x } from "./data.tsx";\nimport { y } from "./other.mjs";\nimport "./styles.css";\nimport { w } from "./Widget.client";\nexport const B = () => api.get("/b");\n`);
   writeFileSync(join(root, "src", "data.tsx.ts"), `export const x = api.get("/double-ext-ghost");\n`);
+  writeFileSync(join(root, "src", "other.mjs"), `export const y = api.get("/mjs-not-a-module");\n`);
   writeFileSync(join(root, "src", "other.mjs.ts"), `export const y = api.get("/mjs-ghost");\n`);
+  writeFileSync(join(root, "src", "styles.css"), `.b {}\n`);
   writeFileSync(join(root, "src", "styles.css.tsx"), `export const z = api.get("/css-ghost");\n`);
-  writeFileSync(join(root, "src", "w.custom-ext.ts"), `export const w = api.get("/custom-ext-ghost");\n`);
+  writeFileSync(join(root, "src", "Widget.client.tsx"), `export const w = api.get("/widget");\n`);
   const suffixed = derive({ repoRoot: root, options: {} });
-  assert.deepEqual(suffixed.records.find((r) => r.id === "surface:/b").refs, ["?route:/b"]);
+  assert.deepEqual(suffixed.records.find((r) => r.id === "surface:/b").refs, ["?route:/b", "?route:/widget"]);
   const big = derive({ repoRoot: root, options: { routesFile: "src/big.tsx" } });
   assert.deepEqual(big.records, []);
   assert.match(big.diagnostics[0], /is over 1024 KiB — not read/);
