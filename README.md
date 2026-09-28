@@ -307,10 +307,16 @@ saying no to a row is a visible choice, not a fork.
       proposal points at the skill. Route refs now err toward "might touch":
       a call that fits several routes equally refs all of them, and a React
       Router screen is credited only with what its imports reach, not a
-      whole data module (both found in Cascade) *(engine + plugin 1.3.0,
-      CAS-65; decisions
+      whole data module. Opt-in strict claims (`claims.strict`: every
+      record owned by exactly one feature slice, with an allow-list for
+      plumbing). A renamed React Router routes file now fails `derive`
+      when there is still code beside it, where it used to delete every
+      screen record. All of these were found in Cascade
+      *(engine + plugin 1.3.0, CAS-65; decisions
       [0010](docs/decisions/0010-local-extractors-first-tier-engine-hands-them-io.md),
-      [0011](docs/decisions/0011-refs-err-toward-might-touch.md))*.
+      [0011](docs/decisions/0011-refs-err-toward-might-touch.md),
+      [0012](docs/decisions/0012-strict-claims-are-opt-in.md),
+      [0013](docs/decisions/0013-a-missing-routes-file-beside-code-fails-derive.md))*.
 - [ ] Next: an `expo-router` extractor on its first real adoption; a second
       viewer.
 
@@ -355,8 +361,12 @@ warning can say "behind".
   ([decision 0011](docs/decisions/0011-refs-err-toward-might-touch.md)).
   Ambiguous route calls gain refs, and React Router screens lose the refs
   of data-module functions they never import. The pin bump regenerates
-  them, like every engine bump. No config-schema or metadata-contract
-  change, so a minor.
+  them, like every engine bump. `claims` is an additive config key, off by
+  default ([decision 0012](docs/decisions/0012-strict-claims-are-opt-in.md)).
+  One case newly fails: a React Router `routesFile` that no longer exists
+  beside a folder that does. That repo was already deriving the wrong
+  inventory. No breaking config-schema or metadata-contract change, so a
+  minor.
 
 ## Contributing
 
