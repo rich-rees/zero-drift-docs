@@ -174,9 +174,10 @@ nothing lands unannounced.
 
 ## Upgrade
 
-`bootstrap --upgrade` is the **only** writer into an adopter's repo after
-adoption. Updating the plugin never touches the repo by itself; this does, and
-narrates every file:
+`bootstrap --upgrade` is the only writer of the plugin-owned files after
+adoption (the other writer, the `extractor` skill's scaffold, writes only an
+extractor the adopter asked for). Updating the plugin never touches the repo
+by itself; this does, and narrates every file:
 
 ```
 node "$PLUGIN/scripts/bootstrap.mjs" upgrade

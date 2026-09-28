@@ -35,7 +35,8 @@ npx @rich-rees/zdd-engine freshness [--base <ref>]
   route, table, function and surface no feature slice links — and any record
   two slices claim, as warnings (a repo adopting ZDD starts with everything
   unclaimed); the unclaimed count sits in the human index header. With
-  `claims.strict` both become failures, less an allow-list of plumbing.
+  `claims.strict` both become failures; `claims.allowUnclaimed` exempts
+  named records from the unclaimed check only, never from a double claim.
 - **freshness** — advisory (always exits 0): semantic-map concepts whose code a
   diff touches without updating the concept — the `resource:` path, and the
   source behind every metadata record the concept links to. Markdown on

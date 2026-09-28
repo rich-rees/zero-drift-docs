@@ -51,7 +51,8 @@ Done when all three hold.
 ## Step 1 — read a sample
 
 Find the files that declare the thing — a glob and a grep, then read three to
-five of them whole. Note the **declaration shape** (the syntax that makes a
+five of them (whole when under about 200 KB; the first and last few hundred
+lines of a larger one). Note the **declaration shape** (the syntax that makes a
 route a route or a table a table), where values sit (a quoted template, an
 identifier), how nesting and prefixes combine, and what comments and strings
 nearby could impersonate a declaration.
@@ -96,9 +97,12 @@ the sample. Wait for each answer.
 
 6. **Options** — `roots` (folders to walk) and `extensions` (suffixes
    read), plus `syntax` when the extensions do not settle it: `c-like` (C#,
-   Java, JS/TS, Go, Kotlin…), `sql`, `python`. Syntax picks the comment and
-   string mask. Name any other option the convention needs; you add those by
-   hand in Step 5.
+   Java, JS/TS, Go, Kotlin…), `sql` (standard SQL and Postgres), `mysql`
+   (MySQL and MariaDB: `#` comments, backslash escapes), `python`. Syntax
+   picks the comment and string mask. **For `.sql` files always ask which
+   dialect**: `.sql` defaults to `sql`, where `#` is an operator, and the
+   wrong mask silently hides or invents records. Name any other option the
+   convention needs; you add those by hand in Step 5.
 
 Then the extractor's **name**: lowercase and hyphens (`aspnet-routes`,
 `mysql-migrations`), never a built-in's.
@@ -135,7 +139,11 @@ like the roots. It must hold:
 - a declaration **commented out**, and one **inside a string** — neither may
   become a record;
 - the convention's awkward corner from Step 1 (a prefix, nesting, an
-  include).
+  include);
+- if the convention nests or follows includes, a **cyclic or very deep**
+  case, and replace the scaffold's `recursion ceiling` todo test with one
+  asserting derive completes with a diagnostic (delete the todo if the
+  convention never recurses).
 
 Fill `EXPECTED_IDS` in `<name>.test.mjs` by reading the fixture, before any
 logic exists. Run `node --test <test path>`: the expected-records test fails
@@ -147,8 +155,11 @@ Done when that test is red on the ids and not on "fill in EXPECTED_IDS".
 
 Write `fromSource()` in `index.mjs` (and any options beyond `roots` and
 `extensions`, documented in the header) against the checklist below until
-`node --test <test path>` is **green** — every test passes; the symlink test
-is skipped on Windows and runs in Linux CI.
+`node --test <test path>` is **green** — every test passes; the file-symlink
+test is skipped on Windows and runs in Linux CI. Two of the scaffold's tests
+guard the checklist below: one fails if the module's own files import `fs`,
+`child_process` or a network module, or read `process.env`; the other derives
+under a second timezone, locale and environment and requires the same bytes.
 
 ### Hardening checklist
 
