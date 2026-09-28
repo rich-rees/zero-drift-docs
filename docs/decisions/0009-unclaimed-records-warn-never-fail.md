@@ -1,6 +1,6 @@
 # The unclaimed-records lint warns, never fails
 
-**Date:** 2026-09-25 · **Status:** accepted; the consequence that the `react-router` extractor attributes a data module whole is superseded by [0011](0011-refs-err-toward-might-touch.md) (a screen is credited with what its imports reach) · **Origin:** 1.2.0 — the second adopter's human index showed empty UI-surface and Feature rows although the web app had sign-in, a shell, administration, Activity and the outbound queues; every "update ZDD" since adoption had put its web knowledge into the app node's blessings, and the features folder held a `.gitkeep`.
+**Date:** 2026-09-25 · **Status:** accepted; the consequence that the `react-router` extractor attributes a data module whole is superseded by [0011](0011-refs-err-toward-might-touch.md) (a screen is credited with what its imports reach); "nothing fails on an unclaimed record" holds only while `claims.strict` is off, superseded in part by [0012](0012-strict-claims-are-opt-in.md) · **Origin:** 1.2.0 — the second adopter's human index showed empty UI-surface and Feature rows although the web app had sign-in, a shell, administration, Activity and the outbound queues; every "update ZDD" since adoption had put its web knowledge into the app node's blessings, and the features folder held a `.gitkeep`.
 
 `zdd-engine lint` lists every route, table, function and surface that no
 feature slice links — "unclaimed" — as a **warning on stderr with exit 0**,

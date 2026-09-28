@@ -88,7 +88,11 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
   that references something"). See `src/lib/resolve-refs.mjs`.
 - **Missing source is "nothing to inventory."** A configured root that does not
   exist yields no records and a diagnostic, never an error — greenfield repos
-  adopt ZDD before any code exists.
+  adopt ZDD before any code exists. The one exception is a single named file
+  a whole record kind hangs on, missing while code already sits beside it
+  (`react-router`'s `routesFile`, [decision 0013](docs/decisions/0013-a-missing-routes-file-beside-code-fails-derive.md)).
+  That fails, because "nothing to inventory" there would write every record
+  away.
 - **Determinism is the contract:** same source bytes in ⇒ byte-identical metadata
   out. No LLM, no timestamps, no environment-dependent values — the blocking CI
   check depends on this. Anything needing judgment is *not* metadata; it belongs in
