@@ -12,7 +12,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, cpSync, sy
 import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { derive, parseRouteTree, joinRoutePath, scanApiCalls, normalizeApiPath, importMap, lex, MAX_SOURCE_BYTES } from "../src/extractors/react-router/index.mjs";
+import { derive, parseRouteTree, joinRoutePath, scanApiCalls, normalizeApiPath, importMap, lex, topLevel, narrowModule, MAX_SOURCE_BYTES } from "../src/extractors/react-router/index.mjs";
 import { derive as fastapi } from "../src/extractors/fastapi/index.mjs";
 import { resolveRefs } from "../src/lib/resolve-refs.mjs";
 import { unclaimedRecords, unclaimedInGraph } from "../src/lib/claims.mjs";
@@ -64,16 +64,129 @@ test("fixture: one surface per leaf route; index routes take the parent path; la
   assert.equal(by("surface:/*").filename, "___splat.json");
 });
 
-test("refs: a screen's own API calls and its one-hop data module's resolve to the fastapi routes; the module's calls are attributed whole; a guard's calls belong to no surface", () => {
+test("refs: a screen's own API calls and those of the names it imports resolve to the fastapi routes; a guard's calls belong to no surface", () => {
   const web = derive({ repoRoot: FIXTURE, options: { routesFile: ROUTES } });
   assert.deepEqual(web.records.find((r) => r.id === "surface:/activity").refs, ["?route:/activity"], "unresolved before the merge");
   const api = fastapi({ repoRoot: FIXTURE, options: { roots: ["apps/api"] } });
   const { records } = resolveRefs([...api.records, ...web.records]);
   const by = (id) => records.find((r) => r.id === id);
   assert.deepEqual(by("surface:/activity").refs, ["route:/activity"]);
-  assert.deepEqual(by("surface:/admin/users").refs, ["route:/tenants", "route:/users", "route:/users/invite"]);
-  assert.deepEqual(by("surface:/admin/tenants/:tenantId").refs, ["route:/tenants", "route:/users", "route:/users/invite"]);
+  // CAS-65: narrowed to the imported names — UsersPage imports useUsers and
+  // useInvite, TenantsPage only useTenants, from the same data module.
+  assert.deepEqual(by("surface:/admin/users").refs, ["route:/users", "route:/users/invite"]);
+  assert.deepEqual(by("surface:/admin/tenants/:tenantId").refs, ["route:/tenants"]);
   assert.ok(!records.some((r) => r.refs.includes("route:/me")));
+});
+
+test("CAS-65: the statement model — an indented declaration still starts a statement; a continuation line does not; a template body line never does", () => {
+  const text = [
+    'import { a } from "./a";',
+    "function client() {",
+    '  return api.get("/c");',
+    "}",
+    "  function indented() {", // at depth 0 despite the indent
+    '    return client().get("/i");',
+    "  }",
+    "export const chained = useApi()",
+    '  .post("/chain")', // a continuation, not a statement
+    "  .then(x);",
+    "const tpl = `",
+    "function notCode() {}", // a template body line
+    "`;",
+    'api.get("/top");',
+  ].join("\n");
+  const m = topLevel(text);
+  const kinds = m.statements.map((s) => [s.kind, text.slice(s.start, s.end).split("\n")[0]]);
+  assert.deepEqual(kinds, [
+    ["skip", 'import { a } from "./a";'],
+    ["decl", "function client() {"],
+    ["decl", "  function indented() {"],
+    ["decl", "export const chained = useApi()"],
+    ["decl", "const tpl = `"],
+    ["code", 'api.get("/top");'],
+  ]);
+  assert.deepEqual([...m.decls.keys()].sort(), ["chained", "client", "indented", "tpl"]);
+  assert.deepEqual([...scanApiCalls(narrowModule(m, new Set(["chained"])).text)].sort(), ["/chain", "/top"]);
+});
+
+test("CAS-65: named imports narrow a data module to the bodies they reach — helpers followed, top-level calls kept for every importer; anything unnarrowable falls back to the whole module with a diagnostic", () => {
+  const root = scratch({
+    "src/routes.tsx": [
+      'import { ActivityPage } from "./pages/ActivityPage";',
+      'import { TenantsPage } from "./pages/TenantsPage";',
+      'import { UsersPage } from "./pages/UsersPage";',
+      'import { DefaultPage } from "./pages/DefaultPage";',
+      'import { StarPage } from "./pages/StarPage";',
+      'import { GhostPage } from "./pages/GhostPage";',
+      'import { BarrelPage } from "./pages/BarrelPage";',
+      "export const routes = [",
+      '  { path: "/activity", element: <ActivityPage /> },',
+      '  { path: "/tenants", element: <TenantsPage /> },',
+      '  { path: "/users", element: <UsersPage /> },',
+      '  { path: "/default", element: <DefaultPage /> },',
+      '  { path: "/star", element: <StarPage /> },',
+      '  { path: "/ghost", element: <GhostPage /> },',
+      '  { path: "/barrel", element: <BarrelPage /> },',
+      "];",
+      "",
+    ].join("\n"),
+    "src/admin/api.ts": [
+      'import { useServices } from "../services";',
+      "const PAGE = 50;",
+      "const BUCKET = 'avatars';",
+      "function client() {",
+      "  return useServices().api;",
+      "}",
+      "export function useAuditTrail() {",
+      "  // not useTenants: a name in a comment is not a call",
+      '  return client().get("/audit-events", { note: "useUsers" });',
+      "}",
+      "export const useTenants = () =>",
+      "  client().get(`/tenants?limit=${PAGE}`);",
+      "export async function useUserAction() {",
+      "  return (userId, action) => client().post(`/users/${userId}/${action}`, {});",
+      "}",
+      'const listUsers = () => client().get("/users");',
+      "export { listUsers as useUsers };",
+      "export function useAvatar() {",
+      "  return supabase.storage.from(BUCKET);",
+      "}",
+      'client().get("/boot");',
+      "export default function useEverything() {",
+      '  return client().get("/everything");',
+      "}",
+      "",
+    ].join("\n"),
+    "src/admin/index.ts": 'export { useTenants } from "./api";\n',
+    "src/services.ts": 'export function useServices() { return { api: createApi("/v1") }; }\n',
+    "src/pages/ActivityPage.tsx": 'import { useAuditTrail } from "../admin/api";\nexport function ActivityPage() { return <main>{String(useAuditTrail())}</main>; }\n',
+    "src/pages/TenantsPage.tsx": 'import { useTenants, type Tenant } from "../admin/api";\nexport function TenantsPage() { return <main>{String(useTenants())}</main>; }\n',
+    "src/pages/UsersPage.tsx": 'import { useUsers } from "../admin/api";\nimport { useUserAction as act, useAvatar } from "../admin/api";\nexport function UsersPage() { return <main>{String(useUsers())}{String(act())}{String(useAvatar())}</main>; }\n',
+    "src/pages/DefaultPage.tsx": 'import useEverything from "../admin/api";\nexport function DefaultPage() { return <main>{String(useEverything())}</main>; }\n',
+    "src/pages/StarPage.tsx": 'import * as admin from "../admin/api";\nexport function StarPage() { return <main>{String(admin.useTenants())}</main>; }\n',
+    "src/pages/GhostPage.tsx": 'import { useGhost } from "../admin/api";\nexport function GhostPage() { return <main>{String(useGhost())}</main>; }\n',
+    "src/pages/BarrelPage.tsx": 'import { useTenants } from "../admin";\nexport function BarrelPage() { return <main>{String(useTenants())}</main>; }\n',
+  });
+  try {
+    const { records, diagnostics } = derive({ repoRoot: root, options: { routesFile: "src/routes.tsx" } });
+    const refs = (path) => records.find((r) => r.id === `surface:${path}`).refs;
+    const WHOLE = ["?from:avatars", "?route:/audit-events", "?route:/boot", "?route:/everything", "?route:/tenants", "?route:/users", "?route:/users/*/*"];
+    assert.deepEqual(refs("/activity"), ["?route:/audit-events", "?route:/boot"]);
+    assert.deepEqual(refs("/tenants"), ["?route:/boot", "?route:/tenants"]);
+    assert.deepEqual(refs("/users"), ["?from:avatars", "?route:/boot", "?route:/users", "?route:/users/*/*"]);
+    assert.deepEqual(refs("/default"), WHOLE);
+    assert.deepEqual(refs("/star"), WHOLE);
+    assert.deepEqual(refs("/ghost"), WHOLE);
+    assert.deepEqual(refs("/barrel"), [], "a barrel is one hop: its own calls, and it has none");
+    const said = diagnostics.join("\n");
+    assert.match(said, /src\/pages\/DefaultPage\.tsx imports src\/admin\/api\.ts by default import — its calls are attributed whole/);
+    assert.match(said, /src\/pages\/StarPage\.tsx imports src\/admin\/api\.ts as a namespace — its calls are attributed whole/);
+    assert.match(said, /src\/pages\/GhostPage\.tsx imports 'useGhost' from src\/admin\/api\.ts, which declares no such name — its calls are attributed whole/);
+    assert.match(said, /src\/pages\/BarrelPage\.tsx imports 'useTenants' from src\/admin\/index\.ts, which re-exports it from another module — not followed \(one hop\); its calls are attributed whole/);
+    assert.equal(diagnostics.length, 4, said);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("array form: createBrowserRouter literal, absolute child paths, a path-bearing layout, nested pathless layouts, duplicate paths, non-literal paths", () => {
@@ -256,8 +369,12 @@ test("API call scan: any receiver, fetch, a leading ${base} dropped, query strin
     api.get(path); // not a literal
     api.get("users"); // no leading slash: not a path
     map.get("/"); // the root alone is noise
+    client().get("/chained"); // CAS-65: a receiver that is a call result
+    useApi()
+      .post("/next-line", x);
+    xfetch("/not-fetch"); // a longer name ending in fetch is not fetch
   `;
-  assert.deepEqual([...scanApiCalls(text)].sort(), ["/generic", "/tenants", "/things/*", "/users", "/users/invite"]);
+  assert.deepEqual([...scanApiCalls(text)].sort(), ["/chained", "/generic", "/next-line", "/tenants", "/things/*", "/users", "/users/invite"]);
   assert.equal(normalizeApiPath("${b}/a/${x}/?q=1"), "/a/*");
 });
 
@@ -310,7 +427,7 @@ test("CR-001: a symlinked routes file, element file or one-hop module is never r
   writeFileSync(join(root, "src", "data2.tsx"), `export const v = api.get("/data2");\n`);
   writeFileSync(join(root, "src", "B.tsx"), readFileSync(join(root, "src", "B.tsx"), "utf8").replace("export const B", `import { v } from "./data2";\nexport const B`));
   const suffixed = derive({ repoRoot: root, options: {} });
-  assert.deepEqual(suffixed.records.find((r) => r.id === "surface:/b").refs, ["?route:/b", "?route:/widget", "?route:/data2"]);
+  assert.deepEqual(suffixed.records.find((r) => r.id === "surface:/b").refs, ["?route:/b", "?route:/data2", "?route:/widget"]);
   const big = derive({ repoRoot: root, options: { routesFile: "src/big.tsx" } });
   assert.deepEqual(big.records, []);
   assert.match(big.diagnostics[0], /is over 1024 KiB — not read/);

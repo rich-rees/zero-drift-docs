@@ -34,10 +34,12 @@
 // local modules it imports ONE hop away (a screen's data module:
 // `api.get("/users")`, `fetch("/v1/x")`, any receiver — textual on purpose)
 // are emitted UNRESOLVED (`?route:/users`) for the deriver to resolve against
-// whichever extractor owns the API; `.from('x')` / `.rpc('x')` likewise. One
-// hop is deliberate: the data module's calls are attributed whole to every
-// screen that imports it — mechanically true, and honest about what a grep
-// can know (decision 0009). Every file read is a regular file physically
+// whichever extractor owns the API; `.from('x')` / `.rpc('x')` likewise. A
+// named import narrows the module to what the imported names reach — their
+// declarations, the helpers those mention, and top-level code; a default or
+// namespace import, or a name the module does not declare itself, takes the
+// module whole with a diagnostic (decision 0011, superseding 0009's "whole"
+// in part). Every file read is a regular file physically
 // inside the repo (no symlink on any segment) and under MAX_SOURCE_BYTES,
 // else a diagnostic (CR-001). Deterministic: same bytes in, same records out.
 
@@ -548,15 +550,148 @@ export function importMap(text) {
   for (const m of code.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:React\.)?lazy\(\s*(?:async\s*)?\(\)\s*=>\s*import\(\s*(['"])([^'"]+)\2/g)) imports.set(m[1], m[3]);
   return imports;
 }
-// Every local runtime import source of a file (relative or `@/`), deduped.
-function localImportSources(code) {
-  const out = [];
-  for (const m of code.matchAll(/\bimport\s+(type\s+)?[^;]*?\bfrom\s*(['"])([^'"]+)\2|\bimport\(\s*(['"])([^'"]+)\4/g)) {
+// Every local runtime import of a file (relative or `@/`), in first-seen
+// order, with what it binds (CAS-65): `names` is the set of exported names
+// the named imports ask for (`import { a, b as c }` asks for a and b), or
+// null when the import takes the module whole — a default or namespace
+// import, or a dynamic import() — with `how` saying which.
+function localImports(code) {
+  const out = new Map();
+  const note = (src, names, how) => {
+    if (!(src.startsWith(".") || src.startsWith("@/"))) return;
+    const prev = out.get(src);
+    if (prev && prev.names === null) return;
+    out.set(src, names === null ? { names: null, how } : { names: new Set([...(prev?.names ?? []), ...names]), how: null });
+  };
+  for (const m of code.matchAll(/\bimport\s+(type\s+)?([^;]*?)\s*\bfrom\s*(['"])([^'"]+)\3|\bimport\(\s*(['"])([^'"]+)\5/g)) {
     if (m[1]) continue;
-    const src = m[3] ?? m[5];
-    if ((src.startsWith(".") || src.startsWith("@/")) && !out.includes(src)) out.push(src);
+    if (m[6] !== undefined) {
+      note(m[6], null, "through import()");
+      continue;
+    }
+    const clause = m[2];
+    const brace = /\{([^}]*)\}/.exec(clause);
+    const outside = clause.replace(/\{[^}]*\}/, "").replace(/,/g, " ").trim();
+    if (/\*\s*as\b/.test(outside)) note(m[4], null, "as a namespace");
+    else if (outside) note(m[4], null, "by default import");
+    else {
+      const names = [];
+      for (const part of (brace ? brace[1] : "").split(",")) {
+        const seg = part.trim();
+        if (!seg || /^type\s/.test(seg)) continue;
+        const hit = /^([A-Za-z_$][\w$]*)(?:\s+as\s+[A-Za-z_$][\w$]*)?$/.exec(seg);
+        if (hit) names.push(hit[1]);
+      }
+      note(m[4], names, null);
+    }
   }
   return out;
+}
+
+// A module's top-level statements, found on the mask: a statement starts on
+// a line at bracket depth 0 — at column 0 on a character that cannot continue
+// the line before (not a closer, a dot, a backtick or whitespace), or indented
+// when its first word is a declaration keyword — and runs to the next start.
+// Template bodies are blanked on the mask, so a line inside one never starts
+// a statement. Each statement is classified:
+//   decl      a function / class / const / let / var / enum, by local name;
+//             `export default …` declares the local name "default"
+//   exports   `export { a as b }` — exported name → local name
+//   reexport  `export { a } from "…"` / `export * from "…"` — names (or *)
+//             another module declares
+//   code      anything else that is not an import or a type: runs on import
+export function topLevel(text) {
+  const { code, mask } = lex(text);
+  const starts = [];
+  let depth = 0;
+  for (let i = 0; i < mask.length; i++) {
+    const ch = mask[i];
+    if (depth === 0 && (i === 0 || mask[i - 1] === "\n")) {
+      // Column 0 starts a statement unless it continues one (a closer, a dot,
+      // a template's closing backtick). An indented line starts one only
+      // when its first word cannot continue anything: a declaration keyword.
+      if (!/[\s})\].`]/.test(ch)) starts.push(i);
+      else if (/^[ \t]+(?:export|import|function|async|class|const|let|var|enum)\b/.test(code.slice(i, i + 40))) starts.push(i);
+    }
+    if (ch === "(" || ch === "[" || ch === "{") depth++;
+    else if (ch === ")" || ch === "]" || ch === "}") depth = Math.max(0, depth - 1);
+  }
+  const statements = [];
+  const decls = new Map(); // local name -> [statement index]
+  const exportsMap = new Map(); // exported name -> local name
+  const reexported = new Set();
+  let reexportAll = false;
+  const declare = (name, k) => decls.set(name, [...(decls.get(name) ?? []), k]);
+  starts.forEach((start, k) => {
+    const end = k + 1 < starts.length ? starts[k + 1] : mask.length;
+    const s = code.slice(start, end).trimStart();
+    let kind = "code";
+    let m;
+    if (/^import\b/.test(s) || /^(?:export\s+)?(?:declare\s+)?(?:type|interface)\b/.test(s)) kind = "skip";
+    else if ((m = /^export\s*\*/.exec(s))) {
+      kind = "skip";
+      reexportAll = true;
+    } else if ((m = /^export\s*(?:type\s*)?\{([^}]*)\}\s*from\b/.exec(s))) {
+      kind = "skip";
+      for (const part of m[1].split(",")) {
+        const hit = /^\s*(?:type\s+)?[A-Za-z_$][\w$]*(?:\s+as\s+([A-Za-z_$][\w$]*))?\s*$/.exec(part);
+        const name = hit && (hit[1] ?? part.trim().replace(/^type\s+/, ""));
+        if (name) reexported.add(name);
+      }
+    } else if ((m = /^export\s*\{([^}]*)\}/.exec(s))) {
+      kind = "skip";
+      for (const part of m[1].split(",")) {
+        const hit = /^\s*([A-Za-z_$][\w$]*)(?:\s+as\s+([A-Za-z_$][\w$]*))?\s*$/.exec(part);
+        if (hit) exportsMap.set(hit[2] ?? hit[1], hit[1]);
+      }
+    } else if ((m = /^export\s+default\s+(?:async\s+)?(?:function\s*\*?|class)\s*([A-Za-z_$][\w$]*)?/.exec(s)) || /^export\s+default\b/.test(s)) {
+      kind = "decl";
+      declare("default", k);
+      exportsMap.set("default", "default");
+      if (m?.[1]) declare(m[1], k);
+    } else if ((m = /^(export\s+)?(?:declare\s+)?(?:(?:async\s+)?function\s*\*?\s*|class\s+|(?:const\s+)?enum\s+|(?:const|let|var)\s+)([A-Za-z_$][\w$]*)/.exec(s))) {
+      kind = "decl";
+      declare(m[2], k);
+      if (m[1]) exportsMap.set(m[2], m[2]);
+    }
+    statements.push({ start, end, kind });
+  });
+  return { text, mask, statements, decls, exportsMap, reexported, reexportAll };
+}
+
+// The part of a module that the named imports `names` reach: the statements
+// declaring each name, every top-level declaration those bodies mention
+// (followed to a fixed point — a visited set bounds it), and every `code`
+// statement, which runs on import whatever is imported. Returns the module
+// text with everything else blanked (same length, same newlines), or
+// { whole: reason } when a name cannot be narrowed: declared by no
+// statement here, or re-exported from another module (one hop).
+export function narrowModule(mod, names) {
+  const include = new Set(mod.statements.flatMap((s, k) => (s.kind === "code" ? [k] : [])));
+  const todo = [];
+  for (const name of [...names].sort()) {
+    const local = mod.exportsMap.get(name);
+    if (local !== undefined && mod.decls.has(local)) todo.push(local);
+    else if (mod.reexported.has(name) || mod.reexportAll) return { whole: "reexport", name };
+    else return { whole: "missing", name };
+  }
+  const visited = new Set();
+  while (todo.length) {
+    const local = todo.pop();
+    if (visited.has(local)) continue;
+    visited.add(local);
+    for (const k of mod.decls.get(local) ?? []) {
+      include.add(k);
+      const { start, end } = mod.statements[k];
+      for (const id of mod.mask.slice(start, end).matchAll(/(?<![.\w$])[A-Za-z_$][\w$]*/g)) {
+        if (mod.decls.has(id[0]) && !visited.has(id[0])) todo.push(id[0]);
+      }
+    }
+  }
+  const chars = mod.text.split("");
+  const keep = new Array(chars.length).fill(false);
+  for (const k of include) for (let i = mod.statements[k].start; i < mod.statements[k].end; i++) keep[i] = true;
+  return { text: chars.map((c, i) => (keep[i] || c === "\n" ? c : " ")).join("") };
 }
 
 // `${expr}` -> *, a leading `${base}` prefix dropped, query string and
@@ -575,7 +710,9 @@ export function normalizeApiPath(raw) {
 export function scanApiCalls(text) {
   const m = model(text);
   const out = new Set();
-  const re = /\b(?:fetch|\.(?:get|post|put|patch|delete|request)(?:<(?:[^<>()]|<[^<>()]*>)*>)?)\(\s*(['"`])/g;
+  // `\bfetch`, but `.get` on ANY receiver — `client().get(…)` has no word
+  // character before the dot (CAS-65).
+  const re = /(?:\bfetch|\.(?:get|post|put|patch|delete|request)(?:<(?:[^<>()]|<[^<>()]*>)*>)?)\(\s*(['"`])/g;
   for (const hit of m.mask.matchAll(re)) {
     const q = hit.index + hit[0].length - 1;
     const raw = stringAt(m, q);
@@ -662,27 +799,53 @@ export function derive({ repoRoot, options }) {
   const routes = parseRouteTree(text, diagnostics);
   const imports = importMap(text);
 
-  // Refs of one file plus its one-hop local imports, memoised per file.
-  const scanned = new Map();
-  const refsOfFile = (rel) => {
-    if (scanned.has(rel)) return scanned.get(rel);
+  // The refs one piece of source text calls out to.
+  const refsOfText = (body) => {
     const refs = new Set();
-    scanned.set(rel, refs);
-    const body = readSource(rel);
-    if (body === null) return refs;
     for (const p of scanApiCalls(body)) refs.add(`?route:${p}`);
     const scan = scanFileText(lex(body).code);
     for (const name of scan.fromNames) refs.add(`?from:${name}`);
     for (const name of scan.rpcNames) refs.add(`?function:${name}`);
     return refs;
   };
+  // A one-hop module, memoised: its whole-file refs and its statement model.
+  const modules = new Map();
+  const moduleOf = (rel) => {
+    if (!modules.has(rel)) {
+      const body = readSource(rel);
+      modules.set(rel, body === null ? null : { whole: refsOfText(body), model: topLevel(body), narrowed: new Map() });
+    }
+    return modules.get(rel);
+  };
+  // A screen's refs: its own file whole, and of each local module it imports
+  // only what the imported names reach (CAS-65) — the module whole, with a
+  // diagnostic, when the import cannot be narrowed. One hop: the imported
+  // module's own imports are not followed. Memoised per element file.
+  const elements = new Map();
   const refsOfElement = (rel) => {
-    const refs = new Set(refsOfFile(rel));
+    if (elements.has(rel)) return elements.get(rel);
     const body = readSource(rel);
+    const refs = body === null ? new Set() : refsOfText(body);
+    elements.set(rel, refs);
     if (body === null) return refs;
-    for (const source of localImportSources(lex(body).code)) {
+    for (const [source, { names, how }] of localImports(lex(body).code)) {
       const target = resolveImport(rel, source);
-      if (target) for (const r of refsOfFile(target)) refs.add(r);
+      const mod = target && moduleOf(target);
+      if (!mod) continue;
+      let hit = mod.whole;
+      if (names === null) diagnostics.push(`${rel} imports ${target} ${how} — its calls are attributed whole`);
+      else {
+        const key = [...names].sort().join(",");
+        if (!mod.narrowed.has(key)) {
+          const cut = narrowModule(mod.model, names);
+          mod.narrowed.set(key, cut.whole ? cut : { refs: refsOfText(cut.text) });
+        }
+        const cut = mod.narrowed.get(key);
+        if (cut.whole === "missing") diagnostics.push(`${rel} imports '${cut.name}' from ${target}, which declares no such name — its calls are attributed whole`);
+        else if (cut.whole === "reexport") diagnostics.push(`${rel} imports '${cut.name}' from ${target}, which re-exports it from another module — not followed (one hop); its calls are attributed whole`);
+        else hit = cut.refs;
+      }
+      for (const r of hit) refs.add(r);
     }
     return refs;
   };
@@ -719,7 +882,7 @@ export function derive({ repoRoot, options }) {
       title: r.path,
       description: r.comment,
       resource,
-      refs: [...refs],
+      refs: [...refs].sort(),
       facts: {
         element: r.element ?? (r.lazy ? `lazy(${r.lazy})` : ""),
         guards: r.guards,
