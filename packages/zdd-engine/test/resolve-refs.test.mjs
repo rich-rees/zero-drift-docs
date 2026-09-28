@@ -88,7 +88,7 @@ test("ids without a namespace slash still resolve by name (CR-015)", () => {
   assert.deepEqual(records.find((r) => r.id === "module:m").refs, ["table:users"]);
 });
 
-test("route resolution: most literal segments win, ties break by id; wildcards and catch-alls", () => {
+test("route resolution: most literal segments win; a wildcard prefers a parameter to a literal; catch-alls", () => {
   const { records } = resolveRefs([
     rec("route", "route:/api/things/[id]"),
     rec("route", "route:/api/things/mine"),
@@ -101,6 +101,38 @@ test("route resolution: most literal segments win, ties break by id; wildcards a
   ]);
   assert.deepEqual(records.find((r) => r.id === "module:m").refs, ["route:/api/files/[...path]", "route:/api/things/[id]", "route:/api/things/mine", "route:/jobs/{id}"]);
   assert.deepEqual(records.find((r) => r.id === "module:n").refs, ["route:/a/[x]"]);
+});
+
+test("CAS-65: a wildcard facing a parameter beats one facing a literal, whatever the parameter spelling sorts like", () => {
+  const { records } = resolveRefs([
+    rec("route", "route:/things/mine"),
+    rec("route", "route:/things/{id}"), // `{` sorts after letters: id order used to pick `mine`
+    rec("route", "route:/stuff/mine"),
+    rec("route", "route:/stuff/[id]"),
+    rec("route", "route:/files/[id]"),
+    rec("route", "route:/files/[...path]"),
+    rec("module", "module:m", ["?route:/things/*", "?route:/stuff/*", "?route:/files/*"]),
+  ]);
+  assert.deepEqual(records.find((r) => r.id === "module:m").refs, ["route:/files/[id]", "route:/stuff/[id]", "route:/things/{id}"]);
+});
+
+test("CAS-65: a call that fits several routes equally well refs all of them, with a diagnostic naming the fan-out", () => {
+  const { records, diagnostics } = resolveRefs([
+    rec("route", "route:/users/{user_id}"),
+    rec("route", "route:/users/{user_id}/deactivate"),
+    rec("route", "route:/users/{user_id}/reactivate"),
+    rec("route", "route:/users/{user_id}/resend-invitation"),
+    rec("route", "route:/users/invite"),
+    rec("surface", "surface:/admin/users", ["?route:/users/*/*", "?route:/users/invite"]),
+  ]);
+  assert.deepEqual(records.find((r) => r.id === "surface:/admin/users").refs, [
+    "route:/users/invite",
+    "route:/users/{user_id}/deactivate",
+    "route:/users/{user_id}/reactivate",
+    "route:/users/{user_id}/resend-invitation",
+  ]);
+  assert.equal(diagnostics.length, 1);
+  assert.match(diagnostics[0], /fetch\('\/users\/\*\/\*'\) fits 3 routes equally well \(route:\/users\/\{user_id\}\/deactivate, route:\/users\/\{user_id\}\/reactivate, route:\/users\/\{user_id\}\/resend-invitation\) — all kept/);
 });
 
 test("unknown unresolved kind is an error", () => {
