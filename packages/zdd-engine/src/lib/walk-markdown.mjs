@@ -33,8 +33,11 @@ export function walkMarkdown(dir, out = [], state = { depth: 0, entries: 0 }) {
       return out; // a symlinked or non-dir root is not a store
     }
     names = readdirSync(dir).sort();
-  } catch {
-    return out; // an absent store is empty, not skipped
+  } catch (e) {
+    // Absent is an empty store; present but unlistable is a gap the caller
+    // must hear about (CAS-65 CR-029).
+    if (e.code !== "ENOENT" && e.code !== "ENOTDIR") skip(dir, `could not be listed (${e.code})`);
+    return out;
   }
   for (const name of names) {
     if (++state.entries > MAX_ENTRIES) {

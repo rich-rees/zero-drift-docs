@@ -9,7 +9,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, cpSync, symlinkSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, cpSync, symlinkSync, chmodSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -139,6 +139,17 @@ test("CAS-65 CR-029 (POSIX): a symlinked feature file is never read, and strict 
   assert.match(r.stderr, /claims\.strict: zdd\/map\/features\/linked\.md could not be read \(a symlink — not followed\)/);
 });
 
+test("CAS-65 CR-029: a map folder that exists but cannot be listed is reported, never read as empty (POSIX, not root)", { skip: (process.platform === "win32" || process.getuid?.() === 0) && "needs POSIX permissions and a non-root user" }, (t) => {
+  const repo = derived(t);
+  setClaims(repo, { strict: true, allowUnclaimed: unclaimed(repo).map((r) => r.id) });
+  const locked = join(repo, "zdd", "map", "features");
+  chmodSync(locked, 0o000);
+  t.after(() => chmodSync(locked, 0o755));
+  const r = run(repo, ["lint"]);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /claims\.strict: zdd\/map\/features could not be read \(could not be listed \(EACCES\)\)/);
+});
+
 test("CAS-65 CR-030: many features claiming one record are collected in linear time", (t) => {
   const repo = derived(t);
   const N = 4000;
@@ -173,7 +184,7 @@ test("CAS-65 CR-031: the engine reads zdd/config.json under a size cap — an ov
   for (const cmd of ["lint", "derive"]) {
     const r = run(repo, [cmd]);
     assert.equal(r.status, 1, cmd);
-    assert.match(r.stderr, /zdd\/config\.json is \d+ bytes — larger than 1048576; a config is small/);
+    assert.match(r.stderr, /zdd\/config\.json is over 1048576 bytes; a config is small/);
   }
 });
 

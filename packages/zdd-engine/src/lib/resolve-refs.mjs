@@ -53,20 +53,33 @@ const isDynamic = (s) => /^\[.+\]$/.test(s) || /^\{.+\}$/.test(s);
 export function makeRouteMatcher(routePath) {
   const segs = routePath.split("/").filter(Boolean);
   const one = (s, u) => isDynamic(s) || s === "*" || u === "*" || s === u;
-  const from = (i, uSegs, j) => {
-    for (; i < segs.length; i++, j++) {
-      if (isCatchAll(segs[i])) {
-        const rest = segs.length - i - 1;
-        // The catch-all takes 1..(remaining - rest) segments; with at most
-        // a handful of segments per route the search is tiny.
-        for (let take = uSegs.length - j - rest; take >= 1; take--) if (from(i + 1, uSegs, j + take)) return true;
-        return false;
+  return (url) => {
+    const uSegs = url.split("/").filter(Boolean);
+    // (pattern index, url index) pairs already known to fail: each pair is
+    // tried once, so several catch-alls cost segs × url steps, never the
+    // combinatorial partitions of plain backtracking (CAS-65 CR-044).
+    const failed = new Set();
+    const from = (i, j) => {
+      const key = i * (uSegs.length + 1) + j;
+      if (failed.has(key)) return false;
+      for (; i < segs.length; i++, j++) {
+        if (isCatchAll(segs[i])) {
+          const rest = segs.length - i - 1;
+          for (let take = uSegs.length - j - rest; take >= 1; take--) if (from(i + 1, j + take)) return true;
+          failed.add(key);
+          return false;
+        }
+        if (j >= uSegs.length || !one(segs[i], uSegs[j])) {
+          failed.add(key);
+          return false;
+        }
       }
-      if (j >= uSegs.length || !one(segs[i], uSegs[j])) return false;
-    }
-    return j === uSegs.length;
+      if (j === uSegs.length) return true;
+      failed.add(key);
+      return false;
+    };
+    return from(0, 0);
   };
-  return (url) => from(0, url.split("/").filter(Boolean), 0);
 }
 
 // How well a matching route fits a url, as a tuple compared in order:

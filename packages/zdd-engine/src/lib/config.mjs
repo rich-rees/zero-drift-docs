@@ -11,7 +11,7 @@
 // zdd/config.json is the discovery convention — configurable paths live INSIDE
 // the config, but the config itself is found at the conventional spot.
 
-import { readFileSync, existsSync, statSync } from "node:fs";
+import { existsSync, openSync, readSync, closeSync } from "node:fs";
 
 const MAX_CONFIG_BYTES = 1024 * 1024; // the plugin's cap too (plugins/zdd/scripts/lib/repo.mjs)
 import { dirname, join, resolve, relative } from "node:path";
@@ -176,12 +176,21 @@ export function loadConfig(args, cwd = process.cwd()) {
   }
   // Bounded like every other adopter file the engine reads (CAS-65 CR-031):
   // a config is small, and an oversized one is refused before it is parsed.
-  const size = statSync(configPath).size;
+  // Read at most cap + 1 bytes: a file that grows after a size check can
+  // never be read whole (CAS-65 CR-031).
+  const buf = Buffer.alloc(MAX_CONFIG_BYTES + 1);
+  const fd = openSync(configPath, "r");
+  let size = 0;
+  try {
+    for (let got; size <= MAX_CONFIG_BYTES && (got = readSync(fd, buf, size, MAX_CONFIG_BYTES + 1 - size, null)) > 0; ) size += got;
+  } finally {
+    closeSync(fd);
+  }
   if (size > MAX_CONFIG_BYTES) {
-    console.error(`zdd/config.json is ${size} bytes — larger than ${MAX_CONFIG_BYTES}; a config is small`);
+    console.error(`zdd/config.json is over ${MAX_CONFIG_BYTES} bytes; a config is small`);
     process.exit(1);
   }
-  const config = JSON.parse(readFileSync(configPath, "utf8"));
+  const config = JSON.parse(buf.subarray(0, size).toString("utf8"));
   const paths = { ...DEFAULT_PATHS, ...(config.paths ?? {}) };
   // Every artifact path is read or written on the adopter's behalf — none may
   // point outside the checkout (CR-006). Same rule for localExtractorDir.

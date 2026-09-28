@@ -126,6 +126,9 @@ export function makeExtractorIo(repoRoot, label = "extractor", { maxEntries = IO
       let n = 0;
       for (let got; n <= cap && (got = readSync(fd, buf, n, cap + 1 - n, null)) > 0; ) n += got;
       if (n > cap) return refuse("too-large", `is over ${cap} bytes — not read`);
+      // Charged on the bytes actually read: a file that grew after the
+      // pre-open check cannot carry the total past its budget (CR-025).
+      if (state.bytes + n > maxTotalBytes) return refuse("over-budget", `would pass this extractor's total read budget of ${maxTotalBytes} bytes — not read`);
       state.bytes += n;
       return { ok: true, text: buf.subarray(0, n).toString("utf8") };
     } catch (e) {

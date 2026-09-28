@@ -147,6 +147,18 @@ test("CAS-65 CR-033/034: a route-side `*` is one segment; a catch-all in the mid
   assert.equal(makeRouteMatcher("/api/files/[...path]")("/api/files/a/b"), true, "a trailing catch-all is unchanged");
 });
 
+test("CAS-65 CR-044: many catch-alls against a non-matching url stay polynomial", async () => {
+  const { makeRouteMatcher } = await import("../src/lib/resolve-refs.mjs");
+  // Consecutive catch-alls then a literal that never matches: plain
+  // backtracking tries every way to split the url among them.
+  const pattern = "/" + Array.from({ length: 12 }, (_, i) => `[...p${i}]`).join("/") + "/z";
+  const url = "/" + Array.from({ length: 30 }, (_, i) => `s${i}`).join("/");
+  const started = Date.now();
+  assert.equal(makeRouteMatcher(pattern)(url), false);
+  assert.ok(Date.now() - started < 1000, `matching took ${Date.now() - started} ms`);
+  assert.equal(makeRouteMatcher("/[...a]/x/[...b]/y")("/1/2/x/3/y"), true, "still matches when it should");
+});
+
 test("CAS-65 CR-035: requireRefs pruning is linear — a long chain whose tail drops unwinds in one pass, same result as before", () => {
   const N = 20000;
   const records = [rec("module", "module:0", ["?from:nope"], { requireRefs: true })];
