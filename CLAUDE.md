@@ -50,7 +50,8 @@ a local extractor — decision 0010). The runbook's writer is
 writes, and it is the only writer of *adopter-owned* files — config, skeleton,
 opt-ins, the instruction block (decision 0003) — save one:
 `scripts/scaffold-extractor.mjs`, which writes a local extractor's skeleton and
-its config lines through bootstrap's own `Ledger`. The engine's `derive` /
+its config lines by bootstrap's rules (exclusive create, never overwrite,
+the same `Ledger` report). The engine's `derive` /
 `render` write the generated artifacts, and nothing else writes into an
 adopter's repo. When a
 skill wraps an upstream one (`grill` wraps Matt Pocock's grilling +

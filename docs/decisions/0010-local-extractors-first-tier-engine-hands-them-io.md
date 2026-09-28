@@ -49,9 +49,11 @@ this is a minor engine version: 1.3.0.
 - **A second writer of adopter-owned files, by the same rule.**
   `plugins/zdd/scripts/scaffold-extractor.mjs` writes the local extractor's
   skeleton and its config lines (`localExtractorDir`, the `extractors`
-  entry, `extractorOptions.<name>`). It writes through bootstrap's own
-  `Ledger`: validated before the first write, creating each file
-  exclusively, never overwriting, and reporting wrote / kept / skipped.
+  entry, `extractorOptions.<name>`). It writes by bootstrap's rules:
+  everything is validated before the first write, each file is created
+  exclusively and never overwritten, the config is replaced atomically, a
+  failed run removes exactly the files it created, and the report uses the
+  same `Ledger` wrote / kept / skipped shape.
   Decision 0003's split still holds (the skill asks, the script writes), and
   now has two scripts. The parsing logic is the agent's, written after the
   scaffold like any other code in the repo.
