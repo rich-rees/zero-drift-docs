@@ -14,9 +14,9 @@
 //                             --check, missing source, oversized, symlink
 //   <name>/fixture/<root>/    one empty folder per root (.gitkeep)
 // and edits zdd/config.json: sets localExtractorDir if unset, appends the
-// name to `extractors`, adds extractorOptions.<name> if absent. Writes go
-// through bootstrap's Ledger — one writer discipline, one wrote/kept/skipped
-// report (decision 0003).
+// name to `extractors`, adds extractorOptions.<name> if absent. Writes follow
+// bootstrap's rules — resolveInside, exclusive create, never overwrite — and
+// report in its Ledger's wrote/kept/skipped shape (decision 0003).
 //
 // Answer set:
 //   {
@@ -34,11 +34,12 @@
 //
 // Trust: the answer set and the checkout are untrusted. Answers are
 // validated whole before the first write; a config that cannot be read stops
-// the run; every path goes through the Ledger's resolveInside (no escape, no
+// the run; every path goes through repo.mjs's resolveInside (no escape, no
 // symlink); text that lands in a generated comment is flattened to one line.
 
-import { readFileSync, lstatSync, openSync, readSync, closeSync, rmSync, writeFileSync, renameSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, lstatSync, openSync, readSync, writeSync, closeSync, rmSync, mkdirSync, renameSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { join, dirname } from "node:path";
 import { PLUGIN_ROOT, parseArgs, adopterRoot, readConfig, artifactPaths, repoRelative, resolveInside, pathsOverlap, CONFIG_REL, posixify } from "./lib/repo.mjs";
 import { Ledger, printable } from "./bootstrap.mjs";
 
@@ -297,32 +298,57 @@ export function scaffold(root, rawAnswers) {
   // for a reason it cannot (permissions, a full disk). Then every file this
   // run created is removed again, and the config — written last — is never
   // touched, so a failure leaves the repo as it was (CR-003).
-  // Rollback works from the PLAN, not the ledger: every target that did not
-  // exist before this run is removed, including one whose write failed
-  // after the file was created. The config is replaced atomically (a
-  // temporary file, then a rename), so it is either old or new, never torn.
+  // Rollback removes exactly what THIS run created: a file is recorded the
+  // moment its exclusive create (`wx`) succeeds — before its bytes are
+  // written — so a failed write is still removed, and a file anyone else
+  // made, before or during the run, is never touched (CR-003, CR-047). The
+  // config is replaced atomically: a temporary file with a random name,
+  // created exclusively, then a rename — old or new, never torn.
   const ledger = new Ledger(root);
-  const created = [`${base}/index.mjs`, testPath, ...fixtureKeeps].filter((rel) => !lstatOrNull(join(root, ...rel.split("/"))));
-  const configTmp = `zdd/.config.json.scaffold-${process.pid}.tmp`;
+  const mine = []; // absolute paths this run created
+  const make = (rel, content) => {
+    const abs = resolveInside(root, rel, rel);
+    mkdirSync(dirname(abs), { recursive: true });
+    let fd;
+    try {
+      fd = openSync(abs, "wx");
+    } catch (e) {
+      if (e.code === "EEXIST") {
+        ledger.kept.push(rel);
+        return;
+      }
+      throw e;
+    }
+    mine.push(abs);
+    try {
+      writeSync(fd, content);
+    } finally {
+      closeSync(fd);
+    }
+    ledger.wrote.push(rel);
+  };
   try {
-    ledger.create(`${base}/index.mjs`, moduleText);
-    ledger.create(testPath, testText);
-    for (const keep of fixtureKeeps) ledger.create(keep, "");
+    make(`${base}/index.mjs`, moduleText);
+    make(testPath, testText);
+    for (const keep of fixtureKeeps) make(keep, "");
     if (changes.length) {
-      const tmpAbs = resolveInside(root, configTmp, configTmp);
-      writeFileSync(tmpAbs, JSON.stringify(next, null, 2) + "\n", { flag: "wx" });
+      const configTmp = `zdd/.config.json.scaffold-${randomBytes(8).toString("hex")}.tmp`;
+      make(configTmp, JSON.stringify(next, null, 2) + "\n");
+      ledger.wrote.pop(); // the temporary file is not a result
+      const tmpAbs = mine[mine.length - 1];
       renameSync(tmpAbs, resolveInside(root, CONFIG_REL, CONFIG_REL));
+      mine.pop(); // renamed away: nothing left at the temporary path to remove
       ledger.wrote.push(CONFIG_REL);
       ledger.notes.push(`zdd/config.json: ${changes.join("; ")}`);
     } else ledger.kept.push(CONFIG_REL);
   } catch (e) {
     let removed = 0;
-    for (const rel of [configTmp, ...created].reverse()) {
+    for (const abs of mine.reverse()) {
       try {
-        rmSync(join(root, ...rel.split("/")));
+        rmSync(abs);
         removed++;
       } catch {
-        /* absent, or best effort — reported below */
+        /* best effort — reported below */
       }
     }
     throw new Error(`${e.message} — the scaffold removed the ${removed} file(s) it had created; zdd/config.json is unchanged`);

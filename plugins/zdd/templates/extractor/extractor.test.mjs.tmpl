@@ -190,10 +190,11 @@ test("the extractor reads through io only: no fs, process, network or environmen
     [/\bprocess\s*\.\s*env\b/, "reads process.env"],
   ];
   const problems = [];
+  const budget = { bytes: 0 }; // one total across the scan (CR-008)
   walkFiles(HERE, (p) => {
     const rel = relative(HERE, p);
-    if (!/\.m?js$/.test(p) || rel.startsWith(`fixture${sep}`) || rel.endsWith(".test.mjs")) return;
-    const text = readCapped(p).toString("utf8");
+    if (!/\.m?js$/.test(p) || /^fixture(?:-deep)?(?:[\\/]|$)/.test(rel) || rel.endsWith(".test.mjs")) return;
+    const text = readCapped(p, budget).toString("utf8");
     for (const [re, what] of banned) if (re.test(text)) problems.push(`${rel} ${what}`);
   });
   assert.deepEqual(problems, []);
