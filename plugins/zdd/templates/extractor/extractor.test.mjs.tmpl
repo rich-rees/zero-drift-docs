@@ -1,0 +1,169 @@
+// Tests for the local `__NAME__` extractor, scaffolded by the zdd `extractor`
+// skill. Run from the repo root:
+//
+//   node --test __TEST_PATH__
+//
+// Each test builds a throwaway repo from ./fixture (a miniature repo written
+// in this convention) plus this extractor, and runs the engine pinned in
+// zdd/config.json against it — the way CI runs it. Set ZDD_ENGINE_BIN to a
+// local zdd-engine.mjs to test against an engine you have checked out.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, relative, sep } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const NAME = "__NAME__";
+const HERE = dirname(fileURLToPath(import.meta.url));
+const FIXTURE = join(HERE, "fixture");
+// The options the fixture is laid out for — independent of the real repo's
+// extractorOptions, so moving your real roots never breaks these tests.
+const FIXTURE_OPTIONS = __FIXTURE_OPTIONS__;
+
+// The ids the fixture must produce. Write them BEFORE the logic: this test
+// stays red until fromSource() finds exactly these, and no others.
+const EXPECTED_IDS = null; // e.g. __EXPECTED_EXAMPLE__
+
+// ---------------------------------------------------------------------------
+// Plumbing
+// ---------------------------------------------------------------------------
+function repoRoot() {
+  for (let dir = HERE; ; dir = dirname(dir)) {
+    if (existsSync(join(dir, "zdd", "config.json"))) return dir;
+    if (dirname(dir) === dir) throw new Error("no zdd/config.json above this test — run it inside the adopting repo");
+  }
+}
+const PIN = JSON.parse(readFileSync(join(repoRoot(), "zdd", "config.json"), "utf8")).engine;
+
+// npm's own npx script, run by this node — no shell, so no quoting to get
+// wrong on Windows.
+function npxCli() {
+  const bin = dirname(process.execPath);
+  for (const p of [join(bin, "node_modules", "npm", "bin", "npx-cli.js"), join(bin, "..", "lib", "node_modules", "npm", "bin", "npx-cli.js")]) {
+    if (existsSync(p)) return p;
+  }
+  throw new Error("npx-cli.js not found next to this node — set ZDD_ENGINE_BIN to a zdd-engine.mjs");
+}
+function engine(repo, args) {
+  const local = process.env.ZDD_ENGINE_BIN;
+  if (!local && !/^\d+\.\d+\.\d+$/.test(String(PIN))) throw new Error(`zdd/config.json 'engine' must be x.y.z, got ${JSON.stringify(PIN)}`);
+  const argv = local ? [local, ...args, `--root=${repo}`] : [npxCli(), "-y", `@rich-rees/zdd-engine@${PIN}`, ...args, `--root=${repo}`];
+  const r = spawnSync(process.execPath, argv, { encoding: "utf8" });
+  return { status: r.status, out: `${r.stdout}${r.stderr}` };
+}
+function engineOk(repo, args) {
+  const r = engine(repo, args);
+  assert.equal(r.status, 0, `zdd-engine ${args.join(" ")} failed:\n${r.out}`);
+  return r.out;
+}
+
+// A throwaway repo: the fixture (unless `withFixture` is false), this
+// extractor, and a config selecting it with FIXTURE_OPTIONS.
+function scratchRepo(t, { withFixture = true } = {}) {
+  const repo = mkdtempSync(join(tmpdir(), `zdd-${NAME}-`));
+  t.after(() => rmSync(repo, { recursive: true, force: true }));
+  if (withFixture) cpSync(FIXTURE, repo, { recursive: true, filter: (src) => !src.endsWith(`${sep}.gitkeep`) });
+  const target = join(repo, "zdd", "extractors", NAME);
+  cpSync(HERE, target, {
+    recursive: true,
+    filter: (src) => {
+      const rel = relative(HERE, src);
+      return rel !== "fixture" && !rel.startsWith(`fixture${sep}`) && !rel.endsWith(".test.mjs");
+    },
+  });
+  const config = { name: "fixture", engine: PIN, extractors: [NAME], extractorOptions: { [NAME]: FIXTURE_OPTIONS }, localExtractorDir: "zdd/extractors", render: { storeChanges: false } };
+  writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify(config, null, 2) + "\n");
+  return repo;
+}
+
+function metadata(repo) {
+  const out = new Map();
+  const root = join(repo, "zdd", "metadata");
+  const visit = (dir) => {
+    if (!existsSync(dir)) return;
+    for (const name of readdirSync(dir).sort()) {
+      const p = join(dir, name);
+      if (statSync(p).isDirectory()) visit(p);
+      else out.set(relative(root, p).split(sep).join("/"), readFileSync(p, "utf8"));
+    }
+  };
+  visit(root);
+  return out;
+}
+const records = (repo) => [...metadata(repo).values()].map((text) => JSON.parse(text));
+const ids = (repo) => records(repo).map((r) => r.id).sort();
+const resources = (repo) => records(repo).flatMap((r) => r.resource);
+
+// The first fixture file this extractor reads, for the hardening tests.
+function firstSource() {
+  const exts = FIXTURE_OPTIONS.extensions;
+  const found = [];
+  const visit = (dir) => {
+    for (const name of readdirSync(dir).sort()) {
+      const p = join(dir, name);
+      if (statSync(p).isDirectory()) visit(p);
+      else if (exts.some((e) => name.endsWith(e))) found.push(p);
+    }
+  };
+  visit(FIXTURE);
+  assert.ok(found.length, `the fixture holds no ${exts.join("/")} file yet — add one under fixture/${FIXTURE_OPTIONS.roots[0]}`);
+  return found[0];
+}
+
+// ---------------------------------------------------------------------------
+// The contract
+// ---------------------------------------------------------------------------
+test("the fixture yields exactly the expected records", (t) => {
+  assert.ok(Array.isArray(EXPECTED_IDS), "fill in EXPECTED_IDS with the ids the fixture should produce, then write fromSource()");
+  const repo = scratchRepo(t);
+  engineOk(repo, ["derive"]);
+  assert.deepEqual(ids(repo), [...EXPECTED_IDS].sort());
+});
+
+test("determinism: two fresh copies, and a second run on one copy, write byte-identical metadata; derive --check passes", (t) => {
+  const a = scratchRepo(t);
+  const b = scratchRepo(t);
+  engineOk(a, ["derive"]);
+  engineOk(b, ["derive"]);
+  const first = metadata(a);
+  assert.deepEqual([...first.entries()], [...metadata(b).entries()], "two copies differ");
+  engineOk(a, ["derive"]);
+  assert.deepEqual([...first.entries()], [...metadata(a).entries()], "a second run changed bytes");
+  assert.match(engineOk(a, ["derive", "--check"]), /in sync/);
+});
+
+test("missing source is nothing to inventory: no records, a diagnostic, exit 0", (t) => {
+  const repo = scratchRepo(t, { withFixture: false });
+  const out = engineOk(repo, ["derive", "--verbose"]);
+  assert.deepEqual(ids(repo), []);
+  // A root of "." always exists; every other root is gone and says so.
+  if (FIXTURE_OPTIONS.roots.some((r) => r !== ".")) assert.match(out, /missing — nothing to inventory/);
+});
+
+test("an oversized source file is never read", (t) => {
+  const repo = scratchRepo(t);
+  const src = firstSource();
+  const ext = FIXTURE_OPTIONS.extensions.find((e) => src.endsWith(e));
+  const big = join(repo, FIXTURE_OPTIONS.roots[0], `zz-oversized${ext}`);
+  mkdirSync(dirname(big), { recursive: true });
+  writeFileSync(big, readFileSync(src, "utf8") + "\n".repeat(1024 * 1024 + 1));
+  const out = engineOk(repo, ["derive", "--verbose"]);
+  assert.ok(!resources(repo).some((r) => r.includes("zz-oversized")), "a record cites the oversized file");
+  assert.match(out, /zz-oversized.* — not read/);
+});
+
+test("a symlinked source file is never read (POSIX)", { skip: process.platform === "win32" && "symlinks need privileges on Windows" }, (t) => {
+  const repo = scratchRepo(t);
+  const src = firstSource();
+  const ext = FIXTURE_OPTIONS.extensions.find((e) => src.endsWith(e));
+  const outside = mkdtempSync(join(tmpdir(), `zdd-${NAME}-outside-`));
+  t.after(() => rmSync(outside, { recursive: true, force: true }));
+  writeFileSync(join(outside, `linked${ext}`), readFileSync(src, "utf8"));
+  const link = join(repo, FIXTURE_OPTIONS.roots[0], `zz-linked${ext}`);
+  mkdirSync(dirname(link), { recursive: true });
+  symlinkSync(join(outside, `linked${ext}`), link);
+  engineOk(repo, ["derive"]);
+  assert.ok(!resources(repo).some((r) => r.includes("zz-linked")), "a record cites the symlinked file");
+});

@@ -3,7 +3,8 @@
 // the PLUGIN root (where these scripts live — reached by hooks.json via
 // ${CLAUDE_PLUGIN_ROOT}) and the ADOPTER root (the repo being documented —
 // CLAUDE_PROJECT_DIR, an explicit --root, or the nearest zdd/config.json
-// above cwd). Nothing here ever writes; the writer is bootstrap.mjs alone.
+// above cwd). Nothing here ever writes; the writers are bootstrap.mjs and
+// scaffold-extractor.mjs, both through bootstrap's Ledger.
 //
 // Everything the adopter's repo hands us is untrusted input (review CR-002..
 // CR-004): config may be malformed, a configured path may point outside the
