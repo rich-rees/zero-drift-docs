@@ -28,10 +28,13 @@
 // (CR-008). A table name minted twice is an error outright: `.from()` calls
 // would be unattributable.
 //
-// Route choice: every matching route is scored by how many url segments it
-// matched literally (not through `*` or a dynamic segment); highest wins,
-// ties by id. So `fetch('/api/things/*')` prefers `[id]` over a literal
-// sibling, and `fetch('/api/things/mine')` prefers the literal.
+// Route choice: every matching route is ranked by how many url segments it
+// matched literally, then by how few `*`s it had to take on a literal route
+// segment (a guess), then single-segment parameters over catch-alls (fit()
+// below). So `fetch('/api/things/*')` prefers `[id]` or `{id}` over a
+// literal sibling, and `fetch('/api/things/mine')` prefers the literal.
+// Routes tied for the best fit are ALL kept, with a diagnostic (CAS-65):
+// `/users/${id}/${action}` refs every `/users/{id}/<verb>` it could be.
 //
 // Determinism: resolution is a pure function of the merged record set.
 
@@ -44,32 +47,64 @@ const shortName = (id) => {
 const isCatchAll = (s) => /^\[\.\.\..+\]$/.test(s) || /^\{[^}]+:path\}$/.test(s);
 const isDynamic = (s) => /^\[.+\]$/.test(s) || /^\{.+\}$/.test(s);
 
-// `[x]` / `{x}` / `*` eat one segment; `[...x]` / `{x:path}` eat 1+ trailing.
+// `[x]` / `{x}` / `*` eat one segment on either side; `[...x]` / `{x:path}`
+// eat one or more — anywhere in the pattern, with the segments after it
+// still required to match the url's tail (CAS-65 CR-033/034).
 export function makeRouteMatcher(routePath) {
   const segs = routePath.split("/").filter(Boolean);
+  const one = (s, u) => isDynamic(s) || s === "*" || u === "*" || s === u;
   return (url) => {
     const uSegs = url.split("/").filter(Boolean);
-    let i = 0;
-    for (; i < segs.length; i++) {
-      const s = segs[i];
-      if (isCatchAll(s)) return uSegs.length - i >= 1;
-      if (uSegs.length <= i) return false;
-      if (isDynamic(s)) continue;
-      if (s !== uSegs[i] && uSegs[i] !== "*") return false;
-    }
-    return uSegs.length === segs.length;
+    // (pattern index, url index) pairs already known to fail: each pair is
+    // tried once, so several catch-alls cost segs × url steps, never the
+    // combinatorial partitions of plain backtracking (CAS-65 CR-044).
+    const failed = new Set();
+    const from = (i, j) => {
+      const key = i * (uSegs.length + 1) + j;
+      if (failed.has(key)) return false;
+      for (; i < segs.length; i++, j++) {
+        if (isCatchAll(segs[i])) {
+          const rest = segs.length - i - 1;
+          for (let take = uSegs.length - j - rest; take >= 1; take--) if (from(i + 1, j + take)) return true;
+          failed.add(key);
+          return false;
+        }
+        if (j >= uSegs.length || !one(segs[i], uSegs[j])) {
+          failed.add(key);
+          return false;
+        }
+      }
+      if (j === uSegs.length) return true;
+      failed.add(key);
+      return false;
+    };
+    return from(0, 0);
   };
 }
 
-function literalMatches(routePath, url) {
+// How well a matching route fits a url, as a tuple compared in order:
+// literal segments matched (more is better), then GUESSES — a `*` in the url
+// standing on a literal route segment, a value the scan could not see (fewer
+// is better; a `*` on a parameter is the natural fit), then whether a
+// catch-all did the matching (a single-segment parameter is more specific).
+function fit(routePath, url) {
   const segs = routePath.split("/").filter(Boolean);
   const uSegs = url.split("/").filter(Boolean);
-  let n = 0;
+  let literal = 0;
+  let guesses = 0;
+  let catchAll = 0;
   for (let i = 0; i < segs.length && i < uSegs.length; i++) {
-    if (!isDynamic(segs[i]) && segs[i] === uSegs[i]) n++;
+    if (isCatchAll(segs[i])) {
+      catchAll = 1;
+      break;
+    }
+    if (isDynamic(segs[i])) continue;
+    if (uSegs[i] === "*") guesses++;
+    else if (segs[i] === uSegs[i]) literal++;
   }
-  return n;
+  return [-literal, guesses, catchAll];
 }
+const compareFit = (a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
 
 export function resolveRefs(records) {
   const diagnostics = [];
@@ -125,17 +160,24 @@ export function resolveRefs(records) {
         return hit !== undefined ? hit : drop(`${kind} '${target}' matches no known ${kind}`);
       }
       case "route": {
-        let best = null;
-        let bestScore = -1;
+        // Every route tied for the best fit is kept (CAS-65): with a `*` on
+        // literal segments the scan cannot tell `/users/*/deactivate` from
+        // `/users/*/reactivate`, and keeping one would hide the others from
+        // anyone judging what a change touches. A fan-out is a diagnostic.
+        let best = [];
+        let bestFit = null;
         for (const rt of routes) {
           if (!rt.match(target)) continue;
-          const score = literalMatches(rt.path, target);
-          if (score > bestScore) {
-            best = rt;
-            bestScore = score;
-          }
+          const f = fit(rt.path, target);
+          const c = bestFit === null ? -1 : compareFit(f, bestFit);
+          if (c < 0) {
+            best = [rt.id];
+            bestFit = f;
+          } else if (c === 0) best.push(rt.id);
         }
-        return best ? best.id : drop(`fetch('${target}') matches no route`);
+        if (!best.length) return drop(`fetch('${target}') matches no route`);
+        if (best.length > 1) diagnostics.push(`[refs] ${where}: fetch('${target}') fits ${best.length} routes equally well (${best.join(", ")}) — all kept`);
+        return best;
       }
       default:
         throw new Error(`Record ${record.id}: unknown unresolved ref kind '${kind}' in '${ref}'`);
@@ -145,21 +187,41 @@ export function resolveRefs(records) {
   for (const r of records) {
     const resolved = new Set();
     for (const ref of r.refs) {
-      const id = ref.startsWith("?") ? resolveOne(ref, r) : ref;
-      if (id && id !== r.id) resolved.add(id);
+      const hit = ref.startsWith("?") ? resolveOne(ref, r) : ref;
+      for (const id of Array.isArray(hit) ? hit : [hit]) if (id && id !== r.id) resolved.add(id);
     }
     r.refs = [...resolved].sort();
   }
   // Prune to a fixed point: dropping a record strips the refs that pointed
   // at it, which can empty another `requireRefs` record, which must then be
   // dropped in turn (CR-065) — a single pass kept such a record with `refs: []`.
-  let kept = records;
-  for (;;) {
-    const dropped = new Set(kept.filter((r) => r.requireRefs && !r.refs.length).map((r) => r.id));
-    if (!dropped.size) break;
-    kept = kept.filter((r) => !dropped.has(r.id));
-    for (const r of kept) r.refs = r.refs.filter((id) => !dropped.has(id));
+  // A queue over reverse edges: each drop is processed once, each edge
+  // touched once — linear, where re-scanning every record per round was
+  // quadratic on a long chain (CAS-65 CR-035).
+  const byId = new Map(records.map((r) => [r.id, r]));
+  const inbound = new Map(); // id -> ids of records that ref it
+  for (const r of records) {
+    for (const id of r.refs) {
+      if (!inbound.has(id)) inbound.set(id, []);
+      inbound.get(id).push(r.id);
+    }
   }
+  const live = new Map(records.map((r) => [r.id, new Set(r.refs)]));
+  const dropped = new Set();
+  const queue = records.filter((r) => r.requireRefs && !r.refs.length).map((r) => r.id);
+  while (queue.length) {
+    const id = queue.pop();
+    if (dropped.has(id)) continue;
+    dropped.add(id);
+    for (const from of inbound.get(id) ?? []) {
+      if (dropped.has(from)) continue;
+      const refs = live.get(from);
+      refs.delete(id);
+      if (!refs.size && byId.get(from).requireRefs) queue.push(from);
+    }
+  }
+  const kept = records.filter((r) => !dropped.has(r.id));
+  for (const r of kept) if (dropped.size) r.refs = r.refs.filter((id) => !dropped.has(id));
   for (const r of kept) delete r.requireRefs;
   return { records: kept, diagnostics };
 }

@@ -32,9 +32,11 @@ npx @rich-rees/zdd-engine freshness [--base <ref>]
   cites a superseded or non-existent ADR fails; a citation-less blessing or a
   partial supersession is a warning), and — with `--tempstate` — a tracked
   `TEMPSTATE.md` fails. It also lists the **unclaimed records** — every
-  route, table, function and surface no feature slice links — as a warning,
-  never a failure (a repo adopting ZDD starts with everything unclaimed); the
-  same count sits in the human index header.
+  route, table, function and surface no feature slice links — and any record
+  two slices claim, as warnings (a repo adopting ZDD starts with everything
+  unclaimed); the unclaimed count sits in the human index header. With
+  `claims.strict` both become failures; `claims.allowUnclaimed` exempts
+  named records from the unclaimed check only, never from a double claim.
 - **freshness** — advisory (always exits 0): semantic-map concepts whose code a
   diff touches without updating the concept — the `resource:` path, and the
   source behind every metadata record the concept links to. Markdown on
@@ -61,6 +63,8 @@ version:
 | `baseBranch` | `"main"` | The branch PRs merge into — freshness diffs and the changed-set highlight key on `origin/<baseBranch>` |
 | `paths.*` | `zdd/…` | Where each artifact lives (glossary, adrDir, mapDir, metadataDir, agentIndex, adrIndex, humanIndex, graph, bundleDir) |
 | `render.storeChanges` | `true` | Set `false` to render with no git dependency (drops the "what just changed" highlight) |
+| `claims.strict` | `false` | `true`: every route, table, function and surface belongs to exactly one feature slice. `lint` fails on an unclaimed record not in `claims.allowUnclaimed`, on an allow-list id that names no record, and on a record two slices claim. Off: both are warnings |
+| `claims.allowUnclaimed` | `[]` | Record ids that may stay unclaimed under strict: plumbing no feature owns (`["route:/health", "route:/ready"]`) |
 | `agentIndex.summary` | `""` | The blockquote summary line at the top of the agent index |
 | `viewer` | `"cytoscape"` | Which viewer renders the human index from the graph artifact: a name (`cytoscape`, `minimal`) or `{ "name", ...options }` — cytoscape takes `defaultFocus`, `authHubs` |
 
@@ -74,15 +78,20 @@ git history only. `test/determinism.test.mjs` is the guard; the blocking
 
 ## Extractors
 
-An extractor is one module implementing `derive({ repoRoot, options })` →
+An extractor is one module implementing `derive({ repoRoot, options, io })` →
 `{ records, diagnostics }` plus a `FACTS_KEY_ORDER` map, keyed to **one
-convention** (see `src/extractors/`). Config lists the extractors in use and the
+convention** (see `src/extractors/`). `io` (since 1.3.0) is the engine's safe
+reader, built fresh per extractor per run: `io.read` returns a regular file
+inside the repo under a 1 MiB cap, and `io.walk` lists files, sorted, without
+following links, on one shared entry budget. A local extractor cannot import
+the engine, so this is how it reads safely. Config lists the extractors in use and the
 deriver merges their records, then resolves cross-extractor refs — a record
 emits `?from:<name>` / `?function:<name>` / `?route:<url>` for a target another
 convention owns, and the deriver turns those into ids after the merge. Missing
 source roots are "nothing to inventory", so a greenfield repo derives clean.
 Extractors are selected by name from a static registry in `src/derive.mjs` or
-from the declared `localExtractorDir` — never by path. To contribute one, see the
+from the declared `localExtractorDir` — never by path. The plugin's `extractor`
+skill scaffolds a local one. To contribute one, see the
 repo's [CONTRIBUTING.md](https://github.com/rich-rees/zero-drift-docs/blob/main/CONTRIBUTING.md).
 
 ## Viewers

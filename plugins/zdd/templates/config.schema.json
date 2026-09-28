@@ -84,7 +84,7 @@
     },
     "localExtractorDir": {
       "type": "string",
-      "description": "Repo-relative directory holding repo-local extractors (<name>.mjs or <name>/index.mjs), each selectable by name in `extractors`. The one place config may point at code; a one-off convention lives here instead of in a fork. Local names may not shadow built-ins.",
+      "description": "Repo-relative directory holding repo-local extractors (<name>.mjs or <name>/index.mjs), each selectable by name in `extractors`. The one place config may point at code; a one-off convention lives here instead of in a fork, and the plugin's `extractor` skill scaffolds one here. Local names may not shadow built-ins.",
       "examples": ["zdd/extractors"]
     },
     "adapter": {
@@ -103,7 +103,7 @@
       "type": "string",
       "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(\\.(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*))?(\\+([0-9a-zA-Z-]+(\\.[0-9a-zA-Z-]+)*))?$",
       "description": "The @rich-rees/zdd-engine version this repo was bootstrapped for — written by bootstrap, rewritten by bootstrap --upgrade, compared against the plugin by load (skew warning). Mirrors the pin in the CI workflow / pre-push hook so a repo without CI still has one.",
-      "examples": ["1.2.0"]
+      "examples": ["1.3.0"]
     },
     "hooks": {
       "type": "object",
@@ -167,6 +167,24 @@
           "type": "boolean",
           "default": true,
           "description": "Set false to render with no git dependency — drops the 'what just changed' highlight from the human index."
+        }
+      }
+    },
+    "claims": {
+      "type": "object",
+      "description": "How `lint` treats feature claims on routes, tables, functions and surfaces (a Feature slice claims a record by linking it). Off by default: unclaimed and double-claimed records are warnings. Unknown keys are refused — a misspelt 'strict' must never leave enforcement silently off.",
+      "additionalProperties": false,
+      "properties": {
+        "strict": {
+          "type": "boolean",
+          "default": false,
+          "description": "true: every claimable record belongs to exactly one feature slice. An unclaimed record not in allowUnclaimed, an allowUnclaimed id that names no record, and a record claimed by two or more slices all FAIL lint."
+        },
+        "allowUnclaimed": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Record ids that may stay unclaimed under strict — plumbing no feature owns. Read only when strict is true.",
+          "examples": [["route:/health", "route:/ready", "route:/docs", "route:/openapi.json"]]
         }
       }
     },

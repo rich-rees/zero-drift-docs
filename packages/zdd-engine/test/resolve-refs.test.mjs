@@ -88,7 +88,7 @@ test("ids without a namespace slash still resolve by name (CR-015)", () => {
   assert.deepEqual(records.find((r) => r.id === "module:m").refs, ["table:users"]);
 });
 
-test("route resolution: most literal segments win, ties break by id; wildcards and catch-alls", () => {
+test("route resolution: most literal segments win; a wildcard prefers a parameter to a literal; catch-alls", () => {
   const { records } = resolveRefs([
     rec("route", "route:/api/things/[id]"),
     rec("route", "route:/api/things/mine"),
@@ -101,6 +101,76 @@ test("route resolution: most literal segments win, ties break by id; wildcards a
   ]);
   assert.deepEqual(records.find((r) => r.id === "module:m").refs, ["route:/api/files/[...path]", "route:/api/things/[id]", "route:/api/things/mine", "route:/jobs/{id}"]);
   assert.deepEqual(records.find((r) => r.id === "module:n").refs, ["route:/a/[x]"]);
+});
+
+test("CAS-65: a wildcard facing a parameter beats one facing a literal, whatever the parameter spelling sorts like", () => {
+  const { records } = resolveRefs([
+    rec("route", "route:/things/mine"),
+    rec("route", "route:/things/{id}"), // `{` sorts after letters: id order used to pick `mine`
+    rec("route", "route:/stuff/mine"),
+    rec("route", "route:/stuff/[id]"),
+    rec("route", "route:/files/[id]"),
+    rec("route", "route:/files/[...path]"),
+    rec("module", "module:m", ["?route:/things/*", "?route:/stuff/*", "?route:/files/*"]),
+  ]);
+  assert.deepEqual(records.find((r) => r.id === "module:m").refs, ["route:/files/[id]", "route:/stuff/[id]", "route:/things/{id}"]);
+});
+
+test("CAS-65: a call that fits several routes equally well refs all of them, with a diagnostic naming the fan-out", () => {
+  const { records, diagnostics } = resolveRefs([
+    rec("route", "route:/users/{user_id}"),
+    rec("route", "route:/users/{user_id}/deactivate"),
+    rec("route", "route:/users/{user_id}/reactivate"),
+    rec("route", "route:/users/{user_id}/resend-invitation"),
+    rec("route", "route:/users/invite"),
+    rec("surface", "surface:/admin/users", ["?route:/users/*/*", "?route:/users/invite"]),
+  ]);
+  assert.deepEqual(records.find((r) => r.id === "surface:/admin/users").refs, [
+    "route:/users/invite",
+    "route:/users/{user_id}/deactivate",
+    "route:/users/{user_id}/reactivate",
+    "route:/users/{user_id}/resend-invitation",
+  ]);
+  assert.equal(diagnostics.length, 1);
+  assert.match(diagnostics[0], /fetch\('\/users\/\*\/\*'\) fits 3 routes equally well \(route:\/users\/\{user_id\}\/deactivate, route:\/users\/\{user_id\}\/reactivate, route:\/users\/\{user_id\}\/resend-invitation\) — all kept/);
+});
+
+test("CAS-65 CR-033/034: a route-side `*` is one segment; a catch-all in the middle must still match the segments after it", async () => {
+  const { makeRouteMatcher } = await import("../src/lib/resolve-refs.mjs");
+  assert.equal(makeRouteMatcher("/files/*")("/files/a"), true);
+  assert.equal(makeRouteMatcher("/files/*")("/files/a/b"), false);
+  const mid = makeRouteMatcher("/a/{p:path}/admin");
+  assert.equal(mid("/a/x"), false, "the suffix is required");
+  assert.equal(mid("/a/x/admin"), true);
+  assert.equal(mid("/a/x/y/admin"), true);
+  assert.equal(mid("/a/admin"), false, "a catch-all eats at least one segment");
+  assert.equal(makeRouteMatcher("/api/files/[...path]")("/api/files/a/b"), true, "a trailing catch-all is unchanged");
+});
+
+test("CAS-65 CR-044: many catch-alls against a non-matching url stay polynomial", async () => {
+  const { makeRouteMatcher } = await import("../src/lib/resolve-refs.mjs");
+  // Consecutive catch-alls then a literal that never matches: plain
+  // backtracking tries every way to split the url among them.
+  const pattern = "/" + Array.from({ length: 12 }, (_, i) => `[...p${i}]`).join("/") + "/z";
+  const url = "/" + Array.from({ length: 30 }, (_, i) => `s${i}`).join("/");
+  const started = Date.now();
+  assert.equal(makeRouteMatcher(pattern)(url), false);
+  assert.ok(Date.now() - started < 1000, `matching took ${Date.now() - started} ms`);
+  assert.equal(makeRouteMatcher("/[...a]/x/[...b]/y")("/1/2/x/3/y"), true, "still matches when it should");
+});
+
+test("CAS-65 CR-035: requireRefs pruning is linear — a long chain whose tail drops unwinds in one pass, same result as before", () => {
+  const N = 20000;
+  const records = [rec("module", "module:0", ["?from:nope"], { requireRefs: true })];
+  for (let i = 1; i < N; i++) records.push(rec("module", `module:${i}`, [`module:${i - 1}`], { requireRefs: true }));
+  records.push(rec("module", "module:keeper", [`module:${N - 1}`, "?route:/x"]));
+  records.push(rec("route", "route:/x"));
+  const started = process.hrtime.bigint();
+  const { records: kept } = resolveRefs(records);
+  const ms = Number(process.hrtime.bigint() - started) / 1e6;
+  assert.deepEqual(kept.map((r) => r.id).sort(), ["module:keeper", "route:/x"]);
+  assert.deepEqual(kept.find((r) => r.id === "module:keeper").refs, ["route:/x"]);
+  assert.ok(ms < 2000, `pruning took ${ms} ms`);
 });
 
 test("unknown unresolved kind is an error", () => {

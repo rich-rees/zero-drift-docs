@@ -21,7 +21,7 @@ import { readdirSync, lstatSync } from "node:fs";
 import { join, dirname, relative } from "node:path";
 import { parseFrontmatter } from "./frontmatter.mjs";
 import { extractLinks } from "./map-links.mjs";
-import { walkMarkdown, readBounded } from "./walk-markdown.mjs";
+import { walkMarkdown, readBounded, MAX_STORE_FILE_BYTES } from "./walk-markdown.mjs";
 
 export const CLAIMABLE_KINDS = ["route", "table", "function", "surface"];
 const MAX_DEPTH = 4; // metadataDir/<kind>/<file>.json — anything deeper is not derive's
@@ -29,30 +29,49 @@ const MAX_ENTRIES = 20_000;
 
 const posixify = (p) => p.split(/[\\/]/).join("/");
 
-// Regular .json files under `dir`, sorted, links skipped, bounded.
+// Regular .json files under `dir`, sorted, links skipped, bounded. What it
+// does not see goes to `state.skipped` when the caller passes one (CAS-65
+// CR-029): a link, an unreadable entry, a depth or entry cut-off.
 function walkJson(dir, out = [], state = { depth: 0, entries: 0 }) {
-  if (state.depth > MAX_DEPTH) return out;
+  const skip = (path, reason) => state.skipped?.push({ path, reason });
+  if (state.depth > MAX_DEPTH) {
+    skip(dir, `deeper than ${MAX_DEPTH} levels — not walked`);
+    return out;
+  }
   let names;
   try {
-    if (!lstatSync(dir).isDirectory()) return out; // a symlinked or non-dir root is not a store
+    if (!lstatSync(dir).isDirectory()) {
+      if (lstatSync(dir).isSymbolicLink()) skip(dir, "a symlink — not followed");
+      return out; // a symlinked or non-dir root is not a store
+    }
     names = readdirSync(dir).sort();
-  } catch {
+  } catch (e) {
+    // Absent is an empty store; present but unlistable is a gap the caller
+    // must hear about (CAS-65 CR-029).
+    if (e.code !== "ENOENT" && e.code !== "ENOTDIR") skip(dir, `could not be listed (${e.code})`);
     return out;
   }
   for (const name of names) {
-    if (++state.entries > MAX_ENTRIES) return out;
+    if (++state.entries > MAX_ENTRIES) {
+      skip(dir, `the walk passed ${MAX_ENTRIES} entries — the rest not read`);
+      return out;
+    }
     const p = join(dir, name);
     let st;
     try {
       st = lstatSync(p);
     } catch {
+      skip(p, "unreadable");
       continue;
     }
-    if (st.isSymbolicLink()) continue;
+    if (st.isSymbolicLink()) {
+      skip(p, "a symlink — not followed");
+      continue;
+    }
     // One counter for the whole walk: a copied `entries` let every subtree
     // start its budget afresh (CAS-63 review CR-026).
     if (st.isDirectory()) {
-      const child = { depth: state.depth + 1, entries: state.entries };
+      const child = { depth: state.depth + 1, entries: state.entries, skipped: state.skipped };
       walkJson(p, out, child);
       state.entries = child.entries;
     }
@@ -63,41 +82,89 @@ function walkJson(dir, out = [], state = { depth: 0, entries: 0 }) {
 
 // The claimable records under metadataDir, each with the node id a map link
 // resolves to (bundle-relative path minus extension), sorted by id.
-export function claimableRecords(metadataDir, bundleDir) {
+export function claimableRecords(metadataDir, bundleDir, skipped) {
   const out = [];
-  for (const p of walkJson(metadataDir)) {
+  const why = (p) => {
+    try {
+      const st = lstatSync(p);
+      return st.size > MAX_STORE_FILE_BYTES ? `over ${MAX_STORE_FILE_BYTES} bytes` : "unreadable";
+    } catch {
+      return "unreadable";
+    }
+  };
+  for (const p of walkJson(metadataDir, [], { depth: 0, entries: 0, skipped })) {
     const text = readBounded(p);
-    if (text === null) continue;
+    if (text === null) {
+      skipped?.push({ path: p, reason: why(p) });
+      continue;
+    }
     let record;
     try {
       record = JSON.parse(text);
     } catch {
+      skipped?.push({ path: p, reason: "not JSON" });
       continue;
     }
     if (!record || typeof record !== "object" || !CLAIMABLE_KINDS.includes(record.kind)) continue;
     const nodeId = posixify(relative(bundleDir, p)).replace(/\.json$/, "");
-    out.push({ kind: record.kind, title: String(record.title ?? record.id ?? nodeId), nodeId, file: posixify(relative(dirname(bundleDir), p)) });
+    out.push({ kind: record.kind, id: String(record.id ?? nodeId), title: String(record.title ?? record.id ?? nodeId), nodeId, file: posixify(relative(dirname(bundleDir), p)) });
   }
   return out.sort((a, b) => (a.nodeId < b.nodeId ? -1 : 1));
 }
 
-// Every node id a Feature concept links to.
-export function featureClaims(mapDir, bundleDir) {
-  const claimed = new Set();
-  for (const path of walkMarkdown(mapDir)) {
+// Every node id a Feature concept links to, with the feature files linking
+// it (repo-relative, sorted) — two or more is a DOUBLE claim (CAS-65).
+// Claimants are collected in sets and sorted once at the end — linear in
+// the links, where re-sorting per link was quadratic (CAS-65 CR-030).
+export function featureClaims(mapDir, bundleDir, skipped) {
+  const sets = new Map();
+  for (const path of walkMarkdown(mapDir, [], { depth: 0, entries: 0, skipped })) {
     const text = readBounded(path);
-    if (text === null) continue;
+    if (text === null) {
+      let reason = "unreadable";
+      try {
+        if (lstatSync(path).size > MAX_STORE_FILE_BYTES) reason = `over ${MAX_STORE_FILE_BYTES} bytes`;
+      } catch {
+        /* unreadable */
+      }
+      skipped?.push({ path, reason });
+      continue;
+    }
     const parsed = parseFrontmatter(text);
     if (!parsed || String(parsed.frontmatter.type) !== "Feature") continue;
-    for (const id of extractLinks(parsed.body, dirname(path), bundleDir)) claimed.add(id);
+    const file = posixify(relative(dirname(bundleDir), path));
+    for (const id of extractLinks(parsed.body, dirname(path), bundleDir)) {
+      if (!sets.has(id)) sets.set(id, new Set());
+      sets.get(id).add(file);
+    }
   }
+  const claimed = new Map();
+  for (const [id, files] of sets) claimed.set(id, [...files].sort());
   return claimed;
 }
 
+// The claim picture lint reports: every claimable record, the unclaimed ones,
+// and the ones two or more features claim (each with its claiming files).
+// `skipped` lists every map or metadata file the pass could not read, as
+// { file, reason, record } — the claim picture is incomplete by exactly
+// those (CAS-65 CR-029; strict lint fails on them).
 export function unclaimedRecords({ metadataDir, mapDir, bundleDir }) {
-  const claimed = featureClaims(mapDir, bundleDir);
-  const records = claimableRecords(metadataDir, bundleDir);
-  return { total: records.length, unclaimed: records.filter((r) => !claimed.has(r.nodeId)) };
+  const raw = [];
+  const claimed = featureClaims(mapDir, bundleDir, raw);
+  const records = claimableRecords(metadataDir, bundleDir, raw);
+  const skipped = raw
+    .map((s) => {
+      const inMetadata = !relative(metadataDir, s.path).startsWith("..");
+      return { file: posixify(relative(dirname(bundleDir), s.path)), reason: s.reason, record: inMetadata };
+    })
+    .sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : 0));
+  return {
+    skipped,
+    total: records.length,
+    records,
+    unclaimed: records.filter((r) => !claimed.has(r.nodeId)),
+    doubleClaimed: records.filter((r) => (claimed.get(r.nodeId)?.length ?? 0) > 1).map((r) => ({ ...r, features: claimed.get(r.nodeId) })),
+  };
 }
 
 // The same count from a graph artifact (schema zdd-graph/1): metadata nodes

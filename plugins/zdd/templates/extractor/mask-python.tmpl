@@ -1,0 +1,43 @@
+// Blank comments and string contents to spaces, keeping every newline and
+// every offset, so structure found in the result sits at the same place in
+// the original text. Python-like syntax: `#` comments; '…' and "…"
+// literals with backslash escapes; '''…''' and """…""" blocks (docstrings
+// included — read a docstring from the original text when you want it as a
+// description). Quote characters stay; string prefixes (r, f, b) are code.
+// Not handled — adjust if the convention needs it: raw strings ending in a
+// backslash.
+function mask(text) {
+  const blank = (s) => s.replace(/[^\n]/g, " ");
+  let out = "";
+  let i = 0;
+  const n = text.length;
+  while (i < n) {
+    const c = text[i];
+    const triple = (c === '"' || c === "'") && text.startsWith(c.repeat(3), i);
+    if (c === "#") {
+      const nl = text.indexOf("\n", i);
+      const end = nl < 0 ? n : nl;
+      out += blank(text.slice(i, end));
+      i = end;
+    } else if (triple) {
+      const q = c.repeat(3);
+      let j = i + 3;
+      while (j < n && !text.startsWith(q, j)) j += text[j] === "\\" ? 2 : 1;
+      j = Math.min(j, n);
+      const closed = j < n;
+      out += q + blank(text.slice(i + 3, j)) + (closed ? q : "");
+      i = closed ? j + 3 : j;
+    } else if (c === '"' || c === "'") {
+      let j = i + 1;
+      while (j < n && text[j] !== c && text[j] !== "\n") j += text[j] === "\\" ? 2 : 1;
+      j = Math.min(j, n);
+      const closed = j < n && text[j] === c;
+      out += c + blank(text.slice(i + 1, j)) + (closed ? c : "");
+      i = closed ? j + 1 : j;
+    } else {
+      out += c;
+      i += 1;
+    }
+  }
+  return out;
+}

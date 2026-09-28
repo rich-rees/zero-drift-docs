@@ -3,7 +3,8 @@
 // the PLUGIN root (where these scripts live — reached by hooks.json via
 // ${CLAUDE_PLUGIN_ROOT}) and the ADOPTER root (the repo being documented —
 // CLAUDE_PROJECT_DIR, an explicit --root, or the nearest zdd/config.json
-// above cwd). Nothing here ever writes; the writer is bootstrap.mjs alone.
+// above cwd). Nothing here ever writes; the writers are bootstrap.mjs and
+// scaffold-extractor.mjs, both by the same rules and the same Ledger report.
 //
 // Everything the adopter's repo hands us is untrusted input (review CR-002..
 // CR-004): config may be malformed, a configured path may point outside the
@@ -176,6 +177,14 @@ export function repoRelative(value, label, { exact = false } = {}) {
 export const GENERATED_KEYS = ["metadataDir", "graph", "agentIndex", "adrIndex", "humanIndex"];
 export const CURATED_KEYS = ["glossary", "adrDir", "mapDir"];
 export const CONFIG_REL = "zdd/config.json";
+// Two repo-relative paths share ground: one is the other, or sits under it.
+// Case is folded where the filesystem folds it (Windows, macOS), as the
+// engine's overlaps() does (CAS-65 CR-004).
+export function pathsOverlap(a, b) {
+  const fold = process.platform === "win32" || process.platform === "darwin" ? (s) => s.toLowerCase() : (s) => s;
+  const [x, y] = [fold(a), fold(b)];
+  return x === "." || y === "." || x === y || x.startsWith(`${y}/`) || y.startsWith(`${x}/`);
+}
 const samePosix = (a, b) => (process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b);
 const posixPrefix = (dir, p) => samePosix(dir, p) || (process.platform === "win32" ? p.toLowerCase().startsWith(dir.toLowerCase() + "/") : p.startsWith(dir + "/"));
 
