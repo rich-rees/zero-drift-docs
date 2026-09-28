@@ -43,16 +43,23 @@ export function derive({ repoRoot, options = {}, io }) {
   }
   const roots = options.roots ?? DEFAULT_ROOTS;
   const extensions = options.extensions ?? DEFAULT_EXTENSIONS;
-  if (!Array.isArray(roots) || !roots.every((r) => typeof r === "string")) throw new Error("__NAME__: 'roots' must be an array of repo-relative folders");
-  if (!Array.isArray(extensions) || !extensions.every((e) => typeof e === "string")) throw new Error("__NAME__: 'extensions' must be an array of suffixes");
+  // Options come from zdd/config.json — adopter input, so bounded.
+  if (!Array.isArray(roots) || roots.length > 64 || !roots.every((r) => typeof r === "string" && r.length <= 200)) throw new Error("__NAME__: 'roots' must be an array of at most 64 repo-relative folders");
+  if (!Array.isArray(extensions) || extensions.length > 64 || !extensions.every((e) => typeof e === "string" && /^\.[A-Za-z0-9][A-Za-z0-9._-]{0,30}$/.test(e))) throw new Error("__NAME__: 'extensions' must be an array of at most 64 suffixes like \".cs\"");
 
-  // This extractor's own folder (and its fixture) is never source.
+  // This extractor's own folder (and its fixture) is never source: vetoed
+  // when a walk reaches it, and a root that starts at or inside it is skipped.
   const self = relative(repoRoot, dirname(fileURLToPath(import.meta.url))).split(/[\\/]/).join("/");
   const enter = (rel, name) => !SKIP.has(name) && rel !== self;
+  const clean = (p) => p.split("/").filter((s) => s && s !== ".").join("/") || ".";
 
   const records = [];
   const diagnostics = [];
-  for (const root of roots) {
+  for (const root of [...new Set(roots.map(clean))]) {
+    if (root === self || root.startsWith(`${self}/`)) {
+      diagnostics.push(`${root} is this extractor's own folder — not source, not walked`);
+      continue;
+    }
     const walked = io.walk(root, (rel) => {
       if (!extensions.some((ext) => rel.endsWith(ext))) return;
       const got = io.read(rel);
@@ -62,7 +69,7 @@ export function derive({ repoRoot, options = {}, io }) {
       }
       records.push(...fromSource(rel, mask(got.text), got.text, diagnostics));
     }, { enter });
-    if (!walked.exists) diagnostics.push(`${root} is missing — nothing to inventory`);
+    if (!walked.exists && !walked.skipped.length) diagnostics.push(`${root} is missing — nothing to inventory`);
     if (walked.truncated) diagnostics.push(`${root}: the walk hit its entry or depth limit — some files were not read`);
     for (const s of walked.skipped) diagnostics.push(`${s.path}: ${s.reason}`);
   }

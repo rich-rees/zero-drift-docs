@@ -165,8 +165,15 @@ test("the scaffolded test is red until EXPECTED_IDS and a fixture exist, and gre
   writeFileSync(modPath, readFileSync(modPath, "utf8").replace("function fromSource(rel, masked, text, diagnostics) {\n  const out = [];", (head) => `${head}\n${logic}`));
   const green = runTests(repo, testFile);
   assert.equal(green.status, 0, green.stdout + green.stderr);
-  assert.match(green.stdout, /# pass [45]\b/);
-  assert.match(green.stdout, /# fail 0/);
+  // Exact counts per platform (CAS-65 CR-012): a hardening test deleted or
+  // newly skipped must turn this red. Nine tests — the POSIX file-symlink one
+  // skips on Windows, the recursion one is a todo until the convention needs it.
+  const count = (what) => Number(new RegExp(`^# ${what} (\\d+)$`, "m").exec(green.stdout)?.[1]);
+  assert.equal(count("tests"), 9, green.stdout);
+  assert.equal(count("fail"), 0, green.stdout);
+  assert.equal(count("todo"), 1, green.stdout);
+  assert.equal(count("skipped"), POSIX ? 0 : 1, green.stdout);
+  assert.equal(count("pass"), POSIX ? 8 : 7, green.stdout);
 });
 
 test("refusals: every bad answer or repo state stops before the first write", (t) => {
@@ -288,6 +295,152 @@ test("mask python: # comments, quoted strings and triple-quoted docstrings blank
   const text = '# @router.get("/ghost")\n@router.get("/jobs/{id}")\ndef f():\n    """\n    @router.post("/doc")\n    """\n    s = \'@app.put("/x")\'\n@app.delete("/jobs")';
   const out = sameShape(mask, text);
   assert.deepEqual([...out.matchAll(/@(\w+)\.(\w+)\(/g)].map((m) => `${m[1]}.${m[2]}`), ["router.get", "app.delete"]);
+});
+
+test("CAS-65 CR-001: the scaffold never switches on code it did not write — an existing folder module, a linked or non-folder base, a flat module of any kind", (t) => {
+  const planted = adopted(t);
+  mkdirSync(join(planted, "zdd", "extractors", "aspnet-routes"), { recursive: true });
+  writeFileSync(join(planted, "zdd", "extractors", "aspnet-routes", "index.mjs"), "export function derive() { /* not the scaffold's */ }\n");
+  const before = snapshot(planted);
+  const r = scaffold(planted, CSHARP);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /aspnet-routes\/index\.mjs already exists but zdd\/config\.json does not select 'aspnet-routes' — the scaffold never switches on code it did not write/);
+  assert.deepEqual(snapshot(planted), before);
+
+  const fileBase = adopted(t);
+  mkdirSync(join(fileBase, "zdd", "extractors"), { recursive: true });
+  writeFileSync(join(fileBase, "zdd", "extractors", "aspnet-routes"), "not a folder");
+  assert.match(scaffold(fileBase, CSHARP).stderr, /zdd\/extractors\/aspnet-routes exists and is not a real folder/);
+
+  const flatDir = adopted(t);
+  mkdirSync(join(flatDir, "zdd", "extractors", "aspnet-routes.mjs"), { recursive: true });
+  assert.match(scaffold(flatDir, CSHARP).stderr, /aspnet-routes\.mjs already exists/, "a directory named <name>.mjs is still a collision");
+
+  // A rerun — the config already selects the name — keeps the module.
+  const rerun = adopted(t);
+  scaffoldJson(rerun, CSHARP);
+  writeFileSync(join(rerun, "zdd", "extractors", "aspnet-routes", "index.mjs"), "// the adopter's logic by now\n");
+  assert.equal(scaffold(rerun, CSHARP).status, 0);
+});
+
+test("CAS-65 CR-001 (POSIX): a symlinked flat module or base folder is refused", { skip: !POSIX && "symlinks need privileges on Windows" }, (t) => {
+  const repo = adopted(t);
+  mkdirSync(join(repo, "zdd", "extractors"), { recursive: true });
+  const outside = mkdtempSync(join(tmpdir(), "zdd-scaffold-out-"));
+  t.after(() => rmSync(outside, { recursive: true, force: true }));
+  writeFileSync(join(outside, "evil.mjs"), "export function derive() {}\n");
+  symlinkSync(join(outside, "evil.mjs"), join(repo, "zdd", "extractors", "aspnet-routes.mjs"));
+  assert.match(scaffold(repo, CSHARP).stderr, /aspnet-routes\.mjs already exists/);
+  rmSync(join(repo, "zdd", "extractors", "aspnet-routes.mjs"));
+  symlinkSync(outside, join(repo, "zdd", "extractors", "aspnet-routes"));
+  assert.match(scaffold(repo, CSHARP).stderr, /exists and is not a real folder/);
+  assert.deepEqual(readdirSync(outside), ["evil.mjs"], "nothing written through the link");
+});
+
+test("CAS-65 CR-002/005: a malformed or disagreeing config is refused, never normalised — and nothing is written", (t) => {
+  const cases = [
+    [{ extractors: "supabase" }, /'extractors' is not a list of names/],
+    [{ extractors: ["supabase", 3] }, /'extractors' is not a list of names/],
+    [{ extractorOptions: [] }, /'extractorOptions' is not an object/],
+    [{ extractorOptions: { "aspnet-routes": { roots: ["src/Other"], extensions: [".cs"] } } }, /already has extractorOptions\.aspnet-routes = .*src\/Other.* — answer those roots and extensions, or remove it first/],
+    [{ extractorOptions: { "aspnet-routes": "yes" } }, /already has extractorOptions\.aspnet-routes/],
+  ];
+  for (const [patch, re] of cases) {
+    const repo = adopted(t);
+    writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify({ ...config(repo), ...patch }, null, 2));
+    const before = snapshot(repo);
+    const r = scaffold(repo, CSHARP);
+    assert.equal(r.status, 1, JSON.stringify(patch));
+    assert.match(r.stderr, re);
+    assert.deepEqual(snapshot(repo), before, `nothing written for ${JSON.stringify(patch)}`);
+  }
+  // Agreeing options are fine: the name is simply activated.
+  const agree = adopted(t);
+  writeFileSync(join(agree, "zdd", "config.json"), JSON.stringify({ ...config(agree), extractorOptions: { ...config(agree).extractorOptions, "aspnet-routes": { roots: ["src/Api"], extensions: [".cs"] } } }, null, 2));
+  assert.equal(scaffold(agree, CSHARP).status, 0);
+});
+
+test("CAS-65 CR-003: a path that cannot be written anywhere in the plan stops the run before the first write", (t) => {
+  const repo = adopted(t);
+  // A fixture root whose parent is a FILE: the module and test would have
+  // been written before this refusal under the old one-pass scaffold.
+  mkdirSync(join(repo, "zdd", "extractors", "aspnet-routes", "fixture"), { recursive: true });
+  writeFileSync(join(repo, "zdd", "extractors", "aspnet-routes", "fixture", "src"), "a file where a folder must go");
+  const before = snapshot(repo);
+  const r = scaffold(repo, CSHARP);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /zdd\/extractors\/aspnet-routes\/fixture\/src is not a folder/);
+  assert.deepEqual(snapshot(repo), before);
+});
+
+test("CAS-65 CR-004/007: overlap with any artifact (files too, case-folded where the filesystem folds) or with the extractor's own folder is refused", (t) => {
+  const cases = [
+    [{ ...CSHARP, localExtractorDir: "zdd/graph.json/x" }, /overlaps paths\.graph 'zdd\/graph\.json'/],
+    [{ ...CSHARP, localExtractorDir: "zdd/glossary.md" }, /overlaps paths\.glossary/],
+    [{ ...CSHARP, localExtractorDir: "zdd/config.json" }, /overlaps zdd\/config\.json/],
+    [{ ...CSHARP, roots: ["zdd/extractors/aspnet-routes/fixture/src/Api"] }, /roots entry 'zdd\/extractors\/aspnet-routes\/fixture\/src\/Api' overlaps the extractor's own folder/],
+  ];
+  if (process.platform === "win32" || process.platform === "darwin") cases.push([{ ...CSHARP, localExtractorDir: "ZDD/Metadata/local" }, /overlaps paths\.metadataDir/]);
+  for (const [answers, re] of cases) {
+    const repo = adopted(t);
+    const before = snapshot(repo);
+    const r = scaffold(repo, answers);
+    assert.equal(r.status, 1, JSON.stringify(answers.localExtractorDir ?? answers.roots));
+    assert.match(r.stderr, re);
+    assert.deepEqual(snapshot(repo), before);
+  }
+});
+
+test("CAS-65 CR-006: the answers file is a small regular file", (t) => {
+  const repo = adopted(t);
+  const big = join(repo, "..", `answers-big-${Date.now()}.json`);
+  writeFileSync(big, JSON.stringify({ ...CSHARP, pad: "x".repeat(70 * 1024) }));
+  t.after(() => rmSync(big, { force: true }));
+  const r = spawnSync(process.execPath, [SCRIPT, "apply", `--answers=${big}`, `--root=${repo}`], { encoding: "utf8" });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /is \d+ bytes — an answer set is under 65536/);
+  const dir = spawnSync(process.execPath, [SCRIPT, "apply", `--answers=${repo}`, `--root=${repo}`], { encoding: "utf8" });
+  assert.match(dir.stderr, /is not a regular file/);
+});
+
+test("CAS-65 CR-010: engine pins compare as SemVer — a prerelease before 1.3.0 is older; an unreadable pin says so", async (t) => {
+  const { olderThan } = await import("../scripts/scaffold-extractor.mjs");
+  assert.equal(olderThan("1.2.0-beta.1", "1.3.0"), true);
+  assert.equal(olderThan("1.3.0-rc.1", "1.3.0"), true);
+  assert.equal(olderThan("1.3.0+build.7", "1.3.0"), false);
+  assert.equal(olderThan("1.4.0-beta", "1.3.0"), false);
+  assert.equal(olderThan("latest", "1.3.0"), null);
+  const repo = adopted(t, "next");
+  assert.ok(scaffoldJson(repo, CSHARP).notes.some((n) => /engine pin \(next\) is not a version this can compare/.test(n)));
+});
+
+test("CAS-65 CR-014: mask mysql — `#` and `-- ` comments, backslash and doubled-quote escapes, double-quoted strings blank; backtick identifiers stay", async () => {
+  const mask = await loadMask("mysql");
+  const text = "# CREATE TABLE ghost (id int);\nCREATE TABLE `orders` (note text DEFAULT 'it\\'s CREATE TABLE x', b text DEFAULT \"CREATE TABLE y\", c text DEFAULT 'a''b');\n-- CREATE TABLE z\nCREATE TABLE b (id int);";
+  const out = sameShape(mask, text);
+  assert.deepEqual([...out.matchAll(/CREATE TABLE (`?\w+`?)/g)].map((m) => m[1]), ["`orders`", "b"]);
+});
+
+test("CAS-65 CR-013: mask c-like — a `//` inside a JS regex literal is not a comment; division is still division; linear on a large file", async () => {
+  const mask = await loadMask("c-like");
+  const text = 'const slash = /[//]/; app.get("/real", h);\nx = a / b; y = (c) / d;\nreturn /re\\/x/.test(s);';
+  const out = sameShape(mask, text);
+  assert.match(out, /app\.get\(" {5}", h\)/, "code after the regex survives");
+  assert.match(out, /x = a \/ b; y = \(c\) \/ d;/);
+  assert.match(out, /return \/ {5}\/\.test/);
+  const big = "x = a / b;\n".repeat(100_000);
+  const started = Date.now();
+  sameShape(mask, big);
+  assert.ok(Date.now() - started < 5000, "the mask stays linear");
+});
+
+test("CAS-65 CR-014: `.sql` still infers the standard mask; `mysql` is chosen explicitly", (t) => {
+  const repo = adopted(t);
+  const sql = scaffoldJson(repo, { ...CSHARP, name: "pg-tables", kinds: ["table"], roots: ["db"], extensions: [".sql"] });
+  assert.equal(sql.syntax, "sql");
+  const my = scaffoldJson(repo, { ...CSHARP, name: "my-tables", kinds: ["table"], roots: ["db2"], extensions: [".sql"], syntax: "mysql" });
+  assert.equal(my.syntax, "mysql");
+  assert.match(readFileSync(join(repo, "zdd", "extractors", "my-tables", "index.mjs"), "utf8"), /MySQL \/ MariaDB syntax/);
 });
 
 test("POSIX: a symlinked localExtractorDir is refused — nothing written through it", { skip: !POSIX && "symlinks need privileges on Windows" }, (t) => {

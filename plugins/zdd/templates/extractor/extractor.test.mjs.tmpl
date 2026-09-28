@@ -10,7 +10,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -36,6 +36,7 @@ function repoRoot() {
   }
 }
 const PIN = JSON.parse(readFileSync(join(repoRoot(), "zdd", "config.json"), "utf8")).engine;
+const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
 // npm's own npx script, run by this node — no shell, so no quoting to get
 // wrong on Windows.
@@ -46,34 +47,55 @@ function npxCli() {
   }
   throw new Error("npx-cli.js not found next to this node — set ZDD_ENGINE_BIN to a zdd-engine.mjs");
 }
-function engine(repo, args) {
+function engine(repo, args, env = process.env) {
   const local = process.env.ZDD_ENGINE_BIN;
-  if (!local && !/^\d+\.\d+\.\d+$/.test(String(PIN))) throw new Error(`zdd/config.json 'engine' must be x.y.z, got ${JSON.stringify(PIN)}`);
+  if (!local && !SEMVER.test(String(PIN))) throw new Error(`zdd/config.json 'engine' must be a version like 1.3.0, got ${JSON.stringify(PIN)}`);
   const argv = local ? [local, ...args, `--root=${repo}`] : [npxCli(), "-y", `@rich-rees/zdd-engine@${PIN}`, ...args, `--root=${repo}`];
-  const r = spawnSync(process.execPath, argv, { encoding: "utf8" });
+  const r = spawnSync(process.execPath, argv, { encoding: "utf8", env });
   return { status: r.status, out: `${r.stdout}${r.stderr}` };
 }
-function engineOk(repo, args) {
-  const r = engine(repo, args);
+function engineOk(repo, args, env) {
+  const r = engine(repo, args, env);
   assert.equal(r.status, 0, `zdd-engine ${args.join(" ")} failed:\n${r.out}`);
   return r.out;
 }
 
+// Files under `dir`, never through a link, bounded — the fixture is checkout
+// content too.
+function walkFiles(dir, visit, depth = 0, budget = { entries: 20_000 }) {
+  if (depth > 32) throw new Error(`${dir}: deeper than 32 levels`);
+  for (const name of readdirSync(dir).sort()) {
+    if (--budget.entries < 0) throw new Error(`${dir}: more than 20000 entries`);
+    const p = join(dir, name);
+    const st = lstatSync(p);
+    if (st.isSymbolicLink()) continue;
+    if (st.isDirectory()) walkFiles(p, visit, depth + 1, budget);
+    else if (st.isFile()) visit(p, st);
+  }
+}
+
 // A throwaway repo: the fixture (unless `withFixture` is false), this
-// extractor, and a config selecting it with FIXTURE_OPTIONS.
-function scratchRepo(t, { withFixture = true } = {}) {
+// extractor, and a config selecting it with `options`.
+function scratchRepo(t, { withFixture = true, options = FIXTURE_OPTIONS } = {}) {
   const repo = mkdtempSync(join(tmpdir(), `zdd-${NAME}-`));
   t.after(() => rmSync(repo, { recursive: true, force: true }));
-  if (withFixture) cpSync(FIXTURE, repo, { recursive: true, filter: (src) => !src.endsWith(`${sep}.gitkeep`) });
+  if (withFixture) {
+    walkFiles(FIXTURE, (p) => {
+      if (p.endsWith(`${sep}.gitkeep`)) return;
+      const to = join(repo, relative(FIXTURE, p));
+      mkdirSync(dirname(to), { recursive: true });
+      cpSync(p, to);
+    });
+  }
   const target = join(repo, "zdd", "extractors", NAME);
-  cpSync(HERE, target, {
-    recursive: true,
-    filter: (src) => {
-      const rel = relative(HERE, src);
-      return rel !== "fixture" && !rel.startsWith(`fixture${sep}`) && !rel.endsWith(".test.mjs");
-    },
+  walkFiles(HERE, (p) => {
+    const rel = relative(HERE, p);
+    if (rel === "fixture" || rel.startsWith(`fixture${sep}`) || rel.endsWith(".test.mjs")) return;
+    mkdirSync(dirname(join(target, rel)), { recursive: true });
+    cpSync(p, join(target, rel));
   });
-  const config = { name: "fixture", engine: PIN, extractors: [NAME], extractorOptions: { [NAME]: FIXTURE_OPTIONS }, localExtractorDir: "zdd/extractors", render: { storeChanges: false } };
+  const config = { name: "fixture", engine: PIN, extractors: [NAME], extractorOptions: { [NAME]: options }, localExtractorDir: "zdd/extractors", render: { storeChanges: false } };
+  mkdirSync(join(repo, "zdd"), { recursive: true });
   writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify(config, null, 2) + "\n");
   return repo;
 }
@@ -81,33 +103,22 @@ function scratchRepo(t, { withFixture = true } = {}) {
 function metadata(repo) {
   const out = new Map();
   const root = join(repo, "zdd", "metadata");
-  const visit = (dir) => {
-    if (!existsSync(dir)) return;
-    for (const name of readdirSync(dir).sort()) {
-      const p = join(dir, name);
-      if (statSync(p).isDirectory()) visit(p);
-      else out.set(relative(root, p).split(sep).join("/"), readFileSync(p, "utf8"));
-    }
-  };
-  visit(root);
+  if (!existsSync(root)) return out;
+  walkFiles(root, (p) => out.set(relative(root, p).split(sep).join("/"), readFileSync(p, "utf8")));
   return out;
 }
 const records = (repo) => [...metadata(repo).values()].map((text) => JSON.parse(text));
 const ids = (repo) => records(repo).map((r) => r.id).sort();
 const resources = (repo) => records(repo).flatMap((r) => r.resource);
 
-// The first fixture file this extractor reads, for the hardening tests.
+// The first fixture file this extractor reads, for the hardening tests: a
+// regular file (never a link), under 1 MiB.
 function firstSource() {
   const exts = FIXTURE_OPTIONS.extensions;
   const found = [];
-  const visit = (dir) => {
-    for (const name of readdirSync(dir).sort()) {
-      const p = join(dir, name);
-      if (statSync(p).isDirectory()) visit(p);
-      else if (exts.some((e) => name.endsWith(e))) found.push(p);
-    }
-  };
-  visit(FIXTURE);
+  walkFiles(FIXTURE, (p, st) => {
+    if (exts.some((e) => p.endsWith(e)) && st.size <= 1024 * 1024) found.push(p);
+  });
   assert.ok(found.length, `the fixture holds no ${exts.join("/")} file yet — add one under fixture/${FIXTURE_OPTIONS.roots[0]}`);
   return found[0];
 }
@@ -134,15 +145,44 @@ test("determinism: two fresh copies, and a second run on one copy, write byte-id
   assert.match(engineOk(a, ["derive", "--check"]), /in sync/);
 });
 
-test("missing source is nothing to inventory: no records, a diagnostic, exit 0", (t) => {
-  const repo = scratchRepo(t, { withFixture: false });
-  const out = engineOk(repo, ["derive", "--verbose"]);
-  assert.deepEqual(ids(repo), []);
-  // A root of "." always exists; every other root is gone and says so.
-  if (FIXTURE_OPTIONS.roots.some((r) => r !== ".")) assert.match(out, /missing — nothing to inventory/);
+test("determinism across machines: another timezone, locale and environment write the same bytes", (t) => {
+  // Catches the honest mistake — a date, a locale-sorted list, an env value
+  // in a record. Output from a CI runner must equal output from a laptop.
+  const a = scratchRepo(t);
+  const b = scratchRepo(t);
+  engineOk(a, ["derive"]);
+  engineOk(b, ["derive"], { ...process.env, TZ: "Pacific/Chatham", LANG: "tr_TR.UTF-8", LC_ALL: "tr_TR.UTF-8", ZDD_SENTINEL: `${Date.now()}` });
+  assert.deepEqual([...metadata(b).entries()], [...metadata(a).entries()], "output depends on the environment");
 });
 
-test("an oversized source file is never read", (t) => {
+test("the extractor reads through io only: no fs, process, network or environment in its own files", () => {
+  // A text check: it catches the honest mistake (reaching for node:fs),
+  // not deliberate evasion — the extractor is this repo's own code, trusted
+  // like its tests (decision 0010).
+  const banned = [
+    [/\bfrom\s*["'](?:node:)?(?:fs|fs\/promises|child_process|net|http|https|http2|dgram|worker_threads|cluster)["']/, "imports a module io replaces"],
+    [/\brequire\s*\(/, "calls require()"],
+    [/\bimport\s*\(/, "imports dynamically"],
+    [/\bprocess\s*\.\s*env\b/, "reads process.env"],
+  ];
+  const problems = [];
+  walkFiles(HERE, (p) => {
+    const rel = relative(HERE, p);
+    if (!/\.m?js$/.test(p) || rel.startsWith(`fixture${sep}`) || rel.endsWith(".test.mjs")) return;
+    const text = readFileSync(p, "utf8");
+    for (const [re, what] of banned) if (re.test(text)) problems.push(`${rel} ${what}`);
+  });
+  assert.deepEqual(problems, []);
+});
+
+test("missing source is nothing to inventory: no records, a diagnostic naming the root, exit 0", (t) => {
+  const repo = scratchRepo(t, { withFixture: false, options: { ...FIXTURE_OPTIONS, roots: ["zz-no-such-root"] } });
+  const out = engineOk(repo, ["derive", "--verbose"]);
+  assert.deepEqual(ids(repo), []);
+  assert.match(out, /zz-no-such-root is missing — nothing to inventory/);
+});
+
+test("an oversized source file is never read, and says so", (t) => {
   const repo = scratchRepo(t);
   const src = firstSource();
   const ext = FIXTURE_OPTIONS.extensions.find((e) => src.endsWith(e));
@@ -154,7 +194,21 @@ test("an oversized source file is never read", (t) => {
   assert.match(out, /zz-oversized.* — not read/);
 });
 
-test("a symlinked source file is never read (POSIX)", { skip: process.platform === "win32" && "symlinks need privileges on Windows" }, (t) => {
+test("a linked folder is never walked, and says so (every platform: a junction on Windows)", (t) => {
+  const repo = scratchRepo(t);
+  const src = firstSource();
+  const outside = mkdtempSync(join(tmpdir(), `zdd-${NAME}-outside-`));
+  t.after(() => rmSync(outside, { recursive: true, force: true }));
+  writeFileSync(join(outside, `linked${FIXTURE_OPTIONS.extensions.find((e) => src.endsWith(e))}`), readFileSync(src, "utf8"));
+  const link = join(repo, FIXTURE_OPTIONS.roots[0], "zz-linked-dir");
+  mkdirSync(dirname(link), { recursive: true });
+  symlinkSync(outside, link, process.platform === "win32" ? "junction" : "dir");
+  const out = engineOk(repo, ["derive", "--verbose"]);
+  assert.ok(!resources(repo).some((r) => r.includes("zz-linked-dir")), "a record cites a file under the linked folder");
+  assert.match(out, /zz-linked-dir: symlink — not followed/);
+});
+
+test("a symlinked source file is never read, and says so (POSIX)", { skip: process.platform === "win32" && "file symlinks need privileges on Windows" }, (t) => {
   const repo = scratchRepo(t);
   const src = firstSource();
   const ext = FIXTURE_OPTIONS.extensions.find((e) => src.endsWith(e));
@@ -164,6 +218,12 @@ test("a symlinked source file is never read (POSIX)", { skip: process.platform =
   const link = join(repo, FIXTURE_OPTIONS.roots[0], `zz-linked${ext}`);
   mkdirSync(dirname(link), { recursive: true });
   symlinkSync(join(outside, `linked${ext}`), link);
-  engineOk(repo, ["derive"]);
+  const out = engineOk(repo, ["derive", "--verbose"]);
   assert.ok(!resources(repo).some((r) => r.includes("zz-linked")), "a record cites the symlinked file");
+  assert.match(out, new RegExp(`zz-linked\\${ext}: symlink — not followed`));
 });
+
+// If the convention nests (route groups, includes, imports followed), give
+// the fixture a cyclic or very deep case and replace this with a test that
+// derive completes with a diagnostic. If it never recurses, delete it.
+test("recursion ceiling: a cyclic or very deep case completes with a diagnostic", { todo: "only if the convention nests or follows includes — see the hardening checklist" }, () => {});
