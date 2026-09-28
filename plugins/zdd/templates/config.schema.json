@@ -170,6 +170,24 @@
         }
       }
     },
+    "claims": {
+      "type": "object",
+      "description": "How `lint` treats feature claims on routes, tables, functions and surfaces (a Feature slice claims a record by linking it). Off by default: unclaimed and double-claimed records are warnings.",
+      "additionalProperties": true,
+      "properties": {
+        "strict": {
+          "type": "boolean",
+          "default": false,
+          "description": "true: every claimable record belongs to exactly one feature slice. An unclaimed record not in allowUnclaimed, an allowUnclaimed id that names no record, and a record claimed by two or more slices all FAIL lint."
+        },
+        "allowUnclaimed": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Record ids that may stay unclaimed under strict — plumbing no feature owns. Read only when strict is true.",
+          "examples": [["route:/health", "route:/ready", "route:/docs", "route:/openapi.json"]]
+        }
+      }
+    },
     "agentIndex": {
       "type": "object",
       "description": "Renderer options for the agent index (e.g. the blockquote summary line).",
