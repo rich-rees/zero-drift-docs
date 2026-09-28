@@ -19,6 +19,11 @@
 // 3. TEMPSTATE lint (--tempstate, PRs only — tautological on the base
 //    branch): the branch working file must be deleted before merge.
 //    Enforced by construction, not ritual.
+// 4. Unclaimed records (CAS-63): every route, table, function and surface
+//    that no feature slice links is listed as a WARNING, never a failure — a
+//    repo adopting ZDD starts with everything unclaimed, and the list is the
+//    checklist `update` works from (decision 0009). The same count sits in
+//    the human index header.
 
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
@@ -27,11 +32,13 @@ import { loadConfig, absentStoreNotes } from "./lib/config.mjs";
 import { parseFrontmatter } from "./lib/frontmatter.mjs";
 import { extractBlessings, forwardStamps } from "./lib/map-links.mjs";
 import { walkMarkdown, readBounded, MAX_STORE_FILE_BYTES } from "./lib/walk-markdown.mjs";
+import { unclaimedRecords } from "./lib/claims.mjs";
 
 export function run(args) {
-  const { repoRoot: REPO, paths } = loadConfig(args);
+  const { repoRoot: REPO, paths, bundleDir } = loadConfig(args);
   const ADR_DIR = resolve(REPO, paths.adrDir);
   const MAP_DIR = resolve(REPO, paths.mapDir);
+  const METADATA_DIR = resolve(REPO, paths.metadataDir);
   // A missing adrDir or mapDir is greenfield-tolerated (empty corpus passes);
   // say so when the rest of the bundle exists, so a typo is not a silent pass
   // (CR-068).
@@ -150,9 +157,22 @@ if (args.includes("--tempstate")) {
   }
 }
 
+// ---- 4. Unclaimed records (warning tier) ----
+// Read after the blocking lints so a failure above is not buried under the
+// list. Absent metadata (greenfield, or derive not yet run) is an empty
+// inventory: nothing to claim, no line printed.
+const { total, unclaimed } = unclaimedRecords({ metadataDir: METADATA_DIR, mapDir: MAP_DIR, bundleDir });
+if (unclaimed.length) {
+  console.error(
+    `WARNING: ${unclaimed.length} of ${total} records unclaimed — no feature slice in ${paths.mapDir} links them ` +
+      `(a feature claims a record by linking it; a unit of work that adds or changes user-facing behaviour adds or extends a slice):`,
+  );
+  for (const r of unclaimed) console.error(`  ${r.kind.padEnd(8)} ${printable(r.title)}  (${r.file})`);
+}
+
 if (problems.length) {
   console.error(`Store lints failed (${problems.length}):\n` + problems.map((p) => `  ${p}`).join("\n"));
   process.exit(1);
 }
-console.log("store lints passed");
+console.log(`store lints passed${total ? ` (${total - unclaimed.length}/${total} records claimed by a feature)` : ""}`);
 }

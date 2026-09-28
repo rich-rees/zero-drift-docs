@@ -18,22 +18,31 @@ Run this as the definition of done for every unit of work — the spoken form is
      offer them only when hard-to-reverse *and* surprising *and* a real trade-off.
    - **Code comments** — new non-obvious constraints, at the code site. A gotcha
      spanning multiple sites becomes an ADR instead.
-   - **Semantic map** — feature / edge / blessing changes. A blessing names
-     the exemplar to copy and cites its ADR; if a decision was fully
-     superseded in this unit of work, re-bless or drop every blessing that
-     cited it (the lint fails otherwise; a partial supersession only warns).
+   - **Semantic map** — feature / edge / blessing changes. **A unit of work
+     that adds or changes user-facing behaviour adds a feature slice or
+     extends one** (`zdd/map/features/<feature>.md`): the slice claims the
+     routes, tables, functions and surfaces it owns by linking them. The
+     lint's *unclaimed* list (step 4) is the checklist — every record on it
+     is one no slice has placed yet. A blessing names the exemplar to copy
+     and cites its ADR; if a decision was fully superseded in this unit of
+     work, re-bless or drop every blessing that cited it (the lint fails
+     otherwise; a partial supersession only warns).
 2. **Run the deriver.** Regenerates the codebase metadata from source:
    ```
-   npx -y @rich-rees/zdd-engine@1.1.0 derive
+   npx -y @rich-rees/zdd-engine@1.2.0 derive
    ```
 3. **Run the renderer.** Rebuilds the graph artifact (`zdd/graph.json`), the
    agent index, the ADR index, and the human index:
    ```
-   npx -y @rich-rees/zdd-engine@1.1.0 render
+   npx -y @rich-rees/zdd-engine@1.2.0 render
    ```
-4. **Lint the stores.** Supersession symmetry and blessing citations:
+4. **Lint the stores.** Supersession symmetry and blessing citations (blocking),
+   and the **unclaimed records** list (a warning, never a failure): every
+   route, table, function and surface no feature slice links. Read it against
+   the diff — a record this unit of work added or changed belongs in a slice
+   now; the rest is the backlog a repo carries from adoption.
    ```
-   npx -y @rich-rees/zdd-engine@1.1.0 lint
+   npx -y @rich-rees/zdd-engine@1.2.0 lint
    ```
 5. **Commit all of it in the PR.** Code and docs merge atomically; the doc delta
    is reviewed alongside the code delta.

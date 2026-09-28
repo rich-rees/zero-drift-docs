@@ -34,7 +34,13 @@ export function walkMarkdown(dir, out = [], state = { depth: 0, entries: 0 }) {
       continue;
     }
     if (st.isSymbolicLink()) continue;
-    if (st.isDirectory()) walkMarkdown(p, out, { depth: state.depth + 1, entries: state.entries });
+    // One counter for the whole walk: a copied `entries` let every subtree
+    // start its budget afresh (CAS-63 review CR-026).
+    if (st.isDirectory()) {
+      const child = { depth: state.depth + 1, entries: state.entries };
+      walkMarkdown(p, out, child);
+      state.entries = child.entries;
+    }
     else if (st.isFile() && name.endsWith(".md")) out.push(p);
   }
   return out;

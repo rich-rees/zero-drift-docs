@@ -29,12 +29,21 @@ export function render({ graph, bundleName, repoBase }) {
     byType.get(n.type).push(n);
   }
   const titleOf = new Map(graph.nodes.map((n) => [n.id, n.title]));
+  // Unclaimed: metadata nodes (routes, tables, functions, surfaces) with no
+  // edge from a Feature node — the engine lint's rule, computed from the graph.
+  const CLAIMABLE = new Set(["API Endpoint", "Table", "Database Function", "UI Surface"]);
+  const features = new Set(graph.nodes.filter((n) => n.type === "Feature").map((n) => n.id));
+  const claimed = new Set(graph.edges.filter((e) => features.has(e.source)).map((e) => e.target));
+  const claimable = graph.nodes.filter((n) => n.layer === "metadata" && CLAIMABLE.has(n.type));
+  const unclaimed = claimable.filter((n) => !claimed.has(n.id)).length;
   const lines = [];
   lines.push("<!DOCTYPE html>", '<html lang="en"><head><meta charset="utf-8">', `<title>${esc(bundleName)} — graph</title>`);
   lines.push("<style>body{font:14px/1.5 system-ui,sans-serif;max-width:60rem;margin:2rem auto;padding:0 1rem}h2{margin-top:2rem}li{margin:.2rem 0}.muted{color:#666}</style>");
   lines.push("</head><body>");
   lines.push(`<h1>${esc(bundleName)}</h1>`);
-  lines.push(`<p class="muted">Minimal viewer — ${graph.nodes.length} nodes, ${graph.edges.length} edges. Generated from zdd/graph.json (schema ${esc(graph.schema)}); do not edit.</p>`);
+  lines.push(
+    `<p class="muted">Minimal viewer — ${graph.nodes.length} nodes, ${graph.edges.length} edges${claimable.length ? `, ${unclaimed} of ${claimable.length} records unclaimed by any feature` : ""}. Generated from zdd/graph.json (schema ${esc(graph.schema)}); do not edit.</p>`,
+  );
   for (const [type, nodes] of [...byType.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
     lines.push(`<h2>${esc(type)} <span class="muted">(${nodes.length})</span></h2>`, "<ul>");
     for (const n of [...nodes].sort((a, b) => (a.title < b.title ? -1 : a.title > b.title ? 1 : 0))) {
