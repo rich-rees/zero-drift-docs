@@ -39,6 +39,15 @@ this is a minor engine version: 1.3.0.
   adopter-owned, no fork, no publish; tier two is a PR here and a minor
   bump; tier three is a fork with its own scoped package and repinned
   `ENGINE_PACKAGE`.
+- **A second writer of adopter-owned files, by the same rule.**
+  `plugins/zdd/scripts/scaffold-extractor.mjs` writes the local extractor's
+  skeleton and its config lines (`localExtractorDir`, the `extractors`
+  entry, `extractorOptions.<name>`). It writes through bootstrap's own
+  `Ledger`: validated before the first write, creating each file
+  exclusively, never overwriting, and reporting wrote / kept / skipped.
+  Decision 0003's split still holds (the skill asks, the script writes), and
+  now has two scripts. The parsing logic is the agent's, written after the
+  scaffold like any other code in the repo.
 - **Detection probes belong to the registry path only.** Bootstrap never
   runs adopter code: a local extractor is named in the adopter's config, so
   there is nothing to detect. Bootstrap's "map-only" line points at the

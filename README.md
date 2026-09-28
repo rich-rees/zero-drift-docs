@@ -100,13 +100,34 @@ entry *and* a worked example of the format. Branch protection is the one step it
 prints instead of doing. Idempotent; and `bootstrap --upgrade` is the only thing
 that writes to those files later, narrating every file it changes. (The
 generated artifacts are the engine's: `derive` and `render` write them on every
-"update ZDD"; nothing else touches your repo.)
+"update ZDD". Beyond those, only the `extractor` skill's scaffold writes to
+your repo, and only when you run it.)
 
-Contents: four skills (`bootstrap`, `load`, `update`, `grill`), a shared authoring
-guide, three hooks (auto-load, fence, Stop prompt), the runbook script, the engine + composed
+Contents: five skills (`bootstrap`, `load`, `update`, `grill`, `extractor`), a
+shared authoring guide, three hooks (auto-load, fence, Stop prompt), the runbook
+and scaffold scripts, the engine + composed
 extractors + viewers (`packages/zdd-engine`, also the npm package
 `@rich-rees/zdd-engine`), and templates (instruction block, CI workflow, pre-push
-hook, config schema + example, and the seed ADR-0001).
+hook, config schema + example, the seed ADR-0001, and the extractor scaffold).
+
+### Your stack isn't read yet — add your own extractor
+
+The built-in extractors read Supabase/Postgres migrations, the Next.js App
+Router, FastAPI and React Router. For any other convention, bootstrap proposes
+a map-only setup and points at the **`extractor` skill**. Ask your agent for
+an extractor ("give me one for our C# controllers") and it reads a sample of
+your source and interviews you about the convention. A script then writes
+the module, its tests and fixture folder, and the config wiring, and the agent
+walks the tests red to green. There are three tiers, in the order the skill offers them
+([decision 0010](docs/decisions/0010-local-extractors-first-tier-engine-hands-them-io.md)):
+
+1. **Local**: the extractor lives in your repo's `localExtractorDir`, and the
+   engine loads it by name on the next `derive`. You don't fork or publish
+   anything.
+2. **Registry**: propose it here as a PR once it has proven itself, and it
+   ships to everyone in the next minor release.
+3. **Fork**: publish the engine under your own scope and repin the plugin
+   to it, for a convention upstream won't take.
 
 ### Producing decisions — ZDD stands alone, grilling makes it sharper
 
@@ -142,8 +163,8 @@ codex plugin add zdd@zero-drift-docs
 
 Both hosts read the same marketplace file and the same plugin body — two
 manifests (`.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`) pointing at
-one set of skills and one `hooks.json`. After install the four skills are
-`bootstrap`, `load`, `update` and `grill` (Claude Code lists them as
+one set of skills and one `hooks.json`. After install the five skills are
+`bootstrap`, `load`, `update`, `grill` and `extractor` (Claude Code lists them as
 `/zdd:load` etc.); the SessionStart auto-load fires on the next session start
 in a repo that opted in. Install works from a private fork too — it uses your
 git credentials.
@@ -187,13 +208,16 @@ plugins/zdd/
   hooks/hooks.json                  # SessionStart auto-load + PreToolUse fence + Stop prompt (opt-ins read from zdd/config.json)
   scripts/
     bootstrap.mjs                   # the runbook's writer: detect / apply / upgrade
+    scaffold-extractor.mjs          # the extractor skill's writer: a local extractor's skeleton + config wiring
     inject-agent-index.mjs  fence.mjs  stop-check.mjs  check-skew.mjs
-  skills/{bootstrap,load,update,grill}/SKILL.md
+  skills/{bootstrap,load,update,grill,extractor}/SKILL.md
+  skills/extractor/upstream.md      # the registry and fork tiers
   skills/authoring.md               # shared curated-docs authoring discipline
   templates/
     claude-md-snippet.md            # the instruction block (CLAUDE.md / AGENTS.md)
     zdd.yml  pre-push               # CI check / local hook
     config.schema.json  config.example.json
+    extractor/                      # the scaffold: module, test file, one comment/string mask per syntax
     adr-0001-adopt-zero-drift-docs.md   # seeded as the adopter's first ADR
   test/                             # seam 2: the runbook and hooks observed as files + processes
 packages/zdd-engine/                # deriver / renderer / checks + extractors + viewers
@@ -274,6 +298,14 @@ saying no to a row is a visible choice, not a fork.
       one example feature slice and `update` names the slice as the unit of
       work's checklist *(engine + plugin 1.2.0, CAS-63;
       [decision 0009](docs/decisions/0009-unclaimed-records-warn-never-fail.md))*.
+- [x] **1.3.0** — the `extractor` skill: an interview about the convention, a
+      scaffold script that writes a local extractor (module, tests, fixture
+      folder, config wiring), red to green against the CAS-63 hardening
+      checklist, and the registry and fork paths beyond it; the engine hands
+      every extractor `io` (read and walk that stay inside the repo) so a
+      local extractor can be as safe as a built-in; bootstrap's map-only
+      proposal points at the skill *(engine + plugin 1.3.0, CAS-65;
+      [decision 0010](docs/decisions/0010-local-extractors-first-tier-engine-hands-them-io.md))*.
 - [ ] Next: an `expo-router` extractor on its first real adoption; a second
       viewer.
 
@@ -309,6 +341,13 @@ warning can say "behind".
   commits it in the same PR as every engine bump does (`render --check` is
   red until then — the drift check doing its job, not the lint). Additive
   config-schema fields only, no metadata-contract change, so a minor.
+- **`1.3.0` — your own stack, without a fork.** A fifth skill and its
+  scaffold script, and one addition to the extractor contract: `derive` now
+  receives `io`. Existing extractors ignore it, so nothing an adopter runs
+  changes; a scaffolded extractor needs 1.3.0 and says so loudly on an older
+  engine. `io`'s shape is now public surface — changing what `read` or `walk`
+  returns would be a major. No config-schema or metadata-contract change, so
+  a minor.
 
 ## Contributing
 
