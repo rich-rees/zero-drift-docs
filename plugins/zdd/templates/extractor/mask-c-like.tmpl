@@ -1,0 +1,84 @@
+// Blank comments and string contents to spaces, keeping every newline and
+// every offset, so structure found in the result sits at the same place in
+// the original text. C-like syntax: `//` and `/* */` comments; "…", '…' and
+// `…` literals with backslash escapes (backticks may span lines); and a JS/TS
+// regex literal (`/[//]/`), recognised where an expression can start — after
+// `(`, `,`, `=`, `:`, `[`, `!`, `&`, `|`, `?`, `{`, `}`, `;`, an operator, the
+// file start or a keyword like `return` — so a `//` inside one is not a
+// comment. Quote and slash delimiters stay, so `[Route("api/orders")]` masks
+// to `[Route("          ")]`. One pass, linear in the file.
+// Not handled — adjust if the convention needs it: C# verbatim @"…" (a `""`
+// escape, no backslash escapes) and raw """…""" strings, nested comments.
+function mask(text) {
+  const blank = (s) => s.replace(/[^\n]/g, " ");
+  const parts = [];
+  let i = 0;
+  const n = text.length;
+  // The last significant token, tracked as the mask goes: a `/` starts a
+  // regex literal only where that token cannot end an expression.
+  let lastSig = ""; // last non-space code character; a literal counts as "a"
+  let word = ""; // the identifier just written, kept across spaces
+  const KEYWORDS = new Set(["return", "typeof", "case", "do", "else", "in", "of", "instanceof", "new", "delete", "void", "throw", "yield", "await"]);
+  const regexCanStart = () => lastSig === "" || "(,=:[!&|?{};+-*%<>~^".includes(lastSig) || KEYWORDS.has(word);
+  const literalEnds = () => {
+    lastSig = "a";
+    word = "";
+  };
+  while (i < n) {
+    const c = text[i];
+    const d = text[i + 1];
+    if (c === "/" && d === "/") {
+      const nl = text.indexOf("\n", i);
+      const end = nl < 0 ? n : nl;
+      parts.push(blank(text.slice(i, end)));
+      i = end;
+    } else if (c === "/" && d === "*") {
+      const close = text.indexOf("*/", i + 2);
+      const end = close < 0 ? n : close + 2;
+      parts.push(blank(text.slice(i, end)));
+      i = end;
+    } else if (c === '"' || c === "'" || c === "`") {
+      let j = i + 1;
+      while (j < n && text[j] !== c && (c === "`" || text[j] !== "\n")) j += text[j] === "\\" ? 2 : 1;
+      j = Math.min(j, n);
+      const closed = j < n && text[j] === c;
+      parts.push(c + blank(text.slice(i + 1, j)) + (closed ? c : ""));
+      i = closed ? j + 1 : j;
+      literalEnds();
+    } else if (c === "/" && regexCanStart()) {
+      // A regex literal runs to the next unescaped `/` outside a character
+      // class, on the same line; without one it was a division after all.
+      let j = i + 1;
+      let inClass = false;
+      for (; j < n && text[j] !== "\n"; j++) {
+        if (text[j] === "\\") j++;
+        else if (text[j] === "[") inClass = true;
+        else if (text[j] === "]") inClass = false;
+        else if (text[j] === "/" && !inClass) break;
+      }
+      if (j < n && text[j] === "/") {
+        let e = j + 1;
+        while (e < n && /[a-z]/.test(text[e])) e++; // flags
+        parts.push("/" + blank(text.slice(i + 1, j)) + text.slice(j, e));
+        i = e;
+        literalEnds();
+      } else {
+        parts.push(c);
+        i += 1;
+        lastSig = c;
+        word = "";
+      }
+    } else {
+      parts.push(c);
+      i += 1;
+      if (/[A-Za-z0-9_$]/.test(c)) {
+        word = word && /[A-Za-z0-9_$]/.test(lastSig) ? word + c : c;
+        lastSig = c;
+      } else if (!/\s/.test(c)) {
+        lastSig = c;
+        word = "";
+      }
+    }
+  }
+  return parts.join("");
+}

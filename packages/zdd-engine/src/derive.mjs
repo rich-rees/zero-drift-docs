@@ -24,6 +24,7 @@ import { pathToFileURL } from "node:url";
 import { loadConfig, resolveExtractors } from "./lib/config.mjs";
 import { resolveRefs } from "./lib/resolve-refs.mjs";
 import { insideRepo } from "./lib/paths.mjs";
+import { makeExtractorIo } from "./lib/extractor-io.mjs";
 
 const EXTRACTORS = {
   supabase: "./extractors/supabase/index.mjs",
@@ -243,7 +244,9 @@ export async function deriveRecords({ repoRoot, config }) {
     if (typeof extractor.derive !== "function") fail(`Extractor '${name}' exports no derive()`);
     let out;
     try {
-      out = extractor.derive({ repoRoot, options });
+      // A fresh io per extractor: one shared walk budget each, so a greedy
+      // extractor cannot starve the next one (decision 0010).
+      out = extractor.derive({ repoRoot, options, io: makeExtractorIo(repoRoot, name) });
     } catch (e) {
       fail(`Extractor '${name}' failed: ${e.message}`);
     }

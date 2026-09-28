@@ -5,6 +5,10 @@ artifacts (metadata, the graph, the indexes) are the engine's job and CI-enforce
 ones — glossary, ADRs, comments, map — are judgment, and no script can gate them.
 This is the discipline for writing them well.
 
+When the metadata is thin because the engine does not read your stack's
+convention, that is an extractor to add, not curation to write: the
+[`extractor` skill](extractor/SKILL.md) scaffolds a local one in the repo.
+
 *(The technique here is distilled from Matt Pocock's `domain-modeling` skill. If
 the `mattpocock-skills` plugin is installed, `zdd:grill` runs the full interview
 version live; this file is the compact form ZDD carries so it stands alone.)*

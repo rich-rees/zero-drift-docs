@@ -134,17 +134,17 @@ nothing lands unannounced.
 
 ## Step 4 — the engine, the mapping session, and the recommendation
 
-1. **Derive** — `npx -y @rich-rees/zdd-engine@1.2.0 derive`. On a greenfield
+1. **Derive** — `npx -y @rich-rees/zdd-engine@1.3.0 derive`. On a greenfield
    repo this writes nothing and passes; that is correct.
 2. **Mapping session** (the only LLM-heavy step, paid once; skip on greenfield
    beyond the declared apps) — scan the code with the glossary + ADRs loaded,
    propose feature groupings, and **ask** wherever evidence is thin. Answers
    route by kind, per [authoring.md](../authoring.md): verdicts → ADRs,
    vocabulary → glossary, pure connective fact → the map.
-3. **Render** — `npx -y @rich-rees/zdd-engine@1.2.0 render`. Commit the
+3. **Render** — `npx -y @rich-rees/zdd-engine@1.3.0 render`. Commit the
    generated artifacts (`zdd/graph.json`, both indexes, the human index);
    never edit them.
-4. **Lint** — `npx -y @rich-rees/zdd-engine@1.2.0 lint`. The same blocking
+4. **Lint** — `npx -y @rich-rees/zdd-engine@1.3.0 lint`. The same blocking
    lint CI runs: ADR numbering, supersession symmetry, and every blessing's
    citation. A failure here is fixed now, in the mapping session, not
    discovered on the first PR. It also prints the **unclaimed records** — on
@@ -167,12 +167,17 @@ nothing lands unannounced.
 - **Without CI:** say plainly that the guarantee is weaker — ZDD runs on the
   two verbs (and the pre-push hook, if taken); drift is a habit kept, not a
   check that blocks a merge.
+- **When detection proposed `generic`** (source present, no known
+  convention): offer the [`extractor` skill](../extractor/SKILL.md) as the
+  next session's work — it scaffolds a local extractor so the metadata stops
+  being empty. Offer it here, after the runbook, never in the middle of it.
 
 ## Upgrade
 
-`bootstrap --upgrade` is the **only** writer into an adopter's repo after
-adoption. Updating the plugin never touches the repo by itself; this does, and
-narrates every file:
+`bootstrap --upgrade` is the only writer of the plugin-owned files after
+adoption (the other writer, the `extractor` skill's scaffold, writes only an
+extractor the adopter asked for). Updating the plugin never touches the repo
+by itself; this does, and narrates every file:
 
 ```
 node "$PLUGIN/scripts/bootstrap.mjs" upgrade

@@ -6,7 +6,7 @@ at **both ends** of the pipeline: **extractors** feed data in (one per
 convention), and **viewers** render it out (one per visualization), with a stable
 graph in the middle.
 
-> **Status.** ZDD is `1.2.0` and public. The engine (`packages/zdd-engine`, on
+> **Status.** ZDD is `1.3.0` and public. The engine (`packages/zdd-engine`, on
 > npm as `@rich-rees/zdd-engine`) is what the plugin's skills and adopters' CI
 > both run, and both contracts below — extractors and viewers — are the ones it
 > executes today. Issues and discussion are welcome; the tests are the contract
@@ -39,12 +39,40 @@ metadata set — so a stack *combination* is a config line, never a new module
 (the curated artifacts, the indexes, the ritual, the CI check) is stack-agnostic
 and already done.
 
+**Start with the `extractor` skill** (`plugins/zdd/skills/extractor/`). Ask
+your agent for an extractor and it interviews you about the convention,
+scaffolds a local extractor with its fixture and tests, and walks the tests red
+to green. The skill is the procedure; this section is the contract it follows.
+An extractor lives at one of three tiers
+([decision 0010](docs/decisions/0010-local-extractors-first-tier-engine-hands-them-io.md)):
+
+1. **Local**, in the adopter's `localExtractorDir`. No fork, no publish; the
+   default, and where every extractor should start.
+2. **Registry**, a PR here that ships to everyone in a minor release. The
+   skill's `upstream.md` lists what that PR must hold: fixture, tests,
+   detection probe, schema block, README rows and release note.
+3. **Fork**, your own scoped engine package, repinned everywhere, for a
+   convention upstream will not take.
+
 An extractor is a good contribution when it's **mechanical and deterministic**:
 
-- It exports `derive({ repoRoot, options })` returning `{ records, diagnostics }`,
+- It exports `derive({ repoRoot, options, io })` returning `{ records, diagnostics }`,
   plus a `FACTS_KEY_ORDER` map (per kind) so output is byte-stable. `options` is
   the adopter's `extractorOptions.<name>` object; document its schema in the
   module's leading comment.
+- **Every read goes through `io`**, which the engine builds fresh for each
+  extractor on each run (engine 1.3.0+). `io.read(rel, { maxBytes })` returns
+  `{ ok: true, text }` for a regular file physically inside the repo under a
+  1 MiB cap (`maxBytes` may lower it). Otherwise it returns
+  `{ ok: false, code, reason }`, where `code` is `missing`, `not-regular` or
+  `too-large`. `io.walk(relDir, onFile, { enter })` hands `onFile` every regular
+  file as a sorted, repo-relative POSIX path. It never follows a symlink, caps
+  depth, skips `.git` by default and shares one entry budget across every walk,
+  and returns `{ exists, truncated, skipped }`. A path that is not
+  repo-relative throws. A local extractor cannot import the engine under
+  `npx`, which is why `io` is handed in. Decide structure on text with its
+  comments and strings masked, so a commented-out declaration never becomes a
+  record.
 - Each **record** has: `kind` (`route` | `table` | `surface` | `function` |
   `bucket` | `module` | `job` | …), `id`, `title`, a one-sentence `description`
   *where mechanically extractable*, repo-relative POSIX `resource` path(s),
@@ -60,7 +88,11 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
   that references something"). See `src/lib/resolve-refs.mjs`.
 - **Missing source is "nothing to inventory."** A configured root that does not
   exist yields no records and a diagnostic, never an error — greenfield repos
-  adopt ZDD before any code exists.
+  adopt ZDD before any code exists. The one exception is a single named file
+  a whole record kind hangs on, missing while code already sits beside it
+  (`react-router`'s `routesFile`, [decision 0013](docs/decisions/0013-a-missing-routes-file-beside-code-fails-derive.md)).
+  That fails, because "nothing to inventory" there would write every record
+  away.
 - **Determinism is the contract:** same source bytes in ⇒ byte-identical metadata
   out. No LLM, no timestamps, no environment-dependent values — the blocking CI
   check depends on this. Anything needing judgment is *not* metadata; it belongs in
@@ -68,8 +100,9 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
 - It's selected by **name** from config, never by path — from the engine's
   registry (`src/derive.mjs`), or from the adopter's declared `localExtractorDir`
   (`<name>.mjs` or `<name>/index.mjs`, the one place config may point at code;
-  local names may not shadow built-ins). Try a convention there first; propose it
-  for the registry once it has run against a real repo.
+  local names may not shadow built-ins). Try a convention there first, with the
+  skill's scaffold; propose it for the registry once it has run against a real
+  repo.
 
 A stack without statically derivable structure keeps thinner metadata and a
 larger semantic map — the *contract* is fixed, not the coverage. When in doubt,
@@ -143,7 +176,7 @@ builds its own private data shape from the graph.
 
 ## Other welcome contributions
 
-- **Skills** — improvements to `load` / `update` / `bootstrap`, or new ones that
+- **Skills** — improvements to `load` / `update` / `bootstrap` / `extractor`, or new ones that
   serve the ritual (not project-specific workflow — ZDD ships mechanism, not
   opinions about how *your* team plans work).
 - **Engine** — determinism fixes, better ref resolution, the renderer, the checks.

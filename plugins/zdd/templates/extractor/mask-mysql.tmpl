@@ -1,0 +1,49 @@
+// Blank comments and string contents to spaces, keeping every newline and
+// every offset, so structure found in the result sits at the same place in
+// the original text. MySQL / MariaDB syntax: `-- ` (a space or control
+// character after the dashes — `1--2` is arithmetic), `#` and `/* */`
+// comments; '…' and "…" string literals with backslash escapes and the
+// doubled-quote escape (in MySQL's default mode "…" is a string, not an
+// identifier); `backtick` identifiers are structure and stay visible.
+// For Postgres or standard SQL, scaffold with syntax "sql" instead: there
+// `#` is an operator and backslashes are not escapes.
+// Not handled — adjust if the convention needs it: ANSI_QUOTES mode (where
+// "…" is an identifier), NO_BACKSLASH_ESCAPES, executable /*! … */ comments.
+function mask(text) {
+  const blank = (s) => s.replace(/[^\n]/g, " ");
+  let out = "";
+  let i = 0;
+  const n = text.length;
+  while (i < n) {
+    const c = text[i];
+    const d = text[i + 1];
+    // MySQL reads `--` as a comment only when whitespace or a control
+    // character follows (`1--2` is arithmetic); `#` always.
+    if ((c === "-" && d === "-" && (i + 2 >= n || /[\s\x00-\x1f]/.test(text[i + 2]))) || c === "#") {
+      const nl = text.indexOf("\n", i);
+      const end = nl < 0 ? n : nl;
+      out += blank(text.slice(i, end));
+      i = end;
+    } else if (c === "/" && d === "*") {
+      const close = text.indexOf("*/", i + 2);
+      const end = close < 0 ? n : close + 2;
+      out += blank(text.slice(i, end));
+      i = end;
+    } else if (c === "'" || c === '"') {
+      let j = i + 1;
+      for (; j < n; j++) {
+        if (text[j] === "\\") j++;
+        else if (text[j] === c && text[j + 1] === c) j++;
+        else if (text[j] === c) break;
+      }
+      j = Math.min(j, n);
+      const closed = j < n && text[j] === c;
+      out += c + blank(text.slice(i + 1, j)) + (closed ? c : "");
+      i = closed ? j + 1 : j;
+    } else {
+      out += c;
+      i += 1;
+    }
+  }
+  return out;
+}

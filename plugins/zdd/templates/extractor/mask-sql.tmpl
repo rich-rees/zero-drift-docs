@@ -1,0 +1,46 @@
+// Blank comments and string contents to spaces, keeping every newline and
+// every offset, so structure found in the result sits at the same place in
+// the original text. SQL syntax: `--` and `/* */` comments; '…' literals
+// with the doubled '' escape; dollar-quoted bodies ($$…$$, $tag$…$tag$).
+// Double-quoted "identifiers" are structure, not strings, and stay visible.
+// Not handled — adjust if the dialect needs it: MySQL `#` comments and
+// backslash escapes inside '…', nested /* */ comments.
+function mask(text) {
+  const blank = (s) => s.replace(/[^\n]/g, " ");
+  let out = "";
+  let i = 0;
+  const n = text.length;
+  while (i < n) {
+    const c = text[i];
+    const d = text[i + 1];
+    const dollar = c === "$" ? /^\$[A-Za-z_]*\$/.exec(text.slice(i, i + 64)) : null;
+    if (c === "-" && d === "-") {
+      const nl = text.indexOf("\n", i);
+      const end = nl < 0 ? n : nl;
+      out += blank(text.slice(i, end));
+      i = end;
+    } else if (c === "/" && d === "*") {
+      const close = text.indexOf("*/", i + 2);
+      const end = close < 0 ? n : close + 2;
+      out += blank(text.slice(i, end));
+      i = end;
+    } else if (c === "'") {
+      let j = i + 1;
+      while (j < n && !(text[j] === "'" && text[j + 1] !== "'")) j += text[j] === "'" ? 2 : 1;
+      j = Math.min(j, n);
+      const closed = j < n;
+      out += c + blank(text.slice(i + 1, j)) + (closed ? c : "");
+      i = closed ? j + 1 : j;
+    } else if (dollar) {
+      const tag = dollar[0];
+      const close = text.indexOf(tag, i + tag.length);
+      const end = close < 0 ? n : close;
+      out += tag + blank(text.slice(i + tag.length, end)) + (close < 0 ? "" : tag);
+      i = close < 0 ? n : close + tag.length;
+    } else {
+      out += c;
+      i += 1;
+    }
+  }
+  return out;
+}

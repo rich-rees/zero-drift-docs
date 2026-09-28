@@ -310,7 +310,7 @@ export function detect(root) {
 
   const mode = sourceFiles === 0 && !pkg ? "greenfield" : "existing";
   if (mode === "existing" && !proposals.length) {
-    proposals.push({ name: "generic", evidence: ["source present but no known convention found — map-only ZDD; add extractors later"], options: {} });
+    proposals.push({ name: "generic", evidence: ["source present but no known convention found — map-only ZDD; scaffold an extractor for it with the `extractor` skill once bootstrap is done"], options: {} });
   }
   return { mode, proposals, apps, sourceFiles };
 }
@@ -465,7 +465,7 @@ export function validateAnswers(a) {
 // file that appears between the check and the write is kept, not clobbered
 // (CR-010).
 // ---------------------------------------------------------------------------
-class Ledger {
+export class Ledger {
   constructor(root) {
     this.root = root;
     this.wrote = [];
@@ -958,6 +958,9 @@ export function upgrade(root) {
   }
   if (stopUnset) ledger.notes.push('hooks.stop is not set (new in 1.1: the Stop hook prompts for the curated half once per session) — it stays OFF until answered: run bootstrap apply with {"optIns":{"stop":true}} (repair mode, keeps every other choice), or add "stop": true inside the existing "hooks" object by hand');
   ledger.notes.push("1.1 adds a blocking lint (a blessing citing a superseded or missing ADR fails `lint`) — run `npx -y " + ENGINE_PACKAGE + "@" + version + " lint` before pushing; a red result is the lint doing its job on a stale blessing");
+  if (config.claims === undefined) {
+    ledger.notes.push('claims.strict (new in 1.3): lint can enforce "every record belongs to exactly one feature slice" — an unclaimed record not on an allow-list, a stale allow-list entry, or a record two slices claim then FAILS. It is off until you add it to zdd/config.json: "claims": { "strict": true, "allowUnclaimed": ["route:/health"] }. Without it, double claims are a warning beside the unclaimed list');
+  }
   ledger.notes.push("curated artifacts (glossary, ADRs, map, metadata) untouched — upgrade never writes them");
   ledger.notes.push("if the engine pin moved: run `render` and commit the regenerated artifacts in the same PR");
   return { version, ...ledgerOut(ledger) };
@@ -970,7 +973,7 @@ export function upgrade(root) {
 // character is replaced before it can forge a line or restyle the terminal
 // (CR-092). `--json` output is JSON-quoted and needs no such step.
 // ---------------------------------------------------------------------------
-const printable = (line) => line.replace(/[\x00-\x1f\x7f]/g, "?");
+export const printable = (line) => line.replace(/[\x00-\x1f\x7f]/g, "?");
 
 export function narrateDetect(d, pocock) {
   const out = [];

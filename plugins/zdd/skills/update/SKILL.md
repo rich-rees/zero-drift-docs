@@ -29,20 +29,27 @@ Run this as the definition of done for every unit of work — the spoken form is
      otherwise; a partial supersession only warns).
 2. **Run the deriver.** Regenerates the codebase metadata from source:
    ```
-   npx -y @rich-rees/zdd-engine@1.2.0 derive
+   npx -y @rich-rees/zdd-engine@1.3.0 derive
    ```
 3. **Run the renderer.** Rebuilds the graph artifact (`zdd/graph.json`), the
    agent index, the ADR index, and the human index:
    ```
-   npx -y @rich-rees/zdd-engine@1.2.0 render
+   npx -y @rich-rees/zdd-engine@1.3.0 render
    ```
 4. **Lint the stores.** Supersession symmetry and blessing citations (blocking),
-   and the **unclaimed records** list (a warning, never a failure): every
-   route, table, function and surface no feature slice links. Read it against
-   the diff — a record this unit of work added or changed belongs in a slice
-   now; the rest is the backlog a repo carries from adoption.
+   and the **claims**: every route, table, function and surface no feature
+   slice links, and any record two slices claim. Read the list against the
+   diff — a record this unit of work added or changed belongs in exactly one
+   slice now.
+   - `claims.strict` off (the default): the lists are warnings, and the rest
+     is the backlog a repo carries from adoption.
+   - `claims.strict` on (check `zdd/config.json`): each is a **failure**,
+     along with a stale `allowUnclaimed` entry and any claim file lint could
+     not read. The unit of work is not finished until lint is green: link the
+     record from one slice, move a double claim to one owner, or allow-list
+     genuine plumbing.
    ```
-   npx -y @rich-rees/zdd-engine@1.2.0 lint
+   npx -y @rich-rees/zdd-engine@1.3.0 lint
    ```
 5. **Commit all of it in the PR.** Code and docs merge atomically; the doc delta
    is reviewed alongside the code delta.

@@ -1,0 +1,140 @@
+// __NAME__ — a local Zero-Drift Docs extractor, scaffolded by the zdd
+// `extractor` skill. It lives in this repo (zdd/config.json names it in
+// `extractors`, and `localExtractorDir` points here); the engine loads it by
+// name and calls derive() on every `derive` and `derive --check`.
+//
+// Convention: __EVIDENCE__
+// Shaped like the built-in `__SHAPED_LIKE__` extractor.
+// Emits: __KINDS_LIST__ records, ids spelled like `__ID_EXAMPLE__`.
+// Unresolved refs it may emit: __REFS_LIST__
+//
+// Options (zdd/config.json → extractorOptions.__NAME_KEY__):
+//   roots       repo-relative folders to walk        default __ROOTS__
+//   extensions  file suffixes read as source         default __EXTENSIONS__
+//
+// The contract (CONTRIBUTING.md, "The prize: writing an extractor"):
+//   - derive({ repoRoot, options, io }) returns { records, diagnostics }.
+//   - Same source bytes in ⇒ byte-identical records out: no dates, no
+//     randomness, no absolute paths, nothing from the environment.
+//   - Every read goes through io.read and every listing through io.walk —
+//     they refuse symlinks, files outside the repo and oversized files, and
+//     share one entry budget. Never import node:fs here.
+//   - Decide structure on MASKED text (comments and strings blanked), so a
+//     commented-out declaration or one inside a string is never a record.
+//   - Missing source is nothing to inventory: a diagnostic, never a throw.
+//   - Refs to records another extractor mints are emitted unresolved
+//     (`?table:<name>`, `?route:<url>`, …); the engine resolves them.
+
+import { dirname, relative } from "node:path";
+import { fileURLToPath } from "node:url";
+
+export const FACTS_KEY_ORDER = __FACTS_KEY_ORDER__;
+
+const DEFAULT_ROOTS = __ROOTS__;
+const DEFAULT_EXTENSIONS = __EXTENSIONS__;
+// Folders never walked: dependencies, build output, the zdd bundle.
+const SKIP = new Set(["node_modules", ".git", "bin", "obj", "dist", "build", "zdd"]);
+
+export function derive({ repoRoot, options = {}, io }) {
+  if (!io) {
+    // Fail loudly (decision 0010): empty records here would be committed by
+    // `derive` and then accepted by `derive --check` as the new truth.
+    throw new Error("__NAME__ needs @rich-rees/zdd-engine __IO_SINCE__ or later (io was not passed) — run `zdd:bootstrap --upgrade`, then derive again");
+  }
+  const roots = options.roots ?? DEFAULT_ROOTS;
+  const extensions = options.extensions ?? DEFAULT_EXTENSIONS;
+  // Options come from zdd/config.json — adopter input, so bounded.
+  if (!Array.isArray(roots) || roots.length > 64 || !roots.every((r) => typeof r === "string" && r.length <= 200)) throw new Error("__NAME__: 'roots' must be an array of at most 64 repo-relative folders");
+  if (!Array.isArray(extensions) || extensions.length > 64 || !extensions.every((e) => typeof e === "string" && /^\.[A-Za-z0-9][A-Za-z0-9._-]{0,30}$/.test(e))) throw new Error("__NAME__: 'extensions' must be an array of at most 64 suffixes like \".cs\"");
+
+  // This extractor's own folder (and its fixture) is never source: vetoed
+  // when a walk reaches it, and a root that starts at or inside it is skipped.
+  const self = relative(repoRoot, dirname(fileURLToPath(import.meta.url))).split(/[\\/]/).join("/");
+  const enter = (rel, name) => !SKIP.has(name) && rel !== self;
+  const clean = (p) => p.split("/").filter((s) => s && s !== ".").join("/") || ".";
+
+  const records = [];
+  const diagnostics = [];
+  for (const root of [...new Set(roots.map(clean))]) {
+    if (root === self || root.startsWith(`${self}/`)) {
+      diagnostics.push(`${root} is this extractor's own folder — not source, not walked`);
+      continue;
+    }
+    const walked = io.walk(root, (rel) => {
+      if (!extensions.some((ext) => rel.endsWith(ext))) return;
+      const got = io.read(rel);
+      if (!got.ok) {
+        diagnostics.push(got.reason);
+        return;
+      }
+      records.push(...fromSource(rel, mask(got.text), got.text, diagnostics));
+    }, { enter });
+    if (!walked.exists && !walked.skipped.length) diagnostics.push(`${root} is missing — nothing to inventory`);
+    if (walked.truncated) diagnostics.push(`${root}: the walk hit its entry or depth limit — some files were not read`);
+    for (const s of walked.skipped) diagnostics.push(`${s.path}: ${s.reason}`);
+  }
+  return { records: merge(records), diagnostics };
+}
+
+// ---------------------------------------------------------------------------
+// The convention — the part to write. Given one source file, return its
+// records. Find declarations in `masked` (same length and line breaks as
+// `text`, comments and string contents blanked to spaces); read values such
+// as a route template or a table name from `text` at the same offsets.
+// Push a diagnostic for anything you skip on purpose.
+// ---------------------------------------------------------------------------
+function fromSource(rel, masked, text, diagnostics) {
+  const out = [];
+  // Example: for (const m of masked.matchAll(/…/g)) out.push(record("__FIRST_KIND__", …, rel, { … }));
+  return out;
+}
+
+// One record. `key` is the id without its kind prefix (a URL for a route, a
+// schema-qualified name for a table). Titles and descriptions are mechanical
+// only: a doc comment you can extract, never a guess.
+function record(kind, key, rel, facts = {}, { title = key, description = "", refs = [] } = {}) {
+  return { kind, id: `${kind}:${key}`, title, description, resource: [rel], refs, facts, filename: `${slugify(key)}.json` };
+}
+
+// Several declarations can mint one id (two actions on one route template):
+// merge them into one record, resources and refs unioned and sorted, and
+// facts arrays unioned. Sorted output keeps the bytes stable.
+function merge(records) {
+  const byId = new Map();
+  for (const r of records) {
+    const prev = byId.get(r.id);
+    if (!prev) {
+      byId.set(r.id, { ...r, resource: [...r.resource], refs: [...r.refs], facts: { ...r.facts } });
+      continue;
+    }
+    prev.resource = [...new Set([...prev.resource, ...r.resource])].sort();
+    prev.refs = [...new Set([...prev.refs, ...r.refs])].sort();
+    for (const [k, v] of Object.entries(r.facts)) {
+      prev.facts[k] = Array.isArray(v) && Array.isArray(prev.facts[k]) ? [...new Set([...prev.facts[k], ...v])].sort() : prev.facts[k] ?? v;
+    }
+    if (!prev.description && r.description) prev.description = r.description;
+  }
+  return [...byId.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+}
+
+// The engine's filename scheme (src/lib/slug.mjs), copied because a local
+// extractor cannot import the engine: `/` → `--`, `{p}` → `_p`, `.` → `-`.
+// Two ids that slug alike fail derive loudly — never a silent overwrite.
+function slugify(key) {
+  const cleaned = key.replace(/^\/+/, "");
+  if (!cleaned) return "index";
+  return cleaned
+    .split("/")
+    .map((seg) =>
+      seg
+        .replace(/^\[\.\.\.(.+)\]$/, "___$1")
+        .replace(/^\[(.+)\]$/, "_$1")
+        .replace(/^\{([^:}]+):path\}$/, "___$1")
+        .replace(/^\{([^:}]+)(?::[^}]*)?\}$/, "_$1")
+        .replace(/\./g, "-")
+        .replace(/[^A-Za-z0-9._~()\[\]-]/g, "-"),
+    )
+    .join("--");
+}
+
+__MASK__
