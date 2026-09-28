@@ -397,12 +397,11 @@ test("CR-001: a symlinked routes file, element file or one-hop module is never r
     writeFileSync(join(root, "src", "data.js"), `export const x = api.get("/real-data");\n`);
     const again = derive({ repoRoot: root, options: {} });
     assert.deepEqual(again.records.find((r) => r.id === "surface:/a").refs, ["?route:/a", "?route:/real-data"]);
-    // A linked routes file is "not found".
+    // A linked routes file is never read — and, like a renamed one, it stops
+    // derive rather than writing every surface record away (CAS-65).
     rmSync(join(root, "src", "routes.tsx"));
     symlinkSync(join(root, "outside.ts"), join(root, "src", "routes.tsx"));
-    const linked = derive({ repoRoot: root, options: {} });
-    assert.deepEqual(linked.records, []);
-    assert.match(linked.diagnostics[0], /not found — nothing to inventory/);
+    assert.throws(() => derive({ repoRoot: root, options: {} }), /react-router: routesFile 'src\/routes\.tsx' is not a regular file inside the repo \(a symlink, a directory, or under a link\) — never read; fix extractorOptions\.react-router\.routesFile/);
   } else t.diagnostic("symlink cases skipped on win32");
   // CR-030: an explicitly suffixed specifier (any extension) is tried as spelled only — never a synthetic
   // double extension. Every platform: no symlink involved — so the routes file
@@ -441,6 +440,52 @@ test("CR-004: a route tree nested past the ceiling is a diagnostic, never a stac
   const out = parseRouteTree(text, d);
   assert.equal(out.length, 0);
   assert.match(d[0], /nested deeper than 32/);
+});
+
+test("CAS-65 (Cascade CAS-64): a routes file missing beside an existing folder FAILS derive — a rename must not delete every surface; no folder yet is still nothing to inventory", () => {
+  const renamed = scratch({ "apps/web/src/router.tsx": "export const routes = [];\n" });
+  try {
+    assert.throws(
+      () => derive({ repoRoot: renamed, options: { routesFile: "apps/web/src/routes.tsx" } }),
+      /react-router: routesFile 'apps\/web\/src\/routes\.tsx' does not exist, but its folder 'apps\/web\/src' does — a renamed or misspelt routes file would drop every surface record; fix extractorOptions\.react-router\.routesFile/,
+    );
+    // Through the CLI: exit 1, the message, and no metadata pruned.
+    mkdirSync(join(renamed, "zdd", "metadata", "surface"), { recursive: true });
+    writeFileSync(join(renamed, "zdd", "metadata", "surface", "index.json"), "{}\n");
+    writeFileSync(join(renamed, "zdd", "config.json"), JSON.stringify({ extractors: ["react-router"], extractorOptions: { "react-router": { routesFile: "apps/web/src/routes.tsx" } }, render: { storeChanges: false } }));
+    const r = run(renamed, ["derive"]);
+    assert.equal(r.status, 1, r.stdout);
+    assert.match(r.stderr, /Extractor 'react-router' failed: react-router: routesFile 'apps\/web\/src\/routes\.tsx' does not exist/);
+    assert.equal(readFileSync(join(renamed, "zdd", "metadata", "surface", "index.json"), "utf8"), "{}\n", "nothing pruned");
+  } finally {
+    rmSync(renamed, { recursive: true, force: true });
+  }
+  const greenfield = scratch({ "package.json": "{}" });
+  try {
+    const out = derive({ repoRoot: greenfield, options: { routesFile: "apps/web/src/routes.tsx" } });
+    assert.deepEqual(out.records, []);
+    assert.match(out.diagnostics[0], /apps\/web\/src\/routes\.tsx not found — nothing to inventory/);
+  } finally {
+    rmSync(greenfield, { recursive: true, force: true });
+  }
+});
+
+test("CAS-65 (Cascade CAS-64 #1, end to end): `/things/${id}/${verb}` refs both FastAPI routes of that shape, and the fan-out is a diagnostic", () => {
+  const root = scratch({
+    "api/main.py": 'from fastapi import FastAPI\napp = FastAPI()\n\n@app.post("/things/{id}/a")\nasync def a(id: str):\n    return {}\n\n@app.post("/things/{id}/b")\nasync def b(id: str):\n    return {}\n',
+    "web/src/routes.tsx": 'import { Things } from "./Things";\nexport const routes = [{ path: "/things", element: <Things /> }];\n',
+    "web/src/Things.tsx": 'import { useVerb } from "./data";\nexport function Things() { return <main>{String(useVerb())}</main>; }\n',
+    "web/src/data.ts": "export function useVerb() {\n  return (id: string, verb: \"a\" | \"b\") => api.post(`/things/${id}/${verb}`, {});\n}\n",
+  });
+  try {
+    const api = fastapi({ repoRoot: root, options: { roots: ["api"] } });
+    const web = derive({ repoRoot: root, options: { routesFile: "web/src/routes.tsx" } });
+    const { records, diagnostics } = resolveRefs([...api.records, ...web.records]);
+    assert.deepEqual(records.find((r) => r.id === "surface:/things").refs, ["route:/things/{id}/a", "route:/things/{id}/b"]);
+    assert.ok(diagnostics.some((d) => /fetch\('\/things\/\*\/\*'\) fits 2 routes equally well/.test(d)), diagnostics.join("\n"));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("missing routes file is nothing to inventory; a path option outside the repo is refused; the `@/` alias resolves through srcAliasRoot", () => {

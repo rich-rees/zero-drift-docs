@@ -791,6 +791,32 @@ export function derive({ repoRoot, options }) {
   };
 
   if (!exists(routesFile)) {
+    // Nothing at the path, beside a folder that exists, is a renamed or
+    // misspelt routes file — and "nothing to inventory" would let derive
+    // write every surface record away, with every check then passing on the
+    // smaller truth (Cascade CAS-64). Fail. So does something at the path
+    // that is not a regular file inside the repo (a link, a directory): it
+    // is never read, and the loss would be the same. No folder yet is
+    // greenfield — bootstrap configures the path ahead of the code.
+    const dir = posix.dirname(routesFile);
+    let atPath = true;
+    try {
+      lstatSync(join(realRoot, routesFile));
+    } catch {
+      atPath = false;
+    }
+    let dirExists = false;
+    try {
+      dirExists = dir !== "." && lstatSync(join(realRoot, dir)).isDirectory();
+    } catch {
+      /* no folder: greenfield */
+    }
+    if (!atPath && dirExists) {
+      throw new Error(`react-router: routesFile '${routesFile}' does not exist, but its folder '${dir}' does — a renamed or misspelt routes file would drop every surface record; fix extractorOptions.react-router.routesFile`);
+    }
+    if (atPath) {
+      throw new Error(`react-router: routesFile '${routesFile}' is not a regular file inside the repo (a symlink, a directory, or under a link) — never read; fix extractorOptions.react-router.routesFile`);
+    }
     diagnostics.push(`${routesFile} not found — nothing to inventory`);
     return { records: [], diagnostics };
   }
