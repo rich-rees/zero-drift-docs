@@ -140,10 +140,10 @@ like the roots. It must hold:
   become a record;
 - the convention's awkward corner from Step 1 (a prefix, nesting, an
   include);
-- if the convention nests or follows includes, a **cyclic or very deep**
-  case, and replace the scaffold's `recursion ceiling` todo test with one
-  asserting derive completes with a diagnostic (delete the todo if the
-  convention never recurses).
+- the answer to `CONVENTION_RECURSES` in the test file (its recursion test
+  is red until you set it). `true` when the convention nests or follows
+  includes: then add `fixture-deep/` with a cyclic or very deep case, and
+  derive must finish and say where it stopped. `false` otherwise.
 
 Fill `EXPECTED_IDS` in `<name>.test.mjs` by reading the fixture, before any
 logic exists. Run `node --test <test path>`: the expected-records test fails
