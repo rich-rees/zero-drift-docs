@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, cpSync, symlinkSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, cpSync, symlinkSync, chmodSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -108,8 +108,11 @@ test("walk: every walk on one io shares one entry budget; a fresh io starts afre
   const a = collect(io, "a");
   assert.equal(a.files.length, 6);
   assert.equal(a.truncated, false);
+  // CAS-65 CR-025: the budget is charged per directory entry as it is read,
+  // and a directory the budget runs out inside yields nothing — never the
+  // subset the filesystem happened to list first.
   const b = collect(io, "b");
-  assert.equal(b.files.length, 2, "the second walk gets what the first left");
+  assert.equal(b.files.length, 0, "b's listing would pass the budget: dropped whole, deterministically");
   assert.equal(b.truncated, true);
   assert.equal(collect(io, "a").files.length, 0, "a spent budget stays spent");
   assert.equal(collect(makeExtractorIo(root, "x", { maxEntries: 8 }), "b").files.length, 6);
@@ -121,10 +124,60 @@ test("walk: the budget holds across nested directories, and depth is capped", (t
   const shallow = collect(makeExtractorIo(root, "x", { maxDepth: 1 }), "d");
   assert.deepEqual(shallow.files.map(([rel]) => rel), ["d/1/x.txt"]);
   assert.equal(shallow.truncated, true);
-  // Entries: 1, 1/2, 1/2/3, deep.txt — the fourth is over a budget of 3.
+  // Listings charged: d → [1] (1), d/1 → [2, x.txt] (3), d/1/2 → [3, y.txt]
+  // would reach 5 > 3, so d/1/2 yields nothing and the walk is truncated.
   const tight = collect(makeExtractorIo(root, "x", { maxEntries: 3 }), "d");
-  assert.deepEqual(tight.files, []);
+  assert.deepEqual(tight.files.map(([rel]) => rel), ["d/1/x.txt"]);
   assert.equal(tight.truncated, true);
+});
+
+test("CAS-65 CR-024: walk hands out files in one global path order — a numbered file before the same-named folder's contents", (t) => {
+  const root = scratch({ "db/001/a.sql": "", "db/001.sql": "", "db/002.sql": "", "db/001-x.sql": "" });
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  assert.deepEqual(collect(makeExtractorIo(root), "db").files.map(([rel]) => rel), ["db/001-x.sql", "db/001.sql", "db/001/a.sql", "db/002.sql"]);
+});
+
+test("CAS-65 CR-025: a total read budget per io — once spent, a read is over-budget, never a silent miss", (t) => {
+  const root = scratch({ "a.txt": "x".repeat(600), "b.txt": "y".repeat(600) });
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const io = makeExtractorIo(root, "x", { maxTotalBytes: 1000 });
+  assert.equal(io.read("a.txt").ok, true);
+  const b = io.read("b.txt");
+  assert.equal(b.code, "over-budget");
+  assert.match(b.reason, /b\.txt would pass this extractor's total read budget of 1000 bytes — not read/);
+  assert.equal(makeExtractorIo(root, "x", { maxTotalBytes: 1000 }).read("b.txt").ok, true, "a fresh io starts afresh");
+});
+
+test("CAS-65 CR-023: a file that is present but cannot be read is 'unreadable', never 'missing' (POSIX, not root)", { skip: (!POSIX || process.getuid?.() === 0) && "needs POSIX permissions and a non-root user" }, (t) => {
+  const root = scratch({ "locked.sql": "CREATE TABLE t (id int);" });
+  t.after(() => {
+    chmodSync(join(root, "locked.sql"), 0o644);
+    rmSync(root, { recursive: true, force: true });
+  });
+  chmodSync(join(root, "locked.sql"), 0o000);
+  const got = makeExtractorIo(root).read("locked.sql");
+  assert.equal(got.code, "unreadable");
+  assert.match(got.reason, /locked\.sql could not be opened \(EACCES\) — not read/);
+});
+
+test("CAS-65 CR-038: a directory link is never followed on any platform — a junction on Windows, a symlink elsewhere", (t) => {
+  const outside = scratch({ "leak.sql": "CREATE TABLE leak (id int);" });
+  const root = scratch({ "db/real.sql": "x" });
+  t.after(() => {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  });
+  const type = POSIX ? "dir" : "junction"; // a junction needs no privilege on Windows
+  symlinkSync(outside, join(root, "db", "linked"), type);
+  symlinkSync(outside, join(root, "linkedroot"), type);
+  const io = makeExtractorIo(root);
+  const db = collect(io, "db");
+  assert.deepEqual(db.files.map(([rel]) => rel), ["db/real.sql"]);
+  assert.deepEqual(db.skipped.map((s) => s.path), ["db/linked"]);
+  assert.equal(io.read("db/linked/leak.sql").code, "not-regular");
+  const linked = collect(io, "linkedroot");
+  assert.equal(linked.exists, false);
+  assert.match(linked.skipped[0].reason, /not a real directory/);
 });
 
 test("io is frozen: an extractor cannot swap read or walk for the next one", () => {
