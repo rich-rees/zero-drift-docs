@@ -41,12 +41,22 @@ export function run(args) {
   const { repoRoot: REPO, config, paths, bundleDir } = loadConfig(args);
   // `claims` (CAS-65, decision 0012): opt-in strict mode. Checked before
   // any lint runs, so a malformed block is the one thing reported.
-  const claimsCfg = config.claims ?? {};
+  // Only an ABSENT block defaults: `null` or a misspelt key is an error,
+  // never strict silently off (CAS-65 CR-027/028); the allow-list is bounded
+  // (CR-031).
+  const claimsCfg = config.claims === undefined ? {} : config.claims;
+  const CLAIMS_KEYS = ["strict", "allowUnclaimed"];
+  const isObject = claimsCfg !== null && typeof claimsCfg === "object" && !Array.isArray(claimsCfg);
+  const unknownKey = isObject ? Object.keys(claimsCfg).find((k) => !CLAIMS_KEYS.includes(k)) : undefined;
+  const allow = isObject ? claimsCfg.allowUnclaimed : undefined;
   const claimsError =
-    typeof claimsCfg !== "object" || claimsCfg === null || Array.isArray(claimsCfg) ? "'claims' must be an object"
+    !isObject ? "'claims' must be an object"
+    : unknownKey !== undefined ? `'claims' has an unknown key '${unknownKey.replace(/[\x00-\x1f\x7f]/g, "?").slice(0, 40)}' (known: ${CLAIMS_KEYS.join(", ")})`
     : claimsCfg.strict !== undefined && typeof claimsCfg.strict !== "boolean" ? "'claims.strict' must be true or false"
-    : claimsCfg.allowUnclaimed !== undefined && (!Array.isArray(claimsCfg.allowUnclaimed) || !claimsCfg.allowUnclaimed.every((x) => typeof x === "string"))
+    : allow !== undefined && (!Array.isArray(allow) || !allow.every((x) => typeof x === "string"))
       ? "'claims.allowUnclaimed' must be an array of record ids (\"route:/health\")"
+    : allow !== undefined && allow.length > 10_000 ? "'claims.allowUnclaimed' lists more than 10000 ids"
+    : allow !== undefined && allow.some((x) => x.length > 512) ? "'claims.allowUnclaimed' ids must be at most 512 characters"
       : null;
   if (claimsError) {
     console.error(`zdd/config.json: ${claimsError}`);
@@ -179,17 +189,24 @@ if (args.includes("--tempstate")) {
 // Read after the blocking lints so a failure above is not buried under the
 // list. Absent metadata (greenfield, or derive not yet run) is an empty
 // inventory: nothing to claim, no line printed.
-const { total, records, unclaimed, doubleClaimed } = unclaimedRecords({ metadataDir: METADATA_DIR, mapDir: MAP_DIR, bundleDir });
+const { total, records, unclaimed, doubleClaimed, skipped } = unclaimedRecords({ metadataDir: METADATA_DIR, mapDir: MAP_DIR, bundleDir });
+// Every adopter-controlled path is printable before it reaches the log — a
+// control character in a filename cannot forge a line (CAS-65 CR-032).
+const files = (list) => list.map(printable).join(", ");
 if (STRICT) {
+  // A strict pass means every file was read (CAS-65 CR-029, decision 0012).
+  for (const s of skipped) {
+    problems.push(`claims.strict: ${printable(s.file)} could not be read (${s.reason}) — ${s.record ? "its record is unknown" : "its claims are unknown"}`);
+  }
   const ids = new Set(records.map((r) => r.id));
   for (const r of unclaimed) {
-    if (!ALLOWED.has(r.id)) problems.push(`${printable(r.id)} is unclaimed — claims.strict: link it from one feature slice, or add it to claims.allowUnclaimed (${r.file})`);
+    if (!ALLOWED.has(r.id)) problems.push(`${printable(r.id)} is unclaimed — claims.strict: link it from one feature slice, or add it to claims.allowUnclaimed (${printable(r.file)})`);
   }
   for (const id of [...ALLOWED].sort()) {
     if (!ids.has(id)) problems.push(`claims.allowUnclaimed lists '${printable(id)}', which is no claimable record — remove it`);
   }
   for (const r of doubleClaimed) {
-    problems.push(`${printable(r.id)} is claimed by ${r.features.length} feature slices (${r.features.join(", ")}) — claims.strict: exactly one owns a record`);
+    problems.push(`${printable(r.id)} is claimed by ${r.features.length} feature slices (${files(r.features)}) — claims.strict: exactly one owns a record`);
   }
 } else {
   if (unclaimed.length) {
@@ -197,16 +214,22 @@ if (STRICT) {
       `WARNING: ${unclaimed.length} of ${total} records unclaimed — no feature slice in ${paths.mapDir} links them ` +
         `(a feature claims a record by linking it; a unit of work that adds or changes user-facing behaviour adds or extends a slice):`,
     );
-    for (const r of unclaimed) console.error(`  ${r.kind.padEnd(8)} ${printable(r.title)}  (${r.file})`);
+    for (const r of unclaimed) console.error(`  ${r.kind.padEnd(8)} ${printable(r.title)}  (${printable(r.file)})`);
   }
   if (doubleClaimed.length) {
     console.error(`WARNING: ${doubleClaimed.length} record${doubleClaimed.length === 1 ? "" : "s"} claimed by more than one feature slice (turn on claims.strict to make exactly one owner a rule):`);
-    for (const r of doubleClaimed) console.error(`  ${r.kind.padEnd(8)} ${printable(r.title)}  (${r.file}) — ${r.features.join(", ")}`);
+    for (const r of doubleClaimed) console.error(`  ${r.kind.padEnd(8)} ${printable(r.title)}  (${printable(r.file)}) — ${files(r.features)}`);
+  }
+  if (skipped.length) {
+    console.error(`WARNING: ${skipped.length} claim file${skipped.length === 1 ? "" : "s"} could not be read — the claim picture is incomplete (claims.strict fails on these):`);
+    for (const s of skipped) console.error(`  ${printable(s.file)} (${s.reason})`);
   }
 }
 
 if (problems.length) {
-  console.error(`Store lints failed (${problems.length}):\n` + problems.map((p) => `  ${p}`).join("\n"));
+  // Bounded: a hostile allow-list or map cannot flood the log (CR-031).
+  const shown = problems.slice(0, 200);
+  console.error(`Store lints failed (${problems.length}):\n` + shown.map((p) => `  ${p}`).join("\n") + (problems.length > shown.length ? `\n  … and ${problems.length - shown.length} more` : ""));
   process.exit(1);
 }
 console.log(`store lints passed${!total ? "" : STRICT ? ` (strict claims: ${total - unclaimed.length}/${total} records claimed by a feature, ${unclaimed.length} allowed unclaimed)` : ` (${total - unclaimed.length}/${total} records claimed by a feature)`}`);

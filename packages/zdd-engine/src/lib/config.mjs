@@ -11,7 +11,9 @@
 // zdd/config.json is the discovery convention — configurable paths live INSIDE
 // the config, but the config itself is found at the conventional spot.
 
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, statSync } from "node:fs";
+
+const MAX_CONFIG_BYTES = 1024 * 1024; // the plugin's cap too (plugins/zdd/scripts/lib/repo.mjs)
 import { dirname, join, resolve, relative } from "node:path";
 import { repoRelative, overlaps } from "./paths.mjs";
 
@@ -170,6 +172,13 @@ export function loadConfig(args, cwd = process.cwd()) {
       `No ZDD config found at ${configPath} — run from inside a repo that has ` +
         `adopted ZDD (zdd/config.json), or pass --root= / --config=.`,
     );
+    process.exit(1);
+  }
+  // Bounded like every other adopter file the engine reads (CAS-65 CR-031):
+  // a config is small, and an oversized one is refused before it is parsed.
+  const size = statSync(configPath).size;
+  if (size > MAX_CONFIG_BYTES) {
+    console.error(`zdd/config.json is ${size} bytes — larger than ${MAX_CONFIG_BYTES}; a config is small`);
     process.exit(1);
   }
   const config = JSON.parse(readFileSync(configPath, "utf8"));

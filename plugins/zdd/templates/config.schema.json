@@ -172,8 +172,8 @@
     },
     "claims": {
       "type": "object",
-      "description": "How `lint` treats feature claims on routes, tables, functions and surfaces (a Feature slice claims a record by linking it). Off by default: unclaimed and double-claimed records are warnings.",
-      "additionalProperties": true,
+      "description": "How `lint` treats feature claims on routes, tables, functions and surfaces (a Feature slice claims a record by linking it). Off by default: unclaimed and double-claimed records are warnings. Unknown keys are refused — a misspelt 'strict' must never leave enforcement silently off.",
+      "additionalProperties": false,
       "properties": {
         "strict": {
           "type": "boolean",
