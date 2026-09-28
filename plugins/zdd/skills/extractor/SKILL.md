@@ -50,8 +50,8 @@ Done when all three hold.
 
 ## Step 1 — read a sample
 
-Find the files that declare the thing — a glob and a grep, then read three to
-five of them (whole when under about 200 KB; the first and last few hundred
+Find the files that declare the thing — a glob and a grep, then read up to
+five of them (all of them when there are fewer) (whole when under about 200 KB; the first and last few hundred
 lines of a larger one). Note the **declaration shape** (the syntax that makes a
 route a route or a table a table), where values sit (a quoted template, an
 identifier), how nesting and prefixes combine, and what comments and strings
