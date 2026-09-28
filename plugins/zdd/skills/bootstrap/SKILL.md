@@ -48,8 +48,9 @@ installed (used in step 4):
      repo's display name, `repoBase` and `baseBranch`.
   2. **"Anything else planned for the stack?"** — a part with no code yet is
      configured *ahead* of the code (an extractor at its future path, or an
-     Application concept in the map when no extractor exists yet — React and
-     Expo routers are map-only today).
+     Application concept in the map when no extractor exists yet — a React
+     Router web app gets the `react-router` extractor at its routes file plus
+     its Application; Expo is map-only today).
 - **GREENFIELD** — no source to read. Grill for the intended stack: what
   serves the API, what holds the data, what the apps are (web, mobile), and
   where each will live. Every part maps to an extractor at its stated future
@@ -110,8 +111,11 @@ hand). Then it narrates every file as **wrote / kept / skipped** and writes:
 
 - `zdd/config.json` (extractors + options, `engine` pin, `hooks` opt-ins),
   `zdd/glossary.md` (a header, no terms), `zdd/map/{features,apps,services}/`
-  (empty, plus one Application per declared app), `zdd/adr/0001-…` (dated
-  today), `zdd/metadata/` (empty until derive).
+  (one Application per declared app, and **one example feature slice** —
+  `features/example-feature.md`, drawn from the configured stack, showing
+  how a slice claims records; the adopter renames it to a real feature or
+  deletes it, and a folder that already holds a slice gets none),
+  `zdd/adr/0001-…` (dated today), `zdd/metadata/` (empty until derive).
 - `.github/workflows/zdd.yml` **or** `.githooks/pre-push` (+ `git config
   core.hooksPath .githooks` — run for you when `.git` exists and the setting
   is free; an existing hook manager's path is left alone and the composition
@@ -130,20 +134,23 @@ nothing lands unannounced.
 
 ## Step 4 — the engine, the mapping session, and the recommendation
 
-1. **Derive** — `npx -y @rich-rees/zdd-engine@1.1.0 derive`. On a greenfield
+1. **Derive** — `npx -y @rich-rees/zdd-engine@1.2.0 derive`. On a greenfield
    repo this writes nothing and passes; that is correct.
 2. **Mapping session** (the only LLM-heavy step, paid once; skip on greenfield
    beyond the declared apps) — scan the code with the glossary + ADRs loaded,
    propose feature groupings, and **ask** wherever evidence is thin. Answers
    route by kind, per [authoring.md](../authoring.md): verdicts → ADRs,
    vocabulary → glossary, pure connective fact → the map.
-3. **Render** — `npx -y @rich-rees/zdd-engine@1.1.0 render`. Commit the
+3. **Render** — `npx -y @rich-rees/zdd-engine@1.2.0 render`. Commit the
    generated artifacts (`zdd/graph.json`, both indexes, the human index);
    never edit them.
-4. **Lint** — `npx -y @rich-rees/zdd-engine@1.1.0 lint`. The same blocking
+4. **Lint** — `npx -y @rich-rees/zdd-engine@1.2.0 lint`. The same blocking
    lint CI runs: ADR numbering, supersession symmetry, and every blessing's
    citation. A failure here is fixed now, in the mapping session, not
-   discovered on the first PR.
+   discovered on the first PR. It also prints the **unclaimed records** — on
+   day one that is the whole inventory, and it is the mapping session's
+   worklist: each feature slice written claims the records it links, and
+   the count in the human index header falls as they are placed.
 5. **The Pocock recommendation** — the script already printed it. If
    `mattpocock-skills` is absent, say in plain words: the curated artifacts
    will only be as good as the design sessions that fill them; `grill` needs
