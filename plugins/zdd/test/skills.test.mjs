@@ -1,4 +1,4 @@
-// The four SKILL.md frontmatters, parsed the way a STRICT YAML reader parses
+// Every SKILL.md frontmatter, parsed the way a STRICT YAML reader parses
 // them. Claude Code's reader is lenient; Codex's is not — a description that
 // began with a quoted phrase and continued after the closing quote
 // (`description: "load ZDD" — the declared load…`) is a YAML error there, and
