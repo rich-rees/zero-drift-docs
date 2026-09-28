@@ -84,7 +84,7 @@
     },
     "localExtractorDir": {
       "type": "string",
-      "description": "Repo-relative directory holding repo-local extractors (<name>.mjs or <name>/index.mjs), each selectable by name in `extractors`. The one place config may point at code; a one-off convention lives here instead of in a fork. Local names may not shadow built-ins.",
+      "description": "Repo-relative directory holding repo-local extractors (<name>.mjs or <name>/index.mjs), each selectable by name in `extractors`. The one place config may point at code; a one-off convention lives here instead of in a fork, and the plugin's `extractor` skill scaffolds one here. Local names may not shadow built-ins.",
       "examples": ["zdd/extractors"]
     },
     "adapter": {

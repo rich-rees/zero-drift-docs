@@ -74,15 +74,20 @@ git history only. `test/determinism.test.mjs` is the guard; the blocking
 
 ## Extractors
 
-An extractor is one module implementing `derive({ repoRoot, options })` →
+An extractor is one module implementing `derive({ repoRoot, options, io })` →
 `{ records, diagnostics }` plus a `FACTS_KEY_ORDER` map, keyed to **one
-convention** (see `src/extractors/`). Config lists the extractors in use and the
+convention** (see `src/extractors/`). `io` (since 1.3.0) is the engine's safe
+reader, built fresh per extractor per run: `io.read` returns a regular file
+inside the repo under a 1 MiB cap, and `io.walk` lists files, sorted, without
+following links, on one shared entry budget. A local extractor cannot import
+the engine, so this is how it reads safely. Config lists the extractors in use and the
 deriver merges their records, then resolves cross-extractor refs — a record
 emits `?from:<name>` / `?function:<name>` / `?route:<url>` for a target another
 convention owns, and the deriver turns those into ids after the merge. Missing
 source roots are "nothing to inventory", so a greenfield repo derives clean.
 Extractors are selected by name from a static registry in `src/derive.mjs` or
-from the declared `localExtractorDir` — never by path. To contribute one, see the
+from the declared `localExtractorDir` — never by path. The plugin's `extractor`
+skill scaffolds a local one. To contribute one, see the
 repo's [CONTRIBUTING.md](https://github.com/rich-rees/zero-drift-docs/blob/main/CONTRIBUTING.md).
 
 ## Viewers
