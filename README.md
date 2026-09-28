@@ -304,8 +304,13 @@ saying no to a row is a visible choice, not a fork.
       checklist, and the registry and fork paths beyond it; the engine hands
       every extractor `io` (read and walk that stay inside the repo) so a
       local extractor can be as safe as a built-in; bootstrap's map-only
-      proposal points at the skill *(engine + plugin 1.3.0, CAS-65;
-      [decision 0010](docs/decisions/0010-local-extractors-first-tier-engine-hands-them-io.md))*.
+      proposal points at the skill. Route refs now err toward "might touch":
+      a call that fits several routes equally refs all of them, and a React
+      Router screen is credited only with what its imports reach, not a
+      whole data module (both found in Cascade) *(engine + plugin 1.3.0,
+      CAS-65; decisions
+      [0010](docs/decisions/0010-local-extractors-first-tier-engine-hands-them-io.md),
+      [0011](docs/decisions/0011-refs-err-toward-might-touch.md))*.
 - [ ] Next: an `expo-router` extractor on its first real adoption; a second
       viewer.
 
@@ -346,8 +351,12 @@ warning can say "behind".
   receives `io`. Existing extractors ignore it, so nothing an adopter runs
   changes; a scaffolded extractor needs 1.3.0 and says so loudly on an older
   engine. `io`'s shape is now public surface — changing what `read` or `walk`
-  returns would be a major. No config-schema or metadata-contract change, so
-  a minor.
+  returns would be a major. Two ref fixes change bytes for some adopters
+  ([decision 0011](docs/decisions/0011-refs-err-toward-might-touch.md)).
+  Ambiguous route calls gain refs, and React Router screens lose the refs
+  of data-module functions they never import. The pin bump regenerates
+  them, like every engine bump. No config-schema or metadata-contract
+  change, so a minor.
 
 ## Contributing
 

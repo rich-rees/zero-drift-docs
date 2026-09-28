@@ -1,6 +1,6 @@
 # 0001 — Extractors are composed per convention, and refs resolve after the merge
 
-**Date:** 2026-09-03 · **Status:** accepted · **Origin:** DIO-307 grilling (PressPlay ADR-0113 records the same grain decision from the adopter's side), built under DIO-309.
+**Date:** 2026-09-03 · **Status:** accepted; the route tie-break "ties by id" superseded by [0011](0011-refs-err-toward-might-touch.md) (every route tied for the best fit is kept) · **Origin:** DIO-307 grilling (PressPlay ADR-0113 records the same grain decision from the adopter's side), built under DIO-309.
 
 ## Context
 
