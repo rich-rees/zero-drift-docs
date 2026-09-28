@@ -10,7 +10,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -47,15 +47,18 @@ function npxCli() {
   }
   throw new Error("npx-cli.js not found next to this node — set ZDD_ENGINE_BIN to a zdd-engine.mjs");
 }
-function engine(repo, args, env = process.env) {
+// Every engine run has a timeout: an extractor that never terminates fails
+// the test, never hangs it (CAS-65 CR-045).
+function engine(repo, args, env = process.env, timeout = 300_000) {
   const local = process.env.ZDD_ENGINE_BIN;
   if (!local && !SEMVER.test(String(PIN))) throw new Error(`zdd/config.json 'engine' must be a version like 1.3.0, got ${JSON.stringify(PIN)}`);
   const argv = local ? [local, ...args, `--root=${repo}`] : [npxCli(), "-y", `@rich-rees/zdd-engine@${PIN}`, ...args, `--root=${repo}`];
-  const r = spawnSync(process.execPath, argv, { encoding: "utf8", env });
-  return { status: r.status, out: `${r.stdout}${r.stderr}` };
+  const r = spawnSync(process.execPath, argv, { encoding: "utf8", env, timeout, killSignal: "SIGKILL" });
+  const timedOut = r.error?.code === "ETIMEDOUT" ? `\n(killed after ${timeout / 1000} s — derive did not terminate)` : "";
+  return { status: r.status, out: `${r.stdout ?? ""}${r.stderr ?? ""}${timedOut}` };
 }
-function engineOk(repo, args, env) {
-  const r = engine(repo, args, env);
+function engineOk(repo, args, env, timeout) {
+  const r = engine(repo, args, env, timeout);
   assert.equal(r.status, 0, `zdd-engine ${args.join(" ")} failed:\n${r.out}`);
   return r.out;
 }
@@ -74,13 +77,23 @@ function walkFiles(dir, visit, depth = 0, budget = { entries: 20_000 }) {
   }
 }
 
-// Copies and reads stay bounded: 1 MiB a file, 64 MiB in all.
+// Copies and reads stay bounded: 1 MiB a file, 64 MiB in all — counted on
+// the bytes actually read, never on a size checked earlier (CAS-65 CR-008).
 const MAX_FILE = 1024 * 1024;
 const MAX_TOTAL = 64 * 1024 * 1024;
-function bounded(p, st, budget) {
-  if (st.size > MAX_FILE) throw new Error(`${p} is over ${MAX_FILE} bytes — keep fixtures small`);
-  budget.bytes += st.size;
+function readCapped(p, budget = { bytes: 0 }) {
+  const buf = Buffer.alloc(MAX_FILE + 1);
+  const fd = openSync(p, "r");
+  let n = 0;
+  try {
+    for (let got; n <= MAX_FILE && (got = readSync(fd, buf, n, MAX_FILE + 1 - n, null)) > 0; ) n += got;
+  } finally {
+    closeSync(fd);
+  }
+  if (n > MAX_FILE) throw new Error(`${p} is over ${MAX_FILE} bytes — keep fixtures small`);
+  budget.bytes += n;
   if (budget.bytes > MAX_TOTAL) throw new Error(`more than ${MAX_TOTAL} bytes under ${dirname(p)}`);
+  return buf.subarray(0, n);
 }
 
 // A throwaway repo: a fixture (`from`, unless `withFixture` is false), this
@@ -90,21 +103,19 @@ function scratchRepo(t, { withFixture = true, options = FIXTURE_OPTIONS, from = 
   t.after(() => rmSync(repo, { recursive: true, force: true }));
   const budget = { bytes: 0 };
   if (withFixture) {
-    walkFiles(from, (p, st) => {
+    walkFiles(from, (p) => {
       if (p.endsWith(`${sep}.gitkeep`)) return;
-      bounded(p, st, budget);
       const to = join(repo, relative(from, p));
       mkdirSync(dirname(to), { recursive: true });
-      cpSync(p, to);
+      writeFileSync(to, readCapped(p, budget));
     });
   }
   const target = join(repo, "zdd", "extractors", NAME);
-  walkFiles(HERE, (p, st) => {
+  walkFiles(HERE, (p) => {
     const rel = relative(HERE, p);
     if (/^fixture(?:-deep)?(?:[\\/]|$)/.test(rel) || rel.endsWith(".test.mjs")) return;
-    bounded(p, st, budget);
     mkdirSync(dirname(join(target, rel)), { recursive: true });
-    cpSync(p, join(target, rel));
+    writeFileSync(join(target, rel), readCapped(p, budget));
   });
   const config = { name: "fixture", engine: PIN, extractors: [NAME], extractorOptions: { [NAME]: options }, localExtractorDir: "zdd/extractors", render: { storeChanges: false } };
   mkdirSync(join(repo, "zdd"), { recursive: true });
@@ -117,10 +128,7 @@ function metadata(repo) {
   const root = join(repo, "zdd", "metadata");
   if (!existsSync(root)) return out;
   const budget = { bytes: 0 };
-  walkFiles(root, (p, st) => {
-    bounded(p, st, budget);
-    out.set(relative(root, p).split(sep).join("/"), readFileSync(p, "utf8"));
-  });
+  walkFiles(root, (p) => out.set(relative(root, p).split(sep).join("/"), readCapped(p, budget).toString("utf8")));
   return out;
 }
 const records = (repo) => [...metadata(repo).values()].map((text) => JSON.parse(text));
@@ -185,7 +193,7 @@ test("the extractor reads through io only: no fs, process, network or environmen
   walkFiles(HERE, (p) => {
     const rel = relative(HERE, p);
     if (!/\.m?js$/.test(p) || rel.startsWith(`fixture${sep}`) || rel.endsWith(".test.mjs")) return;
-    const text = readFileSync(p, "utf8");
+    const text = readCapped(p).toString("utf8");
     for (const [re, what] of banned) if (re.test(text)) problems.push(`${rel} ${what}`);
   });
   assert.deepEqual(problems, []);
@@ -204,7 +212,7 @@ test("an oversized source file is never read, and says so", (t) => {
   const ext = FIXTURE_OPTIONS.extensions.find((e) => src.endsWith(e));
   const big = join(repo, FIXTURE_OPTIONS.roots[0], `zz-oversized${ext}`);
   mkdirSync(dirname(big), { recursive: true });
-  writeFileSync(big, readFileSync(src, "utf8") + "\n".repeat(1024 * 1024 + 1));
+  writeFileSync(big, readCapped(src).toString("utf8") + "\n".repeat(1024 * 1024 + 1));
   const out = engineOk(repo, ["derive", "--verbose"]);
   assert.ok(!resources(repo).some((r) => r.includes("zz-oversized")), "a record cites the oversized file");
   assert.match(out, /zz-oversized.* — not read/);
@@ -215,7 +223,7 @@ test("a linked folder is never walked, and says so (every platform: a junction o
   const src = firstSource();
   const outside = mkdtempSync(join(tmpdir(), `zdd-${NAME}-outside-`));
   t.after(() => rmSync(outside, { recursive: true, force: true }));
-  writeFileSync(join(outside, `linked${FIXTURE_OPTIONS.extensions.find((e) => src.endsWith(e))}`), readFileSync(src, "utf8"));
+  writeFileSync(join(outside, `linked${FIXTURE_OPTIONS.extensions.find((e) => src.endsWith(e))}`), readCapped(src).toString("utf8"));
   const link = join(repo, FIXTURE_OPTIONS.roots[0], "zz-linked-dir");
   mkdirSync(dirname(link), { recursive: true });
   symlinkSync(outside, link, process.platform === "win32" ? "junction" : "dir");
@@ -230,7 +238,7 @@ test("a symlinked source file is never read, and says so (POSIX)", { skip: proce
   const ext = FIXTURE_OPTIONS.extensions.find((e) => src.endsWith(e));
   const outside = mkdtempSync(join(tmpdir(), `zdd-${NAME}-outside-`));
   t.after(() => rmSync(outside, { recursive: true, force: true }));
-  writeFileSync(join(outside, `linked${ext}`), readFileSync(src, "utf8"));
+  writeFileSync(join(outside, `linked${ext}`), readCapped(src).toString("utf8"));
   const link = join(repo, FIXTURE_OPTIONS.roots[0], `zz-linked${ext}`);
   mkdirSync(dirname(link), { recursive: true });
   symlinkSync(join(outside, `linked${ext}`), link);
@@ -252,7 +260,7 @@ test("recursion ceiling: a convention that recurses stops on a cycle or a deep c
   assert.ok(existsSync(deep), "CONVENTION_RECURSES is true: add fixture-deep/ with a cyclic or very deep case");
   const repo = scratchRepo(t, { from: deep });
   const started = Date.now();
-  const out = engineOk(repo, ["derive", "--verbose"]);
+  const out = engineOk(repo, ["derive", "--verbose"], process.env, 60_000); // killed, and red, after a minute
   assert.ok(Date.now() - started < 60_000, "derive took over a minute on the deep fixture");
   assert.match(out, /cycle|deeper than|depth|ceiling/i, "derive finished but did not say where it stopped");
 });

@@ -404,6 +404,12 @@ test("CAS-65 CR-042: a name, root or folder Windows cannot create is refused on 
     assert.equal(r.status, 1, JSON.stringify(patch));
     assert.match(r.stderr, re);
   }
+  // A localExtractorDir already in the config is checked too (CR-042).
+  const configured = adopted(t);
+  writeFileSync(join(configured, "zdd", "config.json"), JSON.stringify({ ...config(configured), localExtractorDir: "tools/com3" }));
+  assert.match(scaffold(configured, CSHARP).stderr, /localExtractorDir 'tools\/com3' has a segment Windows cannot create/);
+  // COM0 and LPT0 are ordinary names: Windows reserves 1–9 only (CR-046).
+  assert.equal(scaffold(adopted(t), { ...CSHARP, roots: ["src/com0", "src/lpt0"] }).status, 0);
 });
 
 test("CAS-65 CR-003 (POSIX, not root): a write that fails after the preflight removes what this run wrote and leaves config untouched", { skip: (!POSIX || process.getuid?.() === 0) && "needs POSIX permissions and a non-root user" }, (t) => {
@@ -421,7 +427,8 @@ test("CAS-65 CR-003 (POSIX, not root): a write that fails after the preflight re
     chmodSync(fixture, 0o755); // before the repo's own cleanup
   }
   assert.equal(r.status, 1);
-  assert.match(r.stderr, /the scaffold removed the 2 file\(s\) it had written; zdd\/config\.json is unchanged/);
+  assert.match(r.stderr, /the scaffold removed the 2 file\(s\) it had created; zdd\/config\.json is unchanged/);
+  assert.deepEqual(readdirSync(join(repo, "zdd")).filter((f) => f.includes(".tmp")), [], "no temporary config left behind");
   assert.ok(!existsSync(join(repo, "zdd", "extractors", "aspnet-routes", "index.mjs")));
   assert.ok(!existsSync(join(repo, "zdd", "extractors", "aspnet-routes", "aspnet-routes.test.mjs")));
   assert.equal(readFileSync(join(repo, "zdd", "config.json"), "utf8"), configBefore);

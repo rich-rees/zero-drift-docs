@@ -37,7 +37,7 @@
 // the run; every path goes through the Ledger's resolveInside (no escape, no
 // symlink); text that lands in a generated comment is flattened to one line.
 
-import { readFileSync, lstatSync, openSync, readSync, closeSync, rmSync } from "node:fs";
+import { readFileSync, lstatSync, openSync, readSync, closeSync, rmSync, writeFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { PLUGIN_ROOT, parseArgs, adopterRoot, readConfig, artifactPaths, repoRelative, resolveInside, pathsOverlap, CONFIG_REL, posixify } from "./lib/repo.mjs";
 import { Ledger, printable } from "./bootstrap.mjs";
@@ -70,7 +70,7 @@ const MAX_ANSWERS_BYTES = 64 * 1024;
 // A path segment Windows cannot create (CON, NUL, COM1…, or one ending in a
 // dot or space) — refused on every platform, since a repo is shared across
 // them and the failure would otherwise come late, mid-write (CR-042).
-const WINDOWS_RESERVED = /^(?:con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(?:\..*)?$/i;
+const WINDOWS_RESERVED = /^(?:con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\..*)?$/i;
 const badSegment = (p) => p.split("/").find((seg) => WINDOWS_RESERVED.test(seg) || /[. ]$/.test(seg));
 
 const flat = (s) => String(s).replace(/[\x00-\x1f\x7f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, MAX_TEXT);
@@ -208,6 +208,7 @@ export function scaffold(root, rawAnswers) {
     throw new Error(`zdd/config.json already sets localExtractorDir to '${configured}' — answer that, or leave it out`);
   }
   const dir = configured ?? a.localExtractorDir ?? "zdd/extractors";
+  if (badSegment(dir)) throw new Error(`localExtractorDir '${dir}' has a segment Windows cannot create ('${badSegment(dir)}')`); // a configured value too (CR-042)
   if (dir === ".") throw new Error("localExtractorDir must not be the repo root");
   // Every artifact the engine reads or writes, file or folder, and the config
   // itself — compared the way the filesystem compares (CAS-65 CR-004).
@@ -296,24 +297,35 @@ export function scaffold(root, rawAnswers) {
   // for a reason it cannot (permissions, a full disk). Then every file this
   // run created is removed again, and the config — written last — is never
   // touched, so a failure leaves the repo as it was (CR-003).
+  // Rollback works from the PLAN, not the ledger: every target that did not
+  // exist before this run is removed, including one whose write failed
+  // after the file was created. The config is replaced atomically (a
+  // temporary file, then a rename), so it is either old or new, never torn.
   const ledger = new Ledger(root);
+  const created = [`${base}/index.mjs`, testPath, ...fixtureKeeps].filter((rel) => !lstatOrNull(join(root, ...rel.split("/"))));
+  const configTmp = `zdd/.config.json.scaffold-${process.pid}.tmp`;
   try {
     ledger.create(`${base}/index.mjs`, moduleText);
     ledger.create(testPath, testText);
     for (const keep of fixtureKeeps) ledger.create(keep, "");
     if (changes.length) {
-      ledger.overwrite(CONFIG_REL, JSON.stringify(next, null, 2) + "\n");
+      const tmpAbs = resolveInside(root, configTmp, configTmp);
+      writeFileSync(tmpAbs, JSON.stringify(next, null, 2) + "\n", { flag: "wx" });
+      renameSync(tmpAbs, resolveInside(root, CONFIG_REL, CONFIG_REL));
+      ledger.wrote.push(CONFIG_REL);
       ledger.notes.push(`zdd/config.json: ${changes.join("; ")}`);
     } else ledger.kept.push(CONFIG_REL);
   } catch (e) {
-    for (const rel of ledger.wrote.filter((r) => r !== CONFIG_REL).reverse()) {
+    let removed = 0;
+    for (const rel of [configTmp, ...created].reverse()) {
       try {
         rmSync(join(root, ...rel.split("/")));
+        removed++;
       } catch {
-        /* best effort — reported below */
+        /* absent, or best effort — reported below */
       }
     }
-    throw new Error(`${e.message} — the scaffold removed the ${ledger.wrote.length} file(s) it had written; zdd/config.json is unchanged`);
+    throw new Error(`${e.message} — the scaffold removed the ${removed} file(s) it had created; zdd/config.json is unchanged`);
   }
 
   // ---- notes --------------------------------------------------------------------
