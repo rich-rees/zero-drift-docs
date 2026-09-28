@@ -1,0 +1,39 @@
+// Blank comments and string contents to spaces, keeping every newline and
+// every offset, so structure found in the result sits at the same place in
+// the original text. C-like syntax: `//` and `/* */` comments; "…", '…' and
+// `…` literals with backslash escapes (backticks may span lines). Quote
+// characters stay, so `[Route("api/orders")]` masks to `[Route("          ")]`.
+// Not handled — adjust if the convention needs it: C# verbatim @"…" (a `""`
+// escape, no backslash escapes) and raw """…""" strings, nested comments.
+function mask(text) {
+  const blank = (s) => s.replace(/[^\n]/g, " ");
+  let out = "";
+  let i = 0;
+  const n = text.length;
+  while (i < n) {
+    const c = text[i];
+    const d = text[i + 1];
+    if (c === "/" && d === "/") {
+      const nl = text.indexOf("\n", i);
+      const end = nl < 0 ? n : nl;
+      out += blank(text.slice(i, end));
+      i = end;
+    } else if (c === "/" && d === "*") {
+      const close = text.indexOf("*/", i + 2);
+      const end = close < 0 ? n : close + 2;
+      out += blank(text.slice(i, end));
+      i = end;
+    } else if (c === '"' || c === "'" || c === "`") {
+      let j = i + 1;
+      while (j < n && text[j] !== c && (c === "`" || text[j] !== "\n")) j += text[j] === "\\" ? 2 : 1;
+      j = Math.min(j, n);
+      const closed = j < n && text[j] === c;
+      out += c + blank(text.slice(i + 1, j)) + (closed ? c : "");
+      i = closed ? j + 1 : j;
+    } else {
+      out += c;
+      i += 1;
+    }
+  }
+  return out;
+}

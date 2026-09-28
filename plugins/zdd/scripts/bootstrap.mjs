@@ -465,7 +465,7 @@ export function validateAnswers(a) {
 // file that appears between the check and the write is kept, not clobbered
 // (CR-010).
 // ---------------------------------------------------------------------------
-class Ledger {
+export class Ledger {
   constructor(root) {
     this.root = root;
     this.wrote = [];
@@ -970,7 +970,7 @@ export function upgrade(root) {
 // character is replaced before it can forge a line or restyle the terminal
 // (CR-092). `--json` output is JSON-quoted and needs no such step.
 // ---------------------------------------------------------------------------
-const printable = (line) => line.replace(/[\x00-\x1f\x7f]/g, "?");
+export const printable = (line) => line.replace(/[\x00-\x1f\x7f]/g, "?");
 
 export function narrateDetect(d, pocock) {
   const out = [];
