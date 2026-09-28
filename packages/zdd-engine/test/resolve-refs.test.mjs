@@ -135,6 +135,32 @@ test("CAS-65: a call that fits several routes equally well refs all of them, wit
   assert.match(diagnostics[0], /fetch\('\/users\/\*\/\*'\) fits 3 routes equally well \(route:\/users\/\{user_id\}\/deactivate, route:\/users\/\{user_id\}\/reactivate, route:\/users\/\{user_id\}\/resend-invitation\) — all kept/);
 });
 
+test("CAS-65 CR-033/034: a route-side `*` is one segment; a catch-all in the middle must still match the segments after it", async () => {
+  const { makeRouteMatcher } = await import("../src/lib/resolve-refs.mjs");
+  assert.equal(makeRouteMatcher("/files/*")("/files/a"), true);
+  assert.equal(makeRouteMatcher("/files/*")("/files/a/b"), false);
+  const mid = makeRouteMatcher("/a/{p:path}/admin");
+  assert.equal(mid("/a/x"), false, "the suffix is required");
+  assert.equal(mid("/a/x/admin"), true);
+  assert.equal(mid("/a/x/y/admin"), true);
+  assert.equal(mid("/a/admin"), false, "a catch-all eats at least one segment");
+  assert.equal(makeRouteMatcher("/api/files/[...path]")("/api/files/a/b"), true, "a trailing catch-all is unchanged");
+});
+
+test("CAS-65 CR-035: requireRefs pruning is linear — a long chain whose tail drops unwinds in one pass, same result as before", () => {
+  const N = 20000;
+  const records = [rec("module", "module:0", ["?from:nope"], { requireRefs: true })];
+  for (let i = 1; i < N; i++) records.push(rec("module", `module:${i}`, [`module:${i - 1}`], { requireRefs: true }));
+  records.push(rec("module", "module:keeper", [`module:${N - 1}`, "?route:/x"]));
+  records.push(rec("route", "route:/x"));
+  const started = process.hrtime.bigint();
+  const { records: kept } = resolveRefs(records);
+  const ms = Number(process.hrtime.bigint() - started) / 1e6;
+  assert.deepEqual(kept.map((r) => r.id).sort(), ["module:keeper", "route:/x"]);
+  assert.deepEqual(kept.find((r) => r.id === "module:keeper").refs, ["route:/x"]);
+  assert.ok(ms < 2000, `pruning took ${ms} ms`);
+});
+
 test("unknown unresolved kind is an error", () => {
   assert.throws(() => resolveRefs([rec("module", "module:m", ["?widget:x"])]), /unknown unresolved ref kind 'widget'/);
 });

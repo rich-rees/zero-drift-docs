@@ -47,21 +47,26 @@ const shortName = (id) => {
 const isCatchAll = (s) => /^\[\.\.\..+\]$/.test(s) || /^\{[^}]+:path\}$/.test(s);
 const isDynamic = (s) => /^\[.+\]$/.test(s) || /^\{.+\}$/.test(s);
 
-// `[x]` / `{x}` / `*` eat one segment; `[...x]` / `{x:path}` eat 1+ trailing.
+// `[x]` / `{x}` / `*` eat one segment on either side; `[...x]` / `{x:path}`
+// eat one or more — anywhere in the pattern, with the segments after it
+// still required to match the url's tail (CAS-65 CR-033/034).
 export function makeRouteMatcher(routePath) {
   const segs = routePath.split("/").filter(Boolean);
-  return (url) => {
-    const uSegs = url.split("/").filter(Boolean);
-    let i = 0;
-    for (; i < segs.length; i++) {
-      const s = segs[i];
-      if (isCatchAll(s)) return uSegs.length - i >= 1;
-      if (uSegs.length <= i) return false;
-      if (isDynamic(s)) continue;
-      if (s !== uSegs[i] && uSegs[i] !== "*") return false;
+  const one = (s, u) => isDynamic(s) || s === "*" || u === "*" || s === u;
+  const from = (i, uSegs, j) => {
+    for (; i < segs.length; i++, j++) {
+      if (isCatchAll(segs[i])) {
+        const rest = segs.length - i - 1;
+        // The catch-all takes 1..(remaining - rest) segments; with at most
+        // a handful of segments per route the search is tiny.
+        for (let take = uSegs.length - j - rest; take >= 1; take--) if (from(i + 1, uSegs, j + take)) return true;
+        return false;
+      }
+      if (j >= uSegs.length || !one(segs[i], uSegs[j])) return false;
     }
-    return uSegs.length === segs.length;
+    return j === uSegs.length;
   };
+  return (url) => from(0, url.split("/").filter(Boolean), 0);
 }
 
 // How well a matching route fits a url, as a tuple compared in order:
@@ -177,13 +182,33 @@ export function resolveRefs(records) {
   // Prune to a fixed point: dropping a record strips the refs that pointed
   // at it, which can empty another `requireRefs` record, which must then be
   // dropped in turn (CR-065) — a single pass kept such a record with `refs: []`.
-  let kept = records;
-  for (;;) {
-    const dropped = new Set(kept.filter((r) => r.requireRefs && !r.refs.length).map((r) => r.id));
-    if (!dropped.size) break;
-    kept = kept.filter((r) => !dropped.has(r.id));
-    for (const r of kept) r.refs = r.refs.filter((id) => !dropped.has(id));
+  // A queue over reverse edges: each drop is processed once, each edge
+  // touched once — linear, where re-scanning every record per round was
+  // quadratic on a long chain (CAS-65 CR-035).
+  const byId = new Map(records.map((r) => [r.id, r]));
+  const inbound = new Map(); // id -> ids of records that ref it
+  for (const r of records) {
+    for (const id of r.refs) {
+      if (!inbound.has(id)) inbound.set(id, []);
+      inbound.get(id).push(r.id);
+    }
   }
+  const live = new Map(records.map((r) => [r.id, new Set(r.refs)]));
+  const dropped = new Set();
+  const queue = records.filter((r) => r.requireRefs && !r.refs.length).map((r) => r.id);
+  while (queue.length) {
+    const id = queue.pop();
+    if (dropped.has(id)) continue;
+    dropped.add(id);
+    for (const from of inbound.get(id) ?? []) {
+      if (dropped.has(from)) continue;
+      const refs = live.get(from);
+      refs.delete(id);
+      if (!refs.size && byId.get(from).requireRefs) queue.push(from);
+    }
+  }
+  const kept = records.filter((r) => !dropped.has(r.id));
+  for (const r of kept) if (dropped.size) r.refs = r.refs.filter((id) => !dropped.has(id));
   for (const r of kept) delete r.requireRefs;
   return { records: kept, diagnostics };
 }
