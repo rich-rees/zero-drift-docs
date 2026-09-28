@@ -37,7 +37,7 @@
 // the run; every path goes through repo.mjs's resolveInside (no escape, no
 // symlink); text that lands in a generated comment is flattened to one line.
 
-import { readFileSync, lstatSync, openSync, readSync, writeSync, closeSync, rmSync, mkdirSync, renameSync } from "node:fs";
+import { readFileSync, lstatSync, fstatSync, openSync, readSync, writeSync, closeSync, rmSync, mkdirSync, renameSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { join, dirname } from "node:path";
 import { PLUGIN_ROOT, parseArgs, adopterRoot, readConfig, artifactPaths, repoRelative, resolveInside, pathsOverlap, CONFIG_REL, posixify } from "./lib/repo.mjs";
@@ -305,45 +305,59 @@ export function scaffold(root, rawAnswers) {
   // config is replaced atomically: a temporary file with a random name,
   // created exclusively, then a rename — old or new, never torn.
   const ledger = new Ledger(root);
-  const mine = []; // absolute paths this run created
-  const make = (rel, content) => {
-    const abs = resolveInside(root, rel, rel);
+  const mine = []; // { abs, dev, ino } for every file this run created
+  // Create `abs` exclusively and write ALL of `content` (writeSync may write
+  // fewer bytes than asked — CR-049). Returns false when the path exists.
+  const createExclusive = (abs, content) => {
     mkdirSync(dirname(abs), { recursive: true });
     let fd;
     try {
       fd = openSync(abs, "wx");
     } catch (e) {
-      if (e.code === "EEXIST") {
-        ledger.kept.push(rel);
-        return;
-      }
+      if (e.code === "EEXIST") return false;
       throw e;
     }
-    mine.push(abs);
     try {
-      writeSync(fd, content);
+      const st = fstatSync(fd);
+      mine.push({ abs, dev: st.dev, ino: st.ino });
+      const bytes = Buffer.from(content, "utf8");
+      for (let off = 0; off < bytes.length; ) off += writeSync(fd, bytes, off, bytes.length - off);
     } finally {
       closeSync(fd);
     }
-    ledger.wrote.push(rel);
+    return true;
+  };
+  const make = (rel, content) => {
+    if (createExclusive(resolveInside(root, rel, rel), content)) ledger.wrote.push(rel);
+    else ledger.kept.push(rel);
   };
   try {
     make(`${base}/index.mjs`, moduleText);
     make(testPath, testText);
     for (const keep of fixtureKeeps) make(keep, "");
     if (changes.length) {
-      const configTmp = `zdd/.config.json.scaffold-${randomBytes(8).toString("hex")}.tmp`;
-      make(configTmp, JSON.stringify(next, null, 2) + "\n");
-      ledger.wrote.pop(); // the temporary file is not a result
-      const tmpAbs = mine[mine.length - 1];
+      // The temporary config never takes the "kept" path: a name that
+      // exists is simply not ours, so draw another (CR-048). The rename
+      // moves exactly the file this run just wrote.
+      let tmpAbs;
+      for (let tries = 0; !tmpAbs; tries++) {
+        if (tries === 8) throw new Error("could not create a temporary config file in zdd/");
+        const rel = `zdd/.config.json.scaffold-${randomBytes(8).toString("hex")}.tmp`;
+        const abs = resolveInside(root, rel, rel);
+        if (createExclusive(abs, JSON.stringify(next, null, 2) + "\n")) tmpAbs = abs;
+      }
       renameSync(tmpAbs, resolveInside(root, CONFIG_REL, CONFIG_REL));
-      mine.pop(); // renamed away: nothing left at the temporary path to remove
+      mine.pop(); // renamed away: nothing of ours is left at the temporary path
       ledger.wrote.push(CONFIG_REL);
       ledger.notes.push(`zdd/config.json: ${changes.join("; ")}`);
     } else ledger.kept.push(CONFIG_REL);
   } catch (e) {
+    // Remove a path only while it is still the very file this run created
+    // (same device and inode): one swapped in since is someone else's (CR-047).
     let removed = 0;
-    for (const abs of mine.reverse()) {
+    for (const { abs, dev, ino } of mine.reverse()) {
+      const st = lstatOrNull(abs);
+      if (!st || st.dev !== dev || st.ino !== ino) continue;
       try {
         rmSync(abs);
         removed++;
