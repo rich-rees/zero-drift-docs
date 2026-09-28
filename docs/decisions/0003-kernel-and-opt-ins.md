@@ -1,6 +1,6 @@
 # 0003 — The kernel is two verbs; enforcement is an opt-in the runbook writes
 
-**Date:** 2026-09-03 · **Status:** accepted · **Origin:** DIO-307 grilling, built under DIO-311.
+**Date:** 2026-09-03 · **Status:** accepted; point 5's "the script is the only writer" superseded in part by [0010](0010-local-extractors-first-tier-engine-hands-them-io.md) (the extractor scaffold is a second writer, through the same Ledger) · **Origin:** DIO-307 grilling, built under DIO-311.
 
 ## Context
 

@@ -354,9 +354,8 @@ warning can say "behind".
   config-schema fields only, no metadata-contract change, so a minor.
 - **`1.3.0` — your own stack, without a fork.** A fifth skill and its
   scaffold script, and one addition to the extractor contract: `derive` now
-  receives `io`. Existing extractors ignore it, so nothing an adopter runs
-  changes; a scaffolded extractor needs 1.3.0 and says so loudly on an older
-  engine. `io`'s shape is now public surface — changing what `read` or `walk`
+  receives `io`. Existing extractors ignore that argument; a scaffolded
+  extractor needs 1.3.0 and says so loudly on an older engine. `io`'s shape is now public surface — changing what `read` or `walk`
   returns would be a major. Two ref fixes change bytes for some adopters
   ([decision 0011](docs/decisions/0011-refs-err-toward-might-touch.md)).
   Ambiguous route calls gain refs, and React Router screens lose the refs
