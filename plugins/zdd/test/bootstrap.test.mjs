@@ -93,6 +93,17 @@ test("detect: names the evidence for each proposed extractor (FastAPI + Supabase
   assert.equal(json.pocock.installed, false);
 });
 
+test("detect: source in no known convention proposes generic and points at the extractor skill (CAS-65)", () => {
+  const repo = fresh("detect-unknown");
+  mkdirSync(join(repo, "src", "Api"), { recursive: true });
+  writeFileSync(join(repo, "src", "Api", "OrdersController.cs"), '[Route("api/orders")]\npublic class OrdersController {}\n');
+  const json = JSON.parse(bootstrap(repo, ["detect", "--json"]));
+  assert.equal(json.mode, "existing");
+  assert.deepEqual(json.proposals.map((p) => p.name), ["generic"]);
+  const text = bootstrap(repo, ["detect"]);
+  assert.match(text, /no known convention found — map-only ZDD; scaffold an extractor for it with the `extractor` skill once bootstrap is done/);
+});
+
 test("detect: Next.js App Router + middleware + migrations (the engine's Next.js fixture)", () => {
   const repo = fresh("detect-next", join(ENGINE_FIXTURES, "fixture"));
   rmSync(join(repo, "zdd"), { recursive: true });

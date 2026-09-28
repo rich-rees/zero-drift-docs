@@ -167,6 +167,10 @@ nothing lands unannounced.
 - **Without CI:** say plainly that the guarantee is weaker — ZDD runs on the
   two verbs (and the pre-push hook, if taken); drift is a habit kept, not a
   check that blocks a merge.
+- **When detection proposed `generic`** (source present, no known
+  convention): offer the [`extractor` skill](../extractor/SKILL.md) as the
+  next session's work — it scaffolds a local extractor so the metadata stops
+  being empty. Offer it here, after the runbook, never in the middle of it.
 
 ## Upgrade
 
