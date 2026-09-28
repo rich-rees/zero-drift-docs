@@ -32,9 +32,10 @@ npx @rich-rees/zdd-engine freshness [--base <ref>]
   cites a superseded or non-existent ADR fails; a citation-less blessing or a
   partial supersession is a warning), and — with `--tempstate` — a tracked
   `TEMPSTATE.md` fails. It also lists the **unclaimed records** — every
-  route, table, function and surface no feature slice links — as a warning,
-  never a failure (a repo adopting ZDD starts with everything unclaimed); the
-  same count sits in the human index header.
+  route, table, function and surface no feature slice links — and any record
+  two slices claim, as warnings (a repo adopting ZDD starts with everything
+  unclaimed); the unclaimed count sits in the human index header. With
+  `claims.strict` both become failures, less an allow-list of plumbing.
 - **freshness** — advisory (always exits 0): semantic-map concepts whose code a
   diff touches without updating the concept — the `resource:` path, and the
   source behind every metadata record the concept links to. Markdown on
@@ -61,6 +62,8 @@ version:
 | `baseBranch` | `"main"` | The branch PRs merge into — freshness diffs and the changed-set highlight key on `origin/<baseBranch>` |
 | `paths.*` | `zdd/…` | Where each artifact lives (glossary, adrDir, mapDir, metadataDir, agentIndex, adrIndex, humanIndex, graph, bundleDir) |
 | `render.storeChanges` | `true` | Set `false` to render with no git dependency (drops the "what just changed" highlight) |
+| `claims.strict` | `false` | `true`: every route, table, function and surface belongs to exactly one feature slice. `lint` fails on an unclaimed record not in `claims.allowUnclaimed`, on an allow-list id that names no record, and on a record two slices claim. Off: both are warnings |
+| `claims.allowUnclaimed` | `[]` | Record ids that may stay unclaimed under strict: plumbing no feature owns (`["route:/health", "route:/ready"]`) |
 | `agentIndex.summary` | `""` | The blockquote summary line at the top of the agent index |
 | `viewer` | `"cytoscape"` | Which viewer renders the human index from the graph artifact: a name (`cytoscape`, `minimal`) or `{ "name", ...options }` — cytoscape takes `defaultFocus`, `authHubs` |
 

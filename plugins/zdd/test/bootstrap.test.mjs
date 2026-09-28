@@ -707,6 +707,21 @@ test("upgrade leaves alone what it does not own: a customised legacy section, an
   }
 });
 
+test("upgrade names the opt-in strict claims setting while config has no `claims` block, and says nothing once it has one (CAS-65)", () => {
+  const repo = fresh("upgrade-claims");
+  mkdirSync(join(repo, "zdd"));
+  writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], engine: PLUGIN_VERSION }));
+  const before = JSON.parse(bootstrap(repo, ["upgrade", "--json"]));
+  assert.ok(
+    before.notes.some((n) => /claims\.strict \(new in 1\.3\).*"claims": \{ "strict": true, "allowUnclaimed": \[/.test(n) && /off until you add it/.test(n)),
+    before.notes.join("\n"),
+  );
+  assert.equal(JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8")).claims, undefined, "a note, never a write");
+  writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], engine: PLUGIN_VERSION, claims: { strict: false } }));
+  const after = JSON.parse(bootstrap(repo, ["upgrade", "--json"]));
+  assert.ok(!after.notes.some((n) => n.includes("claims.strict")), after.notes.join("\n"));
+});
+
 test("upgrade recognises the exact v0.3.1 workflow (no owner line, floating npx) as ours and replaces it with the pinned template (CR-081)", () => {
   const v031 = readFileSync(join(PLUGIN, "test", "fixtures", "v0.3.1", "zdd.yml"), "utf8");
   const template = readFileSync(join(PLUGIN, "templates", "zdd.yml"), "utf8");

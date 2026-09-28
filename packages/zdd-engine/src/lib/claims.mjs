@@ -76,28 +76,41 @@ export function claimableRecords(metadataDir, bundleDir) {
     }
     if (!record || typeof record !== "object" || !CLAIMABLE_KINDS.includes(record.kind)) continue;
     const nodeId = posixify(relative(bundleDir, p)).replace(/\.json$/, "");
-    out.push({ kind: record.kind, title: String(record.title ?? record.id ?? nodeId), nodeId, file: posixify(relative(dirname(bundleDir), p)) });
+    out.push({ kind: record.kind, id: String(record.id ?? nodeId), title: String(record.title ?? record.id ?? nodeId), nodeId, file: posixify(relative(dirname(bundleDir), p)) });
   }
   return out.sort((a, b) => (a.nodeId < b.nodeId ? -1 : 1));
 }
 
-// Every node id a Feature concept links to.
+// Every node id a Feature concept links to, with the feature files linking
+// it (repo-relative, sorted) — two or more is a DOUBLE claim (CAS-65).
 export function featureClaims(mapDir, bundleDir) {
-  const claimed = new Set();
+  const claimed = new Map();
   for (const path of walkMarkdown(mapDir)) {
     const text = readBounded(path);
     if (text === null) continue;
     const parsed = parseFrontmatter(text);
     if (!parsed || String(parsed.frontmatter.type) !== "Feature") continue;
-    for (const id of extractLinks(parsed.body, dirname(path), bundleDir)) claimed.add(id);
+    const file = posixify(relative(dirname(bundleDir), path));
+    for (const id of extractLinks(parsed.body, dirname(path), bundleDir)) {
+      const by = claimed.get(id) ?? [];
+      if (!by.includes(file)) by.push(file);
+      claimed.set(id, by.sort());
+    }
   }
   return claimed;
 }
 
+// The claim picture lint reports: every claimable record, the unclaimed ones,
+// and the ones two or more features claim (each with its claiming files).
 export function unclaimedRecords({ metadataDir, mapDir, bundleDir }) {
   const claimed = featureClaims(mapDir, bundleDir);
   const records = claimableRecords(metadataDir, bundleDir);
-  return { total: records.length, unclaimed: records.filter((r) => !claimed.has(r.nodeId)) };
+  return {
+    total: records.length,
+    records,
+    unclaimed: records.filter((r) => !claimed.has(r.nodeId)),
+    doubleClaimed: records.filter((r) => (claimed.get(r.nodeId)?.length ?? 0) > 1).map((r) => ({ ...r, features: claimed.get(r.nodeId) })),
+  };
 }
 
 // The same count from a graph artifact (schema zdd-graph/1): metadata nodes
