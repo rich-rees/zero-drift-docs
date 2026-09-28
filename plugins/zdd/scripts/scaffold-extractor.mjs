@@ -318,12 +318,24 @@ export function scaffold(root, rawAnswers) {
       throw e;
     }
     try {
-      const st = fstatSync(fd);
+      let st;
+      try {
+        st = fstatSync(fd);
+      } catch (e) {
+        closeSync(fd);
+        fd = null;
+        rmSync(abs); // created a moment ago by this run, before anyone could act on it (CR-050)
+        throw e;
+      }
       mine.push({ abs, dev: st.dev, ino: st.ino });
       const bytes = Buffer.from(content, "utf8");
-      for (let off = 0; off < bytes.length; ) off += writeSync(fd, bytes, off, bytes.length - off);
+      for (let off = 0; off < bytes.length; ) {
+        const n = writeSync(fd, bytes, off, bytes.length - off);
+        if (n <= 0) throw new Error(`${abs}: the filesystem accepted no bytes`); // never spin (CR-051)
+        off += n;
+      }
     } finally {
-      closeSync(fd);
+      if (fd !== null) closeSync(fd);
     }
     return true;
   };
@@ -354,6 +366,9 @@ export function scaffold(root, rawAnswers) {
   } catch (e) {
     // Remove a path only while it is still the very file this run created
     // (same device and inode): one swapped in since is someone else's (CR-047).
+    // A swap between this check and the removal cannot be ruled out — Node
+    // has no unlink through an open handle — but whoever can swap files in
+    // the checkout during a scaffold run already controls the checkout.
     let removed = 0;
     for (const { abs, dev, ino } of mine.reverse()) {
       const st = lstatOrNull(abs);
