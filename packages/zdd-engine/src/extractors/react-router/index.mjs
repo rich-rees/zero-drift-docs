@@ -11,7 +11,10 @@
 // is the surface at that path.
 // Options (extractorOptions["react-router"]):
 //   routesFile    repo-relative file holding the route tree (default
-//                 "src/routes.tsx"); missing = "nothing to inventory"
+//                 "src/routes.tsx"). Missing with no folder yet = "nothing
+//                 to inventory" (greenfield); missing beside a real folder,
+//                 a link, or over the size cap = derive fails (decision
+//                 0013) — every surface record hangs on this one file
 //   srcAliasRoot  where the tsconfig `@/` alias points (default: routesFile's
 //                 directory)
 // Purely textual — no TypeScript parser — but LEXICALLY honest (review
@@ -48,7 +51,6 @@ import { join, posix } from "node:path";
 import { slugify } from "../../lib/slug.mjs";
 import { repoRelative } from "../../lib/paths.mjs";
 import { regularFileInside } from "../../lib/walk-markdown.mjs";
-import { scanFileText } from "../nextjs/refs.mjs";
 
 const RESOLVE_EXTS = [".tsx", ".ts", ".jsx", ".js", "/index.tsx", "/index.ts", "/index.jsx", "/index.js"];
 export const MAX_SOURCE_BYTES = 1024 * 1024;
@@ -119,6 +121,7 @@ export function lex(text) {
   // Template literals nest via `${ ... }`: a stack of "how many braces are
   // open inside the current interpolation".
   const tpl = [];
+  const tplOpens = new Set(); // offsets of backticks that OPEN a template (CAS-65 CR-017)
   while (i < n) {
     const ch = text[i];
     const next = text[i + 1];
@@ -176,6 +179,7 @@ export function lex(text) {
       continue;
     }
     if (ch === "`") {
+      tplOpens.add(i);
       let k = i + 1;
       for (; k < n; k++) {
         if (text[k] === "\\") {
@@ -217,7 +221,7 @@ export function lex(text) {
     }
     i++;
   }
-  return { code: code.join(""), mask: mask.join("") };
+  return { code: code.join(""), mask: mask.join(""), tplOpens };
 }
 
 // Index just past the bracket closing the one opened at `open`, on the mask.
@@ -550,12 +554,24 @@ export function importMap(text) {
   for (const m of code.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:React\.)?lazy\(\s*(?:async\s*)?\(\)\s*=>\s*import\(\s*(['"])([^'"]+)\2/g)) imports.set(m[1], m[3]);
   return imports;
 }
+// Identifiers as ECMAScript spells them — not ASCII only, so
+// `import { café }` is a name, never a silent miss (CAS-65 CR-019).
+const ID = "[\\p{ID_Start}$_][\\p{ID_Continue}$\\u200C\\u200D]*";
+const ID_RE = new RegExp(`^${ID}$`, "u");
+
 // Every local runtime import of a file (relative or `@/`), in first-seen
 // order, with what it binds (CAS-65): `names` is the set of exported names
-// the named imports ask for (`import { a, b as c }` asks for a and b), or
-// null when the import takes the module whole — a default or namespace
-// import, or a dynamic import() — with `how` saying which.
-function localImports(code) {
+// the named imports ask for (`import { a, b as c }` asks for a and b; a
+// side-effect `import "./x"` or `import {} from` asks for none — the
+// module's top-level code still runs), or null when the import takes the
+// module whole — a default or namespace import, a dynamic import(), or a
+// specifier the scan cannot read — with `how` saying which. An import of
+// types only (`import type`, `import { type A }`) is erased by TypeScript
+// and binds nothing (CR-018). Structure is found on the MASK (comments and
+// string bodies blanked), so an import spelled inside a string is not one
+// (CR-020); the module specifier is read from the text at the same offsets.
+function localImports(text) {
+  const { mask } = lex(text);
   const out = new Map();
   const note = (src, names, how) => {
     if (!(src.startsWith(".") || src.startsWith("@/"))) return;
@@ -563,37 +579,63 @@ function localImports(code) {
     if (prev && prev.names === null) return;
     out.set(src, names === null ? { names: null, how } : { names: new Set([...(prev?.names ?? []), ...names]), how: null });
   };
-  for (const m of code.matchAll(/\bimport\s+(type\s+)?([^;]*?)\s*\bfrom\s*(['"])([^'"]+)\3|\bimport\(\s*(['"])([^'"]+)\5/g)) {
-    if (m[1]) continue;
-    if (m[6] !== undefined) {
-      note(m[6], null, "through import()");
+  const literal = (q) => {
+    const end = mask.indexOf(mask[q], q + 1);
+    return end === -1 ? null : text.slice(q + 1, end);
+  };
+  const re = /\bimport\s*(?:(type\s+)?([^;'"`]*?)\s*\bfrom\s*|)(['"])|\bimport\(\s*(['"])/g;
+  for (const m of mask.matchAll(re)) {
+    if (m[4] !== undefined) {
+      const src = literal(m.index + m[0].length - 1);
+      if (src !== null) note(src, null, "through import()");
+      continue;
+    }
+    const src = literal(m.index + m[0].length - 1);
+    if (src === null || m[1]) continue; // `import type … from`
+    if (m[2] === undefined) {
+      note(src, [], null); // `import "./x"`: top-level code only
       continue;
     }
     const clause = m[2];
     const brace = /\{([^}]*)\}/.exec(clause);
     const outside = clause.replace(/\{[^}]*\}/, "").replace(/,/g, " ").trim();
-    if (/\*\s*as\b/.test(outside)) note(m[4], null, "as a namespace");
-    else if (outside) note(m[4], null, "by default import");
-    else {
-      const names = [];
-      for (const part of (brace ? brace[1] : "").split(",")) {
-        const seg = part.trim();
-        if (!seg || /^type\s/.test(seg)) continue;
-        const hit = /^([A-Za-z_$][\w$]*)(?:\s+as\s+[A-Za-z_$][\w$]*)?$/.exec(seg);
-        if (hit) names.push(hit[1]);
-      }
-      note(m[4], names, null);
+    if (/\*\s*as\b/.test(outside)) {
+      note(src, null, "as a namespace");
+      continue;
     }
+    if (outside) {
+      note(src, null, "by default import");
+      continue;
+    }
+    const specs = (brace ? brace[1] : "").split(",").map((s) => s.trim()).filter(Boolean);
+    if (specs.length && specs.every((s) => /^type\s/.test(s))) continue; // types only: erased
+    const names = [];
+    let unreadable = null;
+    for (const seg of specs) {
+      if (/^type\s/.test(seg)) continue;
+      const [name, ...rest] = seg.split(/\s+as\s+/);
+      if (ID_RE.test(name) && rest.length <= 1 && (!rest.length || ID_RE.test(rest[0]))) names.push(name);
+      else unreadable ??= seg;
+    }
+    if (unreadable !== null) note(src, null, `with a specifier the scan cannot read ('${unreadable.slice(0, 40)}')`);
+    else note(src, names, null);
   }
   return out;
 }
 
-// A module's top-level statements, found on the mask: a statement starts on
-// a line at bracket depth 0 — at column 0 on a character that cannot continue
-// the line before (not a closer, a dot, a backtick or whitespace), or indented
-// when its first word is a declaration keyword — and runs to the next start.
-// Template bodies are blanked on the mask, so a line inside one never starts
-// a statement. Each statement is classified:
+// A module's top-level statements, found on the mask. A statement starts on
+// a line at bracket depth 0:
+//   - at column 0, on a character that cannot continue the line before (not
+//     a closer, a dot, or a template's CLOSING backtick — an opening one
+//     starts a statement, CR-017);
+//   - indented, when its first word is a declaration keyword;
+//   - indented, when the line cannot continue the one before: it does not
+//     open with `.`, an operator or a closer, and the line before does not
+//     end with an operator, `=>`, an opener or a comma. An indented
+//     statement that is really a continuation is then counted as `code`,
+//     which only ever adds refs — the "might touch" side (decision 0011).
+// It runs to the next start. Template bodies are blanked on the mask, so a
+// line inside one never starts a statement. Each statement is classified:
 //   decl      a function / class / const / let / var / enum, by local name;
 //             `export default …` declares the local name "default"
 //   exports   `export { a as b }` — exported name → local name
@@ -601,97 +643,152 @@ function localImports(code) {
 //             another module declares
 //   code      anything else that is not an import or a type: runs on import
 export function topLevel(text) {
-  const { code, mask } = lex(text);
+  const { code, mask, tplOpens } = lex(text);
   const starts = [];
   let depth = 0;
+  // How the last non-blank line ENDED: its masked text if it ended at depth
+  // 0, else "{" (a line ending inside brackets is always continued).
+  let lastLineEnd = "";
+  let lineFrom = 0;
+  const CONTINUES_NEXT = /(?:[=+\-*/%&|^,?:(\[{<>!~]|=>|\b(?:return|new|await|yield|typeof|in|of|instanceof|extends|delete|void|throw|case|else))$/;
   for (let i = 0; i < mask.length; i++) {
     const ch = mask[i];
-    if (depth === 0 && (i === 0 || mask[i - 1] === "\n")) {
-      // Column 0 starts a statement unless it continues one (a closer, a dot,
-      // a template's closing backtick). An indented line starts one only
-      // when its first word cannot continue anything: a declaration keyword.
-      if (!/[\s})\].`]/.test(ch)) starts.push(i);
-      else if (/^[ \t]+(?:export|import|function|async|class|const|let|var|enum)\b/.test(code.slice(i, i + 40))) starts.push(i);
+    if (depth === 0 && i === lineFrom) {
+      const eol = mask.indexOf("\n", i);
+      const line = mask.slice(i, eol === -1 ? mask.length : eol);
+      const lead = line.search(/\S/);
+      if (lead === 0) {
+        if (!/[})\].`]/.test(ch) || (ch === "`" && tplOpens.has(i))) starts.push(i);
+      } else if (lead > 0) {
+        const first = line[lead];
+        if (/^(?:export|import|function|async|class|const|let|var|enum)\b/.test(code.slice(i + lead, i + lead + 12))) starts.push(i);
+        else if (!/[.?:+\-*/%&|^=,<>)\]}]/.test(first) && !(first === "`" && !tplOpens.has(i + lead)) && !CONTINUES_NEXT.test(lastLineEnd)) starts.push(i);
+      }
     }
     if (ch === "(" || ch === "[" || ch === "{") depth++;
     else if (ch === ")" || ch === "]" || ch === "}") depth = Math.max(0, depth - 1);
+    if (ch === "\n") {
+      const line = mask.slice(lineFrom, i).trimEnd();
+      if (line.trim()) lastLineEnd = depth === 0 ? line : "{";
+      lineFrom = i + 1;
+    }
   }
   const statements = [];
   const decls = new Map(); // local name -> [statement index]
   const exportsMap = new Map(); // exported name -> local name
   const reexported = new Set();
   let reexportAll = false;
-  const declare = (name, k) => decls.set(name, [...(decls.get(name) ?? []), k]);
+  const declare = (name, k) => {
+    if (!decls.has(name)) decls.set(name, []);
+    decls.get(name).push(k);
+  };
+  const exportList = (body, fn) => {
+    for (const part of body.split(",")) {
+      const seg = part.trim().replace(/^type\s+/, "");
+      if (!seg) continue;
+      const [local, exported] = seg.split(/\s+as\s+/);
+      fn(local, exported ?? local);
+    }
+  };
+  const DECL = new RegExp(`^(export\\s+)?(?:declare\\s+)?(?:(?:async\\s+)?function\\s*\\*?\\s*|class\\s+|(?:const\\s+)?enum\\s+|(?:const|let|var)\\s+)(${ID})`, "u");
+  const DEFAULT = new RegExp(`^export\\s+default\\s+(?:async\\s+)?(?:function\\s*\\*?|class)\\s*(${ID})?`, "u");
   starts.forEach((start, k) => {
     const end = k + 1 < starts.length ? starts[k + 1] : mask.length;
     const s = code.slice(start, end).trimStart();
     let kind = "code";
     let m;
     if (/^import\b/.test(s) || /^(?:export\s+)?(?:declare\s+)?(?:type|interface)\b/.test(s)) kind = "skip";
-    else if ((m = /^export\s*\*/.exec(s))) {
+    else if (/^export\s*\*/.test(s)) {
       kind = "skip";
       reexportAll = true;
     } else if ((m = /^export\s*(?:type\s*)?\{([^}]*)\}\s*from\b/.exec(s))) {
       kind = "skip";
-      for (const part of m[1].split(",")) {
-        const hit = /^\s*(?:type\s+)?[A-Za-z_$][\w$]*(?:\s+as\s+([A-Za-z_$][\w$]*))?\s*$/.exec(part);
-        const name = hit && (hit[1] ?? part.trim().replace(/^type\s+/, ""));
-        if (name) reexported.add(name);
-      }
+      exportList(m[1], (_local, exported) => reexported.add(exported));
     } else if ((m = /^export\s*\{([^}]*)\}/.exec(s))) {
       kind = "skip";
-      for (const part of m[1].split(",")) {
-        const hit = /^\s*([A-Za-z_$][\w$]*)(?:\s+as\s+([A-Za-z_$][\w$]*))?\s*$/.exec(part);
-        if (hit) exportsMap.set(hit[2] ?? hit[1], hit[1]);
-      }
-    } else if ((m = /^export\s+default\s+(?:async\s+)?(?:function\s*\*?|class)\s*([A-Za-z_$][\w$]*)?/.exec(s)) || /^export\s+default\b/.test(s)) {
+      exportList(m[1], (local, exported) => exportsMap.set(exported, local));
+    } else if ((m = DEFAULT.exec(s)) || /^export\s+default\b/.test(s)) {
       kind = "decl";
       declare("default", k);
       exportsMap.set("default", "default");
       if (m?.[1]) declare(m[1], k);
-    } else if ((m = /^(export\s+)?(?:declare\s+)?(?:(?:async\s+)?function\s*\*?\s*|class\s+|(?:const\s+)?enum\s+|(?:const|let|var)\s+)([A-Za-z_$][\w$]*)/.exec(s))) {
+    } else if ((m = DECL.exec(s))) {
       kind = "decl";
       declare(m[2], k);
       if (m[1]) exportsMap.set(m[2], m[2]);
     }
     statements.push({ start, end, kind });
   });
+  // The top-level names each statement mentions (on the mask: never in a
+  // comment or a string, never as a property after a dot).
+  const mentionRe = new RegExp(`(?<![.\\p{ID_Continue}$])${ID}`, "gu");
+  for (const st of statements) {
+    st.mentions = new Set();
+    for (const id of mask.slice(st.start, st.end).matchAll(mentionRe)) if (decls.has(id[0])) st.mentions.add(id[0]);
+  }
   return { text, mask, statements, decls, exportsMap, reexported, reexportAll };
 }
 
-// The part of a module that the named imports `names` reach: the statements
-// declaring each name, every top-level declaration those bodies mention
-// (followed to a fixed point — a visited set bounds it), and every `code`
-// statement, which runs on import whatever is imported. Returns the module
-// text with everything else blanked (same length, same newlines), or
-// { whole: reason } when a name cannot be narrowed: declared by no
+// The statements the named imports `names` reach: every `code` statement
+// (it runs on import whatever is imported), the statements declaring each
+// name, and every top-level declaration any included statement mentions —
+// followed to a fixed point, which a visited set bounds (CR-017: a helper a
+// top-level call reaches counts too). Returns { statements: Set<index> }, or
+// { whole: reason, name } when a name cannot be narrowed: declared by no
 // statement here, or re-exported from another module (one hop).
 export function narrowModule(mod, names) {
-  const include = new Set(mod.statements.flatMap((s, k) => (s.kind === "code" ? [k] : [])));
+  const include = new Set();
   const todo = [];
+  const take = (k) => {
+    if (include.has(k)) return;
+    include.add(k);
+    for (const id of mod.statements[k].mentions) todo.push(id);
+  };
   for (const name of [...names].sort()) {
     const local = mod.exportsMap.get(name);
     if (local !== undefined && mod.decls.has(local)) todo.push(local);
     else if (mod.reexported.has(name) || mod.reexportAll) return { whole: "reexport", name };
     else return { whole: "missing", name };
   }
+  mod.statements.forEach((s, k) => s.kind === "code" && take(k));
   const visited = new Set();
   while (todo.length) {
     const local = todo.pop();
     if (visited.has(local)) continue;
     visited.add(local);
-    for (const k of mod.decls.get(local) ?? []) {
-      include.add(k);
-      const { start, end } = mod.statements[k];
-      for (const id of mod.mask.slice(start, end).matchAll(/(?<![.\w$])[A-Za-z_$][\w$]*/g)) {
-        if (mod.decls.has(id[0]) && !visited.has(id[0])) todo.push(id[0]);
-      }
-    }
+    for (const k of mod.decls.get(local) ?? []) take(k);
   }
-  const chars = mod.text.split("");
-  const keep = new Array(chars.length).fill(false);
-  for (const k of include) for (let i = mod.statements[k].start; i < mod.statements[k].end; i++) keep[i] = true;
-  return { text: chars.map((c, i) => (keep[i] || c === "\n" ? c : " ")).join("") };
+  return { statements: include };
+}
+
+// Data calls in one file: `.from('x')` / `.from(CONST)` (a table or bucket)
+// and `.rpc('x')` (a database function). Call sites are found on the mask —
+// a call spelled inside a string or a comment is not one (CAS-65 CR-020) —
+// and literals read from the text. `consts` resolves `.from(NAME)` against
+// the module's own `const NAME = '…'` bindings.
+export function scanDataCalls(text, consts = moduleConsts(text)) {
+  const m = model(text);
+  const from = new Set();
+  const rpc = new Set();
+  for (const hit of m.mask.matchAll(/\.(from|rpc)\(\s*(?:(['"])|([A-Za-z_$][\w$]*)\s*\))/g)) {
+    if (hit[2]) {
+      const raw = stringAt(m, hit.index + hit[0].length - 1);
+      if (raw === null) continue;
+      if (hit[1] === "from" && /^[\w-]+$/.test(raw)) from.add(raw);
+      if (hit[1] === "rpc" && /^\w+$/.test(raw)) rpc.add(raw);
+    } else if (hit[1] === "from" && consts.has(hit[3])) from.add(consts.get(hit[3]));
+  }
+  return { from, rpc };
+}
+// A module's `const NAME = 'literal'` bindings, found on the mask.
+export function moduleConsts(text) {
+  const m = model(text);
+  const out = new Map();
+  for (const hit of m.mask.matchAll(/\bconst\s+([A-Za-z_$][\w$]*)\s*=\s*(['"])/g)) {
+    const raw = stringAt(m, hit.index + hit[0].length - 1);
+    if (raw !== null && /^[\w-]+$/.test(raw)) out.set(hit[1], raw);
+  }
+  return out;
 }
 
 // `${expr}` -> *, a leading `${base}` prefix dropped, query string and
@@ -798,48 +895,69 @@ export function derive({ repoRoot, options }) {
     // that is not a regular file inside the repo (a link, a directory): it
     // is never read, and the loss would be the same. No folder yet is
     // greenfield — bootstrap configures the path ahead of the code.
+    // The folder is judged segment by segment, never through a link: only
+    // a genuinely absent real directory is greenfield (CAS-65 CR-016).
     const dir = posix.dirname(routesFile);
+    const notRegular = () => {
+      throw new Error(`react-router: routesFile '${routesFile}' is not a regular file inside the repo (a symlink, a directory, or under a link) — never read; fix extractorOptions.react-router.routesFile`);
+    };
+    let cur = realRoot;
+    for (const seg of dir === "." ? [] : dir.split("/")) {
+      cur = join(cur, seg);
+      let st;
+      try {
+        st = lstatSync(cur);
+      } catch {
+        diagnostics.push(`${routesFile} not found — nothing to inventory`);
+        return { records: [], diagnostics };
+      }
+      if (st.isSymbolicLink() || !st.isDirectory()) notRegular();
+    }
     let atPath = true;
     try {
       lstatSync(join(realRoot, routesFile));
     } catch {
       atPath = false;
     }
-    let dirExists = false;
-    try {
-      dirExists = dir !== "." && lstatSync(join(realRoot, dir)).isDirectory();
-    } catch {
-      /* no folder: greenfield */
+    if (atPath) notRegular();
+    if (dir === ".") {
+      diagnostics.push(`${routesFile} not found — nothing to inventory`); // the root always exists: greenfield-shaped (decision 0013)
+      return { records: [], diagnostics };
     }
-    if (!atPath && dirExists) {
-      throw new Error(`react-router: routesFile '${routesFile}' does not exist, but its folder '${dir}' does — a renamed or misspelt routes file would drop every surface record; fix extractorOptions.react-router.routesFile`);
-    }
-    if (atPath) {
-      throw new Error(`react-router: routesFile '${routesFile}' is not a regular file inside the repo (a symlink, a directory, or under a link) — never read; fix extractorOptions.react-router.routesFile`);
-    }
-    diagnostics.push(`${routesFile} not found — nothing to inventory`);
-    return { records: [], diagnostics };
+    throw new Error(`react-router: routesFile '${routesFile}' does not exist, but its folder '${dir}' does — a renamed or misspelt routes file would drop every surface record; fix extractorOptions.react-router.routesFile`);
   }
+  // A routes file that exists but cannot be read (over the cap) would derive
+  // zero surfaces as if the tree were empty — the same loss (CAS-65 CR-015).
   const text = readSource(routesFile);
-  if (text === null) return { records: [], diagnostics };
+  if (text === null) throw new Error(`react-router: routesFile '${routesFile}' is over ${MAX_SOURCE_BYTES / 1024} KiB — never read; every surface record hangs on it, so derive stops rather than write them away`);
   const routes = parseRouteTree(text, diagnostics);
   const imports = importMap(text);
 
-  // The refs one piece of source text calls out to.
-  const refsOfText = (body) => {
+  // The refs one piece of source text calls out to; `consts` resolves
+  // `.from(NAME)` against the whole module's bindings when the text is one
+  // statement of it.
+  const refsOfText = (body, consts) => {
     const refs = new Set();
     for (const p of scanApiCalls(body)) refs.add(`?route:${p}`);
-    const scan = scanFileText(lex(body).code);
-    for (const name of scan.fromNames) refs.add(`?from:${name}`);
-    for (const name of scan.rpcNames) refs.add(`?function:${name}`);
+    const data = scanDataCalls(body, consts);
+    for (const name of data.from) refs.add(`?from:${name}`);
+    for (const name of data.rpc) refs.add(`?function:${name}`);
     return refs;
   };
-  // A one-hop module, memoised: its whole-file refs and its statement model.
+  // A one-hop module, memoised: its whole-file refs, its statement model and
+  // each statement's refs, scanned ONCE — a narrowed import is then a union
+  // of precomputed sets, never a rescan of the module (CAS-65 CR-022).
   const modules = new Map();
   const moduleOf = (rel) => {
     if (!modules.has(rel)) {
       const body = readSource(rel);
-      modules.set(rel, body === null ? null : { whole: refsOfText(body), model: topLevel(body), narrowed: new Map() });
+      if (body === null) modules.set(rel, null);
+      else {
+        const model = topLevel(body);
+        const consts = moduleConsts(body);
+        const stmtRefs = model.statements.map((st) => refsOfText(body.slice(st.start, st.end), consts));
+        modules.set(rel, { whole: refsOfText(body), model, stmtRefs, narrowed: new Map() });
+      }
     }
     return modules.get(rel);
   };
@@ -854,7 +972,7 @@ export function derive({ repoRoot, options }) {
     const refs = body === null ? new Set() : refsOfText(body);
     elements.set(rel, refs);
     if (body === null) return refs;
-    for (const [source, { names, how }] of localImports(lex(body).code)) {
+    for (const [source, { names, how }] of localImports(body)) {
       const target = resolveImport(rel, source);
       const mod = target && moduleOf(target);
       if (!mod) continue;
@@ -864,7 +982,7 @@ export function derive({ repoRoot, options }) {
         const key = [...names].sort().join(",");
         if (!mod.narrowed.has(key)) {
           const cut = narrowModule(mod.model, names);
-          mod.narrowed.set(key, cut.whole ? cut : { refs: refsOfText(cut.text) });
+          mod.narrowed.set(key, cut.whole ? cut : { refs: new Set([...cut.statements].flatMap((k) => [...mod.stmtRefs[k]])) });
         }
         const cut = mod.narrowed.get(key);
         if (cut.whole === "missing") diagnostics.push(`${rel} imports '${cut.name}' from ${target}, which declares no such name — its calls are attributed whole`);

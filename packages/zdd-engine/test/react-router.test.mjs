@@ -106,7 +106,110 @@ test("CAS-65: the statement model — an indented declaration still starts a sta
     ["code", 'api.get("/top");'],
   ]);
   assert.deepEqual([...m.decls.keys()].sort(), ["chained", "client", "indented", "tpl"]);
-  assert.deepEqual([...scanApiCalls(narrowModule(m, new Set(["chained"])).text)].sort(), ["/chain", "/top"]);
+  assert.deepEqual(narrowedCalls(text, ["chained"]), ["/chain", "/top"]);
+});
+
+// The API calls a narrowed import reaches, from the statement model.
+function narrowedCalls(text, names) {
+  const m = topLevel(text);
+  const cut = narrowModule(m, new Set(names));
+  if (cut.whole) return cut;
+  return [...new Set([...cut.statements].flatMap((k) => [...scanApiCalls(text.slice(m.statements[k].start, m.statements[k].end))]))].sort();
+}
+
+test("CAS-65 CR-017: narrowing keeps what top-level code reaches — a helper a top-level call runs, an indented top-level call, a bare template statement", () => {
+  const text = [
+    'import { x } from "./x";',
+    '  api.get("/indented-boot");', // indented, but it cannot continue an import
+    'function boot() { api.get("/boot"); }',
+    "export function used() {}",
+    "boot();", // top-level code: boot runs on import, whatever is imported
+    "export const tagged = () =>",
+    '  api.get("/tagged");', // a continuation of `=>`, part of `tagged`
+    '`${api.get("/in-template")}`;', // a statement that opens with a backtick
+    'export function unused() { api.get("/unused"); }',
+  ].join("\n");
+  assert.deepEqual(narrowedCalls(text, ["used"]), ["/boot", "/in-template", "/indented-boot"]);
+  assert.deepEqual(narrowedCalls(text, ["tagged"]), ["/boot", "/in-template", "/indented-boot", "/tagged"]);
+});
+
+test("CAS-65 CR-040: a helper reached only after two hops is followed", () => {
+  const text = [
+    'function h2() { return api.get("/deep"); }',
+    "function h1() { return h2(); }",
+    "export function top() { return h1(); }",
+    'export function other() { return api.get("/other"); }',
+  ].join("\n");
+  assert.deepEqual(narrowedCalls(text, ["top"]), ["/deep"]);
+});
+
+test("CAS-65 CR-018/019/020/021/040: type-only imports bind nothing; Unicode names narrow; strings forge no imports or data calls; a side-effect import runs top-level code; import() takes the module whole", () => {
+  const root = scratch({
+    "src/routes.tsx": [
+      'import { A } from "./A";',
+      "export const routes = [{ path: \"/a\", element: <A /> }];",
+      "",
+    ].join("\n"),
+    "src/A.tsx": [
+      'import { type User } from "./typesonly";', // erased by TypeScript
+      'import { café } from "./unicode";',
+      'import "./register";', // side effect: top-level code only
+      'const doc = \'import { leak } from "./leak"; db.from("ghost"); db.rpc("phantom")\';', // a string, not code
+      'const lazyData = () => import("./lazy");',
+      'export function A() { return <main>{String(café())}{doc}</main>; }',
+      "",
+    ].join("\n"),
+    "src/typesonly.ts": 'export type User = { id: string };\napi.get("/typesonly-top");\n',
+    "src/unicode.ts": 'export function café() { return api.get("/cafe"); }\nexport function thé() { return api.get("/the"); }\n',
+    "src/register.ts": 'api.get("/registered");\nexport function unrelated() { return api.get("/unrelated"); }\n',
+    "src/leak.ts": 'api.get("/leak");\n',
+    "src/lazy.ts": 'export function x() { return api.get("/lazy"); }\n',
+  });
+  try {
+    const { records, diagnostics } = derive({ repoRoot: root, options: { routesFile: "src/routes.tsx" } });
+    assert.deepEqual(records[0].refs, ["?route:/cafe", "?route:/lazy", "?route:/registered"]);
+    assert.ok(diagnostics.some((d) => /src\/A\.tsx imports src\/lazy\.ts through import\(\) — its calls are attributed whole/.test(d)), diagnostics.join("\n"));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("CAS-65 CR-022: many screens importing different name sets from one large module do not rescan it per set", () => {
+  const N = 400;
+  const mod = [];
+  for (let i = 0; i < N; i++) mod.push(`export function f${i}() { return api.get("/r${i}"); } // ${"x".repeat(1500)}`);
+  const files = { "src/data.ts": mod.join("\n") + "\n" };
+  const routes = [];
+  const imports = [];
+  for (let i = 0; i < N; i++) {
+    files[`src/S${i}.tsx`] = `import { f${i}, f${(i + 1) % N} } from "./data";\nexport function S${i}() { return <main>{String(f${i}())}</main>; }\n`;
+    imports.push(`import { S${i} } from "./S${i}";`);
+    routes.push(`  { path: "/s${i}", element: <S${i} /> },`);
+  }
+  files["src/routes.tsx"] = `${imports.join("\n")}\nexport const routes = [\n${routes.join("\n")}\n];\n`;
+  const root = scratch(files);
+  try {
+    const started = process.hrtime.bigint();
+    const { records } = derive({ repoRoot: root, options: { routesFile: "src/routes.tsx" } });
+    const ms = Number(process.hrtime.bigint() - started) / 1e6;
+    assert.equal(records.length, N);
+    assert.deepEqual(records.find((r) => r.id === "surface:/s7").refs, ["?route:/r7", "?route:/r8"]);
+    assert.ok(ms < 10_000, `derive took ${ms} ms for ${N} distinct name sets of a ${Math.round(files["src/data.ts"].length / 1024)} KiB module`);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("CAS-65 CR-015/016: an oversized routes file, or one missing under a linked folder, stops derive", (t) => {
+  const big = scratch({ "src/x.ts": "" });
+  t.after(() => rmSync(big, { recursive: true, force: true }));
+  writeFileSync(join(big, "src", "routes.tsx"), `export const routes = [];\n${" ".repeat(MAX_SOURCE_BYTES)}`);
+  assert.throws(() => derive({ repoRoot: big, options: { routesFile: "src/routes.tsx" } }), /react-router: routesFile 'src\/routes\.tsx' is over 1024 KiB — never read/);
+
+  const linked = scratch({ "real/src/other.tsx": "" });
+  t.after(() => rmSync(linked, { recursive: true, force: true }));
+  symlinkSync(join(linked, "real", "src"), join(linked, "src"), process.platform === "win32" ? "junction" : "dir");
+  assert.throws(() => derive({ repoRoot: linked, options: { routesFile: "src/routes.tsx" } }), /react-router: routesFile 'src\/routes\.tsx' is not a regular file inside the repo \(a symlink, a directory, or under a link\)/);
 });
 
 test("CAS-65: named imports narrow a data module to the bodies they reach — helpers followed, top-level calls kept for every importer; anything unnarrowable falls back to the whole module with a diagnostic", () => {
@@ -378,7 +481,7 @@ test("API call scan: any receiver, fetch, a leading ${base} dropped, query strin
   assert.equal(normalizeApiPath("${b}/a/${x}/?q=1"), "/a/*");
 });
 
-test("CR-001: a symlinked routes file, element file or one-hop module is never read (POSIX); an oversized source is not read; both are diagnostics, not records", (t) => {
+test("CR-001: a symlinked routes file, element file or one-hop module is never read (POSIX); an oversized source is not read; a secondary one is a diagnostic, the routes file itself stops derive", (t) => {
   const root = scratch({
     "src/routes.tsx": `import { A } from "./A";\nimport { B } from "./B";\nexport const routes = [{ path: "/a", element: <A /> }, { path: "/b", element: <B /> }];\n`,
     "src/A.tsx": `import { x } from "./data";\nexport const A = () => api.get("/a");\n`,
@@ -427,9 +530,9 @@ test("CR-001: a symlinked routes file, element file or one-hop module is never r
   writeFileSync(join(root, "src", "B.tsx"), readFileSync(join(root, "src", "B.tsx"), "utf8").replace("export const B", `import { v } from "./data2";\nexport const B`));
   const suffixed = derive({ repoRoot: root, options: {} });
   assert.deepEqual(suffixed.records.find((r) => r.id === "surface:/b").refs, ["?route:/b", "?route:/data2", "?route:/widget"]);
-  const big = derive({ repoRoot: root, options: { routesFile: "src/big.tsx" } });
-  assert.deepEqual(big.records, []);
-  assert.match(big.diagnostics[0], /is over 1024 KiB — not read/);
+  // An oversized routes file is still never read — and since CAS-65 CR-015
+  // it stops derive: an empty tree here would write every surface away.
+  assert.throws(() => derive({ repoRoot: root, options: { routesFile: "src/big.tsx" } }), /routesFile 'src\/big\.tsx' is over 1024 KiB — never read/);
   rmSync(root, { recursive: true, force: true });
 });
 
