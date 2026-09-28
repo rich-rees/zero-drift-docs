@@ -324,7 +324,16 @@ export function scaffold(root, rawAnswers) {
       } catch (e) {
         closeSync(fd);
         fd = null;
-        rmSync(abs); // created a moment ago by this run, before anyone could act on it (CR-050)
+        // Created a moment ago by this run: remove it now (CR-050). The
+        // original error is the one reported; a removal that fails too is
+        // named, never silent (CR-052).
+        let leftover = "";
+        try {
+          rmSync(abs);
+        } catch {
+          leftover = ` — and ${abs}, just created, could not be removed; delete it by hand`;
+        }
+        e.message += leftover;
         throw e;
       }
       mine.push({ abs, dev: st.dev, ino: st.ino });
