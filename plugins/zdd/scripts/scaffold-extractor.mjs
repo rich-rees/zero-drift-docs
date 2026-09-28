@@ -37,7 +37,7 @@
 // the run; every path goes through the Ledger's resolveInside (no escape, no
 // symlink); text that lands in a generated comment is flattened to one line.
 
-import { readFileSync, lstatSync } from "node:fs";
+import { readFileSync, lstatSync, openSync, readSync, closeSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { PLUGIN_ROOT, parseArgs, adopterRoot, readConfig, artifactPaths, repoRelative, resolveInside, pathsOverlap, CONFIG_REL, posixify } from "./lib/repo.mjs";
 import { Ledger, printable } from "./bootstrap.mjs";
@@ -67,6 +67,12 @@ const MAX_LIST = 32; // roots, extensions, kinds — a scaffold answer, not a da
 const MAX_ANSWERS_BYTES = 64 * 1024;
 
 // One line, printable, bounded: it lands in a `//` comment.
+// A path segment Windows cannot create (CON, NUL, COM1…, or one ending in a
+// dot or space) — refused on every platform, since a repo is shared across
+// them and the failure would otherwise come late, mid-write (CR-042).
+const WINDOWS_RESERVED = /^(?:con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(?:\..*)?$/i;
+const badSegment = (p) => p.split("/").find((seg) => WINDOWS_RESERVED.test(seg) || /[. ]$/.test(seg));
+
 const flat = (s) => String(s).replace(/[\x00-\x1f\x7f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, MAX_TEXT);
 
 export function validateAnswers(raw) {
@@ -77,6 +83,7 @@ export function validateAnswers(raw) {
   const a = {};
   if (typeof raw.name !== "string" || !NAME_RE.test(raw.name)) fail("name must match ^[a-z][a-z0-9-]*$ (lowercase, digits, hyphens)");
   if (BUILT_INS.includes(raw.name)) fail(`name '${raw.name}' is a built-in extractor — a local one may not shadow it; pick another name`);
+  if (WINDOWS_RESERVED.test(raw.name)) fail(`name '${raw.name}' is a device name Windows cannot create as a folder — pick another`);
   a.name = raw.name;
   if (typeof raw.evidence !== "string" || !flat(raw.evidence)) fail("evidence must say what file layout or code shape declares the thing");
   a.evidence = flat(raw.evidence);
@@ -93,6 +100,7 @@ export function validateAnswers(raw) {
   if (!Array.isArray(raw.roots) || !raw.roots.length) fail("roots must be a non-empty array of repo-relative folders");
   if (!raw.roots.every((r) => typeof r === "string" && r.length <= MAX_TEXT)) fail(`roots must be strings of at most ${MAX_TEXT} characters`);
   a.roots = [...new Set(raw.roots.map((r, i) => repoRelative(r, `answers: roots[${i}]`)))];
+  for (const r of a.roots) if (r !== "." && badSegment(r)) fail(`roots entry '${r}' has a segment Windows cannot create ('${badSegment(r)}')`);
   if (!Array.isArray(raw.extensions) || !raw.extensions.length || !raw.extensions.every((e) => typeof e === "string" && e.length <= 32 && EXT_RE.test(e))) fail("extensions must be a non-empty array of suffixes like \".cs\"");
   a.extensions = [...new Set(raw.extensions)];
   if (raw.syntax !== undefined) {
@@ -104,6 +112,7 @@ export function validateAnswers(raw) {
     a.syntax = [...inferred][0];
   }
   if (raw.localExtractorDir !== undefined) a.localExtractorDir = repoRelative(raw.localExtractorDir, "answers: localExtractorDir");
+  if (a.localExtractorDir && badSegment(a.localExtractorDir)) fail(`localExtractorDir has a segment Windows cannot create ('${badSegment(a.localExtractorDir)}')`);
   return a;
 }
 
@@ -146,8 +155,19 @@ export function readAnswers(path) {
   const st = lstatOrNull(path);
   if (!st || !st.isFile()) throw new Error(`--answers '${path}' is not a regular file`);
   if (st.size > MAX_ANSWERS_BYTES) throw new Error(`--answers '${path}' is ${st.size} bytes — an answer set is under ${MAX_ANSWERS_BYTES}`);
+  // Read at most cap + 1 bytes: a file that grows after the check is still
+  // never read whole (CR-006).
+  const buf = Buffer.alloc(MAX_ANSWERS_BYTES + 1);
+  const fd = openSync(path, "r");
+  let n = 0;
   try {
-    return JSON.parse(readFileSync(path, "utf8"));
+    for (let got; n <= MAX_ANSWERS_BYTES && (got = readSync(fd, buf, n, MAX_ANSWERS_BYTES + 1 - n, null)) > 0; ) n += got;
+  } finally {
+    closeSync(fd);
+  }
+  if (n > MAX_ANSWERS_BYTES) throw new Error(`--answers '${path}' is over ${MAX_ANSWERS_BYTES} bytes — an answer set is under that`);
+  try {
+    return JSON.parse(buf.subarray(0, n).toString("utf8"));
   } catch (e) {
     throw new Error(`--answers '${path}' does not parse: ${e.message}`);
   }
@@ -272,14 +292,29 @@ export function scaffold(root, rawAnswers) {
   }
 
   // ---- write ------------------------------------------------------------------
+  // The preflight catches every refusal it can see; a write can still fail
+  // for a reason it cannot (permissions, a full disk). Then every file this
+  // run created is removed again, and the config — written last — is never
+  // touched, so a failure leaves the repo as it was (CR-003).
   const ledger = new Ledger(root);
-  ledger.create(`${base}/index.mjs`, moduleText);
-  ledger.create(testPath, testText);
-  for (const keep of fixtureKeeps) ledger.create(keep, "");
-  if (changes.length) {
-    ledger.overwrite(CONFIG_REL, JSON.stringify(next, null, 2) + "\n");
-    ledger.notes.push(`zdd/config.json: ${changes.join("; ")}`);
-  } else ledger.kept.push(CONFIG_REL);
+  try {
+    ledger.create(`${base}/index.mjs`, moduleText);
+    ledger.create(testPath, testText);
+    for (const keep of fixtureKeeps) ledger.create(keep, "");
+    if (changes.length) {
+      ledger.overwrite(CONFIG_REL, JSON.stringify(next, null, 2) + "\n");
+      ledger.notes.push(`zdd/config.json: ${changes.join("; ")}`);
+    } else ledger.kept.push(CONFIG_REL);
+  } catch (e) {
+    for (const rel of ledger.wrote.filter((r) => r !== CONFIG_REL).reverse()) {
+      try {
+        rmSync(join(root, ...rel.split("/")));
+      } catch {
+        /* best effort — reported below */
+      }
+    }
+    throw new Error(`${e.message} — the scaffold removed the ${ledger.wrote.length} file(s) it had written; zdd/config.json is unchanged`);
+  }
 
   // ---- notes --------------------------------------------------------------------
   if (next.extractors.includes("generic") && next.extractors.length > 1) {

@@ -144,8 +144,12 @@ test("CAS-65 CR-029: a map folder that exists but cannot be listed is reported, 
   setClaims(repo, { strict: true, allowUnclaimed: unclaimed(repo).map((r) => r.id) });
   const locked = join(repo, "zdd", "map", "features");
   chmodSync(locked, 0o000);
-  t.after(() => chmodSync(locked, 0o755));
-  const r = run(repo, ["lint"]);
+  let r;
+  try {
+    r = run(repo, ["lint"]);
+  } finally {
+    chmodSync(locked, 0o755); // before the repo's own cleanup, which needs to list it
+  }
   assert.equal(r.status, 1);
   assert.match(r.stderr, /claims\.strict: zdd\/map\/features could not be read \(could not be listed \(EACCES\)\)/);
 });

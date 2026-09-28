@@ -9,7 +9,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -130,6 +130,7 @@ test("the scaffolded test is red until EXPECTED_IDS and a fixture exist, and gre
   assert.notEqual(red.status, 0);
   assert.match(red.stdout, /fill in EXPECTED_IDS/);
   assert.match(red.stdout, /the fixture holds no \.cs file yet/);
+  assert.match(red.stdout, /set CONVENTION_RECURSES to true or false/, "the recursion question is red until answered (CR-039)");
 
   // What the agent writes: a fixture, the expected ids, the logic.
   writeFileSync(
@@ -149,7 +150,7 @@ test("the scaffolded test is red until EXPECTED_IDS and a fixture exist, and gre
     ].join("\n"),
   );
   const testPath = join(dir, "aspnet-routes.test.mjs");
-  writeFileSync(testPath, readFileSync(testPath, "utf8").replace("const EXPECTED_IDS = null;", 'const EXPECTED_IDS = ["route:/api/orders", "route:/api/orders/{id}"];'));
+  writeFileSync(testPath, readFileSync(testPath, "utf8").replace("const EXPECTED_IDS = null;", 'const EXPECTED_IDS = ["route:/api/orders", "route:/api/orders/{id}"];').replace("const CONVENTION_RECURSES = null;", "const CONVENTION_RECURSES = false;"));
   const modPath = join(dir, "index.mjs");
   const logic = [
     "  const cls = /\\[Route\\(\"/.exec(masked);",
@@ -167,13 +168,13 @@ test("the scaffolded test is red until EXPECTED_IDS and a fixture exist, and gre
   assert.equal(green.status, 0, green.stdout + green.stderr);
   // Exact counts per platform (CAS-65 CR-012): a hardening test deleted or
   // newly skipped must turn this red. Nine tests — the POSIX file-symlink one
-  // skips on Windows, the recursion one is a todo until the convention needs it.
+  // skips on Windows; the recursion one passes once CONVENTION_RECURSES is answered.
   const count = (what) => Number(new RegExp(`^# ${what} (\\d+)$`, "m").exec(green.stdout)?.[1]);
   assert.equal(count("tests"), 9, green.stdout);
   assert.equal(count("fail"), 0, green.stdout);
-  assert.equal(count("todo"), 1, green.stdout);
+  assert.equal(count("todo"), 0, green.stdout);
   assert.equal(count("skipped"), POSIX ? 0 : 1, green.stdout);
-  assert.equal(count("pass"), POSIX ? 8 : 7, green.stdout);
+  assert.equal(count("pass"), POSIX ? 9 : 8, green.stdout);
 });
 
 test("refusals: every bad answer or repo state stops before the first write", (t) => {
@@ -391,6 +392,41 @@ test("CAS-65 CR-004/007: overlap with any artifact (files too, case-folded where
   }
 });
 
+test("CAS-65 CR-042: a name, root or folder Windows cannot create is refused on every platform", (t) => {
+  for (const [patch, re] of [
+    [{ name: "con" }, /name 'con' is a device name/],
+    [{ roots: ["src/aux"] }, /roots entry 'src\/aux' has a segment Windows cannot create \('aux'\)/],
+    [{ roots: ["src/Api."] }, /has a segment Windows cannot create \('Api\.'\)/],
+    [{ localExtractorDir: "tools/nul.d" }, /localExtractorDir has a segment Windows cannot create/],
+  ]) {
+    const repo = adopted(t);
+    const r = scaffold(repo, { ...CSHARP, ...patch });
+    assert.equal(r.status, 1, JSON.stringify(patch));
+    assert.match(r.stderr, re);
+  }
+});
+
+test("CAS-65 CR-003 (POSIX, not root): a write that fails after the preflight removes what this run wrote and leaves config untouched", { skip: (!POSIX || process.getuid?.() === 0) && "needs POSIX permissions and a non-root user" }, (t) => {
+  const repo = adopted(t);
+  const configBefore = readFileSync(join(repo, "zdd", "config.json"), "utf8");
+  // The fixture folder exists but is read-only: the preflight sees a real
+  // folder; the .gitkeep write inside it fails.
+  const fixture = join(repo, "zdd", "extractors", "aspnet-routes", "fixture", "src", "Api");
+  mkdirSync(fixture, { recursive: true });
+  chmodSync(fixture, 0o555);
+  let r;
+  try {
+    r = scaffold(repo, CSHARP);
+  } finally {
+    chmodSync(fixture, 0o755); // before the repo's own cleanup
+  }
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /the scaffold removed the 2 file\(s\) it had written; zdd\/config\.json is unchanged/);
+  assert.ok(!existsSync(join(repo, "zdd", "extractors", "aspnet-routes", "index.mjs")));
+  assert.ok(!existsSync(join(repo, "zdd", "extractors", "aspnet-routes", "aspnet-routes.test.mjs")));
+  assert.equal(readFileSync(join(repo, "zdd", "config.json"), "utf8"), configBefore);
+});
+
 test("CAS-65 CR-006: the answers file is a small regular file", (t) => {
   const repo = adopted(t);
   const big = join(repo, "..", `answers-big-${Date.now()}.json`);
@@ -419,6 +455,9 @@ test("CAS-65 CR-014: mask mysql — `#` and `-- ` comments, backslash and double
   const text = "# CREATE TABLE ghost (id int);\nCREATE TABLE `orders` (note text DEFAULT 'it\\'s CREATE TABLE x', b text DEFAULT \"CREATE TABLE y\", c text DEFAULT 'a''b');\n-- CREATE TABLE z\nCREATE TABLE b (id int);";
   const out = sameShape(mask, text);
   assert.deepEqual([...out.matchAll(/CREATE TABLE (`?\w+`?)/g)].map((m) => m[1]), ["`orders`", "b"]);
+  // CR-043: `--` without a following space is arithmetic, not a comment.
+  const arith = sameShape(mask, "SELECT 1--2; CREATE TABLE kept (id int);\nCREATE TABLE also (id int); --\n");
+  assert.deepEqual([...arith.matchAll(/CREATE TABLE (\w+)/g)].map((m) => m[1]), ["kept", "also"]);
 });
 
 test("CAS-65 CR-013: mask c-like — a `//` inside a JS regex literal is not a comment; division is still division; linear on a large file", async () => {
