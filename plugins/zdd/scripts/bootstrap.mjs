@@ -310,7 +310,7 @@ export function detect(root) {
 
   const mode = sourceFiles === 0 && !pkg ? "greenfield" : "existing";
   if (mode === "existing" && !proposals.length) {
-    proposals.push({ name: "generic", evidence: ["source present but no known convention found — map-only ZDD; add extractors later"], options: {} });
+    proposals.push({ name: "generic", evidence: ["source present but no known convention found — map-only ZDD; scaffold an extractor for it with the `extractor` skill once bootstrap is done"], options: {} });
   }
   return { mode, proposals, apps, sourceFiles };
 }
