@@ -10,6 +10,18 @@
       "source": "./plugins/zdd",
       "description": "Zero-Drift Docs — seven documentation artifacts kept at most one unit of work behind the code.",
       "version": "1.3.0"
+    },
+    {
+      "name": "mattpocock-skills",
+      "description": "Matt Pocock's agent skills (grilling, domain modelling, TDD, code review and more) — the exact release this ZDD release was tested with. zdd depends on it; installing zdd brings it. Matt's plugin, uncopied, from his repository.",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/mattpocock/skills.git",
+        "ref": "v1.3.1",
+        "sha": "24fe0ef7737efae15c87225755e9f6f5965e4888"
+      },
+      "version": "1.3.1"
     }
-  ]
+  ],
+  "description": "Zero-Drift Docs: the zdd plugin and the one release of Matt Pocock's skills it is tested with and brings in."
 }

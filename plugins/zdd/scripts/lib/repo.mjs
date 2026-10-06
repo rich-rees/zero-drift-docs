@@ -353,3 +353,75 @@ function findUnder(dir, tail, depth) {
   }
   return null;
 }
+
+// ---------------------------------------------------------------------------
+// The pinned Pocock release (CAS-93, decision 0014). pocock.json names the
+// one mattpocock-skills release this plugin was tested with; the marketplace
+// lists it and the zdd manifest depends on it (a test pins the three). Two
+// enabled copies of one plugin name load as ONE, silently, so bootstrap
+// switches the other known copies off per repo and pocockCopies() reports
+// whatever is still switched on — from the three settings files Claude Code
+// merges, lowest precedence first: user, project, local. Managed settings
+// and the --settings flag are not files in the repo or home and are not read.
+// ---------------------------------------------------------------------------
+export const ZDD_PLUGIN_ID = "zdd@zero-drift-docs";
+export function pocockPin() {
+  return JSON.parse(readFileSync(join(PLUGIN_ROOT, "pocock.json"), "utf8"));
+}
+// The enabledPlugins block bootstrap writes into a repo's .claude/settings.json.
+export function pluginSettings() {
+  const pin = pocockPin();
+  return { [ZDD_PLUGIN_ID]: true, [`${pin.plugin}@${pin.marketplace}`]: true, ...Object.fromEntries(pin.otherCopies.map((id) => [id, false])) };
+}
+
+const settingsSources = (root, home) => [
+  { source: "user", label: "~/.claude/settings.json, user settings", path: join(home, ".claude", "settings.json") },
+  { source: "project", label: ".claude/settings.json, project settings", path: join(root, ".claude", "settings.json") },
+  { source: "local", label: ".claude/settings.local.json, local settings", path: join(root, ".claude", "settings.local.json") },
+];
+const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+function readJsonObject(path) {
+  try {
+    const st = lstatSync(path);
+    if (!st.isFile() || st.size > MAX_CONFIG_BYTES) return null;
+    const j = JSON.parse(readFileSync(path, "utf8"));
+    return isObject(j) ? j : null;
+  } catch {
+    return null;
+  }
+}
+const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}@[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+function installedVersions(home) {
+  const out = new Map();
+  const j = readJsonObject(join(home, ".claude", "plugins", "installed_plugins.json"));
+  if (!j || !isObject(j.plugins)) return out;
+  for (const [id, rows] of Object.entries(j.plugins)) {
+    if (!SAFE_ID.test(id) || !Array.isArray(rows)) continue;
+    const row = rows.find((r) => isObject(r) && r.scope === "user") ?? rows.find(isObject);
+    if (row && typeof row.version === "string" && row.version.length <= 64) out.set(id, row.version);
+  }
+  return out;
+}
+export function pocockCopies(root, home = process.env.ZDD_HOME || homedir()) {
+  const pin = pocockPin();
+  const ours = `${pin.plugin}@${pin.marketplace}`;
+  const effective = new Map(); // id -> { value, source, label } from the highest-precedence file that names it
+  for (const s of settingsSources(root, home)) {
+    const j = readJsonObject(s.path);
+    if (!j || !isObject(j.enabledPlugins)) continue;
+    for (const [id, v] of Object.entries(j.enabledPlugins)) {
+      if (typeof v !== "boolean" || !SAFE_ID.test(id) || !id.startsWith(`${pin.plugin}@`)) continue;
+      effective.set(id, { value: v, source: s.source, label: s.label });
+    }
+  }
+  const versions = installedVersions(home);
+  const others = [...effective]
+    .filter(([id, e]) => id !== ours && e.value)
+    .map(([id, e]) => ({ id, version: versions.get(id) ?? null, source: e.source, label: e.label }))
+    .sort((a, b) => (a.id < b.id ? -1 : 1));
+  const mine = effective.get(ours);
+  return {
+    pinned: { id: ours, name: pin.plugin, version: pin.version, enabled: mine ? mine.value : true, source: mine?.source ?? null, label: mine?.label ?? null },
+    others,
+  };
+}

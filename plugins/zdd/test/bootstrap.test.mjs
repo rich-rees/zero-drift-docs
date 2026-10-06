@@ -585,7 +585,10 @@ test("Pocock recommendation: names the plugin, the install route, and the conseq
   const repo = fresh("pocock");
   const out = bootstrap(repo, ["detect"]);
   assert.match(out, /mattpocock-skills: NOT installed/);
-  assert.match(out, /plugin marketplace add mattpocock\/skills/);
+  // CAS-93: installing zdd brings the pinned Pocock release; no separate marketplace or install id.
+  assert.match(out, /plugin install zdd@zero-drift-docs/);
+  assert.match(out, /mattpocock-skills@zero-drift-docs/);
+  assert.doesNotMatch(out, /mattpocock-skills@skills|marketplace add mattpocock\/skills/);
   assert.match(out, /only be as good as the design sessions/);
   const home = join(scratch, "home-with-pocock");
   const skill = join(home, ".claude", "plugins", "cache", "skills", "mattpocock-skills", "1.0.0", "skills", "domain-modeling");
