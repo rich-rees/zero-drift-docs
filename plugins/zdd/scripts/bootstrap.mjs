@@ -633,6 +633,30 @@ function writeSnippet(ledger, file) {
   if (note) ledger.notes.push(`${file}: ${note}`);
 }
 
+// docs/agents/domain.md (CAS-93): Matt Pocock's skills (1.3+) read a root
+// GLOSSARY.md and docs/adr/ by name, and the one redirect they honour is this
+// file — what their setup skill writes — reached from a "See
+// docs/agents/domain.md" line in CLAUDE.md (the ZDD block carries one). It is
+// adopter-owned from the first byte: written only when absent, with the
+// configured paths filled in, and never rewritten or edited — a hand-written
+// one is kept, whatever it says.
+export const DOMAIN_DOC = "docs/agents/domain.md";
+export function domainDocText(paths) {
+  return readFileSync(join(TEMPLATES, "domain.md"), "utf8")
+    .replaceAll("<GLOSSARY>", paths.glossary)
+    .replaceAll("<ADR_DIR>", paths.adrDir)
+    .replaceAll("<ADR_INDEX>", paths.adrIndex);
+}
+function writeDomainDoc(ledger, paths) {
+  if (ledger.exists(DOMAIN_DOC)) {
+    ledger.kept.push(`${DOMAIN_DOC} (yours — never rewritten)`);
+    return;
+  }
+  if (ledger.create(DOMAIN_DOC, domainDocText(paths))) {
+    ledger.notes.push(`${DOMAIN_DOC}: written — points Matt Pocock's skills (1.3+, which read a root GLOSSARY.md and docs/adr/) at ${paths.glossary} and ${paths.adrDir}/; yours to edit from here`);
+  }
+}
+
 function pinEngine(text, version) {
   const re = new RegExp(ENGINE_PACKAGE.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&") + "@[^\"'\\s]*", "g");
   return text.replace(re, `${ENGINE_PACKAGE}@${version}`);
@@ -811,6 +835,7 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
   writeSnippet(ledger, "CLAUDE.md");
   if (answers.codex) writeSnippet(ledger, "AGENTS.md");
   else ledger.skipped.push("AGENTS.md (not using Codex)");
+  writeDomainDoc(ledger, paths);
 
   const pocock = findPocock(root, home);
   return { mode, version, date, config, optIns, pocock, detection, ...ledgerOut(ledger) };
@@ -956,6 +981,7 @@ export function upgrade(root) {
     }
     writeSnippet(ledger, file);
   }
+  writeDomainDoc(ledger, artifactPaths(config, { lenient: true }));
   if (stopUnset) ledger.notes.push('hooks.stop is not set (new in 1.1: the Stop hook prompts for the curated half once per session) — it stays OFF until answered: run bootstrap apply with {"optIns":{"stop":true}} (repair mode, keeps every other choice), or add "stop": true inside the existing "hooks" object by hand');
   ledger.notes.push("1.1 adds a blocking lint (a blessing citing a superseded or missing ADR fails `lint`) — run `npx -y " + ENGINE_PACKAGE + "@" + version + " lint` before pushing; a red result is the lint doing its job on a stale blessing");
   if (config.claims === undefined) {

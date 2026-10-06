@@ -21,5 +21,7 @@ them with "update ZDD"; the drift check fails otherwise.
 
 Optional: `grill` runs a design interview that writes glossary terms and ADRs
 into `zdd/` as they crystallize (needs the `mattpocock-skills` plugin; without
-it, work decisions out in plan mode and let "update ZDD" capture them).
+it, work decisions out in plan mode and let "update ZDD" capture them). Matt
+Pocock's skills read a root `GLOSSARY.md` and `docs/adr/` by default; this
+repo's are under `zdd/`. See `docs/agents/domain.md`.
 <!-- zdd:end -->
