@@ -135,6 +135,16 @@ hand). Then it narrates every file as **wrote / kept / skipped** and writes:
   names `paths.glossary`, `paths.adrDir` and `paths.adrIndex`. It is the
   adopter's from the first byte: a hand-written one is kept, whatever it
   says, and `--upgrade` never rewrites it.
+- `.claude/settings.json` (Claude Code's project settings, committed): four
+  lines under `enabledPlugins` — `zdd@zero-drift-docs` and
+  `mattpocock-skills@zero-drift-docs` on, `mattpocock-skills@mattpocock` and
+  `mattpocock-skills@claude-plugins-official` off. Claude Code loads two
+  enabled copies of one plugin name as **one**, and the other copy can win,
+  so this is what makes the pinned release load here; the other copies still
+  work in the adopter's other repos. A key-level merge: every other key in
+  the file is kept. Never a user or local settings file, never an uninstall.
+  Say it the way the script does — "switched off your other Pocock copies in
+  this repo; they still work in your other repos".
 
 Relay the narration to the user verbatim — the point of the ledger is that
 nothing lands unannounced.
@@ -158,13 +168,18 @@ nothing lands unannounced.
    day one that is the whole inventory, and it is the mapping session's
    worklist: each feature slice written claims the records it links, and
    the count in the human index header falls as they are placed.
-5. **The Pocock recommendation** — the script already printed it. If
-   `mattpocock-skills` is absent, say in plain words: the curated artifacts
-   will only be as good as the design sessions that fill them; `grill` needs
-   that plugin (`/plugin marketplace add mattpocock/skills`, then
-   `/plugin install mattpocock-skills@skills`); without it, plan mode +
-   "update ZDD" works. **Recommended, never required** — continue either way.
-   Offer to seed the glossary now with `grill` if it is installed.
+5. **The Pocock recommendation** — the script already printed it. ZDD pins
+   one release of Matt Pocock's skills and brings it in: installing zdd
+   (`/plugin install zdd@zero-drift-docs`) installs
+   `mattpocock-skills@zero-drift-docs` beside it, the release this ZDD
+   release is tested with (decision 0014). If the script says
+   `mattpocock-skills` is absent, zdd was loaded some other way (a
+   `--plugin-dir`, a copied folder): say so and name that install. Say in
+   plain words why it matters: the curated artifacts will only be as good as
+   the design sessions that fill them, and `grill` needs that plugin; without
+   it, plan mode + "update ZDD" works. **Recommended, never required** —
+   continue either way. Offer to seed the glossary now with `grill` if it is
+   installed.
 
 ## Step 5 — close
 
@@ -210,6 +225,8 @@ node "$PLUGIN/scripts/bootstrap.mjs" upgrade
   every other choice as it is.
 - `docs/agents/domain.md`: written when absent (the Pocock 1.3 redirect,
   above) and narrated; an existing one is kept and never edited.
+- `.claude/settings.json`: the same four `enabledPlugins` lines as adoption
+  (above), merged in and narrated; nothing else in the file is touched.
 - **Never** the glossary, ADRs, map, or metadata.
 
 If the engine pin moved, run `render` and commit the regenerated artifacts in
