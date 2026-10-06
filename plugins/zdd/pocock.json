@@ -1,0 +1,10 @@
+{
+  "_comment": "The one release of Matt Pocock's skills this ZDD release was tested with and brings in (decision 0014). ZDD's marketplace lists it under this name, by this tag and commit, and the zdd plugin depends on it; a test pins the three together. Bump all of them in one release.",
+  "plugin": "mattpocock-skills",
+  "marketplace": "zero-drift-docs",
+  "version": "1.3.1",
+  "ref": "v1.3.1",
+  "sha": "24fe0ef7737efae15c87225755e9f6f5965e4888",
+  "repo": "https://github.com/mattpocock/skills.git",
+  "otherCopies": ["mattpocock-skills@mattpocock", "mattpocock-skills@claude-plugins-official"]
+}
