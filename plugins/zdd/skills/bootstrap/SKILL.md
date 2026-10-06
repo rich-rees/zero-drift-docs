@@ -128,6 +128,13 @@ hand). Then it narrates every file as **wrote / kept / skipped** and writes:
 - Hook registrations: the plugin's own `hooks.json` carries all three hooks
   and reads the opt-ins from `zdd/config.json`, so nothing is written into the
   host's settings.
+- `docs/agents/domain.md`, **only when absent**: the file Matt Pocock's
+  skills (1.3+) read to learn where the glossary and ADRs live — they look
+  for a root `GLOSSARY.md` and `docs/adr/` by name otherwise, and would skip
+  `zdd/glossary.md` or create a stray root `GLOSSARY.md`. ZDD's version
+  names `paths.glossary`, `paths.adrDir` and `paths.adrIndex`. It is the
+  adopter's from the first byte: a hand-written one is kept, whatever it
+  says, and `--upgrade` never rewrites it.
 
 Relay the narration to the user verbatim — the point of the ledger is that
 nothing lands unannounced.
@@ -201,6 +208,8 @@ node "$PLUGIN/scripts/bootstrap.mjs" upgrade
   `node "$PLUGIN/scripts/bootstrap.mjs" apply --answers=<file>` where the
   file is `{ "optIns": { "stop": true } }` (or `false`). Repair mode keeps
   every other choice as it is.
+- `docs/agents/domain.md`: written when absent (the Pocock 1.3 redirect,
+  above) and narrated; an existing one is kept and never edited.
 - **Never** the glossary, ADRs, map, or metadata.
 
 If the engine pin moved, run `render` and commit the regenerated artifacts in
