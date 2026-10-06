@@ -61,7 +61,7 @@ version:
 | `repoBase` | `""` | GitHub `/tree/<branch>/` URL prefix for source links in the human index — http(s) only, refused otherwise |
 | `nonAreaTags` | `[]` | Tags that are properties, not product areas (`react-flow`); a record inherits its area from its claiming feature's first tag not listed here. Shapes `graph.json`, so top-level (the old `viewer.nonAreaTags` still works, with a note) |
 | `baseBranch` | `"main"` | The branch PRs merge into — freshness diffs and the changed-set highlight key on `origin/<baseBranch>` |
-| `paths.*` | `zdd/…` | Where each artifact lives (glossary, adrDir, mapDir, metadataDir, agentIndex, adrIndex, humanIndex, graph, bundleDir) |
+| `paths.*` | `zdd/…` | Where each artifact lives (glossary, adrDir, mapDir, metadataDir, agentIndex, adrIndex, humanIndex, graph, bundleDir). Keep the glossary under `zdd/`: a glossary moved to a root `glossary.md` collides with Matt Pocock's root `GLOSSARY.md` on case-insensitive disks (Windows, macOS) but not on Linux CI, so the two would disagree by machine |
 | `render.storeChanges` | `true` | Set `false` to render with no git dependency (drops the "what just changed" highlight) |
 | `claims.strict` | `false` | `true`: every route, table, function and surface belongs to exactly one feature slice. `lint` fails on an unclaimed record not in `claims.allowUnclaimed`, on an allow-list id that names no record, and on a record two slices claim. Off: both are warnings |
 | `claims.allowUnclaimed` | `[]` | Record ids that may stay unclaimed under strict: plumbing no feature owns (`["route:/health", "route:/ready"]`) |
