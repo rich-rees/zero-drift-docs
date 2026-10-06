@@ -151,17 +151,17 @@ nothing lands unannounced.
 
 ## Step 4 — the engine, the mapping session, and the recommendation
 
-1. **Derive** — `npx -y @rich-rees/zdd-engine@1.3.0 derive`. On a greenfield
+1. **Derive** — `npx -y @rich-rees/zdd-engine@1.3.1 derive`. On a greenfield
    repo this writes nothing and passes; that is correct.
 2. **Mapping session** (the only LLM-heavy step, paid once; skip on greenfield
    beyond the declared apps) — scan the code with the glossary + ADRs loaded,
    propose feature groupings, and **ask** wherever evidence is thin. Answers
    route by kind, per [authoring.md](../authoring.md): verdicts → ADRs,
    vocabulary → glossary, pure connective fact → the map.
-3. **Render** — `npx -y @rich-rees/zdd-engine@1.3.0 render`. Commit the
+3. **Render** — `npx -y @rich-rees/zdd-engine@1.3.1 render`. Commit the
    generated artifacts (`zdd/graph.json`, both indexes, the human index);
    never edit them.
-4. **Lint** — `npx -y @rich-rees/zdd-engine@1.3.0 lint`. The same blocking
+4. **Lint** — `npx -y @rich-rees/zdd-engine@1.3.1 lint`. The same blocking
    lint CI runs: ADR numbering, supersession symmetry, and every blessing's
    citation. A failure here is fixed now, in the mapping session, not
    discovered on the first PR. It also prints the **unclaimed records** — on
