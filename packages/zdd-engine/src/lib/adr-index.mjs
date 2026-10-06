@@ -35,8 +35,26 @@ export function firstSentence(body) {
   }
   if (!paragraph.length) return "";
   let s = paragraph.join(" ").split(/(?<=\.)\s/)[0].trim();
-  if (s.length > 200) s = s.slice(0, 199).trimEnd() + "…";
+  if (s.length > 200) s = s.slice(0, cutBeforeLink(s, 199)).trimEnd() + "…";
   return s;
+}
+
+// The cap must never land inside a markdown link: a cut "[ADR-0016](0016-pu…"
+// is a broken link in the index, and one rebaseAdrLinks below cannot see
+// (ADR_HREF_RE wants the closing ".md"). When position `at` falls within a
+// "[text](target)" span, back the cut off to the "[" so the link is dropped
+// whole (CAS-93). Links are matched left to right from the sentence start;
+// unbalanced brackets are left as plain text, matching the cap's old shape.
+const LINK_RE = /\[[^\]]*\]\([^)]*\)/g;
+
+function cutBeforeLink(s, at) {
+  for (const m of s.matchAll(LINK_RE)) {
+    const start = m.index;
+    const end = start + m[0].length;
+    if (start >= at) break;
+    if (end > at) return start;
+  }
+  return at;
 }
 
 // An ADR body's own links to sibling ADRs are relative to the ADR dir — e.g.

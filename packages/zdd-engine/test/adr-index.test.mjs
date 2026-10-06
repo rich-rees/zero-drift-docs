@@ -137,3 +137,29 @@ test("buildAdrIndex rebases links carried inside an extracted first sentence", (
   assert.ok(out.includes("](adr/0043-narration.md)"), out);
   assert.ok(!out.includes("](0043-narration.md)"), out);
 });
+
+// CAS-93: the length cap ran before the links were rebased, so a cap that
+// landed inside "[ADR-0016](0016-…" left half a link in the index — one that
+// ADR_HREF_RE no longer matched, so it never got its adr/ prefix either. Seen
+// in DiO (ADR-0094, ADR-0110) and Cascade (ADR-0019, ADR-0037, ADR-0042).
+test("firstSentence never cuts inside a markdown link — the cut backs off to before the [", () => {
+  const prose = "This decision replaces the earlier draft and its publishing rules because the pipeline moved: ".repeat(2);
+  const body = `# T\n\n${prose}see [ADR-0016](0016-publish-is-driven-by-the-release-branch-not-the-tag.md) for the old shape.`;
+  const s = firstSentence(body);
+  assert.ok(s.endsWith("…"), s);
+  assert.ok(!/\[[^\]]*$/.test(s), `cut inside a link text: ${s}`);
+  assert.ok(!/\]\([^)]*$/.test(s), `cut inside a link target: ${s}`);
+  assert.ok(!s.includes("[ADR-0016]"), `link should have been dropped whole, not cut: ${s}`);
+});
+
+test("buildAdrIndex carries no half link when the cap falls inside a link's target", () => {
+  // Pad so position 199 lands inside "(0016-publish-…": the pre-fix output was
+  // "[ADR-0016](0016-publish-is-dr…" — a link with no closing paren and no adr/.
+  const link = "[ADR-0016](0016-publish-is-driven-by-the-release-branch-not-the-tag.md)";
+  const pad = "x".repeat(199 - 12 - "[ADR-0016](".length);
+  const body = `# T\n\nSupersedes ${pad} ${link} and more.`;
+  const out = buildAdrIndex([{ num: "0019", file: "0019-x.md", title: "X", body }]);
+  const line = out.split("\n").find((l) => l.startsWith("- [ADR-0019]"));
+  assert.ok(!line.includes("[ADR-0016]"), `cut link survived into the index: ${line}`);
+  assert.ok(line.endsWith("…"), line);
+});

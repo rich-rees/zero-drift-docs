@@ -17,7 +17,8 @@
 // as data: the closing delimiter cannot appear inside it, and the trailer says
 // so. Never fails a session: any error is exit 0, no output.
 
-import { readConfig, artifactPaths, readInside, MAX_INDEX_BYTES, adopterRoot } from "./lib/repo.mjs";
+import { readConfig, artifactPaths, readInside, MAX_INDEX_BYTES, adopterRoot, pocockCopies } from "./lib/repo.mjs";
+import { narrate as narratePocockCopies } from "./check-pocock.mjs";
 
 try {
   const root = adopterRoot();
@@ -43,6 +44,16 @@ try {
       "docs over the code. Before finishing a unit of work, say \"update ZDD\" (the `update` " +
       "skill).\n",
   );
+  // Another mattpocock-skills copy switched on for this repo loads INSTEAD of
+  // the one ZDD pins (CAS-93, decision 0014) — say so where the session
+  // starts, the same line `load`'s step 0 prints. Advisory: any error here is
+  // swallowed and the index above stands.
+  try {
+    const lines = narratePocockCopies(pocockCopies(root));
+    if (lines.length) process.stdout.write(lines.join("\n") + "\n");
+  } catch {
+    /* advisory */
+  }
 } catch {
   process.exitCode = 0;
 }

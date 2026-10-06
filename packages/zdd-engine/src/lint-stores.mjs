@@ -27,6 +27,10 @@
 //    too (CAS-65). With `claims.strict` (decision 0012) all three FAIL: an
 //    unclaimed record not in `claims.allowUnclaimed`, an allow-list id that
 //    names no claimable record, and a record claimed by more than one slice.
+// 5. Stray root glossary (CAS-93): a root GLOSSARY.md or CONTEXT.md beside
+//    paths.glossary — the file Matt Pocock's skills read and create when
+//    docs/agents/domain.md does not redirect them — is a WARNING, never a
+//    failure.
 
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
@@ -224,6 +228,30 @@ if (STRICT) {
     console.error(`WARNING: ${skipped.length} claim file${skipped.length === 1 ? "" : "s"} could not be read — the claim picture is incomplete (claims.strict fails on these):`);
     for (const s of skipped) console.error(`  ${printable(s.file)} (${s.reason})`);
   }
+}
+
+// ---- 5. Stray root glossary (CAS-93) ----
+// Matt Pocock's skills (1.3+) read and lazily create a root GLOSSARY.md
+// (CONTEXT.md before 1.3). Here the glossary is paths.glossary, so a root
+// file of either name beside it holds terms nothing reads. A WARNING, never a
+// failure: the same tier as an unclaimed record — a nudge to fold the terms
+// in, not a contract an adopter mid-migration should go red on. Matched by
+// exact name (the names the skills use); the configured glossary itself is
+// never a stray, whatever it is called.
+const configuredGlossary = String(paths.glossary).split("\\").join("/").replace(/^\.\//, "");
+for (const name of ["GLOSSARY.md", "CONTEXT.md"]) {
+  if (name === configuredGlossary) continue;
+  let present = false;
+  try {
+    present = readdirSync(REPO).includes(name);
+  } catch {
+    present = false;
+  }
+  if (!present) continue;
+  console.error(
+    `WARNING: ${name} at the repo root beside ${paths.glossary} — Matt Pocock's skills read and create a root ${name === "CONTEXT.md" ? "CONTEXT.md (GLOSSARY.md since 1.3)" : "GLOSSARY.md"} unless docs/agents/domain.md points them at ZDD's glossary; ` +
+      `fold its terms into ${paths.glossary} and delete it (bootstrap --upgrade writes docs/agents/domain.md when it is missing)`,
+  );
 }
 
 if (problems.length) {

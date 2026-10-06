@@ -4,7 +4,7 @@ A documentation architecture for repos built by **human + agent pairs**. ZDD kee
 seven documentation artifacts *at most one unit of work behind the code* — and, with
 CI, makes drift in the machine-generated ones **un-mergeable**.
 
-> **Status: 1.3.0.** The plugin installs in Claude Code
+> **Status: 1.3.1.** The plugin installs in Claude Code
 > and in Codex from this one repo; `bootstrap` detects your stack (or grills
 > for it on a greenfield repo), proposes extractors with evidence, and *writes*
 > the opt-ins; the engine (`packages/zdd-engine`, npm `@rich-rees/zdd-engine`)
@@ -137,13 +137,28 @@ ZDD *captures* decisions; how you *produce* them is your choice. The `update` an
 the glossary/ADR formats, capture-at-crystallization), so ZDD writes decent
 glossary entries and ADRs on its own, from plan-mode work or plain thinking.
 
-For a sharper way to drive decisions out, install
-[Matt Pocock's skills](https://github.com/mattpocock/skills) (`mattpocock-skills`)
-and use **`grill`** — a relentless design interview that writes the glossary
-and ADRs as it goes, redirected into your `zdd/` folder. It self-checks: with the
-plugin absent it points you at the install or at plan-mode + "update ZDD", and ZDD
-keeps working. `bootstrap` says the same in plain words. **Recommended, never
-required.**
+For a sharper way to drive decisions out, use **`grill`** with
+[Matt Pocock's skills](https://github.com/mattpocock/skills) (`mattpocock-skills`,
+which installing `zdd` brings in at the release ZDD is tested with) — a
+relentless design interview that writes the glossary and ADRs as it goes,
+redirected into your `zdd/` folder. It self-checks: with the plugin absent it
+points you at the install or at plan-mode + "update ZDD", and ZDD keeps working.
+`bootstrap` says the same in plain words. **Recommended, never required.**
+
+His skills read a root `GLOSSARY.md` and `docs/adr/` by name (`CONTEXT.md`
+before his 1.3). `bootstrap` writes `docs/agents/domain.md`, the file they honour,
+pointing them at `zdd/glossary.md` and `zdd/adr/` (only when absent; a
+hand-written one is kept). Keep the glossary under `zdd/`: moved to a root
+`glossary.md` it collides with his `GLOSSARY.md` on case-insensitive disks
+(Windows, macOS) but not on Linux CI. `lint` warns while a root `GLOSSARY.md` or
+`CONTEXT.md` sits beside the real glossary.
+
+Claude Code loads two enabled copies of one plugin name as **one**, silently, and
+the other copy can win — so `bootstrap` switches `mattpocock-skills@mattpocock`
+and `mattpocock-skills@claude-plugins-official` off in the repo's committed
+`.claude/settings.json` (they still work in your other repos; nothing is
+uninstalled), and `load` warns when another copy is switched on for the repo
+anyway. Taking a new Pocock release is a ZDD release.
 
 ## Install
 
@@ -168,6 +183,13 @@ one set of skills and one `hooks.json`. After install the five skills are
 `/zdd:load` etc.); the SessionStart auto-load fires on the next session start
 in a repo that opted in. Install works from a private fork too — it uses your
 git credentials.
+
+In Claude Code, installing `zdd` also installs **`mattpocock-skills@zero-drift-docs`**:
+the one release of [Matt Pocock's skills](https://github.com/mattpocock/skills)
+this ZDD release is tested with, fetched from his repository at a pinned tag and
+commit ([decision 0014](docs/decisions/0014-a-zdd-release-pins-and-brings-in-one-pocock-release.md)).
+Nothing is copied; `zdd` declares it as a dependency. Codex has no dependency
+mechanism, so there you install his plugin yourself.
 
 Then run **`bootstrap`** in your repo and answer its questions. It detects the
 stack, writes `zdd/`, the config, the opt-ins and the instruction block, runs
@@ -196,20 +218,23 @@ merge gate.
 Updating the plugin never touches your repo. `load` warns when your pinned engine
 falls behind the plugin; run **`bootstrap --upgrade`** to migrate config
 (`adapter` → `extractors`), rewrite the engine pins, the hook and the instruction
-block — every changed file named, curated artifacts untouched.
+block, write `docs/agents/domain.md` and the four plugin lines in
+`.claude/settings.json` when they are missing — every changed file named, curated
+artifacts untouched.
 
 ## Repo layout
 
 ```
-.claude-plugin/marketplace.json     # this repo is a plugin marketplace (Claude Code + Codex)
+.claude-plugin/marketplace.json     # this repo is a plugin marketplace (Claude Code + Codex): zdd + the pinned mattpocock-skills
 plugins/zdd/
-  .claude-plugin/plugin.json        # two manifests, one body
+  .claude-plugin/plugin.json        # two manifests, one body (the Claude one declares the mattpocock-skills dependency)
   .codex-plugin/plugin.json
+  pocock.json                       # the one Pocock release this release is tested with: tag, commit, version (decision 0014)
   hooks/hooks.json                  # SessionStart auto-load + PreToolUse fence + Stop prompt (opt-ins read from zdd/config.json)
   scripts/
     bootstrap.mjs                   # the runbook's writer: detect / apply / upgrade
     scaffold-extractor.mjs          # the extractor skill's writer: a local extractor's skeleton + config wiring
-    inject-agent-index.mjs  fence.mjs  stop-check.mjs  check-skew.mjs
+    inject-agent-index.mjs  fence.mjs  stop-check.mjs  check-skew.mjs  check-pocock.mjs
   skills/{bootstrap,load,update,grill,extractor}/SKILL.md
   skills/extractor/upstream.md      # the registry and fork tiers
   skills/authoring.md               # shared curated-docs authoring discipline
@@ -317,6 +342,16 @@ saying no to a row is a visible choice, not a fork.
       [0011](docs/decisions/0011-refs-err-toward-might-touch.md),
       [0012](docs/decisions/0012-strict-claims-are-opt-in.md),
       [0013](docs/decisions/0013-a-missing-routes-file-beside-code-fails-derive.md))*.
+- [x] **1.3.1** — a ZDD release pins and brings in one Pocock release. Matt's
+      1.3 renamed the root `CONTEXT.md` to `GLOSSARY.md` and ZDD adopters lost
+      their glossary silently; now ZDD's marketplace lists `mattpocock-skills`
+      at a pinned tag and commit, `zdd` depends on it, bootstrap writes
+      `docs/agents/domain.md` (his skills' redirect) and the per-repo
+      settings that keep any other copy off, `load` warns when one is on
+      anyway, and `lint` warns about a stray root `GLOSSARY.md`/`CONTEXT.md`.
+      Also fixes the ADR index cutting a markdown link at the length cap
+      *(engine + plugin 1.3.1, CAS-93;
+      [decision 0014](docs/decisions/0014-a-zdd-release-pins-and-brings-in-one-pocock-release.md))*.
 - [ ] Next: an `expo-router` extractor on its first real adoption; a second
       viewer.
 
@@ -366,6 +401,13 @@ warning can say "behind".
   beside a folder that does. That repo was already deriving the wrong
   inventory. No breaking config-schema or metadata-contract change, so a
   minor.
+- **`1.3.1` — one Pocock release per ZDD release.** A patch: a bug fix (the
+  ADR index link cut), a new *warning* in `lint`, two more files bootstrap
+  writes only when absent (`docs/agents/domain.md`, the four plugin lines in
+  `.claude/settings.json`), and a dependency the Claude manifest now
+  declares. An adopter's `render` bytes change only where an index line was
+  cut inside a link. From here the Pocock tag in `pocock.json` moves only
+  with a ZDD release.
 
 ## Contributing
 

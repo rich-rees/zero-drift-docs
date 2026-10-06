@@ -1,5 +1,7 @@
 # 0004 — Matt Pocock's skills are recommended, never required
 
+> **Superseded in part by [ADR-0014](0014-a-zdd-release-pins-and-brings-in-one-pocock-release.md)** (2026-10-06): the technique stays Matt's and uncopied, and `grill` still self-checks and degrades, but ZDD now pins and brings in the one Pocock release it was tested with, instead of leaving the version to whichever marketplace the adopter has.
+
 **Date:** 2026-09-03 · **Status:** accepted · **Origin:** DIO-307 grilling, recorded under DIO-311 (the `grill` wrapper itself dates from v0.3).
 
 ## Context

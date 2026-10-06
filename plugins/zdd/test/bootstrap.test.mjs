@@ -585,7 +585,10 @@ test("Pocock recommendation: names the plugin, the install route, and the conseq
   const repo = fresh("pocock");
   const out = bootstrap(repo, ["detect"]);
   assert.match(out, /mattpocock-skills: NOT installed/);
-  assert.match(out, /plugin marketplace add mattpocock\/skills/);
+  // CAS-93: installing zdd brings the pinned Pocock release; no separate marketplace or install id.
+  assert.match(out, /plugin install zdd@zero-drift-docs/);
+  assert.match(out, /mattpocock-skills@zero-drift-docs/);
+  assert.doesNotMatch(out, /mattpocock-skills@skills|marketplace add mattpocock\/skills/);
   assert.match(out, /only be as good as the design sessions/);
   const home = join(scratch, "home-with-pocock");
   const skill = join(home, ".claude", "plugins", "cache", "skills", "mattpocock-skills", "1.0.0", "skills", "domain-modeling");
@@ -773,4 +776,69 @@ test("without --date, apply dates ADR-0001 with today's date (the default today(
   const d = new Date();
   const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   assert.match(readFileSync(join(repo, "zdd", "adr", "0001-adopt-zero-drift-docs.md"), "utf8"), new RegExp(today.replace(/-/g, "\-")));
+});
+
+// --- docs/agents/domain.md (CAS-93) ---------------------------------------------------
+// Pocock 1.3 renamed the root CONTEXT.md to GLOSSARY.md, and six of its skills
+// name that root file in their own text. The one redirect they honour is
+// docs/agents/domain.md (what setup-matt-pocock-skills writes), reached from a
+// "See docs/agents/domain.md" line in CLAUDE.md. ZDD writes both — the file
+// only when absent, never over a hand-written one.
+
+test("apply writes docs/agents/domain.md pointing Pocock's skills at ZDD's glossary and ADRs, and the instruction block names it", () => {
+  const repo = fastapiRepo("domain-fresh");
+  const json = applyJson(repo, "domain-fresh", { name: "X" });
+  assert.ok(json.wrote.includes("docs/agents/domain.md"), json.wrote.join("\n"));
+  const doc = readFileSync(join(repo, "docs", "agents", "domain.md"), "utf8");
+  assert.match(doc, /^<!-- .*Zero-Drift Docs/, "says who wrote it and that it is the adopter's to edit");
+  assert.match(doc, /yours to edit/i);
+  assert.match(doc, /`zdd\/glossary\.md`/);
+  assert.match(doc, /`zdd\/adr\/`/);
+  assert.match(doc, /`zdd\/adr-index\.md`/);
+  assert.match(doc, /GLOSSARY\.md/, "names the root file the skills would otherwise read or create");
+  assert.ok(!/<[A-Z_]+>/.test(doc), `unfilled placeholder in: ${doc}`);
+  const claude = readFileSync(join(repo, "CLAUDE.md"), "utf8");
+  assert.match(claude, /docs\/agents\/domain\.md/, "the instruction block is how the skills find the file");
+});
+
+test("docs/agents/domain.md honours paths.* from zdd/config.json", () => {
+  const repo = fresh("domain-paths");
+  mkdirSync(join(repo, "zdd"));
+  writeFileSync(
+    join(repo, "zdd", "config.json"),
+    JSON.stringify({ extractors: ["generic"], engine: PLUGIN_VERSION, paths: { glossary: "docs/zdd/terms.md", adrDir: "docs/decisions", adrIndex: "docs/zdd/decisions.md" } }),
+  );
+  applyJson(repo, "domain-paths", {});
+  const doc = readFileSync(join(repo, "docs", "agents", "domain.md"), "utf8");
+  assert.match(doc, /`docs\/zdd\/terms\.md`/);
+  assert.match(doc, /`docs\/decisions\/`/);
+  assert.match(doc, /`docs\/zdd\/decisions\.md`/);
+  assert.ok(!doc.includes("zdd/glossary.md"), doc);
+});
+
+test("a hand-written docs/agents/domain.md is kept byte for byte by apply and by upgrade", () => {
+  const repo = fastapiRepo("domain-kept");
+  mkdirSync(join(repo, "docs", "agents"), { recursive: true });
+  const mine = "# Domain Docs\n\nOur own rules.\n";
+  writeFileSync(join(repo, "docs", "agents", "domain.md"), mine);
+  const json = applyJson(repo, "domain-kept", { name: "X" });
+  assert.ok(json.kept.some((k) => k.startsWith("docs/agents/domain.md")), json.kept.join("\n"));
+  assert.ok(!json.wrote.includes("docs/agents/domain.md"));
+  assert.equal(readFileSync(join(repo, "docs", "agents", "domain.md"), "utf8"), mine);
+  const up = JSON.parse(bootstrap(repo, ["upgrade", "--json"]));
+  assert.ok(!up.wrote.includes("docs/agents/domain.md"), up.wrote.join("\n"));
+  assert.equal(readFileSync(join(repo, "docs", "agents", "domain.md"), "utf8"), mine);
+});
+
+test("upgrade offers docs/agents/domain.md to an existing adopter: written when absent and narrated, kept on the next run", () => {
+  const repo = fresh("domain-upgrade");
+  mkdirSync(join(repo, "zdd"));
+  writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], engine: PLUGIN_VERSION }));
+  const out = bootstrap(repo, ["upgrade"]);
+  assert.match(out, /changed docs\/agents\/domain\.md/, out);
+  assert.match(out, /note\s+docs\/agents\/domain\.md: .*Pocock/, out);
+  assert.match(readFileSync(join(repo, "docs", "agents", "domain.md"), "utf8"), /`zdd\/glossary\.md`/);
+  const again = JSON.parse(bootstrap(repo, ["upgrade", "--json"]));
+  assert.deepEqual(again.wrote, []);
+  assert.ok(again.kept.some((k) => k.startsWith("docs/agents/domain.md")), again.kept.join("\n"));
 });

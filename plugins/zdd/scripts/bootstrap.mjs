@@ -62,6 +62,9 @@ import {
   resolveInside,
   findPocock,
   posixify,
+  pocockPin,
+  pluginSettings,
+  ZDD_PLUGIN_ID,
 } from "./lib/repo.mjs";
 
 const TEMPLATES = join(PLUGIN_ROOT, "templates");
@@ -633,6 +636,76 @@ function writeSnippet(ledger, file) {
   if (note) ledger.notes.push(`${file}: ${note}`);
 }
 
+// docs/agents/domain.md (CAS-93): Matt Pocock's skills (1.3+) read a root
+// GLOSSARY.md and docs/adr/ by name, and the one redirect they honour is this
+// file — what their setup skill writes — reached from a "See
+// docs/agents/domain.md" line in CLAUDE.md (the ZDD block carries one). It is
+// adopter-owned from the first byte: written only when absent, with the
+// configured paths filled in, and never rewritten or edited — a hand-written
+// one is kept, whatever it says.
+export const DOMAIN_DOC = "docs/agents/domain.md";
+export function domainDocText(paths) {
+  return readFileSync(join(TEMPLATES, "domain.md"), "utf8")
+    .replaceAll("<GLOSSARY>", paths.glossary)
+    .replaceAll("<ADR_DIR>", paths.adrDir)
+    .replaceAll("<ADR_INDEX>", paths.adrIndex);
+}
+function writeDomainDoc(ledger, paths) {
+  if (ledger.exists(DOMAIN_DOC)) {
+    ledger.kept.push(`${DOMAIN_DOC} (yours — never rewritten)`);
+    return;
+  }
+  if (ledger.create(DOMAIN_DOC, domainDocText(paths))) {
+    ledger.notes.push(`${DOMAIN_DOC}: written — points Matt Pocock's skills (1.3+, which read a root GLOSSARY.md and docs/adr/) at ${paths.glossary} and ${paths.adrDir}/; yours to edit from here`);
+  }
+}
+
+// .claude/settings.json (CAS-93, decision 0014): ZDD brings in one pinned
+// release of mattpocock-skills from its own marketplace, and Claude Code
+// loads two enabled copies of one plugin name as ONE, silently — in the
+// CAS-93 experiment the OTHER copy won. So the repo's committed project
+// settings switch the other known copies off, in advance, and switch ZDD's
+// pair on. Key-level merge into the adopter's file (every other key and its
+// order kept; the analogue of the marked block in CLAUDE.md); never a user or
+// local settings file, never an uninstall. A file that is not a JSON object
+// is the adopter's problem to name, not ours to replace.
+const SETTINGS_FILE = ".claude/settings.json";
+function writePluginSettings(ledger, version) {
+  const wanted = pluginSettings();
+  const pin = pocockPin();
+  let existing = "";
+  let obj = {};
+  if (ledger.exists(SETTINGS_FILE)) {
+    existing = ledger.read(SETTINGS_FILE);
+    try {
+      obj = JSON.parse(existing);
+    } catch {
+      obj = null;
+    }
+    if (!obj || typeof obj !== "object" || Array.isArray(obj)) {
+      ledger.kept.push(SETTINGS_FILE);
+      ledger.notes.push(`${SETTINGS_FILE}: not valid JSON (an object) — left untouched; add these by hand under "enabledPlugins": ${JSON.stringify(wanted)}`);
+      return;
+    }
+  }
+  const ep = obj.enabledPlugins;
+  const enabled = ep && typeof ep === "object" && !Array.isArray(ep) ? ep : {};
+  if (!Object.entries(wanted).some(([k, v]) => enabled[k] !== v)) {
+    ledger.kept.push(SETTINGS_FILE);
+    return;
+  }
+  obj.enabledPlugins = { ...enabled, ...wanted }; // existing keys keep their place; ours are updated or appended
+  let text = JSON.stringify(obj, null, 2) + "\n";
+  if (/\r\n/.test(existing)) text = text.replace(/\n/g, "\r\n");
+  if (existing) ledger.overwrite(SETTINGS_FILE, text);
+  else if (!ledger.create(SETTINGS_FILE, text)) return;
+  ledger.notes.push(
+    `${SETTINGS_FILE}: switched off your other Pocock copies in this repo (${pin.otherCopies.join(", ")}) — each still works in your other repos — ` +
+      `and switched on ${ZDD_PLUGIN_ID} and ${pin.plugin}@${pin.marketplace}, the ${pin.plugin} ${pin.version} release plugin ${version} is tested with. ` +
+      `Only one copy of a plugin name loads per session, so this is what makes the pinned one load here. Claude Code reads this file; Codex ignores it`,
+  );
+}
+
 function pinEngine(text, version) {
   const re = new RegExp(ENGINE_PACKAGE.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&") + "@[^\"'\\s]*", "g");
   return text.replace(re, `${ENGINE_PACKAGE}@${version}`);
@@ -811,6 +884,8 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
   writeSnippet(ledger, "CLAUDE.md");
   if (answers.codex) writeSnippet(ledger, "AGENTS.md");
   else ledger.skipped.push("AGENTS.md (not using Codex)");
+  writeDomainDoc(ledger, paths);
+  writePluginSettings(ledger, version);
 
   const pocock = findPocock(root, home);
   return { mode, version, date, config, optIns, pocock, detection, ...ledgerOut(ledger) };
@@ -956,6 +1031,8 @@ export function upgrade(root) {
     }
     writeSnippet(ledger, file);
   }
+  writeDomainDoc(ledger, artifactPaths(config, { lenient: true }));
+  writePluginSettings(ledger, version);
   if (stopUnset) ledger.notes.push('hooks.stop is not set (new in 1.1: the Stop hook prompts for the curated half once per session) — it stays OFF until answered: run bootstrap apply with {"optIns":{"stop":true}} (repair mode, keeps every other choice), or add "stop": true inside the existing "hooks" object by hand');
   ledger.notes.push("1.1 adds a blocking lint (a blessing citing a superseded or missing ADR fails `lint`) — run `npx -y " + ENGINE_PACKAGE + "@" + version + " lint` before pushing; a red result is the lint doing its job on a stale blessing");
   if (config.claims === undefined) {
@@ -993,11 +1070,12 @@ export function narrateDetect(d, pocock) {
 }
 
 function narratePocock(p) {
-  if (p.installed) return `mattpocock-skills: installed (${p.hits[0].where}: ${p.hits[0].path}) — \`grill\` will run the real interview.`;
+  const pin = pocockPin();
+  if (p.installed) return `mattpocock-skills: installed (${p.hits[0].where}: ${p.hits[0].path}) — \`grill\` will run the real interview. ZDD pins ${pin.plugin} ${pin.version} (${pin.plugin}@${pin.marketplace}); this repo's .claude/settings.json keeps any other copy off here.`;
   return (
-    "mattpocock-skills: NOT installed. Recommended, never required: your glossary and ADRs will only be as good as the design " +
-    "sessions that fill them, and `grill` (the design interview that writes them as it goes) needs Matt Pocock's skills. " +
-    "Install: `/plugin marketplace add mattpocock/skills` then `/plugin install mattpocock-skills@skills` (Claude Code). " +
+    `mattpocock-skills: NOT installed. Installing zdd brings it: \`/plugin install ${ZDD_PLUGIN_ID}\` (Claude Code) installs ${pin.plugin}@${pin.marketplace}, ` +
+    `the ${pin.version} release this ZDD release is tested with, beside it — so a missing copy means zdd was loaded another way (a --plugin-dir, a copied folder); run that install. ` +
+    "Your glossary and ADRs will only be as good as the design sessions that fill them, and `grill` (the design interview that writes them as it goes) needs Matt Pocock's skills. " +
     "Without it, work decisions out in plan mode and let \"update ZDD\" capture them."
   );
 }

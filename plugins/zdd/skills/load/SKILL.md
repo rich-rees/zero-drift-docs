@@ -28,6 +28,21 @@ behind, **its one line is the first line of your reply** — it names
 `bootstrap --upgrade`, which rewrites every pin. Silent when they match; do not
 mention it then.
 
+Then, the same way:
+
+```
+node "$PLUGIN/scripts/check-pocock.mjs"
+```
+
+ZDD brings in one pinned release of Matt Pocock's skills
+(`mattpocock-skills@zero-drift-docs`), and Claude Code loads two enabled copies
+of that plugin name as **one**, silently — the other copy can win. This prints
+one line when another copy is switched on for this repo (a user or local
+settings file, a marketplace bootstrap did not know), naming both versions,
+where it is switched on, and the one-line fix (set it `false` in this repo's
+`.claude/settings.json`; never uninstall). **Relay it verbatim as the next line
+of your reply.** Silent when only ZDD's copy is on; do not mention it then.
+
 ## Steps
 
 The paths below are the defaults. The repo's `zdd/config.json` may move any of
