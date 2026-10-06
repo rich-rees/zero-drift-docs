@@ -35,6 +35,10 @@ Supersession points both ways; never edit an accepted decision into a new truth.
   shares the engine's version line (`load` compares them). Bump them together in
   one PR, run `render`, and commit the result. A new mandatory generated file is a breaking
   change for adopters' CI (decision 0002).
+- **A ZDD release pins one Pocock release** (decision 0014): the tag, commit
+  and version live in `plugins/zdd/pocock.json` and the marketplace entry for
+  `mattpocock-skills`, and a test keeps them equal. Taking a new Pocock release
+  is a ZDD release, tested against it; it never moves on its own.
 - **Semver on the engine:** config-schema or metadata-contract break = major.
   Plugin version lives in both manifests (`plugins/zdd/.claude-plugin/plugin.json`,
   `plugins/zdd/.codex-plugin/plugin.json`) and the marketplace entry, kept in

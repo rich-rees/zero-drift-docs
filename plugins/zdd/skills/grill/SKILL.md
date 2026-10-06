@@ -40,8 +40,9 @@ than one place, so **check all of them — a hit in any one is enough** (the
   ask before running it; on a "no", treat it as not installed.
 - **Found nowhere** → stop and tell the user, then do nothing else:
   > `zdd:grill` needs the **mattpocock-skills** plugin, which isn't installed.
-  > Two ways forward: install it (`/plugin marketplace add …` then
-  > `/plugin install mattpocock-skills@…`) and re-run me — or skip grilling
+  > Installing zdd brings the release ZDD is tested with: run
+  > `/plugin install zdd@zero-drift-docs` (it installs
+  > `mattpocock-skills@zero-drift-docs` beside it) and re-run me — or skip grilling
   > entirely: work the decisions out in plan mode, then "update ZDD". ZDD
   > works fine without grilling; `update` carries the same authoring
   > discipline (see [authoring.md](../authoring.md)).
@@ -58,11 +59,13 @@ unread glossary produces questions the stores already answer.
 ## Step 2 — grill, with the paths pinned to zdd/
 
 Run `mattpocock-skills:grilling` using `mattpocock-skills:domain-modeling`, with
-these overrides — Pocock defaults to a root `CONTEXT.md` + `docs/adr/`, and ZDD's
-homes are different:
+these overrides — Pocock defaults to a root `GLOSSARY.md` (`CONTEXT.md` before
+his 1.3) + `docs/adr/`, and ZDD's homes are different. Bootstrap writes
+`docs/agents/domain.md` saying so, which his skills honour; repeat it anyway:
 
-- The glossary is **`zdd/glossary.md`** — never a root `CONTEXT.md`. If a
-  `CONTEXT.md` appears, its content belongs in `zdd/glossary.md`.
+- The glossary is **`zdd/glossary.md`** — never a root `GLOSSARY.md` or
+  `CONTEXT.md`. If either appears, its content belongs in `zdd/glossary.md`
+  (`zdd-engine lint` warns while one sits beside the real glossary).
 - ADRs live in **`zdd/adr/`** — never `docs/adr/`. Number them `NNNN-*.md`,
   continuing the existing sequence.
 - Supersession is linted (`zdd-engine lint`): a new ADR that supersedes another
