@@ -549,7 +549,9 @@ function buildAgentIndex(concepts, features, adrs) {
   const byId = new Map(concepts.map((c) => [c.id, c]));
   // A concept's file: a metadata record is JSON, a map page is markdown —
   // the External services list linked a service record as `.md` (CAS-99).
-  const hrefOf = (id) => `${id}${id.startsWith("metadata/") ? ".json" : ".md"}`;
+  // Read from the concept's layer, never its path: `paths.metadataDir` moves
+  // the folder (CR-005).
+  const hrefOf = (id) => `${id}${byId.get(id)?.layer === "metadata" ? ".json" : ".md"}`;
   // Pointer descriptions: first sentence, capped — the full text lives on the
   // concept; the agent index is a router, and its ~2k-token budget is the
   // constraint that keeps it loadable whole.

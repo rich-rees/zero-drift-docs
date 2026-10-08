@@ -109,3 +109,8 @@ test("a subscribes ref resolves against a schema-qualified table (CAS-99): migra
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("scanSubscriptions: the client's own .on('postgres_changes') with a schema-qualified table is seen, like the helper form (CAS-99 CR-009)", () => {
+  const text = `sb.on("postgres_changes", { schema: "public", table: "public.audit_events" }, cb);\nsb.on("postgres_changes", { table: "a.b.c" }, cb);\n`;
+  assert.deepEqual([...scanSubscriptions(text)], ["public.audit_events"], "one schema qualifier at most");
+});

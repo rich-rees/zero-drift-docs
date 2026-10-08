@@ -51,3 +51,31 @@ test("a table created as `public.things` keeps that id when later migrations say
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("a function body that names only `archive.things` links that table, never `public.things`; a bare or public-qualified mention links the public one (CAS-99 CR-003)", () => {
+  const root = scratch({
+    "migrations/0001.sql": "create table public.things (id uuid);\ncreate table archive.things (id uuid);\ncreate or replace function archived() returns int language sql as $$ select count(*) from archive.things $$;\ncreate or replace function bare() returns int language sql as $$ select count(*) from things $$;\ncreate or replace function qualified() returns int language sql as $$ select count(*) from public.things $$;\n",
+  });
+  try {
+    const { records } = derive({ repoRoot: root, options: { migrationNamespaces: [{ name: "db", dir: "migrations" }] } });
+    const refs = (id) => records.find((r) => r.id === id).refs;
+    assert.deepEqual(refs("function:db/archived"), ["table:db/archive.things"]);
+    assert.deepEqual(refs("function:db/bare"), ["table:db/public.things"]);
+    assert.deepEqual(refs("function:db/qualified"), ["table:db/public.things"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("collision checks see through the spelling: `public.things` in one namespace and `things` in another, or a bucket named like a public table, are errors (CAS-99 CR-011)", () => {
+  const root = scratch({
+    "a/0001.sql": "create table public.things (id uuid);\n",
+    "b/0001.sql": "create table things (id uuid);\n",
+  });
+  try {
+    assert.throws(() => derive({ repoRoot: root, options: { migrationNamespaces: [{ name: "a", dir: "a" }, { name: "b", dir: "b" }] } }), /Table 'things' exists in namespaces 'a' and 'b'/);
+    assert.throws(() => derive({ repoRoot: root, options: { migrationNamespaces: [{ name: "a", dir: "a" }], externalBuckets: [{ name: "things", namespace: "a" }] } }), /'things' is both a table and a bucket/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

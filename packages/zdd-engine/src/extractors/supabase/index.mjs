@@ -124,10 +124,13 @@ export function derive({ repoRoot, options }) {
       // functions never name their tables (`NEW.updated_at = now()`), so
       // CREATE TRIGGER attachments contribute edges + facts.triggers too.
       // A public table's key is its bare name, so `things` and
-      // `public.things` in a body both match it (CAS-99).
+      // `public.things` in a body both match it (CAS-99) — but not the
+      // `things` in `archive.things`: a bare key never follows a qualifier
+      // (CR-003).
       const refs = new Set();
       for (const [key, tNs] of tableNs) {
-        if (tNs === ns && new RegExp(`\\b${escapeRegex(key)}\\b`).test(f.body)) refs.add(tableId(key));
+        const word = key.includes(".") ? `\\b${escapeRegex(key)}\\b` : `(?:\\bpublic\\.|(?<![\\w$.]))${escapeRegex(key)}\\b`;
+        if (tNs === ns && new RegExp(word).test(f.body)) refs.add(tableId(key));
       }
       const attached = triggers.filter((t) => t.fn === name && tableId(t.table));
       const facts = { namespace: ns, signature: f.signature, returns: f.returns, language: f.language };

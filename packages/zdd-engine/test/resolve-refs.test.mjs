@@ -189,15 +189,30 @@ test("unknown unresolved kind is an error", () => {
   assert.throws(() => resolveRefs([rec("module", "module:m", ["?widget:x"])]), /unknown unresolved ref kind 'widget'/);
 });
 
-test("a table or function minted with its schema answers to its bare name too; two schemas sharing a bare name are ambiguous, never a guess (CAS-99)", () => {
+test("a table minted in the public schema answers to its bare name too, as Postgres resolves it; another schema's table never does (CAS-99, narrowed by CR-002/CR-007: tables only, public only)", () => {
   const { records, diagnostics } = resolveRefs([
     rec("table", "table:db/public.audit_events"),
     rec("table", "table:db/public.things"),
     rec("table", "table:db/archive.things"),
-    rec("function", "function:db/public.save"),
-    rec("module", "module:a.ts", ["?table:audit_events", "?from:audit_events", "?table:public.audit_events", "?function:save", "?table:things", "?table:archive.things"]),
+    rec("table", "table:db/archive.logs"),
+    rec("module", "module:a.ts", ["?table:audit_events", "?from:audit_events", "?table:public.audit_events", "?table:things", "?table:archive.things", "?table:logs"]),
   ]);
-  assert.deepEqual(records.find((r) => r.id === "module:a.ts").refs, ["function:db/public.save", "table:db/archive.things", "table:db/public.audit_events"]);
+  assert.deepEqual(records.find((r) => r.id === "module:a.ts").refs, ["table:db/archive.things", "table:db/public.audit_events", "table:db/public.things"]);
   assert.equal(diagnostics.length, 1);
-  assert.match(diagnostics[0], /table 'things' is ambiguous \(table:db\/archive\.things, table:db\/public\.things\)/);
+  assert.match(diagnostics[0], /table 'logs' matches no known table/, "archive.logs never answers to 'logs'");
+});
+
+test("a bare table beside a same-named table in another schema is no duplicate, in either order (CAS-99 CR-002)", () => {
+  for (const order of [["table:db/archive.things", "table:db/things"], ["table:db/things", "table:db/archive.things"]]) {
+    const { records, diagnostics } = resolveRefs([...order.map((id) => rec("table", id)), rec("module", "module:a.ts", ["?table:archive.things"])]);
+    assert.deepEqual(records.find((r) => r.id === "module:a.ts").refs, ["table:db/archive.things"]);
+    assert.deepEqual(diagnostics, []);
+  }
+  assert.throws(() => resolveRefs([rec("table", "table:a/things"), rec("table", "table:b/things")]), /minted twice/, "one name minted twice is still an error");
+});
+
+test("the bare-name alias is for tables only: `public.save` and `save` stay two functions and `?function:save` resolves to the bare one, as before (CAS-99 CR-007)", () => {
+  const { records, diagnostics } = resolveRefs([rec("function", "function:db/public.save"), rec("function", "function:db/save"), rec("module", "module:a.ts", ["?function:save"])]);
+  assert.deepEqual(records.find((r) => r.id === "module:a.ts").refs, ["function:db/save"]);
+  assert.deepEqual(diagnostics, []);
 });

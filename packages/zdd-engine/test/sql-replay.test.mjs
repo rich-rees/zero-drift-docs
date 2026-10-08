@@ -230,3 +230,23 @@ test("replay: `things` and `public.things` are one table — an ALTER, RENAME, D
   assert.deepEqual([...otherSchema.keys()].sort(), ["archive.things", "things"], "a schema other than public is another table");
   assert.deepEqual(otherSchema.get("archive.things").columns.map((c) => c.name), ["id"]);
 });
+
+test("replay: CREATE TABLE IF NOT EXISTS under either spelling of an existing table is a no-op, as in Postgres — the first table, its name and its provenance stay (CAS-99 CR-001)", () => {
+  for (const [first, second] of [["things", "public.things"], ["public.things", "things"], ["things", "things"]]) {
+    const [t, ...rest] = [...replayMigrations([
+      { name: "1.sql", text: `-- The real one.\ncreate table ${first} (id uuid, kept text);` },
+      { name: "2.sql", text: `create table if not exists ${second} (id uuid, other text);` },
+    ]).tables.values()];
+    assert.equal(rest.length, 0);
+    assert.equal(t.name, first, `${first} then ${second}`);
+    assert.deepEqual(t.columns.map((c) => c.name), ["id", "kept"]);
+    assert.equal(t.createdIn, "1.sql");
+    assert.equal(t.description, "The real one.");
+  }
+});
+
+test("replay: CREATE OR REPLACE TRIGGER replaces across `x` / `public.x` (CAS-99 CR-011)", () => {
+  const { triggers } = replayMigrations([{ name: "1.sql", text: "create table things (id uuid);\ncreate or replace function f() returns trigger language plpgsql as $$ begin return new; end; $$;\ncreate trigger trg after insert on things for each row execute function f();\ncreate or replace trigger trg before update on public.things for each row execute function f();" }]);
+  assert.equal(triggers.length, 1);
+  assert.equal(triggers[0].timing, "before");
+});
