@@ -67,6 +67,9 @@ import {
   pocockPin,
   pluginSettings,
   ZDD_PLUGIN_ID,
+  MARKETPLACE,
+  MARKETPLACE_REPO,
+  isOurDeclaration,
 } from "./lib/repo.mjs";
 
 const TEMPLATES = join(PLUGIN_ROOT, "templates");
@@ -855,17 +858,9 @@ const SETTINGS_FILE = ".claude/settings.json";
 // release's tag, auto-update off — what the session-start release check reads.
 // A declaration is OURS when its source is this marketplace's repository; any
 // other (a fork, a mirror, a path) is the adopter's, named and never touched.
-export const MARKETPLACE = "zero-drift-docs";
-export const MARKETPLACE_REPO = "rich-rees/zero-drift-docs";
 export const lockEntry = (version) => ({ source: { source: "github", repo: MARKETPLACE_REPO, ref: `v${version}` }, autoUpdate: false });
 const isPlainObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
-const OUR_URL = /^(?:https:\/\/|git@)github\.com[/:]rich-rees\/zero-drift-docs(?:\.git)?\/?$/i;
-export function isOurDeclaration(decl) {
-  const src = isPlainObject(decl) ? decl.source : null;
-  if (!isPlainObject(src)) return false;
-  if (src.source === "github") return typeof src.repo === "string" && src.repo.toLowerCase() === MARKETPLACE_REPO;
-  return typeof src.url === "string" && OUR_URL.test(src.url);
-}
+export { MARKETPLACE, MARKETPLACE_REPO, isOurDeclaration };
 const describeSource = (decl) => {
   const src = isPlainObject(decl?.source) ? decl.source : {};
   return String(src.repo ?? src.url ?? src.path ?? src.source ?? "an unknown source").slice(0, 120);

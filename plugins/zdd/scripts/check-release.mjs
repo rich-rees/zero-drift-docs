@@ -39,9 +39,9 @@
 import { readFileSync, lstatSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { homedir } from "node:os";
-import { parseArgs, adopterRoot, pocockPin, ZDD_PLUGIN_ID, MAX_CONFIG_BYTES } from "./lib/repo.mjs";
+import { parseArgs, adopterRoot, pocockPin, ZDD_PLUGIN_ID, MAX_CONFIG_BYTES, MARKETPLACE, MARKETPLACE_REPO, isOurDeclaration } from "./lib/repo.mjs";
 
-export const MARKETPLACE = "zero-drift-docs";
+export { MARKETPLACE };
 const POCOCK_ID = `mattpocock-skills@${MARKETPLACE}`;
 const TAG = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?$/;
 const printable = (s) => String(s).replace(/[\x00-\x1f\x7f]/g, "?").slice(0, 120);
@@ -82,7 +82,10 @@ export function strayDeclarations(root, home) {
     const decl = readJsonObject(file(root, home))?.extraKnownMarketplaces?.[MARKETPLACE];
     if (!isObject(decl)) return [];
     const ref = decl.source?.ref;
-    return [{ scope, ref: typeof ref === "string" ? ref : null }];
+    // Only a declaration of this repository is ours to prescribe removing; a
+    // fork or mirror is the user's, and other repos may rely on it (CR-007).
+    const src = isObject(decl.source) ? decl.source : {};
+    return [{ scope, ref: typeof ref === "string" ? ref : null, ours: isOurDeclaration(decl), source: String(src.repo ?? src.url ?? src.path ?? "an unknown source") }];
   });
 }
 
@@ -141,7 +144,13 @@ export function narrate(r) {
     .join("; ");
   const where = { user: "your user settings (~/.claude/settings.json)", local: "this repo's local settings (.claude/settings.local.json)" };
   const strays = Array.isArray(r.strayDeclarations) ? r.strayDeclarations.filter((d) => where[d.scope]) : [];
-  const strayText = strays.map((d) => `; ${where[d.scope]} also declare ${MARKETPLACE}${d.ref ? ` at ${printable(d.ref)}` : ""}, which holds the catalogue there`).join("");
+  const strayText = strays
+    .map((d) =>
+      d.ours === false
+        ? `; ${where[d.scope]} declare ${MARKETPLACE} from ${printable(d.source)}, not ${MARKETPLACE_REPO} — yours to resolve by hand before the rest (it holds the catalogue there, and other repos may use it)`
+        : `; ${where[d.scope]} also declare ${MARKETPLACE}${d.ref ? ` at ${printable(d.ref)}` : ""}, which holds the catalogue there`,
+    )
+    .join("");
   // The pin-move route (CAS-99; decision 0022): with no stray declaration, a restart
   // moves the catalogue to the lock, `plugin update` moves this project's
   // install to the release the catalogue holds, a second restart loads it.
@@ -155,7 +164,7 @@ export function narrate(r) {
     .filter((id) => r.mismatches.some((m) => m.what === id) || (catalogueMoved && found[id] !== null))
     .map((id) => (found[id] === null ? `claude plugin install ${id} --scope project` : `claude plugin update ${id}`));
   const steps = [];
-  for (const d of strays) steps.push(`claude plugin marketplace remove ${MARKETPLACE} --scope ${d.scope}`);
+  for (const d of strays.filter((x) => x.ours !== false)) steps.push(`claude plugin marketplace remove ${MARKETPLACE} --scope ${d.scope}`);
   if (catalogueMoved) steps.push(`restart Claude Code (the catalogue follows this repo's lock on restart)`);
   if (plugins.length) steps.push(...plugins, catalogueMoved ? "then restart Claude Code again" : "then restart Claude Code");
   return [`ZDD release mismatch: ${said}${strayText}. Fix, from this repo's folder: ${steps.join("; ")}. (Installed is not loaded: this line clears on the next session.)`];

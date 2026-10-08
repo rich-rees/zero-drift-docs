@@ -166,7 +166,7 @@ test("a user-level declaration with the catalogue behind: remove it by scope fir
     assert.match(out, /Fix, from this repo's folder: claude plugin marketplace remove zero-drift-docs --scope user; restart Claude Code \(the catalogue follows this repo's lock on restart\); claude plugin update zdd@zero-drift-docs; claude plugin update mattpocock-skills@zero-drift-docs; then restart Claude Code again\./, out);
     assert.doesNotMatch(out, /marketplace add|marketplace update|--scope local/, out);
     const j = JSON.parse(run(CHECK, "--json"));
-    assert.deepEqual(j.strayDeclarations, [{ scope: "user", ref: "v1.3.1" }]);
+    assert.deepEqual(j.strayDeclarations, [{ scope: "user", ref: "v1.3.1", ours: true, source: "rich-rees/zero-drift-docs" }]);
   } finally {
     userDecl(null);
   }
@@ -219,4 +219,19 @@ test("under Codex (no CLAUDECODE) the check is silent — Codex has no Claude ca
   assert.match(run(), /^ZDD release mismatch:/, "Claude Code: loud");
   assert.equal(run(CHECK, "@codex"), "", "Codex: silent");
   assert.equal(run(INJECT, "@codex").includes("ZDD release mismatch"), false, "the SessionStart hook under Codex: silent");
+});
+
+test("a stray declaration from a fork or mirror is named, never removed by the route — it is the user's, and other repos may use it (CR-007)", () => {
+  lock("v2.1.0");
+  catalogue("v1.3.1", "1.3.1");
+  installed("1.3.1", "1.3.1");
+  writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify({ extraKnownMarketplaces: { "zero-drift-docs": { source: { source: "github", repo: "me/zdd-fork", ref: "v1.3.1" } } } }));
+  try {
+    const out = run();
+    assert.match(out, /your user settings \(~\/\.claude\/settings\.json\) declare zero-drift-docs from me\/zdd-fork, not rich-rees\/zero-drift-docs — yours to resolve by hand before the rest/, out);
+    assert.doesNotMatch(out, /marketplace remove/, out);
+    assert.match(out, /restart Claude Code \(the catalogue follows this repo's lock on restart\)/, out);
+  } finally {
+    userDecl(null);
+  }
 });
