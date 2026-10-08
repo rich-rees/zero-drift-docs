@@ -86,6 +86,14 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
   merge, drops misses with a diagnostic, and drops a record flagged
   `requireRefs: true` when nothing resolved (how a "module" record means "a file
   that references something"). See `src/lib/resolve-refs.mjs`.
+- **A ref may carry a verb** ([decision 0016](docs/decisions/0016-typed-edges-are-additive.md)):
+  `facts.edges` maps a verb to the refs it covers, resolved and unresolved
+  forms alike — `{ "subscribes": ["?table:audit_events"] }`. Every id there
+  is also a plain ref (the deriver makes the union), so `refs` keeps its
+  meaning. The documented vocabulary is `uses`, `calls`, `subscribes`,
+  `reads`, `writes`, `dependsOn`, `belongsTo`; any letters-only verb is
+  accepted and drawn plain. The graph's edge gains `verb`; a record with no
+  `facts.edges` renders exactly as before.
 - **Missing source is "nothing to inventory."** A configured root that does not
   exist yields no records and a diagnostic, never an error — greenfield repos
   adopt ZDD before any code exists. The one exception is a single named file

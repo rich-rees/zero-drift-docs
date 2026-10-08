@@ -53,6 +53,18 @@ const KIND_DISPLAY = {
   job: "Job",
 };
 
+// Edge verbs (decision 0016) -> how a body and the agent index say them.
+// An unknown verb is said as written.
+const VERB_LABELS = {
+  uses: "uses",
+  calls: "calls",
+  subscribes: "subscribes to",
+  reads: "reads",
+  writes: "writes",
+  dependsOn: "depends on",
+  belongsTo: "belongs to",
+};
+
 const posixify = (p) => p.split(/[\\/]/).join("/");
 
 // Symlinks are skipped, never followed (lstat): a checked-in link named
@@ -275,9 +287,15 @@ function synthesizeBody(record, idOfRef) {
   }
   if (record.refs.length) {
     lines.push(`# References`, "");
+    // A typed edge (decision 0016) says its verb; a plain ref says nothing,
+    // exactly as before, so a record without edges renders the same bytes.
+    const verbOf = new Map();
+    for (const [verb, ids] of Object.entries(f.edges ?? {})) for (const id of ids) if (!verbOf.has(id)) verbOf.set(id, verb);
     for (const ref of record.refs) {
       const id = idOfRef.get(ref);
-      if (id) lines.push(`- [${ref}](/${id}.json)`);
+      if (!id) continue;
+      const verb = verbOf.get(ref);
+      lines.push(verb ? `- ${VERB_LABELS[verb] ?? verb} [${ref}](/${id}.json)` : `- [${ref}](/${id}.json)`);
     }
     lines.push("");
   }
@@ -409,6 +427,8 @@ function buildConcepts() {
     body: synthesizeBody(record, idOfRef),
     linksTo: record.refs.map((r) => idOfRef.get(r)).filter(Boolean),
     auth: record.kind === "route" ? record.facts.auth : undefined,
+    // target node id -> verb (decision 0016); absent when the record has none.
+    verbs: record.facts.edges ? new Map(Object.entries(record.facts.edges).flatMap(([verb, ids]) => ids.map((r) => [idOfRef.get(r), verb]).filter(([id]) => id))) : undefined,
   });
   for (const entry of derivedRecords.filter(({ record }) => record.kind !== "module")) {
     const feature = featureOf.get(entry.nodeId);
@@ -457,6 +477,8 @@ function buildConcepts() {
 // those are a viewer's business (src/viewers/). Node ids are bundle-relative
 // paths minus extension, so a node links back to the file it was built from;
 // `resource` links it to the source. Edges are deduped and self-refs dropped.
+// An edge carries `verb` when the record typed it (decision 0016); a graph
+// with no verbs is still zdd-graph/1 and viewers treat a missing verb as plain.
 // ---------------------------------------------------------------------------
 function buildGraph(concepts) {
   const ids = new Set(concepts.map((c) => c.id));
@@ -483,7 +505,8 @@ function buildGraph(concepts) {
       if (!seen.has(c.id)) seen.set(c.id, new Set());
       if (seen.get(c.id).has(target)) continue;
       seen.get(c.id).add(target);
-      edges.push({ source: c.id, target });
+      const verb = c.verbs?.get(target);
+      edges.push(verb ? { source: c.id, target, verb } : { source: c.id, target });
     }
   }
   return { schema: "zdd-graph/1", name: BUNDLE_NAME, repoBase: REPO_BASE, nodes, edges };

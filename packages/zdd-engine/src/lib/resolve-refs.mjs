@@ -184,11 +184,30 @@ export function resolveRefs(records) {
     }
   };
 
-  for (const r of records) {
+  const resolveList = (list, r) => {
     const resolved = new Set();
-    for (const ref of r.refs) {
+    for (const ref of list) {
       const hit = ref.startsWith("?") ? resolveOne(ref, r) : ref;
       for (const id of Array.isArray(hit) ? hit : [hit]) if (id && id !== r.id) resolved.add(id);
+    }
+    return resolved;
+  };
+  for (const r of records) {
+    const resolved = resolveList(r.refs, r);
+    // Typed edges (decision 0016): `facts.edges` maps a verb to the refs it
+    // covers, resolved the same way; every id it names is also a plain ref,
+    // so every consumer of `refs` keeps working. Verbs and ids come out
+    // sorted; an empty verb is dropped, and an empty map is removed.
+    const edges = r.facts && r.facts.edges && typeof r.facts.edges === "object" && !Array.isArray(r.facts.edges) ? r.facts.edges : null;
+    if (edges) {
+      const out = {};
+      for (const verb of Object.keys(edges).sort()) {
+        const ids = resolveList(Array.isArray(edges[verb]) ? edges[verb] : [], r);
+        for (const id of ids) resolved.add(id);
+        if (ids.size) out[verb] = [...ids].sort();
+      }
+      if (Object.keys(out).length) r.facts.edges = out;
+      else delete r.facts.edges;
     }
     r.refs = [...resolved].sort();
   }
@@ -221,7 +240,17 @@ export function resolveRefs(records) {
     }
   }
   const kept = records.filter((r) => !dropped.has(r.id));
-  for (const r of kept) if (dropped.size) r.refs = r.refs.filter((id) => !dropped.has(id));
+  for (const r of kept) {
+    if (!dropped.size) break;
+    r.refs = r.refs.filter((id) => !dropped.has(id));
+    if (r.facts?.edges) {
+      for (const verb of Object.keys(r.facts.edges)) {
+        r.facts.edges[verb] = r.facts.edges[verb].filter((id) => !dropped.has(id));
+        if (!r.facts.edges[verb].length) delete r.facts.edges[verb];
+      }
+      if (!Object.keys(r.facts.edges).length) delete r.facts.edges;
+    }
+  }
   for (const r of kept) delete r.requireRefs;
   return { records: kept, diagnostics };
 }

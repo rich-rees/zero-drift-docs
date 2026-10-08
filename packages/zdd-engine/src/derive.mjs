@@ -40,6 +40,10 @@ const FILENAME_RE = /^[A-Za-z0-9._~()\[\]-]+\.json$/;
 // `kind` is a directory name under metadataDir — a record with kind `..`
 // would write outside it (CR-003).
 const KIND_RE = /^[a-z][a-z0-9_-]*$/;
+// An edge verb (decision 0016): `uses`, `calls`, `subscribes`, `reads`,
+// `writes`, `dependsOn`, `belongsTo` are the documented vocabulary; any
+// letters-only name is accepted so a local extractor may coin one.
+const VERB_RE = /^[a-z][A-Za-z]*$/;
 
 function fail(msg) {
   console.error(msg);
@@ -113,10 +117,30 @@ function validateRecords(records) {
     }
   }
   // Every ref must resolve to an emitted record — dangling refs are extractor
-  // bugs, caught here rather than shipped.
+  // bugs, caught here rather than shipped. A typed edge (decision 0016) names
+  // a verb and ids that are also plain refs; the resolver guarantees the
+  // union, this checks the shape an extractor handed over.
   for (const r of records) {
     for (const ref of r.refs) {
       if (!ids.has(ref)) fail(`Record ${r.id}: dangling ref '${ref}'`);
+    }
+    for (const [verb, list] of Object.entries(r.facts?.edges ?? {})) {
+      for (const id of list) if (!r.refs.includes(id)) fail(`Record ${r.id}: facts.edges.${verb} names '${id}', which is not among its refs`);
+    }
+  }
+}
+
+// The shape of `facts.edges` as an extractor handed it over, checked BEFORE
+// resolution (which would otherwise quietly drop a malformed entry): an
+// object, letters-only verbs, an array of refs per verb.
+function validateEdgeShapes(records) {
+  for (const r of records) {
+    const edges = r && r.facts ? r.facts.edges : undefined;
+    if (edges === undefined) continue;
+    if (!edges || typeof edges !== "object" || Array.isArray(edges)) fail(`Record ${r.id}: facts.edges must be an object mapping a verb to ids`);
+    for (const [verb, list] of Object.entries(edges)) {
+      if (!VERB_RE.test(verb)) fail(`Record ${r.id}: bad edge verb '${verb}' (letters only, camelCase)`);
+      if (!Array.isArray(list) || list.some((id) => typeof id !== "string")) fail(`Record ${r.id}: facts.edges.${verb} must be an array of ids`);
     }
   }
 }
@@ -259,6 +283,7 @@ export async function deriveRecords({ repoRoot, config }) {
       factsOrder[kind] = [...new Set([...(factsOrder[kind] ?? []), ...order])];
     }
   }
+  validateEdgeShapes(records);
   const resolved = resolveRefs(records);
   records = resolved.records;
   diagnostics.push(...resolved.diagnostics);
