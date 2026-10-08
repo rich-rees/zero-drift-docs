@@ -38,7 +38,7 @@ const SURFACE_FILE = /^(page|layout)\.(tsx|ts|jsx|js)$/;
 
 export const FACTS_KEY_ORDER = {
   route: ["methods", "dynamicSegments", "auth"],
-  surface: ["file", "routeGroups", "dynamicSegments"],
+  surface: ["file", "routeGroups", "dynamicSegments", "edges"],
   module: [],
 };
 
@@ -207,6 +207,8 @@ export function derive({ repoRoot, options }) {
   for (const k of ["roots", "extensions", "excludeDirs", "excludeSuffixes"]) {
     if (!Array.isArray(refsOptions[k])) throw new Error(`nextjs: 'refs.${k}' must be an array`);
   }
+  const subscribeCalls = refsOpt.subscribeCalls ?? [];
+  if (!Array.isArray(subscribeCalls) || subscribeCalls.some((h) => typeof h !== "string")) throw new Error("nextjs: 'refs.subscribeCalls' must be an array of call names");
   refsOptions.roots = refsOptions.roots.map((r) => repoRelative(r, "nextjs.refs.roots"));
 
   // ---- Route & surface trees ----
@@ -231,7 +233,7 @@ export function derive({ repoRoot, options }) {
 
   // ---- Refs scan ----
   const sourceFiles = walkSourceFiles(repoRoot, refsOptions, diagnostics);
-  const scans = scanFiles(repoRoot, sourceFiles);
+  const scans = scanFiles(repoRoot, sourceFiles, subscribeCalls);
 
   // Attribution: nearest enclosing route dir wins; else nearest page (then
   // layout) dir; else the file becomes its own module record.
@@ -269,9 +271,11 @@ export function derive({ repoRoot, options }) {
 
   const routeRefs = new Map(); // route rel -> Set
   const surfaceRefs = new Map(); // surface rel -> Set
+  const surfaceSubs = new Map(); // surface rel -> Set of table names (a `subscribes` edge)
   const moduleFiles = []; // { rel, refs }
   for (const [rel, scan] of scans) {
     const refs = unresolvedRefs(rel, scan);
+    for (const t of scan.subscriptions) refs.add(`?table:${t}`);
     const route = rel.startsWith(apiDirRel + "/") ? nearest(rel, routeDirs) : null;
     if (route) {
       const set = routeRefs.get(route.rel) ?? new Set();
@@ -284,6 +288,9 @@ export function derive({ repoRoot, options }) {
       const set = surfaceRefs.get(surface.rel) ?? new Set();
       refs.forEach((r) => set.add(r));
       surfaceRefs.set(surface.rel, set);
+      const subs = surfaceSubs.get(surface.rel) ?? new Set();
+      for (const t of scan.subscriptions) subs.add(t);
+      surfaceSubs.set(surface.rel, subs);
       continue;
     }
     if (refs.size) moduleFiles.push({ rel, refs });
@@ -353,6 +360,7 @@ export function derive({ repoRoot, options }) {
         file: s.file,
         routeGroups: s.segs.filter((x) => /^\(.+\)$/.test(x)),
         dynamicSegments: dynamicSegments(s.segs),
+        ...(surfaceSubs.get(s.rel)?.size ? { edges: { subscribes: [...surfaceSubs.get(s.rel)].sort().map((t) => `?table:${t}`) } } : {}),
       },
       filename: `${slugify(urlPath)}.json`,
     });

@@ -29,6 +29,8 @@ const TYPE_PALETTE = {
   "Database Function": "#0d9488",
   "Storage Bucket": "#b45309",
   "Module": "#64748b",
+  "UI Component": "#9333ea",
+  "Job": "#475569",
 };
 const DEFAULT_NODE_COLOR = "#94a3b8";
 
@@ -45,6 +47,8 @@ function toBundle(graph, docs, changed, options, repoBase) {
       resource: n.resource,
       tags: n.tags,
       ...(n.auth ? { auth: n.auth } : {}),
+      ...(n.app ? { app: n.app } : {}),
+      layer: n.layer,
       // hasOwn: a map `type: __proto__` must fall to the default colour, not
       // to Object.prototype (CR-010).
       color: Object.hasOwn(TYPE_PALETTE, n.type) ? TYPE_PALETTE[n.type] : DEFAULT_NODE_COLOR,
@@ -55,14 +59,19 @@ function toBundle(graph, docs, changed, options, repoBase) {
   // plain `source__target` join was ambiguous and cytoscape silently drops a
   // second element with a duplicate id (CR-069); the length prefix pins the
   // split. viz.js never parses edge ids — it reads data.source / data.target.
-  const edges = graph.edges.map((e) => ({ data: { id: `${e.source.length}:${e.source}__${e.target}`, source: e.source, target: e.target } }));
+  const edges = graph.edges.map((e) => ({ data: { id: `${e.source.length}:${e.source}__${e.target}`, source: e.source, target: e.target, ...(e.verb ? { verb: e.verb } : {}) } }));
   const bodies = Object.fromEntries(graph.nodes.map((n) => [n.id, n.body]));
   const types = [...new Set(graph.nodes.map((n) => n.type))].sort();
+  // The apps a node may belong to (decision 0018), for the app filter; only
+  // present when the map declares an Application page, so an older bundle
+  // keeps its bytes.
+  const apps = graph.nodes.filter((n) => n.type === "Application").map((n) => ({ id: n.id, title: n.title })).sort((a, b) => (a.title < b.title ? -1 : 1));
   return {
     nodes,
     edges,
     bodies,
     types,
+    ...(apps.length ? { apps } : {}),
     palette: TYPE_PALETTE,
     repoBase,
     viewer: options,

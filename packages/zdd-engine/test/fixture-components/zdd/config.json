@@ -1,0 +1,33 @@
+{
+  "name": "Fixture Components",
+  "baseBranch": "main",
+  "extractors": [
+    "fastapi",
+    "react-router",
+    "expo-router",
+    "components"
+  ],
+  "render": {
+    "storeChanges": false
+  },
+  "extractorOptions": {
+    "fastapi": {
+      "roots": [
+        "apps/api"
+      ]
+    },
+    "react-router": {
+      "routesFile": "apps/web/src/routes.tsx"
+    },
+    "components": {
+      "roots": [
+        "apps/web/src",
+        "apps/mobile",
+        "packages/ui/src"
+      ]
+    },
+    "expo-router": {
+      "appDir": "apps/mobile/app"
+    }
+  }
+}

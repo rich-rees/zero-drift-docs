@@ -1,0 +1,17 @@
+{
+  "name": "Fixture Services",
+  "baseBranch": "main",
+  "extractors": ["fastapi", "services"],
+  "render": { "storeChanges": false },
+  "extractorOptions": {
+    "fastapi": { "roots": ["apps/api"] },
+    "services": {
+      "services": [
+        { "name": "Sentry", "imports": ["sentry_sdk", "@sentry/react"], "env": ["SENTRY_"] },
+        { "name": "Resend", "env": ["RESEND_"] },
+        { "name": "Unused", "imports": ["nothing_imports_this"] }
+      ],
+      "ignore": ["MAPBOX"]
+    }
+  }
+}

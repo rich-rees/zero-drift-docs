@@ -44,7 +44,10 @@ Run everything from the adopter's repo root.
   extractor stops `derive` on an older engine by design.
 - The convention is not already a built-in: `supabase` (SQL migrations),
   `nextjs` (App Router), `fastapi` (decorators), `react-router` (a route tree
-  in one file). If it is, the answer is config, not code.
+  in one file), `components` (React / React Native components),
+  `expo-router` (an Expo Router folder tree), `jobs` (workers and scheduled
+  jobs from run manifests), `services` (external services by declared
+  marker). If it is, the answer is config, not code.
 
 Done when all three hold.
 
@@ -93,6 +96,8 @@ the sample. Wait for each answer.
    | C# Web API attributes, Spring `@GetMapping`, Express/Koa/Flask route calls, Rails `routes.rb` | `fastapi` (declarations, textual) | route |
    | Vue Router / Angular route arrays, a route table in one file | `react-router` | surface |
    | Blazor `@page`, SvelteKit, Nuxt, Remix — the file tree is the route tree | `nextjs` | surface, route |
+   | Vue / Svelte single-file components, Angular `@Component` classes | `components` | component |
+   | A cron table, Celery beat, a systemd timer — a manifest that names a process | `jobs` | job |
    | Anything else | `generic` (the minimal example) | — |
 
 6. **Options** — `roots` (folders to walk) and `extensions` (suffixes
@@ -193,9 +198,9 @@ Done when the tests are green and every checklist item holds.
 ## Step 6 — the real repo
 
 ```
-npx -y @rich-rees/zdd-engine@2.0.0 derive --verbose
-npx -y @rich-rees/zdd-engine@2.0.0 render
-npx -y @rich-rees/zdd-engine@2.0.0 lint
+npx -y @rich-rees/zdd-engine@2.1.0 derive --verbose
+npx -y @rich-rees/zdd-engine@2.1.0 render
+npx -y @rich-rees/zdd-engine@2.1.0 lint
 ```
 
 Read every `[<name>]` diagnostic and account for each: a real gap goes back
