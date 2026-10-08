@@ -44,12 +44,54 @@ Supersession points both ways; never edit an accepted decision into a new truth.
   `plugins/zdd/.codex-plugin/plugin.json`) and the marketplace entry, kept in
   sync (a test pins them), tagged `vX.Y.Z`.
 
+## Releasing
+
+Every line is checked off in the release PR; *(test)* marks the ones a test
+already holds, so a red suite names what was forgotten.
+
+**Before the PR merges**
+
+- [ ] The version pins move together and `render` runs (above). *(test)*
+- [ ] Whatever a new feature **reads**, bootstrap **writes** — a test binds
+      each writer to its reader (as the lock bootstrap writes is the one the
+      release check reads). *(test, per feature)*
+- [ ] `UPGRADE_NOTES` in `scripts/bootstrap.mjs` has an entry for this minor,
+      and `skills/upgrade/SKILL.md` an "Upgrading to X.Y" section. *(test)*
+- [ ] The instruction block (`templates/claude-md-snippet.md`) reviewed
+      against the skills that shipped; it names every skill. *(test)*
+- [ ] README: status, roadmap entry, Versioning entry. *(test)* CONTRIBUTING
+      status. *(test)*
+- [ ] Adopter impact stated in the Versioning entry: what moves in their
+      `derive --check` / `render --check` on the bump.
+- [ ] Both suites green on CI (ubuntu + windows × Node 20/22).
+
+**Release order** (held since 1.3.1)
+
+1. Merge the PR (merge commit).
+2. `npm whoami` prints the publisher — an expired token makes `npm publish`
+   fail **404 with no OTP prompt**; `npm login` first.
+3. Publish the engine from `main` (`packages/zdd-engine`).
+4. Tag the merge commit `vX.Y.Z` and push the tag.
+5. GitHub release for the tag, marked **Latest**, notes from the Versioning
+   entry.
+6. Check from **outside** this repo: `npx -y @rich-rees/zdd-engine@X.Y.Z`
+   prints the engine's usage, and `npm view @rich-rees/zdd-engine version`
+   names X.Y.Z (inside the repo, npm finds the workspace copy and installs
+   nothing).
+7. Move this machine's install: the route the release check prints.
+
+**After**
+
+- [ ] Open (or restart) each adopter's pin-move task, listing the generated
+      files expected to move.
+
 ## Skills
 
 The plugin's skills (`plugins/zdd/skills/*/SKILL.md`) are the product. The
-kernel is two spoken verbs — "load ZDD" (`load`) and "update ZDD" (`update`) —
-plus `bootstrap` (the runbook), the optional `grill`, and `extractor` (scaffold
-a local extractor — decision 0010). The runbook's writer is
+kernel is the spoken verbs — "load ZDD" (`load`), "choose patterns"
+(`patterns`), "update ZDD" (`update`), and "upgrade ZDD" (`upgrade`, which
+drives `bootstrap.mjs upgrade`) — plus `bootstrap` (the runbook), the optional
+`grill`, and `extractor` (scaffold a local extractor — decision 0010). The runbook's writer is
 `plugins/zdd/scripts/bootstrap.mjs`: the skill asks, the script detects and
 writes, and it is the only writer of *adopter-owned* files — config, skeleton,
 opt-ins, the instruction block (decision 0003) — save one:

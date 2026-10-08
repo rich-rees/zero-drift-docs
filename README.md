@@ -4,7 +4,7 @@ A documentation architecture for repos built by **human + agent pairs**. ZDD kee
 seven documentation artifacts *at most one unit of work behind the code* — and, with
 CI, makes drift in the machine-generated ones **un-mergeable**.
 
-> **Status: 2.1.1.** The plugin installs in Claude Code
+> **Status: 2.2.0.** The plugin installs in Claude Code
 > and in Codex from this one repo; `bootstrap` detects your stack (or grills
 > for it on a greenfield repo), proposes extractors with evidence, and *writes*
 > the opt-ins; the engine (`packages/zdd-engine`, npm `@rich-rees/zdd-engine`)
@@ -93,6 +93,8 @@ the verbs and the guarantee is a habit. A third hook guards the moment the
 habit slips: when the agent declares done with code changed and nothing in
 `zdd/` moved, the **Stop prompt** asks once — run the ritual, or say that nothing
 met the ADR test ([decision 0008](docs/decisions/0008-stop-hook-prompts-the-curated-half.md)).
+A fourth verb, **"upgrade ZDD"** (the `upgrade` skill), moves the repo to a
+newer ZDD release when you choose to — showing every change before it writes.
 
 ## What the plugin is (and is not)
 
@@ -112,13 +114,14 @@ CI, a pre-push hook), the instruction
 block in `CLAUDE.md` (and `AGENTS.md` for Codex) — plus an empty `zdd/` and one
 seeded **ADR-0001** recording *your* decision to adopt ZDD: the corpus's first
 entry *and* a worked example of the format. Branch protection is the one step it
-prints instead of doing. Idempotent; and `bootstrap --upgrade` is the only thing
-that writes to those files later, narrating every file it changes. (The
+prints instead of doing. Idempotent; and "upgrade ZDD" (the same script) is the
+only thing that writes to those files later, showing every file it will change
+before it writes. (The
 generated artifacts are the engine's: `derive` and `render` write them on every
 "update ZDD". Beyond those, only the `extractor` skill's scaffold writes to
 your repo, and only when you run it.)
 
-Contents: six skills (`bootstrap`, `load`, `patterns`, `update`, `grill`, `extractor`), a
+Contents: seven skills (`bootstrap`, `load`, `patterns`, `update`, `upgrade`, `grill`, `extractor`), a
 shared authoring guide, three hooks (auto-load, fence, Stop prompt), the runbook
 and scaffold scripts, the engine + composed
 extractors + viewers (`packages/zdd-engine`, also the npm package
@@ -194,12 +197,29 @@ anyway. Taking a new Pocock release is a ZDD release.
 
 ## Install
 
-**Claude Code** — inside a session:
+Two paths: **adopting** ZDD in a repo (once, by whoever sets it up), and
+**joining** a repo that already uses it (every other developer — the path most
+people take). Each is a short, copy-pasteable sequence; the commands are the
+same in PowerShell, bash and zsh.
+
+### Adopting ZDD in a repo
+
+**Claude Code** — in a terminal, from the repo's folder (use the newest tag
+from [the releases page](https://github.com/rich-rees/zero-drift-docs/releases)):
 
 ```
-/plugin marketplace add rich-rees/zero-drift-docs
-/plugin install zdd@zero-drift-docs
+claude plugin marketplace add rich-rees/zero-drift-docs@v2.2.0 --scope project
+claude plugin install zdd@zero-drift-docs --scope project
 ```
+
+Start (or restart) Claude Code in the repo and say **"bootstrap ZDD"**.
+
+Always add the marketplace **with its tag and `--scope project`**: that writes
+the declaration into the repo's own `.claude/settings.json` — the lock every
+teammate then follows. Added without a scope, Claude Code also records the
+marketplace in *your* user settings, and that copy holds your machine on the
+old release when the repo later moves
+([decision 0022](docs/decisions/0022-the-pin-move-route-removes-a-stray-declaration-first.md)).
 
 **Codex** — from a terminal:
 
@@ -208,24 +228,50 @@ codex plugin marketplace add rich-rees/zero-drift-docs
 codex plugin add zdd@zero-drift-docs
 ```
 
-Both hosts read the same marketplace file and the same plugin body — two
-manifests (`.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`) pointing at
-one set of skills and one `hooks.json`. After install the six skills are
-`bootstrap`, `load`, `patterns`, `update`, `grill` and `extractor` (Claude Code lists them as
-`/zdd:load` etc.); the SessionStart auto-load fires on the next session start
-in a repo that opted in. Install works from a private fork too — it uses your
-git credentials.
+Then run **`bootstrap`** in the repo. Codex has no dependency mechanism, so
+install [Matt Pocock's skills](https://github.com/mattpocock/skills) yourself,
+at the release named in `plugins/zdd/pocock.json`.
+
+Bootstrap detects the stack, writes `zdd/`, the config, the opt-ins, the
+instruction block and the **release lock** (the repo pinned to this ZDD
+release — [decision 0021](docs/decisions/0021-bootstrap-locks-the-release-by-default.md)),
+runs the first derive and render, and leaves you one step — below.
 
 In Claude Code, installing `zdd` also installs **`mattpocock-skills@zero-drift-docs`**:
 the one release of [Matt Pocock's skills](https://github.com/mattpocock/skills)
 this ZDD release is tested with, fetched from his repository at a pinned tag and
 commit ([decision 0014](docs/decisions/0014-a-zdd-release-pins-and-brings-in-one-pocock-release.md)).
-Nothing is copied; `zdd` declares it as a dependency. Codex has no dependency
-mechanism, so there you install his plugin yourself.
+Nothing is copied; `zdd` declares it as a dependency, and the repo's settings
+switch your other copies of his skills off *in this repo only*.
 
-Then run **`bootstrap`** in your repo and answer its questions. It detects the
-stack, writes `zdd/`, the config, the opt-ins and the instruction block, runs
-the first derive and render, and leaves you one step:
+Both hosts read the same marketplace file and the same plugin body — two
+manifests (`.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`) pointing at
+one set of skills and one `hooks.json`. The seven skills are `bootstrap`,
+`load`, `patterns`, `update`, `upgrade`, `grill` and `extractor` (Claude Code
+lists them as `/zdd:load` etc.). Install works from a private fork too — it
+uses your git credentials.
+
+### Joining a repo that already uses ZDD
+
+**Claude Code** — clone the repo, open it in Claude Code once and accept the
+folder-trust prompt (that brings ZDD's catalogue at the repo's locked release,
+silently — it installs nothing yet). Then, in a terminal from the repo's folder:
+
+```
+claude plugin install zdd@zero-drift-docs --scope project
+```
+
+Restart Claude Code. If a session ever opens with a **"ZDD release
+mismatch"** line, it names the exact commands that bring your machine to the
+repo's release — run them and restart. If `git status` shows
+`.claude/settings.json` changed after a `claude plugin` command, discard that
+change (`git restore .claude/settings.json`): the command reorders the file,
+and the committed one is the team's.
+
+**Codex** — the same two commands as adopting (`codex plugin marketplace add
+…`, `codex plugin add zdd@zero-drift-docs`) and Matt Pocock's skills at the
+release in `plugins/zdd/pocock.json`. There is no bootstrap to run: the repo is
+already set up.
 
 ### …with CI — the real guarantee
 
@@ -247,14 +293,33 @@ merge gate.
 
 ### Upgrading
 
-Updating the plugin never touches your repo. `load` warns when your pinned engine
-falls behind the plugin; run **`bootstrap --upgrade`** to migrate config
-(`adapter` → `extractors`), rewrite the engine pins, the hook and the instruction
-block, write `docs/agents/domain.md` and the four plugin lines in
-`.claude/settings.json` when they are missing — every changed file named, curated
-artifacts untouched. Upgrading to 2.0: render and commit the new
-`zdd/blessing-index.md`, and give every blessing `lint` names a trigger question
-([docs/patterns.md](docs/patterns.md#adopting-it-in-an-existing-repo)).
+Updating the plugin never touches your repo; moving the repo to a newer release
+is a choice you make. Say **"upgrade ZDD"**: it checks for a newer release and,
+on your yes, moves the repo's lock — then you restart, run the commands the
+session's first line names, restart again, and say "upgrade ZDD" once more.
+That second run is the new release's own: it shows every file it will change
+(config, engine pins, the instruction block, the lock), names any text in your
+`CLAUDE.md` / `AGENTS.md` that the new block now covers, asks once, writes,
+regenerates, and lists what to commit — one PR. After it merges, each
+teammate's next session prints the commands that move their machine.
+
+**A repo on a release before 2.2** has no "upgrade ZDD" yet, so move the lock
+by hand once:
+
+1. In `.claude/settings.json`, set
+   `extraKnownMarketplaces["zero-drift-docs"].source.ref` to the new tag
+   (`"v2.2.0"`). No lock there? Add the marketplace from the repo's folder with
+   `claude plugin marketplace add rich-rees/zero-drift-docs@v2.2.0 --scope project`.
+2. Restart Claude Code. The session's first line names the commands that move
+   your machine (on a machine where the marketplace was ever added without a
+   scope, that includes `claude plugin marketplace remove zero-drift-docs
+   --scope user`) — run them, and restart again.
+3. Say **"upgrade ZDD"**: from here it is the guided flow above.
+
+From 1.3.1 (no session-start release check yet), step 2 is: `claude plugin
+marketplace remove zero-drift-docs --scope user` if `~/.claude/settings.json`
+mentions `zero-drift-docs`, restart, `claude plugin update
+zdd@zero-drift-docs`, restart.
 
 ## Repo layout
 
@@ -422,6 +487,21 @@ saying no to a row is a visible choice, not a fork.
       record as `.json`; a component's description is the comment attached to it, never an earlier JSDoc;
       the release check prints the route that moves a machine — restart,
       `claude plugin update`, restart *(engine + plugin 2.1.1, CAS-99)*.
+      **Corrected in 2.2.0:** that route stalls on a machine where the
+      marketplace was once added without a scope; 2.2.0's check adds the
+      missing step there.
+- [x] **2.2.0** — an install and an upgrade a new developer can't get
+      wrong: bootstrap locks the repo to its release; **"upgrade ZDD"** (the
+      `upgrade` skill) checks for a newer release, moves the lock, and on the
+      new release shows every change before writing it, offers what is new
+      with this repo's evidence, names the hand-written instructions the
+      block now covers, and lists the commit; the release check removes a
+      stray user-level declaration before the restart route; the instruction
+      block carries the rules adopters had hand-written; bootstrap asks about
+      Realtime wrappers; the README splits adopting from joining; a release
+      checklist backed by tests binding writers to readers *(plugin 2.2.0,
+      CAS-101; decisions
+      [0021](docs/decisions/0021-bootstrap-locks-the-release-by-default.md)–[0022](docs/decisions/0022-the-pin-move-route-removes-a-stray-declaration-first.md))*.
 - [ ] Next: a second viewer; Vue / Svelte / Angular extractors on their first
       real adoption.
 
@@ -512,6 +592,16 @@ warning can say "behind".
   created as `x` (or the reverse) gains its trigger facts and table edge; a
   component whose JSDoc sat after an exported type or constant gets its own
   description; an agent index with an External services list links `.json`.
+
+- **`2.2.0` — the guided install and upgrade.** A minor: new bootstrap and
+  upgrade behaviour, no config-schema or metadata-contract change, and no
+  engine change beyond the shared version line — an adopter's generated
+  artifacts do not move on the bump, only the engine pin in the workflow and
+  config does. Bootstrap now writes `extraKnownMarketplaces` (the lock) into
+  `.claude/settings.json`; an upgrade moves a lock that points at this
+  repository and leaves any other alone. The instruction block grows by
+  eleven lines, rewritten between its markers on upgrade. A repo before 2.2
+  moves its lock by hand once (see [Upgrading](#upgrading)).
 
 ## Contributing
 
