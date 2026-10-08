@@ -1,6 +1,6 @@
 # 0003 — The kernel is two verbs; enforcement is an opt-in the runbook writes
 
-**Date:** 2026-09-03 · **Status:** accepted; point 1's "two spoken verbs" superseded in part by [0015](0015-choose-patterns-blessings-are-read-before-building.md) (a third verb, "choose patterns"); point 5's "the script is the only writer" superseded in part by [0010](0010-local-extractors-first-tier-engine-hands-them-io.md) (the extractor scaffold is a second writer, through the same Ledger) · **Origin:** DIO-307 grilling, built under DIO-311.
+**Date:** 2026-09-03 · **Status:** accepted; point 1's "two spoken verbs" superseded in part by [0015](0015-choose-patterns-blessings-are-read-before-building.md) (a third verb, "choose patterns"); point 5's "the script is the only writer" superseded in part by [0010](0010-local-extractors-first-tier-engine-hands-them-io.md) (the extractor scaffold is a second writer, through the same Ledger); point 4's "never writes into `.claude/settings.json`" superseded in part by [0014](0014-a-zdd-release-pins-and-brings-in-one-pocock-release.md) (the plugin lines) and [0021](0021-bootstrap-locks-the-release-by-default.md) (the release lock) — the hook opt-ins still live in `zdd/config.json` · **Origin:** DIO-307 grilling, built under DIO-311.
 
 ## Context
 

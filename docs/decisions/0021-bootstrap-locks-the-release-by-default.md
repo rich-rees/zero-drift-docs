@@ -1,6 +1,6 @@
 # 0021 — Bootstrap locks the repo to one ZDD release by default
 
-**Date:** 2026-10-08 · **Status:** accepted · **Origin:** CAS-101, from CAS-99. The session-start release check (2.1.0, CAS-97) compares this machine's catalogue and installs against a lock — `.claude/settings.json` → `extraKnownMarketplaces["zero-drift-docs"].source.ref` — that nothing in the plugin wrote. Cascade and PressPlay had it only because it was typed in by hand (CAS-92, DIO-326), so for every other adopter the check was silent forever, and teammates could run different releases without anyone knowing.
+**Date:** 2026-10-08 · **Status:** accepted; supersedes in part [0003](0003-kernel-and-opt-ins.md) point 4's "never writes into `.claude/settings.json`" (with 0014) · **Origin:** CAS-101, from CAS-99. The session-start release check (2.1.0, CAS-97) compares this machine's catalogue and installs against a lock — `.claude/settings.json` → `extraKnownMarketplaces["zero-drift-docs"].source.ref` — that nothing in the plugin wrote. Cascade and PressPlay had it only because it was typed in by hand (CAS-92, DIO-326), so for every other adopter the check was silent forever, and teammates could run different releases without anyone knowing.
 
 ## Decision
 

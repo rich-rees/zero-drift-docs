@@ -84,7 +84,7 @@ the blessings that survived, records the rest in the commit message and
 deletes the plan; CI refuses a merge while the plan exists. The whole system,
 with examples, is in [docs/patterns.md](docs/patterns.md).
 
-Three spoken verbs carry it, and all work with any coding agent: **"load ZDD"**
+Three spoken verbs carry each unit of work, and all work with any coding agent: **"load ZDD"**
 before you work (the `load` skill, plus an auto-injected index), **"choose
 patterns"** between the design and the code (the `patterns` skill) and **"update
 ZDD"** before you finish (the `update` skill). With the CI check in place the unit
@@ -263,10 +263,12 @@ claude plugin install zdd@zero-drift-docs --scope project
 
 Restart Claude Code. If a session ever opens with a **"ZDD release
 mismatch"** line, it names the exact commands that bring your machine to the
-repo's release — run them and restart. If `git status` shows
-`.claude/settings.json` changed after a `claude plugin` command, discard that
-change (`git restore .claude/settings.json`): the command reorders the file,
-and the committed one is the team's.
+repo's release — run them and restart. A `claude plugin` command may rewrite
+`.claude/settings.json` in its own key order: if `git diff
+.claude/settings.json` shows only lines moving, nothing added or changed,
+discard it with `git restore .claude/settings.json` — the committed file is
+the team's. If you had your own edits in that file, keep them and undo only
+the reordering.
 
 **Codex** — the same two commands as adopting (`codex plugin marketplace add
 …`, `codex plugin add zdd@zero-drift-docs`) and Matt Pocock's skills at the
@@ -333,8 +335,8 @@ plugins/zdd/
   scripts/
     bootstrap.mjs                   # the runbook's writer: detect / apply / upgrade
     scaffold-extractor.mjs          # the extractor skill's writer: a local extractor's skeleton + config wiring
-    inject-agent-index.mjs  fence.mjs  stop-check.mjs  check-skew.mjs  check-pocock.mjs
-  skills/{bootstrap,load,patterns,update,grill,extractor}/SKILL.md
+    inject-agent-index.mjs  fence.mjs  stop-check.mjs  check-skew.mjs  check-pocock.mjs  check-release.mjs
+  skills/{bootstrap,load,patterns,update,upgrade,grill,extractor}/SKILL.md
   skills/extractor/upstream.md      # the registry and fork tiers
   skills/authoring.md               # shared curated-docs authoring discipline
   templates/
@@ -600,7 +602,8 @@ warning can say "behind".
   config does. Bootstrap now writes `extraKnownMarketplaces` (the lock) into
   `.claude/settings.json`; an upgrade moves a lock that points at this
   repository and leaves any other alone. The instruction block grows by
-  eleven lines, rewritten between its markers on upgrade. A repo before 2.2
+  about a dozen lines, rewritten between its markers on upgrade (a managed
+  pre-push hook is re-pinned too, like the workflow). A repo before 2.2
   moves its lock by hand once (see [Upgrading](#upgrading)).
 
 ## Contributing

@@ -143,7 +143,7 @@ hand). Then it narrates every file as **wrote / kept / skipped** and writes:
   without it is kept and called out.
 - The instruction block into `CLAUDE.md` and, for Codex users, `AGENTS.md` —
   one tool-neutral block between `<!-- zdd:begin -->` / `<!-- zdd:end -->`
-  markers, leading with the two spoken verbs. Existing content is kept.
+  markers, leading with the spoken verbs. Existing content is kept.
 - Hook registrations: the plugin's own `hooks.json` carries all three hooks
   and reads the opt-ins from `zdd/config.json`, so nothing is written into the
   host's settings.
@@ -211,7 +211,7 @@ nothing lands unannounced.
   the **zdd** check and require branches to be up to date before merging.
   Now stale generated artifacts cannot merge.
 - **Without CI:** say plainly that the guarantee is weaker — ZDD runs on the
-  two verbs (and the pre-push hook, if taken); drift is a habit kept, not a
+  spoken verbs (and the pre-push hook, if taken); drift is a habit kept, not a
   check that blocks a merge.
 - **When detection proposed `generic`** (source present, no known
   convention): offer the [`extractor` skill](../extractor/SKILL.md) as the
