@@ -136,7 +136,7 @@ hook, config schema + example, the seed ADR-0001, and the extractor scaffold).
 | Native screens | `expo-router` *(early)* | the Expo Router folder tree: screens, layouts, `[id]` segments, platform pairs — namespaced so a native `/jobs` and a web `/jobs` are two surfaces |
 | Components | `components` | React and React Native: exported, capitalised, returning JSX; props as written; **used by** / **uses** / **calls**; shared vs page-private |
 | Background work | `jobs` | package scripts, a Procfile and Railway files that run a process; `reads` / `writes` from the tables a module names; the mode never guessed |
-| External services | `services` | declared markers — a package import, an env-name prefix (names only, never values); **depends on** from the files that use them; undeclared candidates warned about on every derive |
+| External services | `services` | declared markers — a package import, an env-name prefix (names only, never values); **depends on** from the files that carry a marker — never a file that reaches the provider through a settings object; undeclared candidates warned about on every derive |
 | Realtime | *(in `react-router` / `nextjs`)* | a page's Supabase Realtime subscription — `.on('postgres_changes', { table })` or a helper you name — as a **subscribes** edge |
 
 Vue, Svelte and Angular are not read: write a local extractor with the
