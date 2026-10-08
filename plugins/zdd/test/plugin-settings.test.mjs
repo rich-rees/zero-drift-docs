@@ -18,6 +18,7 @@ const SCRIPT = join(PLUGIN, "scripts", "bootstrap.mjs");
 const ENGINE_FIXTURES = resolve(PLUGIN, "..", "..", "packages", "zdd-engine", "test");
 const PLUGIN_VERSION = JSON.parse(readFileSync(join(PLUGIN, ".claude-plugin", "plugin.json"), "utf8")).version;
 const DATE = "2026-10-06";
+const CHECK_RELEASE = join(PLUGIN, "scripts", "check-release.mjs");
 
 const PLUGIN_SETTINGS = {
   "zdd@zero-drift-docs": true,
@@ -25,6 +26,8 @@ const PLUGIN_SETTINGS = {
   "mattpocock-skills@mattpocock": false,
   "mattpocock-skills@claude-plugins-official": false,
 };
+// Decision 0021 (CAS-101): the lock — this release's tag, auto-update off.
+const LOCK = { "zero-drift-docs": { source: { source: "github", repo: "rich-rees/zero-drift-docs", ref: `v${PLUGIN_VERSION}` }, autoUpdate: false } };
 
 let scratch, fakeHome;
 before(() => {
@@ -55,7 +58,8 @@ test("apply writes .claude/settings.json: ZDD and its pinned Pocock on, the othe
   assert.match(out, /wrote\s+\.claude\/settings\.json/, out);
   assert.match(out, /switched off your other Pocock cop/i, out);
   assert.match(out, /still works? in your other repos/i, out);
-  assert.deepEqual(JSON.parse(readFileSync(settingsPath(repo), "utf8")), { enabledPlugins: PLUGIN_SETTINGS });
+  assert.deepEqual(JSON.parse(readFileSync(settingsPath(repo), "utf8")), { enabledPlugins: PLUGIN_SETTINGS, extraKnownMarketplaces: LOCK });
+  assert.match(out, /locked this repo to ZDD v\d+\.\d+\.\d+/, out);
   assert.ok(!existsSync(join(repo, ".claude", "settings.local.json")), "never a local settings file");
 });
 
@@ -67,7 +71,8 @@ test("an existing .claude/settings.json keeps every other key and its order; the
   const json = applyJson(repo, "merge", { name: "X" });
   assert.ok(json.wrote.includes(".claude/settings.json"), json.wrote.join("\n"));
   const after = JSON.parse(readFileSync(settingsPath(repo), "utf8"));
-  assert.deepEqual(Object.keys(after), ["permissions", "enabledPlugins", "model"], "top-level order kept");
+  assert.deepEqual(Object.keys(after), ["permissions", "enabledPlugins", "model", "extraKnownMarketplaces"], "top-level order kept; the lock appended");
+  assert.deepEqual(after.extraKnownMarketplaces, LOCK);
   assert.deepEqual(after.permissions, before.permissions);
   assert.equal(after.model, "opus");
   assert.equal(after.enabledPlugins["other@market"], true, "unrelated plugin kept");
@@ -104,4 +109,101 @@ test("upgrade writes the same plugin settings to an existing adopter and narrate
   assert.deepEqual(JSON.parse(readFileSync(settingsPath(repo), "utf8")), { enabledPlugins: PLUGIN_SETTINGS });
   const again = JSON.parse(bootstrap(repo, ["upgrade", "--json"]));
   assert.deepEqual(again.wrote, []);
+});
+
+// ---- the lock (decision 0021, CAS-101) ------------------------------------
+const settingsRepo = (name, settings, config = { extractors: ["generic"], engine: "2.0.0" }) => {
+  const repo = join(scratch, name);
+  mkdirSync(join(repo, "zdd"), { recursive: true });
+  mkdirSync(join(repo, ".claude"), { recursive: true });
+  writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify(config));
+  if (settings !== undefined) writeFileSync(settingsPath(repo), JSON.stringify(settings, null, 2) + "\n");
+  return repo;
+};
+const readSettings = (repo) => JSON.parse(readFileSync(settingsPath(repo), "utf8"));
+
+test("apply keeps an existing lock (ours at another tag, or a fork) and names it — moving a lock is upgrade's job", () => {
+  const repo = fastapiRepo("lock-kept");
+  mkdirSync(join(repo, ".claude"));
+  const fork = { "zero-drift-docs": { source: { source: "github", repo: "someone/zdd-fork", ref: "v9.9.9" } }, other: { source: { source: "github", repo: "o/r" } } };
+  writeFileSync(settingsPath(repo), JSON.stringify({ enabledPlugins: PLUGIN_SETTINGS, extraKnownMarketplaces: fork }, null, 2) + "\n");
+  const json = applyJson(repo, "lock-kept", { name: "X" });
+  assert.deepEqual(readSettings(repo).extraKnownMarketplaces, fork, "a declaration that is not this marketplace's repository is the adopter's");
+  assert.ok(json.notes.some((n) => /declares zero-drift-docs from someone\/zdd-fork.*not this plugin's repository.*left as it is/i.test(n)), json.notes.join("\n"));
+});
+
+test("upgrade moves our lock's ref to this release, keeps its other fields and every other marketplace, and says what the team does next", () => {
+  const settings = { extraKnownMarketplaces: { other: { source: { source: "github", repo: "o/r" } }, "zero-drift-docs": { source: { source: "github", repo: "rich-rees/zero-drift-docs", ref: "v1.3.1" }, autoUpdate: false } }, enabledPlugins: PLUGIN_SETTINGS };
+  const repo = settingsRepo("lock-move", settings);
+  const json = JSON.parse(bootstrap(repo, ["upgrade", "--json"]));
+  const after = readSettings(repo);
+  assert.deepEqual(Object.keys(after), ["extraKnownMarketplaces", "enabledPlugins"]);
+  assert.deepEqual(Object.keys(after.extraKnownMarketplaces), ["other", "zero-drift-docs"]);
+  assert.equal(after.extraKnownMarketplaces["zero-drift-docs"].source.ref, `v${PLUGIN_VERSION}`);
+  assert.equal(after.extraKnownMarketplaces["zero-drift-docs"].autoUpdate, false);
+  assert.ok(json.notes.some((n) => n.includes(`lock moved v1.3.1 → v${PLUGIN_VERSION}.`)), json.notes.join("\n"));
+  assert.ok(json.notes.some((n) => /after this PR merges.*next session/i.test(n)), json.notes.join("\n"));
+  const again = JSON.parse(bootstrap(repo, ["upgrade", "--json"]));
+  assert.ok(!again.wrote.includes(".claude/settings.json"), "idempotent");
+});
+
+test("upgrade on a repo with no lock names the gap and writes nothing until --lock; with --lock it writes ours", () => {
+  const repo = settingsRepo("lock-absent", { enabledPlugins: PLUGIN_SETTINGS });
+  const json = JSON.parse(bootstrap(repo, ["upgrade", "--json"]));
+  assert.equal(readSettings(repo).extraKnownMarketplaces, undefined);
+  assert.ok(json.notes.some((n) => /no lock.*--lock/i.test(n)), json.notes.join("\n"));
+  const locked = JSON.parse(bootstrap(repo, ["upgrade", "--lock", "--json"]));
+  assert.ok(locked.wrote.includes(".claude/settings.json"));
+  assert.deepEqual(readSettings(repo).extraKnownMarketplaces, LOCK);
+});
+
+test("upgrade never rewrites a fork's declaration, even with --lock", () => {
+  const fork = { "zero-drift-docs": { source: { source: "git", url: "https://example.com/mirror.git", ref: "v1.0.0" } } };
+  const repo = settingsRepo("lock-fork", { enabledPlugins: PLUGIN_SETTINGS, extraKnownMarketplaces: fork });
+  const json = JSON.parse(bootstrap(repo, ["upgrade", "--lock", "--json"]));
+  assert.deepEqual(readSettings(repo).extraKnownMarketplaces, fork);
+  assert.ok(json.notes.some((n) => /not this plugin's repository/i.test(n)), json.notes.join("\n"));
+});
+
+test("writer binds to reader: a freshly bootstrapped repo's lock is what the release check reads — silent at a matching install, loud at a stale one", () => {
+  const repo = fastapiRepo("bind");
+  applyJson(repo, "bind", { name: "X" });
+  const home = join(scratch, "bind-home");
+  const plugins = join(home, ".claude", "plugins");
+  mkdirSync(join(plugins, "marketplaces", "zero-drift-docs", ".claude-plugin"), { recursive: true });
+  const pocock = JSON.parse(readFileSync(join(PLUGIN, "pocock.json"), "utf8")).version;
+  const machine = (ref, zdd) => {
+    writeFileSync(join(plugins, "known_marketplaces.json"), JSON.stringify({ "zero-drift-docs": { source: { source: "github", repo: "rich-rees/zero-drift-docs", ref } } }));
+    writeFileSync(join(plugins, "marketplaces", "zero-drift-docs", ".claude-plugin", "marketplace.json"), JSON.stringify({ plugins: [{ name: "mattpocock-skills", version: pocock }] }));
+    const row = (version) => [{ scope: "project", projectPath: repo, version }];
+    writeFileSync(join(plugins, "installed_plugins.json"), JSON.stringify({ version: 2, plugins: { "zdd@zero-drift-docs": row(zdd), "mattpocock-skills@zero-drift-docs": row(pocock) } }));
+  };
+  const check = () => execFileSync(process.execPath, [CHECK_RELEASE, `--root=${repo}`, `--home=${home}`], { encoding: "utf8", env: { ...process.env, CLAUDECODE: "1" } });
+  machine(`v${PLUGIN_VERSION}`, PLUGIN_VERSION);
+  assert.equal(check(), "", "silent at the release bootstrap locked");
+  machine("v1.3.1", "1.3.1");
+  assert.ok(check().startsWith(`ZDD release mismatch: the catalogue on this machine is at v1.3.1, this repo locks v${PLUGIN_VERSION};`), "loud at a stale machine");
+});
+
+test("a lock that points here with auto-update on is turned off and said so, by apply and by upgrade (CR-006)", () => {
+  const on = { "zero-drift-docs": { source: { source: "github", repo: "rich-rees/zero-drift-docs", ref: `v${PLUGIN_VERSION}` }, autoUpdate: true } };
+  const repo = settingsRepo("auto-on", { enabledPlugins: PLUGIN_SETTINGS, extraKnownMarketplaces: on });
+  const json = JSON.parse(bootstrap(repo, ["upgrade", "--json"]));
+  assert.deepEqual(readSettings(repo).extraKnownMarketplaces, LOCK);
+  assert.ok(json.notes.some((n) => /auto-update switched off/.test(n)), json.notes.join("\n"));
+  const fresh = fastapiRepo("auto-on-apply");
+  mkdirSync(join(fresh, ".claude"));
+  writeFileSync(settingsPath(fresh), JSON.stringify({ extraKnownMarketplaces: on }, null, 2) + "\n");
+  applyJson(fresh, "auto-on-apply", { name: "X" });
+  assert.deepEqual(readSettings(fresh).extraKnownMarketplaces, LOCK);
+});
+
+test("apply keeps our own lock at another tag, and names it (CR-020: the case the earlier test's name claimed)", () => {
+  const repo = fastapiRepo("lock-ours-older");
+  mkdirSync(join(repo, ".claude"));
+  const older = { "zero-drift-docs": { source: { source: "github", repo: "rich-rees/zero-drift-docs", ref: "v1.3.1" }, autoUpdate: false } };
+  writeFileSync(settingsPath(repo), JSON.stringify({ enabledPlugins: PLUGIN_SETTINGS, extraKnownMarketplaces: older }, null, 2) + "\n");
+  const json = applyJson(repo, "lock-ours-older", { name: "X" });
+  assert.deepEqual(readSettings(repo).extraKnownMarketplaces, older);
+  assert.ok(json.notes.some((n) => /locked to v1\.3\.1 — kept; moving the lock is upgrade's job/.test(n)), json.notes.join("\n"));
 });

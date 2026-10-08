@@ -37,8 +37,13 @@ const installed = (zdd, pocock, projectPath = repo) => {
   const row = (v) => (v === null ? [] : [{ scope: "project", projectPath, version: v }]);
   writeFileSync(join(home, ".claude", "plugins", "installed_plugins.json"), JSON.stringify({ version: 2, plugins: { "zdd@zero-drift-docs": row(zdd), "mattpocock-skills@zero-drift-docs": row(pocock) } }));
 };
+// The check speaks only under Claude Code, which sets CLAUDECODE in its hooks
+// and shells (CAS-101 CR-001); `host` lets a test stand in for Codex.
 const run = (script = CHECK, ...args) => {
-  const r = spawnSync(process.execPath, [script, `--root=${repo}`, `--home=${home}`, ...args], { encoding: "utf8", env: { ...process.env, ZDD_HOME: home, CLAUDE_PROJECT_DIR: repo } });
+  const host = args[0] === "@codex" ? (args.shift(), {}) : { CLAUDECODE: "1" };
+  const env = { ...process.env, ZDD_HOME: home, CLAUDE_PROJECT_DIR: repo, ...host };
+  if (!host.CLAUDECODE) delete env.CLAUDECODE;
+  const r = spawnSync(process.execPath, [script, `--root=${repo}`, `--home=${home}`, ...args], { encoding: "utf8", env });
   assert.equal(r.status, 0, `exit ${r.status}: ${r.stderr}`);
   assert.equal(r.stderr, "");
   return r.stdout;
@@ -63,7 +68,7 @@ test("the machine has an older zdd installed for this project: one line, expecte
   assert.match(out, /Installed is not loaded/, "names the known limit");
 });
 
-test("the catalogue is at another tag: the pin-move route — restart (the catalogue follows the lock), update, restart again; never a marketplace remove, add or update (CAS-99, observed on Cascade's CAS-98)", () => {
+test("the catalogue is at another tag: the pin-move route — restart (the catalogue follows the lock), update, restart again; no marketplace step on a machine with no stray declaration, never an add or update (CAS-99; decision 0022)", () => {
   lock("v2.1.0");
   catalogue("v1.3.1", "1.3.1");
   installed("1.3.1", "1.3.1");
@@ -131,4 +136,123 @@ test("the SessionStart hook prints the mismatch line even when the repo has opte
   assert.doesNotMatch(out, /<zdd-agent-index>/, "no index when autoLoad is off");
   installed("2.1.0", "1.3.1");
   assert.equal(run(INJECT), "");
+});
+
+// CAS-101 (decision 0022): a plain `claude plugin marketplace add` also
+// declares the marketplace in the user's settings, and that declaration pins
+// the catalogue — a restart then never follows the repo's lock (reproduced on
+// two clean profiles, Claude Code 2.1.289/2.1.295). The route removes the
+// stray declaration first, by scope, and only where one exists.
+const userDecl = (ref) => {
+  const f = join(home, ".claude", "settings.json");
+  if (ref === null) return rmSync(f, { force: true });
+  writeFileSync(f, JSON.stringify({ theme: "dark", extraKnownMarketplaces: { "zero-drift-docs": { source: { source: "github", repo: "rich-rees/zero-drift-docs", ref } } } }));
+};
+const localDecl = (ref) => {
+  const f = join(repo, ".claude", "settings.local.json");
+  if (ref === null) return rmSync(f, { force: true });
+  writeFileSync(f, JSON.stringify({ extraKnownMarketplaces: { "zero-drift-docs": { source: { source: "github", repo: "rich-rees/zero-drift-docs", ref } } } }));
+};
+
+test("a user-level declaration with the catalogue behind: remove it by scope first, then the pin-move route (decision 0022)", () => {
+  lock("v2.1.0");
+  catalogue("v1.3.1", "1.3.1");
+  installed("1.3.1", "1.3.1");
+  userDecl("v1.3.1");
+  try {
+    const out = run();
+    assert.equal(out.trimEnd().split("\n").length, 1, out);
+    assert.match(out, /your user settings \(~\/\.claude\/settings\.json\) also declare zero-drift-docs at v1\.3\.1, which holds the catalogue there/, out);
+    assert.match(out, /Fix, from this repo's folder: claude plugin marketplace remove zero-drift-docs --scope user; restart Claude Code \(the catalogue follows this repo's lock on restart\); claude plugin update zdd@zero-drift-docs; claude plugin update mattpocock-skills@zero-drift-docs; then restart Claude Code again\./, out);
+    assert.doesNotMatch(out, /marketplace add|marketplace update|--scope local/, out);
+    const j = JSON.parse(run(CHECK, "--json"));
+    assert.deepEqual(j.strayDeclarations, [{ scope: "user", ref: "v1.3.1", ours: true, source: "rich-rees/zero-drift-docs" }]);
+  } finally {
+    userDecl(null);
+  }
+});
+
+test("a local declaration (any ref, or none) with the catalogue behind: removed with --scope local", () => {
+  lock("v2.1.0");
+  catalogue("v2.0.0", "1.3.1");
+  installed("2.0.0", "1.3.1");
+  localDecl("v2.1.0");
+  try {
+    const out = run();
+    assert.match(out, /this repo's local settings \(\.claude\/settings\.local\.json\) also declare zero-drift-docs at v2\.1\.0/, out);
+    assert.match(out, /Fix, from this repo's folder: claude plugin marketplace remove zero-drift-docs --scope local; restart Claude Code/, out);
+  } finally {
+    localDecl(null);
+  }
+});
+
+test("a stray declaration while the catalogue is at the lock: silent — it is advisory about a mismatch, never noise", () => {
+  lock("v2.1.0");
+  catalogue("v2.1.0", "1.3.1");
+  installed("2.1.0", "1.3.1");
+  userDecl("v2.1.0");
+  try {
+    assert.equal(run(), "");
+  } finally {
+    userDecl(null);
+  }
+});
+
+test("a malformed or oversized user settings file is no declaration", () => {
+  lock("v2.1.0");
+  catalogue("v1.3.1", "1.3.1");
+  installed("1.3.1", "1.3.1");
+  writeFileSync(join(home, ".claude", "settings.json"), "{ nope");
+  try {
+    const out = run();
+    assert.doesNotMatch(out, /marketplace remove/, out);
+    assert.match(out, /^ZDD release mismatch: the catalogue on this machine is at v1\.3\.1/, out);
+  } finally {
+    userDecl(null);
+  }
+});
+
+test("under Codex (no CLAUDECODE) the check is silent — Codex has no Claude catalogue or installs to compare, and the lock is Claude Code's (CR-001)", () => {
+  lock("v2.1.0");
+  catalogue(null);
+  rmSync(join(home, ".claude", "plugins", "installed_plugins.json"), { force: true });
+  assert.match(run(), /^ZDD release mismatch:/, "Claude Code: loud");
+  assert.equal(run(CHECK, "@codex"), "", "Codex: silent");
+  assert.equal(run(INJECT, "@codex").includes("ZDD release mismatch"), false, "the SessionStart hook under Codex: silent");
+});
+
+test("a stray declaration from a fork or mirror is named, never removed by the route — it is the user's, and other repos may use it (CR-007)", () => {
+  lock("v2.1.0");
+  catalogue("v1.3.1", "1.3.1");
+  installed("1.3.1", "1.3.1");
+  writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify({ extraKnownMarketplaces: { "zero-drift-docs": { source: { source: "github", repo: "me/zdd-fork", ref: "v1.3.1" } } } }));
+  try {
+    const out = run();
+    assert.match(out, /your user settings \(~\/\.claude\/settings\.json\) declare zero-drift-docs from me\/zdd-fork, not rich-rees\/zero-drift-docs — yours to resolve by hand before the rest/, out);
+    assert.doesNotMatch(out, /marketplace remove/, out);
+    assert.match(out, /restart Claude Code \(the catalogue follows this repo's lock on restart\)/, out);
+  } finally {
+    userDecl(null);
+  }
+});
+
+test("a local declaration with no ref is still stray; an oversized user settings file is no declaration (CR-020: the cases the earlier names claimed)", () => {
+  lock("v2.1.0");
+  catalogue("v1.3.1", "1.3.1");
+  installed("1.3.1", "1.3.1");
+  writeFileSync(join(repo, ".claude", "settings.local.json"), JSON.stringify({ extraKnownMarketplaces: { "zero-drift-docs": { source: { source: "github", repo: "rich-rees/zero-drift-docs" } } } }));
+  try {
+    const out = run();
+    assert.match(out, /this repo's local settings \(\.claude\/settings\.local\.json\) also declare zero-drift-docs, which holds the catalogue there/, out);
+    assert.match(out, /claude plugin marketplace remove zero-drift-docs --scope local/, out);
+  } finally {
+    localDecl(null);
+  }
+  const huge = { extraKnownMarketplaces: { "zero-drift-docs": { source: { source: "github", repo: "rich-rees/zero-drift-docs", ref: "v1.3.1" } } }, pad: "x".repeat(2 * 1024 * 1024) };
+  writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify(huge));
+  try {
+    assert.doesNotMatch(run(), /marketplace remove/, "over the size cap: not read");
+  } finally {
+    userDecl(null);
+  }
 });

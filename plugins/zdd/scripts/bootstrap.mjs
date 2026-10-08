@@ -19,12 +19,14 @@
 //       that already has a config (repair), an omitted answer keeps the
 //       current choice; only an explicit answer changes it.
 //
-//   bootstrap.mjs upgrade [--root=<dir>] [--json]
+//   bootstrap.mjs upgrade [--lock] [--root=<dir>] [--json]
 //       The only later writer into an adopter's repo. Migrates `adapter` →
 //       `extractors`, moves `viewer.nonAreaTags` to the top level, rewrites
 //       every plugin-OWNED file (engine pins, the managed hook, the marked
-//       snippet blocks) to this plugin's version, and names every file it
-//       changed. Never touches a curated artifact or a file it does not own.
+//       snippet blocks) to this plugin's version, moves our release lock's
+//       ref (decision 0021; `--lock` writes an absent one, on the user's
+//       word), and names every file it changed. Never touches a curated
+//       artifact or a file it does not own.
 //
 // Trust: the answer set, the existing config, and everything in the checkout
 // are untrusted input. Answers are validated whole before the first write;
@@ -65,6 +67,9 @@ import {
   pocockPin,
   pluginSettings,
   ZDD_PLUGIN_ID,
+  MARKETPLACE,
+  MARKETPLACE_REPO,
+  isOurDeclaration,
 } from "./lib/repo.mjs";
 
 const TEMPLATES = join(PLUGIN_ROOT, "templates");
@@ -438,6 +443,7 @@ export function detect(root) {
       services.push(entry);
       evidence.push(`\`${[...c.names].sort().join("`, `")}\` read in ${[...c.files].sort().map((f) => `\`${f}\``).join(", ")}${imports.length ? `; imports ${imports.map((i) => `\`${i}\``).join(", ")}` : ""} → service "${entry.name}"`);
     }
+    evidence.push("usedBy lists the files carrying a service's marker (its env name or a matching import), never the files that reach the provider through a settings object or a wrapper — say so when proposing");
     evidence.push("names are guessed from the env prefix — confirm or rename each; a prefix that is not a service goes in `ignore`");
     proposals.push({ name: "services", evidence, options: { services } });
   }
@@ -450,7 +456,25 @@ export function detect(root) {
   if (mode === "existing" && !proposals.length) {
     proposals.push({ name: "generic", evidence: ["source present but no known convention found — map-only ZDD; scaffold an extractor for it with the `extractor` skill once bootstrap is done"], options: {} });
   }
-  return { mode, proposals, apps, sourceFiles };
+  // Questions the evidence raises but cannot answer (CAS-101). Supabase beside
+  // a web app: Realtime subscriptions become `subscribes` edges, the client's
+  // own call is seen, a wrapper of the app's own is not until it is named.
+  // One question per web extractor (CR-009): a repo with both a Next.js and a
+  // React Router app may wrap Realtime differently in each.
+  const questions = [];
+  const names = proposals.map((p) => p.name);
+  if (names.includes("supabase")) {
+    for (const web of ["react-router", "nextjs"].filter((n) => names.includes(n))) {
+      questions.push({
+        topic: "realtime",
+        ask:
+          `Does the ${web === "nextjs" ? "Next.js" : "React Router"} app subscribe to Supabase Realtime through a wrapper of its own (e.g. \`live.onInsert("table", …)\`)? ` +
+          'The client\'s own `.on("postgres_changes", { table })` needs nothing; a wrapper is invisible until its call names are listed in subscribeCalls',
+        records: SUBSCRIBE_CALLS[web],
+      });
+    }
+  }
+  return { mode, proposals, apps, sourceFiles, questions };
 }
 
 // ---------------------------------------------------------------------------
@@ -539,11 +563,18 @@ function enginePath(value, label) {
 }
 // The path-bearing option keys of the built-in extractors, by extractor name.
 // A local extractor's options are its own; only these are inspected.
+// Where each web extractor names its Realtime wrapper calls (ZDD 2.1).
+const SUBSCRIBE_CALLS = { nextjs: "extractorOptions.nextjs.refs.subscribeCalls", "react-router": "extractorOptions.react-router.subscribeCalls" };
+const isCallList = (v) => Array.isArray(v) && v.every((s) => typeof s === "string" && s.length > 0 && s.length <= MAX_NAME);
+
 function validateExtractorOptions(all) {
   const obj = (v) => v && typeof v === "object" && !Array.isArray(v);
   const list = (v, label) => {
     if (!Array.isArray(v)) fail(`${label} must be an array of repo-relative paths`);
     v.forEach((p, i) => enginePath(p, `${label}[${i}]`));
+  };
+  const calls = (v, label) => {
+    if (v !== undefined && !isCallList(v)) fail(`${label} must be an array of call names (strings), e.g. ["live.onInsert"]`); // CR-011
   };
   for (const [name, opts] of Object.entries(all)) {
     if (!obj(opts)) fail(`extractorOptions.${name} must be an object`);
@@ -552,9 +583,11 @@ function validateExtractorOptions(all) {
       if (opts.refs !== undefined) {
         if (!obj(opts.refs)) fail("nextjs.refs must be an object");
         if (opts.refs.roots !== undefined) list(opts.refs.roots, "nextjs.refs.roots");
+        calls(opts.refs.subscribeCalls, "nextjs.refs.subscribeCalls");
       }
     } else if (name === "react-router") {
       for (const k of ["routesFile", "srcAliasRoot"]) if (opts[k] !== undefined) enginePath(opts[k], `react-router.${k}`);
+      calls(opts.subscribeCalls, "react-router.subscribeCalls");
     } else if (name === "services") {
       if (opts.roots !== undefined) list(opts.roots, "services.roots");
     } else if (name === "jobs") {
@@ -616,8 +649,13 @@ export function validateAnswers(a) {
 // (CR-010).
 // ---------------------------------------------------------------------------
 export class Ledger {
-  constructor(root) {
+  // dryRun (`upgrade --plan`, CAS-101): every write is recorded, none lands;
+  // a later read of a file this run "wrote" sees the pending content, so a
+  // plan computes exactly what the real run will.
+  constructor(root, { dryRun = false } = {}) {
     this.root = root;
+    this.dryRun = dryRun;
+    this.pending = new Map();
     this.wrote = [];
     this.kept = [];
     this.skipped = [];
@@ -628,11 +666,21 @@ export class Ledger {
   }
   overwrite(rel, content) {
     const path = this.abs(rel);
+    if (!this.wrote.includes(rel)) this.wrote.push(rel);
+    if (this.dryRun) return void this.pending.set(rel, content);
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, content);
-    this.wrote.push(rel);
   }
   create(rel, content, { executable = false } = {}) {
+    if (this.dryRun) {
+      if (this.exists(rel)) {
+        this.kept.push(rel);
+        return false;
+      }
+      this.pending.set(rel, content);
+      this.wrote.push(rel);
+      return true;
+    }
     const path = this.abs(rel);
     mkdirSync(dirname(path), { recursive: true });
     let fd;
@@ -661,6 +709,7 @@ export class Ledger {
     return true;
   }
   exists(rel) {
+    if (this.pending.has(rel)) return true;
     try {
       return lstatSync(this.abs(rel)).isFile();
     } catch {
@@ -668,7 +717,7 @@ export class Ledger {
     }
   }
   read(rel) {
-    return readFileSync(this.abs(rel), "utf8");
+    return this.pending.has(rel) ? this.pending.get(rel) : readFileSync(this.abs(rel), "utf8");
   }
 }
 
@@ -817,7 +866,78 @@ function writeDomainDoc(ledger, paths) {
 // local settings file, never an uninstall. A file that is not a JSON object
 // is the adopter's problem to name, not ours to replace.
 const SETTINGS_FILE = ".claude/settings.json";
-function writePluginSettings(ledger, version) {
+// The lock (decision 0021, CAS-101): the marketplace declared at this
+// release's tag, auto-update off — what the session-start release check reads.
+// A declaration is OURS when its source is this marketplace's repository; any
+// other (a fork, a mirror, a path) is the adopter's, named and never touched.
+export const lockEntry = (version) => ({ source: { source: "github", repo: MARKETPLACE_REPO, ref: `v${version}` }, autoUpdate: false });
+const isPlainObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+export { MARKETPLACE, MARKETPLACE_REPO, isOurDeclaration };
+const describeSource = (decl) => {
+  const src = isPlainObject(decl?.source) ? decl.source : {};
+  return String(src.repo ?? src.url ?? src.path ?? src.source ?? "an unknown source").slice(0, 120);
+};
+
+// The lock's half of the settings merge. mode "apply" writes the lock when
+// absent and keeps an existing one; "upgrade" moves our lock's ref, and writes
+// an absent one only on the user's word (`lock`, from `--lock`). Mutates `obj`;
+// returns the ledger notes.
+function mergeLock(obj, version, mode, lock) {
+  const ekm = obj.extraKnownMarketplaces;
+  const declared = isPlainObject(ekm) ? ekm[MARKETPLACE] : undefined;
+  const tag = `v${version}`;
+  if (ekm !== undefined && !isPlainObject(ekm)) {
+    return [`${SETTINGS_FILE}: "extraKnownMarketplaces" is not an object, so this repo is NOT locked — left as it is (bootstrap never rewrites what it cannot read); make it an object and run again to lock it`];
+  }
+  if (declared !== undefined && !isOurDeclaration(declared)) {
+    return [`${SETTINGS_FILE}: declares ${MARKETPLACE} from ${describeSource(declared)}, not this plugin's repository (${MARKETPLACE_REPO}) — yours, left as it is`];
+  }
+  if (declared === undefined) {
+    if (mode === "upgrade" && !lock) {
+      return [
+        `${SETTINGS_FILE}: no lock — this repo floats on whatever ZDD each machine last fetched, and the release check stays silent. ` +
+          `Lock it to ${tag} with \`bootstrap.mjs upgrade --lock\`, on the user's word (decision 0021)`,
+      ];
+    }
+    obj.extraKnownMarketplaces = { ...(ekm ?? {}), [MARKETPLACE]: lockEntry(version) };
+    return [
+      `${SETTINGS_FILE}: locked this repo to ZDD ${tag} (extraKnownMarketplaces, auto-update off) — every developer runs this release, ` +
+        `and moving to a new one is a deliberate PR the session-start release check announces`,
+    ];
+  }
+  // Ours: a lock is only a lock with auto-update off (CR-006).
+  const notes = [];
+  let next = declared;
+  if (declared.autoUpdate !== false) {
+    next = { ...next, autoUpdate: false };
+    notes.push(`${SETTINGS_FILE}: auto-update switched off on the zero-drift-docs declaration — a locked release moves only by a PR`);
+  }
+  const was = declared.source.ref;
+  const shown = typeof was === "string" ? was.slice(0, 40) : "(no ref)";
+  if (was !== tag && mode !== "upgrade") notes.push(`${SETTINGS_FILE}: locked to ${shown} — kept; moving the lock is upgrade's job`);
+  else if (was !== tag) {
+    next = { ...next, source: { ...next.source, ref: tag } };
+    notes.push(
+      `${SETTINGS_FILE}: lock moved ${shown} → ${tag}. After this PR merges, each developer's next session prints the route ` +
+        `that moves their machine (restart, claude plugin update, restart)`,
+    );
+  }
+  if (next !== declared) obj.extraKnownMarketplaces = { ...ekm, [MARKETPLACE]: next };
+  return notes;
+}
+
+// The repo's lock ref when the declaration is ours, else null.
+function ourLockRef(ledger) {
+  if (!ledger.exists(SETTINGS_FILE)) return null;
+  try {
+    const d = JSON.parse(ledger.read(SETTINGS_FILE))?.extraKnownMarketplaces?.[MARKETPLACE];
+    return isOurDeclaration(d) && typeof d.source.ref === "string" ? d.source.ref : null;
+  } catch {
+    return null;
+  }
+}
+
+function writePluginSettings(ledger, version, { mode = "apply", lock = false } = {}) {
   const wanted = pluginSettings();
   const pin = pocockPin();
   let existing = "";
@@ -835,18 +955,23 @@ function writePluginSettings(ledger, version) {
       return;
     }
   }
+  const before = JSON.stringify(obj);
   const ep = obj.enabledPlugins;
   const enabled = ep && typeof ep === "object" && !Array.isArray(ep) ? ep : {};
-  if (!Object.entries(wanted).some(([k, v]) => enabled[k] !== v)) {
+  const pluginsMoved = Object.entries(wanted).some(([k, v]) => enabled[k] !== v);
+  if (pluginsMoved) obj.enabledPlugins = { ...enabled, ...wanted }; // existing keys keep their place; ours are updated or appended
+  const lockNotes = mergeLock(obj, version, mode, lock);
+  if (JSON.stringify(obj) === before) {
     ledger.kept.push(SETTINGS_FILE);
+    ledger.notes.push(...lockNotes);
     return;
   }
-  obj.enabledPlugins = { ...enabled, ...wanted }; // existing keys keep their place; ours are updated or appended
   let text = JSON.stringify(obj, null, 2) + "\n";
   if (/\r\n/.test(existing)) text = text.replace(/\n/g, "\r\n");
   if (existing) ledger.overwrite(SETTINGS_FILE, text);
   else if (!ledger.create(SETTINGS_FILE, text)) return;
-  ledger.notes.push(
+  ledger.notes.push(...lockNotes);
+  if (pluginsMoved) ledger.notes.push(
     `${SETTINGS_FILE}: switched off your other Pocock copies in this repo (${pin.otherCopies.join(", ")}) — each still works in your other repos — ` +
       `and switched on ${ZDD_PLUGIN_ID} and ${pin.plugin}@${pin.marketplace}, the ${pin.plugin} ${pin.version} release plugin ${version} is tested with. ` +
       `Only one copy of a plugin name loads per session, so this is what makes the pinned one load here. Claude Code reads this file; Codex ignores it`,
@@ -911,6 +1036,14 @@ function ensureOwned(ledger, rel, content, opts) {
 // ---------------------------------------------------------------------------
 // apply
 // ---------------------------------------------------------------------------
+// Options merge (repair apply): objects deep, anything else replaced.
+function mergeOptions(base, next) {
+  if (!isPlainObject(base) || !isPlainObject(next)) return next;
+  const out = { ...base };
+  for (const [k, v] of Object.entries(next)) out[k] = mergeOptions(base[k], v);
+  return out;
+}
+
 export function apply(root, rawAnswers, { date = today(), home } = {}) {
   const answers = validateAnswers(rawAnswers);
   const ledger = new Ledger(root);
@@ -968,21 +1101,59 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
     };
     if (!hasGit(root)) config.render = { storeChanges: false };
     ledger.create("zdd/config.json", JSON.stringify(config, null, 2) + "\n");
-  } else if (
-    optIns.autoLoad !== current.autoLoad ||
-    optIns.fence !== current.fence ||
-    optIns.stop !== current.stop ||
-    // An explicit answer to a question the config has never recorded is a
-    // change even when the effective value stays the same: a 1.0 config with
-    // no `hooks.stop` answered "no" must say so, or --upgrade asks again
-    // forever (CR-008).
-    (answers.optIns && Object.hasOwn(answers.optIns, "stop") && typeof existingConfig.hooks?.stop !== "boolean")
-  ) {
-    // Repair with an explicit new answer: the hooks block is plugin-owned.
-    existingConfig.hooks = { autoLoad: optIns.autoLoad, fence: optIns.fence, stop: optIns.stop };
-    ledger.overwrite("zdd/config.json", JSON.stringify(existingConfig, null, 2) + "\n");
-    ledger.notes.push("zdd/config.json: hooks block updated to the new answers");
-  } else ledger.kept.push("zdd/config.json");
+  } else {
+    // Repair: only an explicit answer changes the config. A pre-1.0 config's
+    // extractors live under `adapter`; adding `extractors` beside it makes a
+    // shape the engine refuses (CR-010), so upgrade migrates it first.
+    if (existingConfig.adapter !== undefined && (answers.extractors?.length || answers.extractorOptions)) {
+      throw new Error('zdd/config.json still uses the legacy "adapter" — run upgrade first (it migrates to "extractors"), then this answer');
+    }
+    const before = JSON.stringify(existingConfig);
+    const repairNotes = [];
+    if (
+      optIns.autoLoad !== current.autoLoad ||
+      optIns.fence !== current.fence ||
+      optIns.stop !== current.stop ||
+      // An explicit answer to a question the config has never recorded is a
+      // change even when the effective value stays the same: a 1.0 config with
+      // no `hooks.stop` answered "no" must say so, or --upgrade asks again
+      // forever (CR-008).
+      (answers.optIns && Object.hasOwn(answers.optIns, "stop") && typeof existingConfig.hooks?.stop !== "boolean")
+    ) {
+      // The hooks block is plugin-owned.
+      existingConfig.hooks = { autoLoad: optIns.autoLoad, fence: optIns.fence, stop: optIns.stop };
+      repairNotes.push("zdd/config.json: hooks block updated to the new answers");
+    }
+    // An opt-in extractor or a Realtime wrapper the upgrade confirmed with the
+    // user (CAS-101): an explicit `extractors` answer is the list; explicit
+    // `extractorOptions` merge into each extractor's options.
+    if (answers.extractors?.length) {
+      const was = Array.isArray(existingConfig.extractors) ? existingConfig.extractors : [];
+      if (JSON.stringify(was) !== JSON.stringify(answers.extractors)) {
+        existingConfig.extractors = answers.extractors;
+        repairNotes.push(`zdd/config.json: extractors ${was.join(", ") || "(none)"} → ${answers.extractors.join(", ")}`);
+      }
+    }
+    if (answers.extractorOptions) {
+      const opts = isPlainObject(existingConfig.extractorOptions) ? existingConfig.extractorOptions : {};
+      const moved = [];
+      for (const [name, value] of Object.entries(answers.extractorOptions)) {
+        const merged = mergeOptions(opts[name], value);
+        if (JSON.stringify(merged) !== JSON.stringify(opts[name])) {
+          opts[name] = merged;
+          moved.push(name);
+        }
+      }
+      if (moved.length) {
+        existingConfig.extractorOptions = opts;
+        repairNotes.push(`zdd/config.json: extractorOptions updated for ${moved.join(", ")}`);
+      }
+    }
+    if (JSON.stringify(existingConfig) !== before) {
+      ledger.overwrite("zdd/config.json", JSON.stringify(existingConfig, null, 2) + "\n");
+      ledger.notes.push(...repairNotes);
+    } else ledger.kept.push("zdd/config.json");
+  }
 
   // --- curated skeleton (empty templates; never overwritten) ---------------
   ledger.create(paths.glossary, "# Glossary\n\n<!-- One paragraph per term: **Term**: definition. Canonical, not descriptive. -->\n");
@@ -1110,13 +1281,34 @@ function ledgerOut(l) {
 // ---------------------------------------------------------------------------
 // upgrade
 // ---------------------------------------------------------------------------
-export function upgrade(root) {
-  const ledger = new Ledger(root);
+// The guided upgrade (CAS-101): `plan` writes nothing and says what would
+// change; `drop` (ids from the plan's duplicates) removes adopter sections the
+// block now covers, on the user's word; `to` (a tag newer than this plugin)
+// moves only the lock — the rest waits for that release's own upgrade.
+export function upgrade(root, { lock = false, plan = false, drop = null, to = null, remote } = {}) {
   const version = pluginVersion();
+  if (to !== null) return moveLockOnly(root, version, to, { plan, lock, remote });
   const cfg = readConfig(root);
   if (cfg.state === "absent") throw new Error(`no zdd/config.json under ${root} — nothing to upgrade (run bootstrap without --upgrade to adopt)`);
   if (cfg.state === "invalid") throw new Error(`${cfg.error} — fix it by hand; upgrade never rewrites a config it cannot read`);
+  // Never backwards (CR-005): a teammate may already have moved the repo past
+  // the release this machine runs. The machine moves first.
+  const locked = ourLockRef(new Ledger(root));
+  if (locked && RELEASE_TAG.test(locked) && compareVersions(locked, version) > 0) {
+    throw new Error(`this repo locks ${locked}, newer than this plugin (${version}) — update this machine first (the session-start line names the commands), restart, then say "upgrade ZDD" again`);
+  }
+  if (typeof cfg.config.engine === "string" && /^\d+\.\d+\.\d+$/.test(cfg.config.engine) && compareVersions(cfg.config.engine, version) > 0) {
+    throw new Error(`zdd/config.json's engine pin ${cfg.config.engine} is newer than this plugin (${version}) — update this machine's plugin first; upgrade never moves a repo backwards`);
+  }
+  const dropIds = parseDrop(drop);
+  if (dropIds.length && !plan) {
+    const known = upgrade(root, { lock, plan: true }).duplicates.map((d) => d.id);
+    const bad = dropIds.find((id) => !known.includes(id));
+    if (bad !== undefined) throw new Error(`--drop: no duplicate ${bad} (this run names ${known.length ? known.join(", ") : "none"}) — run upgrade --plan for the list`);
+  }
+  const ledger = new Ledger(root, { dryRun: plan });
   const config = cfg.config;
+  const fromEngine = typeof config.engine === "string" ? config.engine : null;
   const hasLegacy = config.adapter !== undefined || config.adapterOptions !== undefined;
   const hasNew = config.extractors !== undefined || config.extractorOptions !== undefined;
   if (hasLegacy && hasNew) throw new Error("zdd/config.json has both 'adapter' and 'extractors' — keep one by hand before upgrading (the engine refuses this shape too)"); // CR-008
@@ -1201,23 +1393,286 @@ export function upgrade(root) {
     }
     writeSnippet(ledger, file);
   }
-  writeDomainDoc(ledger, artifactPaths(config, { lenient: true }));
-  writePluginSettings(ledger, version);
-  if (stopUnset) ledger.notes.push('hooks.stop is not set (new in 1.1: the Stop hook prompts for the curated half once per session) — it stays OFF until answered: run bootstrap apply with {"optIns":{"stop":true}} (repair mode, keeps every other choice), or add "stop": true inside the existing "hooks" object by hand');
-  ledger.notes.push("1.1 adds a blocking lint (a blessing citing a superseded or missing ADR fails `lint`) — run `npx -y " + ENGINE_PACKAGE + "@" + version + " lint` before pushing; a red result is the lint doing its job on a stale blessing");
-  if (config.claims === undefined) {
-    ledger.notes.push('claims.strict (new in 1.3): lint can enforce "every record belongs to exactly one feature slice" — an unclaimed record not on an allow-list, a stale allow-list entry, or a record two slices claim then FAILS. It is off until you add it to zdd/config.json: "claims": { "strict": true, "allowUnclaimed": ["route:/health"] }. Without it, double claims are a warning beside the unclaimed list');
+  // Adopter text outside the block that the block now covers (CAS-101):
+  // named with its lines, removed only by --drop, after the block refresh so
+  // the plan's line numbers are the real run's.
+  let duplicates = findAllDuplicates(ledger);
+  if (dropIds.length && !plan) {
+    dropSections(ledger, duplicates.filter((d) => dropIds.includes(d.id)));
+    duplicates = findAllDuplicates(ledger);
   }
-  const upgradedPaths = artifactPaths(config, { lenient: true });
-  ledger.notes.push(
-    `2.0 adds "choose patterns" (skill: patterns) and a fifth generated artifact, ${upgradedPaths.blessingIndex} — run \`render\` and commit it in this PR, or render --check fails`,
-  );
-  ledger.notes.push(
-    '2.0 makes a blessing that does not open with its trigger question ("Adding an endpoint? …") FAIL lint — run `lint` and show the developer every blessing it names; upgrade never rewrites the map, so add each question on their word',
-  );
+  writeDomainDoc(ledger, artifactPaths(config, { lenient: true }));
+  writePluginSettings(ledger, version, { mode: "upgrade", lock });
+  if (stopUnset) ledger.notes.push('hooks.stop is not set (new in 1.1: the Stop hook prompts for the curated half once per session) — it stays OFF until answered: run bootstrap apply with {"optIns":{"stop":true}} (repair mode, keeps every other choice), or add "stop": true inside the existing "hooks" object by hand');
+  const ctx = { root, config, version, paths: artifactPaths(config, { lenient: true }) };
+  for (const [release, notes] of Object.entries(UPGRADE_NOTES)) {
+    if (fromEngine && compareVersions(release, fromEngine) <= 0) continue;
+    // A note never stops an upgrade mid-write (CR-011): a config shape it
+    // did not expect is named, and the run goes on.
+    try {
+      ledger.notes.push(...notes(ctx));
+    } catch {
+      ledger.notes.push(`${release}: this release's note could not read zdd/config.json's shape — see the upgrade skill's "Upgrading to" section for it`);
+    }
+  }
   ledger.notes.push("curated artifacts (glossary, ADRs, map, metadata) untouched — upgrade never writes them");
-  ledger.notes.push("if the engine pin moved: run `render` and commit the regenerated artifacts in the same PR");
-  return { version, ...ledgerOut(ledger) };
+  ledger.notes.push("if the engine pin moved: run `derive` and `render`, then `lint`, and commit the regenerated artifacts in the same PR");
+  return { version, plan, ...ledgerOut(ledger), duplicates };
+}
+
+// ---------------------------------------------------------------------------
+// What each release brings an existing adopter (CAS-101): one entry per
+// release an upgrade crosses, said only when the repo's engine pin is older.
+// Every minor has an entry — a test fails a release without one, and the
+// `upgrade` skill carries a matching "Upgrading to X.Y" section. Each note
+// opens with its release so the narration reads as a changelog.
+// ---------------------------------------------------------------------------
+const OPT_IN_EXTRACTORS = ["components", "expo-router", "jobs", "services"];
+export const UPGRADE_NOTES = {
+  "1.1.0": ({ version }) => [
+    "1.1 adds a blocking lint (a blessing citing a superseded or missing ADR fails `lint`) — run `npx -y " + ENGINE_PACKAGE + "@" + version + " lint` before pushing; a red result is the lint doing its job on a stale blessing",
+  ],
+  "1.2.0": () => [
+    "1.2 adds the `react-router` extractor (detection offers it), a lint warning listing unclaimed records (never a failure), and their count in the human index header — the human index re-renders on the bump",
+  ],
+  "1.3.0": ({ config }) => [
+    "1.3 adds the `extractor` skill: it scaffolds a local extractor for a stack ZDD does not read yet",
+    ...(config.claims === undefined
+      ? [
+          '1.3 adds claims.strict: lint can enforce "every record belongs to exactly one feature slice" — an unclaimed record not on an allow-list, a stale allow-list entry, or a record two slices claim then FAILS. It is off until you add it to zdd/config.json: "claims": { "strict": true, "allowUnclaimed": ["route:/health"] }. Without it, double claims are a warning beside the unclaimed list',
+        ]
+      : []),
+  ],
+  "1.3.1": () => ["1.3.1 fixes the ADR index link cut — render bytes change only where an index line was cut inside a link"],
+  "2.0.0": ({ paths }) => [
+    `2.0 adds "choose patterns" (skill: patterns) and a fifth generated artifact, ${paths.blessingIndex} — run \`render\` and commit it in this PR, or render --check fails`,
+    '2.0 makes a blessing that does not open with its trigger question ("Adding an endpoint? …") FAIL lint — run `lint` and show the developer every blessing it names; upgrade never rewrites the map, so add each question on their word',
+  ],
+  "2.1.0": ({ root, config }) => {
+    const notes = [];
+    const have = new Set(Array.isArray(config.extractors) ? config.extractors : []);
+    let proposals = [];
+    try {
+      proposals = detect(root).proposals ?? [];
+    } catch {
+      notes.push("2.1 could not re-run detection here — run `bootstrap.mjs detect` to see whether the opt-in extractors (components, expo-router, jobs, services) apply");
+    }
+    for (const p of proposals) {
+      if (!OPT_IN_EXTRACTORS.includes(p.name) || have.has(p.name)) continue;
+      notes.push(
+        `2.1 offers the opt-in extractor \`${p.name}\` — evidence: ${(p.evidence ?? []).join("; ")}. ` +
+          `Never added by upgrade: on the user's word, a repair apply with it in "extractors" (and its options: ${JSON.stringify(p.options ?? {})})`,
+      );
+    }
+    // Per web extractor (CR-009); a malformed list counts as unnamed (CR-011).
+    const opts = isPlainObject(config.extractorOptions) ? config.extractorOptions : {};
+    const named = { "react-router": opts["react-router"]?.subscribeCalls, nextjs: opts.nextjs?.refs?.subscribeCalls };
+    const unnamed = have.has("supabase") ? ["react-router", "nextjs"].filter((w) => have.has(w) && !(isCallList(named[w]) && named[w].length)) : [];
+    if (unnamed.length) {
+      notes.push(
+        '2.1 maps realtime subscriptions as `subscribes` edges: the Supabase client\'s own `.on("postgres_changes", { table })` needs nothing, but a wrapper (e.g. `live.onInsert("table", …)`) is invisible until named — ask whether the app has one, and record it in ' +
+          unnamed.map((w) => SUBSCRIBE_CALLS[w]).join(" / "),
+      );
+    }
+    if (config.claims?.strict === true && config.claims.strictKinds === undefined) {
+      notes.push("2.1 adds claims.strictKinds: strict governs the new kinds (component, job, service) only where listed, so switching an opt-in extractor on never turns lint red by itself (decision 0017)");
+    }
+    notes.push(
+      "2.1 corrects a `*` in a scanned url: it no longer matches a fixed route segment (`/health`), so refs drop wherever a wildcard had reached one — expect a `derive --check` diff on the pin bump, and lint names the calls it could not place",
+    );
+    return notes;
+  },
+  "2.1.1": () => [
+    "2.1.1 moves bytes wherever a fix applies — schema-qualified tables (`public.x`) gain their edges and trigger facts, component descriptions come from the comment attached to the component, an External services list links `.json` — so re-derive and re-render on the bump",
+  ],
+  "2.2.0": () => [
+    '2.2 locks the repo to its ZDD release (decision 0021) and adds a spoken verb, "upgrade ZDD" (skill: upgrade) — this guided flow. The instruction block gains the rules every adopter needs: a release or skew line is the first line of the reply; generated-file conflicts are merged, committed, then regenerated, never hand-resolved; "update ZDD" is never delegated; a developer joining the repo installs zdd for this project',
+    "2.2 next step for the team: after this PR merges, each developer's next session start prints one line naming the exact commands that move their machine to this release — run them, then restart",
+  ],
+};
+
+export function compareVersions(a, b) {
+  const pa = String(a).replace(/^v/, "").split(/[.-]/).map(Number);
+  const pb = String(b).replace(/^v/, "").split(/[.-]/).map(Number);
+  for (let i = 0; i < 3; i++) if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) - (pb[i] || 0);
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Duplicates outside the managed block (CAS-101). A markdown section — its
+// heading down to the next heading of the same or a higher level — is named
+// when its own text (heading and the lines before its first child) speaks of
+// ZDD, and every child section is named too: a section that also carries
+// unrelated subsections is never named whole. Lines inside the managed block
+// and inside fenced code are not read. Line numbers are 1-based, inclusive.
+// ---------------------------------------------------------------------------
+// A section speaks of ZDD when its heading does, when it uses a spoken verb,
+// or when it mentions ZDD at least twice — one passing mention ("the ZDD
+// check runs in CI", a title's "smoke-test the ZDD plugin") is not a rule the
+// block duplicates (found by the CAS-101 smoke). The document's title (its
+// first heading, at level 1) is never named.
+const ZDD_VERB = /\b(?:load|update|upgrade) ZDD\b|choose patterns/i;
+const ZDD_MENTION = /\bZDD\b|zero[- ]drift|\bzdd\/|zdd-engine|agent-index|blessing-index/gi;
+const talksZdd = (heading, own) => new RegExp(ZDD_MENTION.source, "i").test(heading) || ZDD_VERB.test(own) || (own.match(ZDD_MENTION) ?? []).length >= 2;
+export function findDuplicates(text) {
+  const lines = text.split(/\r?\n/);
+  // Only beside exactly one well-formed block (CR-002): with no block nothing
+  // covers the section, and with a lone, doubled or reversed marker the
+  // refresh is refused, so the block cannot be said to carry anything.
+  if (text.split(SNIPPET_BEGIN).length !== 2 || text.split(SNIPPET_END).length !== 2) return [];
+  const b = lines.findIndex((l) => l.trimEnd() === SNIPPET_BEGIN);
+  const e = lines.findIndex((l) => l.trimEnd() === SNIPPET_END);
+  if (b === -1 || e === -1 || b > e) return [];
+  let fence = false;
+  const heads = [];
+  lines.forEach((l, i) => {
+    if (b !== -1 && e !== -1 && i >= b && i <= e) return;
+    if (/^\s*(```|~~~)/.test(l)) fence = !fence;
+    const m = !fence && /^(#{1,6})\s+\S/.exec(l);
+    if (m) heads.push({ i, level: m[1].length });
+  });
+  const blank = (i) => b !== -1 && e !== -1 && i >= b && i <= e;
+  const sections = heads.map((h, k) => {
+    const nextAny = k + 1 < heads.length ? heads[k + 1].i : lines.length;
+    const after = heads.slice(k + 1).find((x) => x.level <= h.level);
+    let end = after ? after.i : lines.length;
+    // A span never swallows the managed block: it stops where the block starts.
+    if (b !== -1 && b > h.i && b < end) end = b;
+    const own = lines.slice(h.i, nextAny).filter((_, j) => !blank(h.i + j)).join("\n");
+    const children = heads.slice(k + 1).filter((x) => x.i < end && x.level > h.level && heads.slice(k + 1).find((y) => y.i < x.i && y.level < x.level && y.level > h.level) === undefined);
+    const title = k === 0 && h.level === 1;
+    return { ...h, end, talks: !title && talksZdd(lines[h.i], own), children: children.map((c) => c.i) };
+  });
+  const byLine = new Map(sections.map((s) => [s.i, s]));
+  const named = (s) => s.talks && s.children.every((c) => named(byLine.get(c)));
+  const out = [];
+  const covered = (i) => out.some((d) => i >= d.from - 1 && i < d.to);
+  for (const s of sections) {
+    if (covered(s.i) || !named(s)) continue;
+    out.push({ heading: lines[s.i].trim(), from: s.i + 1, to: s.end });
+  }
+  return out;
+}
+// A duplicate's id is a hash of its file, its first line and its exact text
+// (CR-014): the user approves a section as and where the plan showed it, and
+// a section edited or moved since no longer answers to the id.
+function findAllDuplicates(ledger) {
+  const all = [];
+  for (const file of ["CLAUDE.md", "AGENTS.md"]) {
+    if (!ledger.exists(file)) continue;
+    const text = ledger.read(file);
+    const lines = text.split(/\r?\n/);
+    // The id binds the section's text AND its place (CR-022, CR-023): identical
+    // copies differ by line, and any edit above or inside the section between
+    // the plan and the write changes the id, so the write refuses.
+    for (const d of findDuplicates(text)) {
+      const body = lines.slice(d.from - 1, d.to).join("\n");
+      const id = createHash("sha256").update(`${file}\0${d.from}\0${body}`).digest("hex").slice(0, 8);
+      all.push({ id, file, ...d });
+    }
+  }
+  return all;
+}
+function dropSections(ledger, chosen) {
+  for (const file of new Set(chosen.map((d) => d.file))) {
+    const text = ledger.read(file);
+    const eol = /\r\n/.test(text) ? "\r\n" : "\n";
+    const lines = text.split(/\r?\n/);
+    const mine = chosen.filter((d) => d.file === file).sort((x, y) => y.from - x.from);
+    for (const d of mine) lines.splice(d.from - 1, d.to - d.from + 1);
+    ledger.overwrite(file, lines.join(eol));
+    for (const d of mine.reverse()) ledger.notes.push(`${file}: removed "${d.heading}" (lines ${d.from}–${d.to}), on the user's word — the ZDD block now carries it`);
+  }
+}
+function parseDrop(drop) {
+  if (drop === null || drop === undefined || drop === false) return [];
+  const ids = String(drop).split(",").map((s) => s.trim().toLowerCase());
+  if (!ids.every((s) => /^[0-9a-f]{8}$/.test(s))) throw new Error("--drop takes the ids upgrade --plan printed (8 hex characters each, comma-separated)");
+  return [...new Set(ids)];
+}
+
+// ---------------------------------------------------------------------------
+// A newer release than the running plugin (CAS-101). `release-status` finds
+// the newest release tag on the marketplace's repository; `upgrade --to`
+// moves only our lock to it. Claude Code loads a new plugin version only at
+// start, so the rest of the upgrade is that release's own run, after the
+// restart and the update the session-start line names.
+// ---------------------------------------------------------------------------
+const RELEASE_TAG = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+export function newestTag(lsRemote) {
+  let best = null;
+  for (const line of String(lsRemote).split(/\r?\n/)) {
+    const m = /\trefs\/tags\/(\S+)$/.exec(line);
+    if (!m || !RELEASE_TAG.test(m[1])) continue;
+    if (!best || compareVersions(m[1], best) > 0) best = m[1];
+  }
+  return best;
+}
+export function releaseStatus(root, remote = `https://github.com/${MARKETPLACE_REPO}.git`) {
+  const running = pluginVersion();
+  let lock = null;
+  try {
+    const s = JSON.parse(readFileSync(join(root, SETTINGS_FILE), "utf8"));
+    const d = s?.extraKnownMarketplaces?.[MARKETPLACE];
+    if (isOurDeclaration(d) && typeof d.source.ref === "string") lock = d.source.ref;
+  } catch {
+    /* no settings: no lock */
+  }
+  const out = remoteTags(remote);
+  const newest = newestTag(out);
+  return { lock, running, newest, newer: newest !== null && compareVersions(newest, running) > 0 };
+}
+function remoteTags(remote = `https://github.com/${MARKETPLACE_REPO}.git`) {
+  return execFileSync("git", ["ls-remote", "--tags", "--refs", remote], { encoding: "utf8", timeout: 30000, stdio: ["ignore", "pipe", "pipe"] });
+}
+// Every --to is lock-only (CR-004): the target must be a release tag the
+// marketplace's repository has (CR-003), never below this plugin or the
+// repo's current lock; an absent lock is written only with --lock (CR-008);
+// --plan writes nothing.
+function moveLockOnly(root, version, to, { plan = false, lock = false, remote } = {}) {
+  if (!RELEASE_TAG.test(String(to))) throw new Error("--to must be a release tag, vX.Y.Z");
+  if (compareVersions(to, version) < 0) throw new Error(`--to ${to} is older than this plugin (${version}) — upgrade never moves a lock backwards`);
+  const ledger = new Ledger(root, { dryRun: plan });
+  let obj = {};
+  let existing = "";
+  if (ledger.exists(SETTINGS_FILE)) {
+    existing = ledger.read(SETTINGS_FILE);
+    try {
+      obj = JSON.parse(existing);
+    } catch {
+      throw new Error(`${SETTINGS_FILE} is not valid JSON — fix it by hand`);
+    }
+    if (!isPlainObject(obj)) throw new Error(`${SETTINGS_FILE} is not a JSON object — fix it by hand`);
+  }
+  const ekm = obj.extraKnownMarketplaces;
+  if (ekm !== undefined && !isPlainObject(ekm)) throw new Error(`${SETTINGS_FILE}: "extraKnownMarketplaces" is not an object — fix it by hand`);
+  const d = ekm?.[MARKETPLACE];
+  if (d === undefined && !lock) throw new Error(`no lock in ${SETTINGS_FILE} — add --lock to lock this repo at ${to} (on the user's word; decision 0021)`);
+  if (d !== undefined && !isOurDeclaration(d)) throw new Error(`${SETTINGS_FILE} declares ${MARKETPLACE} from ${describeSource(d)}, not this plugin's repository — move it by hand`);
+  const was = d === undefined ? null : typeof d.source.ref === "string" ? d.source.ref : null;
+  if (was && RELEASE_TAG.test(was) && compareVersions(to, was) < 0) throw new Error(`--to ${to} is older than this repo's lock (${was}) — upgrade never moves a lock backwards`);
+  let tags;
+  try {
+    tags = remoteTags(remote);
+  } catch {
+    throw new Error(`could not read the release tags from ${remote ?? MARKETPLACE_REPO} — check the network and try again; the lock is unchanged`);
+  }
+  if (!String(tags).split(/\r?\n/).some((l) => l.endsWith(`refs/tags/${to}`))) throw new Error(`${to} is not a release tag on ${remote ?? MARKETPLACE_REPO} — use the tag release-status printed`);
+
+  const next = d === undefined ? lockEntry(to.slice(1)) : { ...d, source: { ...d.source, ref: to }, autoUpdate: false };
+  if (JSON.stringify(next) === JSON.stringify(d)) {
+    ledger.kept.push(SETTINGS_FILE);
+  } else {
+    obj.extraKnownMarketplaces = { ...(ekm ?? {}), [MARKETPLACE]: next };
+    let text = JSON.stringify(obj, null, 2) + "\n";
+    if (/\r\n/.test(existing)) text = text.replace(/\n/g, "\r\n");
+    ledger.overwrite(SETTINGS_FILE, text);
+    ledger.notes.push(`${SETTINGS_FILE}: ${was ? `lock moved ${was.slice(0, 40)} → ${to}` : `locked this repo to ZDD ${to}`} (auto-update off) — nothing else changes in this run`);
+  }
+  ledger.notes.push(
+    `next: restart Claude Code; the first line of the new session names the commands that move this machine to ${to} — run them and restart again; then say "upgrade ZDD" again: that run is ${to}'s own, and shows the rest of the changes before writing them`,
+  );
+  return { version, plan, to, ...ledgerOut(ledger), duplicates: [] };
 }
 
 // ---------------------------------------------------------------------------
@@ -1241,6 +1696,7 @@ export function narrateDetect(d, pocock) {
       out.push(`      options:  ${JSON.stringify(p.options)}`);
     }
     for (const a of d.apps) out.push(`  - map only: ${a.name} — ${a.evidence}; extractor ${a.extractor}`);
+    for (const q of d.questions ?? []) out.push(`  ask: ${q.ask} (recorded under ${q.records})`);
   }
   out.push(narratePocock(pocock));
   return out.map(printable).join("\n");
@@ -1272,7 +1728,7 @@ export function narrateApply(r) {
     out.push("One step only you can do: in branch protection, require the `zdd` check to pass and require branches to be up to date before merging. Now stale generated artifacts cannot merge.");
   } else {
     out.push(
-      "CI declined: ZDD runs on the two verbs alone" +
+      "CI declined: ZDD runs on the spoken verbs alone" +
         (r.optIns.prePush ? ", with the pre-push hook making a forgotten update loud" : "") +
         ". The guarantee is weaker without CI — drift is a habit you keep, not a check that blocks a merge.",
     );
@@ -1282,12 +1738,24 @@ export function narrateApply(r) {
 }
 
 export function narrateUpgrade(r) {
-  const out = [`Upgrade to plugin ${r.version}`];
+  const title = r.to ? `Lock move to ${r.to}` : `Upgrade to plugin ${r.version}`;
+  const out = [r.plan ? `${r.to ? `Lock move plan to ${r.to}` : `Upgrade plan for plugin ${r.version}`} — nothing written yet` : title];
+  const verb = r.plan ? "would change" : "changed";
   if (!r.wrote.length) out.push("  nothing to change — every plugin-owned file is already at this version");
-  for (const f of r.wrote) out.push(`  changed ${f}`);
+  for (const f of r.wrote) out.push(`  ${verb} ${f}`);
   for (const f of r.kept) out.push(`  kept    ${f}`);
   for (const n of r.notes) out.push(`  note    ${n}`);
+  for (const d of r.duplicates ?? []) {
+    out.push(`  outside the ZDD block: [${d.id}] ${d.file} lines ${d.from}–${d.to} "${d.heading}" — read it against the block; remove it only on the user's word (--drop=${d.id})`);
+  }
   return out.map(printable).join("\n");
+}
+
+export function narrateReleaseStatus(s) {
+  if (!s.newest) return "No ZDD release tag found on the marketplace's repository.";
+  const lock = s.lock ? `this repo locks ${s.lock}` : "this repo has no lock";
+  if (s.newer) return `ZDD ${s.newest} is out; ${lock} and this session runs ${s.running}. Release notes: https://github.com/${MARKETPLACE_REPO}/releases/tag/${s.newest}`;
+  return `ZDD ${s.running} is the newest release; ${lock}.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -1309,10 +1777,15 @@ if (process.argv[1] && posixify(process.argv[1]).endsWith("/scripts/bootstrap.mj
       const r = apply(root, answers, { date: flags.date || today(), home: flags.home });
       process.stdout.write(flags.json ? JSON.stringify(r, null, 2) + "\n" : narrateApply(r) + "\n");
     } else if (cmd === "upgrade") {
-      const r = upgrade(root);
+      const to = flags.to === undefined ? null : String(flags.to);
+      const remote = typeof flags.remote === "string" ? flags.remote : undefined;
+      const r = upgrade(root, { lock: flags.lock === true, plan: flags.plan === true, drop: flags.drop ?? null, to, remote });
       process.stdout.write(flags.json ? JSON.stringify(r, null, 2) + "\n" : narrateUpgrade(r) + "\n");
+    } else if (cmd === "release-status") {
+      const s = releaseStatus(root, typeof flags.remote === "string" ? flags.remote : undefined);
+      process.stdout.write(flags.json ? JSON.stringify(s) + "\n" : printable(narrateReleaseStatus(s)) + "\n");
     } else {
-      process.stderr.write("Usage: bootstrap.mjs <detect|apply --answers=<file>|upgrade> [--root=<dir>] [--date=YYYY-MM-DD] [--home=<dir>] [--json]\n");
+      process.stderr.write("Usage: bootstrap.mjs <detect|apply --answers=<file>|upgrade [--plan] [--lock] [--drop=<ids>] [--to=vX.Y.Z]|release-status [--remote=<url>]> [--root=<dir>] [--date=YYYY-MM-DD] [--home=<dir>] [--json]\n");
       process.exit(2);
     }
   } catch (e) {

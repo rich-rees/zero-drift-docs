@@ -1,6 +1,6 @@
 # 0014 — A ZDD release pins and brings in one Pocock release
 
-**Date:** 2026-10-06 · **Status:** accepted · **Origin:** CAS-93, from CAS-92 (pinning Cascade's plugins). mattpocock/skills v1.3.0 renamed the root `CONTEXT.md` to `GLOSSARY.md`; six of its skills read that root file by name; ZDD's glossary lives at `zdd/glossary.md`. A plain ZDD adopter who updated Pocock lost the glossary silently: nothing failed, the skills just stopped reading it, and two of them would create a stray root `GLOSSARY.md`.
+**Date:** 2026-10-06 · **Status:** accepted; supersedes in part [0003](0003-kernel-and-opt-ins.md) point 4's "never writes into `.claude/settings.json`" (pointer added by CAS-101) · **Origin:** CAS-93, from CAS-92 (pinning Cascade's plugins). mattpocock/skills v1.3.0 renamed the root `CONTEXT.md` to `GLOSSARY.md`; six of its skills read that root file by name; ZDD's glossary lives at `zdd/glossary.md`. A plain ZDD adopter who updated Pocock lost the glossary silently: nothing failed, the skills just stopped reading it, and two of them would create a stray root `GLOSSARY.md`.
 
 **Supersedes in part [ADR-0004](0004-pocock-skills-recommended-not-required.md):** the technique stays Matt's and uncopied, and `grill` still self-checks and degrades; what changes is that ZDD now names and installs the release it was tested with, instead of leaving the version to whatever marketplace the adopter happens to have.
 

@@ -232,7 +232,7 @@ further. For example, Cascade's harness:
   why, candidates minted or dropped), refreshed at closure from the record.
 
 None of that is required. A repo with no harness gets the same guarantee from
-the three verbs and the merge gate.
+the spoken verbs and the merge gate.
 
 ## Adopting it in an existing repo
 

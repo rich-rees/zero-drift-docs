@@ -24,7 +24,7 @@ on:
   workflow_dispatch:
 
 env:
-  ZDD_ENGINE: "@rich-rees/zdd-engine@2.1.1"
+  ZDD_ENGINE: "@rich-rees/zdd-engine@2.2.0"
 
 jobs:
   zero-drift:
