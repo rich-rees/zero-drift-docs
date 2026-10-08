@@ -294,3 +294,20 @@ test("a plain upgrade never moves a repo backwards: a lock or engine pin newer t
   const pinned = adopted("ahead-engine", { engine: "9.0.0" });
   assert.match(fails(pinned, ["upgrade"]), /engine pin 9\.0\.0 is newer than this plugin/);
 });
+
+test("a malformed subscribeCalls already in config never crashes an upgrade halfway: notes are computed safely, and the Realtime note is per web extractor (CR-011, CR-009)", () => {
+  const repo = adopted("bad-subscribe", { extractors: ["supabase", "nextjs", "react-router"] });
+  const cfg = JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8"));
+  cfg.extractorOptions = { nextjs: { refs: { subscribeCalls: { oops: true } } }, "react-router": { subscribeCalls: ["live.onInsert"] } };
+  writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify(cfg, null, 2) + "\n");
+  const json = runJson(repo, ["upgrade", "--plan"]);
+  const realtime = json.notes.filter((n) => /^2\.1 maps realtime/.test(n));
+  assert.equal(realtime.length, 1, realtime.join("\n"));
+  assert.match(realtime[0], /nextjs\.refs\.subscribeCalls/, "the Next.js app's wrapper is still unnamed; React Router's is named");
+});
+
+test("a malformed extraKnownMarketplaces says plainly the repo is NOT locked (CR-012)", () => {
+  const repo = adopted("ekm-array", { settings: { extraKnownMarketplaces: [] } });
+  const json = runJson(repo, ["upgrade", "--plan"]);
+  assert.ok(json.notes.some((n) => /this repo is NOT locked/.test(n)), json.notes.join("\n"));
+});

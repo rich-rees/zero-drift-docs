@@ -459,17 +459,20 @@ export function detect(root) {
   // Questions the evidence raises but cannot answer (CAS-101). Supabase beside
   // a web app: Realtime subscriptions become `subscribes` edges, the client's
   // own call is seen, a wrapper of the app's own is not until it is named.
+  // One question per web extractor (CR-009): a repo with both a Next.js and a
+  // React Router app may wrap Realtime differently in each.
   const questions = [];
   const names = proposals.map((p) => p.name);
-  const web = ["react-router", "nextjs"].find((n) => names.includes(n));
-  if (names.includes("supabase") && web) {
-    questions.push({
-      topic: "realtime",
-      ask:
-        'Does the app subscribe to Supabase Realtime through a wrapper of its own (e.g. `live.onInsert("table", …)`)? ' +
-        'The client\'s own `.on("postgres_changes", { table })` needs nothing; a wrapper is invisible until its call names are listed in subscribeCalls',
-      records: web === "nextjs" ? "extractorOptions.nextjs.refs.subscribeCalls" : "extractorOptions.react-router.subscribeCalls",
-    });
+  if (names.includes("supabase")) {
+    for (const web of ["react-router", "nextjs"].filter((n) => names.includes(n))) {
+      questions.push({
+        topic: "realtime",
+        ask:
+          `Does the ${web === "nextjs" ? "Next.js" : "React Router"} app subscribe to Supabase Realtime through a wrapper of its own (e.g. \`live.onInsert("table", …)\`)? ` +
+          'The client\'s own `.on("postgres_changes", { table })` needs nothing; a wrapper is invisible until its call names are listed in subscribeCalls',
+        records: SUBSCRIBE_CALLS[web],
+      });
+    }
   }
   return { mode, proposals, apps, sourceFiles, questions };
 }
@@ -560,11 +563,18 @@ function enginePath(value, label) {
 }
 // The path-bearing option keys of the built-in extractors, by extractor name.
 // A local extractor's options are its own; only these are inspected.
+// Where each web extractor names its Realtime wrapper calls (ZDD 2.1).
+const SUBSCRIBE_CALLS = { nextjs: "extractorOptions.nextjs.refs.subscribeCalls", "react-router": "extractorOptions.react-router.subscribeCalls" };
+const isCallList = (v) => Array.isArray(v) && v.every((s) => typeof s === "string" && s.length > 0 && s.length <= MAX_NAME);
+
 function validateExtractorOptions(all) {
   const obj = (v) => v && typeof v === "object" && !Array.isArray(v);
   const list = (v, label) => {
     if (!Array.isArray(v)) fail(`${label} must be an array of repo-relative paths`);
     v.forEach((p, i) => enginePath(p, `${label}[${i}]`));
+  };
+  const calls = (v, label) => {
+    if (v !== undefined && !isCallList(v)) fail(`${label} must be an array of call names (strings), e.g. ["live.onInsert"]`); // CR-011
   };
   for (const [name, opts] of Object.entries(all)) {
     if (!obj(opts)) fail(`extractorOptions.${name} must be an object`);
@@ -573,9 +583,11 @@ function validateExtractorOptions(all) {
       if (opts.refs !== undefined) {
         if (!obj(opts.refs)) fail("nextjs.refs must be an object");
         if (opts.refs.roots !== undefined) list(opts.refs.roots, "nextjs.refs.roots");
+        calls(opts.refs.subscribeCalls, "nextjs.refs.subscribeCalls");
       }
     } else if (name === "react-router") {
       for (const k of ["routesFile", "srcAliasRoot"]) if (opts[k] !== undefined) enginePath(opts[k], `react-router.${k}`);
+      calls(opts.subscribeCalls, "react-router.subscribeCalls");
     } else if (name === "services") {
       if (opts.roots !== undefined) list(opts.roots, "services.roots");
     } else if (name === "jobs") {
@@ -875,7 +887,7 @@ function mergeLock(obj, version, mode, lock) {
   const declared = isPlainObject(ekm) ? ekm[MARKETPLACE] : undefined;
   const tag = `v${version}`;
   if (ekm !== undefined && !isPlainObject(ekm)) {
-    return [`${SETTINGS_FILE}: "extraKnownMarketplaces" is not an object — left as it is, so this repo has no lock and the release check stays silent`];
+    return [`${SETTINGS_FILE}: "extraKnownMarketplaces" is not an object, so this repo is NOT locked — left as it is (bootstrap never rewrites what it cannot read); make it an object and run again to lock it`];
   }
   if (declared !== undefined && !isOurDeclaration(declared)) {
     return [`${SETTINGS_FILE}: declares ${MARKETPLACE} from ${describeSource(declared)}, not this plugin's repository (${MARKETPLACE_REPO}) — yours, left as it is`];
@@ -1090,7 +1102,12 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
     if (!hasGit(root)) config.render = { storeChanges: false };
     ledger.create("zdd/config.json", JSON.stringify(config, null, 2) + "\n");
   } else {
-    // Repair: only an explicit answer changes the config.
+    // Repair: only an explicit answer changes the config. A pre-1.0 config's
+    // extractors live under `adapter`; adding `extractors` beside it makes a
+    // shape the engine refuses (CR-010), so upgrade migrates it first.
+    if (existingConfig.adapter !== undefined && (answers.extractors?.length || answers.extractorOptions)) {
+      throw new Error('zdd/config.json still uses the legacy "adapter" — run upgrade first (it migrates to "extractors"), then this answer');
+    }
     const before = JSON.stringify(existingConfig);
     const repairNotes = [];
     if (
@@ -1390,7 +1407,13 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
   const ctx = { root, config, version, paths: artifactPaths(config, { lenient: true }) };
   for (const [release, notes] of Object.entries(UPGRADE_NOTES)) {
     if (fromEngine && compareVersions(release, fromEngine) <= 0) continue;
-    ledger.notes.push(...notes(ctx));
+    // A note never stops an upgrade mid-write (CR-011): a config shape it
+    // did not expect is named, and the run goes on.
+    try {
+      ledger.notes.push(...notes(ctx));
+    } catch {
+      ledger.notes.push(`${release}: this release's note could not read zdd/config.json's shape — see the upgrade skill's "Upgrading to" section for it`);
+    }
   }
   ledger.notes.push("curated artifacts (glossary, ADRs, map, metadata) untouched — upgrade never writes them");
   ledger.notes.push("if the engine pin moved: run `derive` and `render`, then `lint`, and commit the regenerated artifacts in the same PR");
@@ -1435,14 +1458,15 @@ export const UPGRADE_NOTES = {
           `Never added by upgrade: on the user's word, a repair apply with it in "extractors" (and its options: ${JSON.stringify(p.options ?? {})})`,
       );
     }
-    const opts = config.extractorOptions ?? {};
-    if (have.has("supabase") && (have.has("react-router") || have.has("nextjs"))) {
-      const named = [...(opts["react-router"]?.subscribeCalls ?? []), ...(opts.nextjs?.refs?.subscribeCalls ?? [])];
-      if (!named.length) {
-        notes.push(
-          '2.1 maps realtime subscriptions as `subscribes` edges: the Supabase client\'s own `.on("postgres_changes", { table })` needs nothing, but a wrapper (e.g. `live.onInsert("table", …)`) is invisible until named — ask whether the app has one, and add it to `subscribeCalls` under the react-router (or nextjs.refs) options',
-        );
-      }
+    // Per web extractor (CR-009); a malformed list counts as unnamed (CR-011).
+    const opts = isPlainObject(config.extractorOptions) ? config.extractorOptions : {};
+    const named = { "react-router": opts["react-router"]?.subscribeCalls, nextjs: opts.nextjs?.refs?.subscribeCalls };
+    const unnamed = have.has("supabase") ? ["react-router", "nextjs"].filter((w) => have.has(w) && !(isCallList(named[w]) && named[w].length)) : [];
+    if (unnamed.length) {
+      notes.push(
+        '2.1 maps realtime subscriptions as `subscribes` edges: the Supabase client\'s own `.on("postgres_changes", { table })` needs nothing, but a wrapper (e.g. `live.onInsert("table", …)`) is invisible until named — ask whether the app has one, and record it in ' +
+          unnamed.map((w) => SUBSCRIBE_CALLS[w]).join(" / "),
+      );
     }
     if (config.claims?.strict === true && config.claims.strictKinds === undefined) {
       notes.push("2.1 adds claims.strictKinds: strict governs the new kinds (component, job, service) only where listed, so switching an opt-in extractor on never turns lint red by itself (decision 0017)");

@@ -34,7 +34,7 @@ test("Supabase beside a Next.js app: detection asks the Realtime-wrapper questio
   assert.match(q.ask, /wrapper of its own/);
   assert.match(q.ask, /\.on\("postgres_changes"/);
   assert.deepEqual(q.records, "extractorOptions.nextjs.refs.subscribeCalls");
-  assert.match(detect(repo, false), /^ {2}ask: Does the app subscribe to Supabase Realtime through a wrapper of its own/m);
+  assert.match(detect(repo, false), /^ {2}ask: Does the Next.js app subscribe to Supabase Realtime through a wrapper of its own/m);
 });
 
 test("Supabase alone, or a web app alone: no Realtime question", (t) => {
@@ -89,4 +89,58 @@ test("a repair apply records explicit extractors and merges extractorOptions, ke
   assert.ok(r.notes.some((n) => /zdd\/config\.json: extractorOptions updated for components, nextjs/.test(n)), r.notes.join("\n"));
   const again = run();
   assert.ok(!again.wrote.includes("zdd/config.json"), "the same answers again: nothing to write");
+});
+
+// ---- CAS-101 review fixes ------------------------------------------------
+const applyIn = (repo, answers, extra = []) => {
+  const file = join(repo, "answers.json");
+  writeFileSync(file, JSON.stringify(answers));
+  return execFileSync(process.execPath, [BOOTSTRAP, "apply", `--answers=${file}`, "--json", `--root=${repo}`, "--date=2026-10-08", ...extra], { encoding: "utf8" });
+};
+const applyFails = (repo, answers) => {
+  const file = join(repo, "answers.json");
+  writeFileSync(file, JSON.stringify(answers));
+  try {
+    execFileSync(process.execPath, [BOOTSTRAP, "apply", `--answers=${file}`, `--root=${repo}`, "--date=2026-10-08"], { encoding: "utf8", stdio: "pipe" });
+  } catch (e) {
+    return String(e.stderr);
+  }
+  assert.fail("expected apply to fail");
+};
+
+test("Supabase beside BOTH a Next.js and a React Router app: one Realtime question per web extractor (CR-009)", (t) => {
+  const repo = scratch(t);
+  mkdirSync(join(repo, "supabase", "migrations"), { recursive: true });
+  writeFileSync(join(repo, "supabase", "migrations", "001_init.sql"), "create table things (id int);\n");
+  writeFileSync(join(repo, "package.json"), JSON.stringify({ dependencies: { next: "14.0.0", "react-router-dom": "6.0.0" } }));
+  mkdirSync(join(repo, "apps", "admin", "src"), { recursive: true });
+  writeFileSync(join(repo, "apps", "admin", "src", "routes.tsx"), 'import { createBrowserRouter } from "react-router-dom";\nexport const router = createBrowserRouter([]);\n');
+  const json = JSON.parse(detect(repo));
+  assert.deepEqual(json.questions.filter((q) => q.topic === "realtime").map((q) => q.records).sort(), ["extractorOptions.nextjs.refs.subscribeCalls", "extractorOptions.react-router.subscribeCalls"]);
+});
+
+test("Supabase beside a web app with no Supabase: no Realtime question; a web app alone: none either", (t) => {
+  const repo = scratch(t);
+  writeFileSync(join(repo, "package.json"), JSON.stringify({ dependencies: { next: "14.0.0" } }));
+  assert.deepEqual(JSON.parse(detect(repo)).questions, []);
+});
+
+test("a repair apply on a pre-1.0 `adapter` config refuses an extractors answer before writing — the engine refuses the mixed shape (CR-010)", (t) => {
+  const repo = scratch(t);
+  mkdirSync(join(repo, "zdd"), { recursive: true });
+  const legacy = JSON.stringify({ adapter: "nextjs-supabase", adapterOptions: {} }, null, 2) + "\n";
+  writeFileSync(join(repo, "zdd", "config.json"), legacy);
+  assert.match(applyFails(repo, { extractors: ["supabase", "nextjs", "components"] }), /legacy "adapter".*run upgrade first/);
+  assert.equal(readFileSync(join(repo, "zdd", "config.json"), "utf8"), legacy);
+});
+
+test("subscribeCalls must be an array of strings, in both places, before anything is written (CR-011)", (t) => {
+  const repo = scratch(t);
+  mkdirSync(join(repo, "zdd"), { recursive: true });
+  const config = JSON.stringify({ extractors: ["supabase", "nextjs"], extractorOptions: { nextjs: { appDir: "src/app" } }, engine: "2.2.0" }, null, 2) + "\n";
+  writeFileSync(join(repo, "zdd", "config.json"), config);
+  assert.match(applyFails(repo, { extractorOptions: { nextjs: { refs: { subscribeCalls: "live.onInsert" } } } }), /nextjs\.refs\.subscribeCalls must be an array of call names/);
+  assert.match(applyFails(repo, { extractorOptions: { "react-router": { subscribeCalls: ["ok", 3] } } }), /react-router\.subscribeCalls must be an array of call names/);
+  assert.equal(readFileSync(join(repo, "zdd", "config.json"), "utf8"), config);
+  applyIn(repo, { extractorOptions: { nextjs: { refs: { subscribeCalls: ["live.onInsert"] } } } });
 });
