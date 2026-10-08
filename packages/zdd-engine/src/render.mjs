@@ -405,7 +405,7 @@ function buildConcepts() {
   };
   const fallbackTag = (record) => {
     if (record.kind === "route") return routeArea(record);
-    if (record.kind === "surface") return record.title.split("/").filter(Boolean)[0] ?? "root";
+    if (record.kind === "surface") return record.title.replace(/\s\([^)]*\)$/, "").split("/").filter(Boolean)[0] ?? "root";
     if (record.facts.namespace) return record.facts.namespace;
     return record.kind;
   };
