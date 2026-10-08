@@ -318,3 +318,14 @@ test("a malformed extraKnownMarketplaces says plainly the repo is NOT locked (CR
   const json = runJson(repo, ["upgrade", "--plan"]);
   assert.ok(json.notes.some((n) => /this repo is NOT locked/.test(n)), json.notes.join("\n"));
 });
+
+test("two identical duplicate sections get distinct ids, and --drop removes only the one chosen (CR-022)", () => {
+  const twice = ["# T", "", "## Loading ZDD", "", 'Say "load ZDD".', "", "## Loading ZDD", "", 'Say "load ZDD".', "", "<!-- zdd:begin -->", "x", "<!-- zdd:end -->", ""].join("\n");
+  const repo = adopted("identical", { claude: twice });
+  const dups = runJson(repo, ["upgrade", "--plan"]).duplicates;
+  assert.equal(dups.length, 2);
+  assert.notEqual(dups[0].id, dups[1].id);
+  runJson(repo, ["upgrade", `--drop=${dups[1].id}`]);
+  const after = readFileSync(join(repo, "CLAUDE.md"), "utf8");
+  assert.equal(after.split("## Loading ZDD").length - 1, 1, "exactly one removed");
+});
