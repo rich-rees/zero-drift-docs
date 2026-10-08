@@ -48,7 +48,7 @@ const TEMPLATES = join(PLUGIN_ROOT, "templates", "extractor");
 export const IO_SINCE = "1.3.0";
 // Mirror of the engine's registry (packages/zdd-engine/src/derive.mjs
 // EXTRACTORS) — a local name may not shadow one. A test holds the two together.
-export const BUILT_INS = ["supabase", "nextjs", "fastapi", "react-router", "generic"];
+export const BUILT_INS = ["supabase", "nextjs", "fastapi", "react-router", "components", "generic"];
 const NAME_RE = /^[a-z][a-z0-9-]*$/; // the engine's NAME_RE
 const KIND_RE = /^[a-z][a-z0-9_-]*$/; // the engine's KIND_RE
 const EXT_RE = /^\.[A-Za-z0-9][A-Za-z0-9._-]*$/;

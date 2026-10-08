@@ -93,8 +93,10 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
   `facts.edges` maps a verb to the refs it covers, resolved and unresolved
   forms alike — `{ "subscribes": ["?table:audit_events"] }`. Every id there
   is also a plain ref (the deriver makes the union), so `refs` keeps its
-  meaning. The documented vocabulary is `uses`, `calls`, `subscribes`,
-  `reads`, `writes`, `dependsOn`, `belongsTo`; any letters-only verb is
+  meaning. The documented vocabulary is `uses`, `usedBy`, `calls`,
+  `subscribes`, `reads`, `writes`, `dependsOn`, `belongsTo` (`usedBy` is how
+  a record names another extractor's record that imports it — a component
+  cannot write into a surface's refs); any letters-only verb is
   accepted and drawn plain. The graph's edge gains `verb`; a record with no
   `facts.edges` renders exactly as before.
 - **Missing source is "nothing to inventory."** A configured root that does not

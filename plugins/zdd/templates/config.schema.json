@@ -16,7 +16,7 @@
       "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
       "minItems": 1,
       "uniqueItems": true,
-      "description": "Extractors to run, composed: one per convention in the stack (built-in: supabase, nextjs, fastapi, react-router, generic). Selected by NAME from the engine's registry or from localExtractorDir — never by path. Records from every extractor are merged and cross-extractor refs resolved after the merge.",
+      "description": "Extractors to run, composed: one per convention in the stack (built-in: supabase, nextjs, fastapi, react-router, components, generic). Selected by NAME from the engine's registry or from localExtractorDir — never by path. Records from every extractor are merged and cross-extractor refs resolved after the merge.",
       "examples": [["supabase", "nextjs"], ["supabase", "fastapi"], ["fastapi", "react-router"], ["generic"]]
     },
     "extractorOptions": {
@@ -76,6 +76,20 @@
           "properties": {
             "routesFile": { "type": "string", "default": "src/routes.tsx", "description": "The file declaring the route tree in code: a RouteObject[] / createBrowserRouter([...]) array, or <Route> elements. One surface per route with a path; layout ancestors become facts.guards." },
             "srcAliasRoot": { "type": "string", "description": "Where the tsconfig @/ alias points; default the routes file's directory." }
+          }
+        },
+        "components": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "React and React Native components (ZDD 2.1, opt-in): exported capitalised functions returning JSX in .tsx/.jsx files under roots. Pages and screens under pageDirs stay the routing extractors'. A component is shared when two or more files import it or it sits under a sharedDirs folder.",
+          "properties": {
+            "roots": { "type": "array", "items": { "type": "string" }, "default": ["src"] },
+            "extensions": { "type": "array", "items": { "type": "string" }, "default": [".tsx", ".jsx"] },
+            "excludeDirs": { "type": "array", "items": { "type": "string" }, "default": ["node_modules"] },
+            "excludeSuffixes": { "type": "array", "items": { "type": "string" }, "default": [".test.tsx", ".test.jsx", ".spec.tsx", ".spec.jsx", ".stories.tsx", ".stories.jsx", ".d.ts"] },
+            "pageDirs": { "type": "array", "items": { "type": "string" }, "default": ["pages", "screens", "app"], "description": "Folder names whose files are surfaces (pages, screens), not components." },
+            "sharedDirs": { "type": "array", "items": { "type": "string" }, "default": ["components", "ui"], "description": "Folder names that mark every component under them shared, whatever its import count." },
+            "srcAliasRoot": { "type": "string", "description": "Where the tsconfig @/ alias points; default the first root." }
           }
         },
         "generic": { "type": "object", "additionalProperties": false }

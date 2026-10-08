@@ -51,12 +51,15 @@ const KIND_DISPLAY = {
   bucket: "Storage Bucket",
   module: "Module",
   job: "Job",
+  component: "UI Component",
+  service: "External Service",
 };
 
 // Edge verbs (decision 0016) -> how a body and the agent index say them.
 // An unknown verb is said as written.
 const VERB_LABELS = {
   uses: "uses",
+  usedBy: "used by",
   calls: "calls",
   subscribes: "subscribes to",
   reads: "reads",

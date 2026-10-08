@@ -21,8 +21,10 @@ byte-identical artifacts.
    reference, as today.
 3. **The graph artifact's edges gain an optional `verb`.** A graph with no
    verbs is still `zdd-graph/1`; viewers treat a missing verb as plain.
-4. **The vocabulary is documented by the engine:** `uses`, `calls`,
-   `subscribes`, `reads`, `writes`, `dependsOn`, `belongsTo`. An unknown
+4. **The vocabulary is documented by the engine:** `uses`, `usedBy`, `calls`,
+   `subscribes`, `reads`, `writes`, `dependsOn`, `belongsTo`. `usedBy` exists
+   because extractors cannot see each other's records: a component names the
+   surface that imports it, since it cannot add `uses` to the surface. An unknown
    verb is kept in the record and the graph and drawn as plain, so a local
    extractor may coin one without the engine refusing it.
 5. **The renderer and the agent index say the verb** ("subscribes to
