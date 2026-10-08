@@ -23,6 +23,10 @@
 //                     catch-all), never a fixed word (decision 0019). A url
 //                     with a `*` that matches nothing is recorded on the
 //                     record as `facts.unplaced`, so lint can name it
+//   ?surface:<file>   every surface whose resource list holds <file> — how
+//                     a component names the screens that import it (CAS-97);
+//                     a file that is the element of several routes is all
+//                     of them, silently
 //
 // <name> is the id's text after its `kind:` prefix, or after the namespace
 // slash when the id is namespaced (`table:db/things` -> `things`); a
@@ -126,6 +130,14 @@ export function resolveRefs(records) {
     const full = afterKind(r.id);
     if (full !== short) add(map, full, r.id);
   }
+  const surfacesByFile = new Map();
+  for (const r of records) {
+    if (r.kind !== "surface") continue;
+    for (const f of r.resource) {
+      if (!surfacesByFile.has(f)) surfacesByFile.set(f, []);
+      surfacesByFile.get(f).push(r.id);
+    }
+  }
   const routes = records
     .filter((r) => r.kind === "route")
     .map((r) => ({ id: r.id, path: afterKind(r.id), match: makeRouteMatcher(afterKind(r.id)) }))
@@ -158,6 +170,10 @@ export function resolveRefs(records) {
       case "function": {
         const hit = lookup(kind, kind);
         return hit !== undefined ? hit : drop(`${kind} '${target}' matches no known ${kind}`);
+      }
+      case "surface": {
+        const hits = surfacesByFile.get(target);
+        return hits ? [...hits].sort() : drop(`surface at '${target}' matches no known surface`);
       }
       case "route": {
         // Every route tied for the best fit is kept (CAS-65): with a `*` on

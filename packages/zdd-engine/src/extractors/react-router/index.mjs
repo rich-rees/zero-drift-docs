@@ -197,7 +197,10 @@ export function lex(text) {
       } else i = Math.min(k + 1, n);
       continue;
     }
-    if (ch === "/" && regexAllowed(i)) {
+    // A `/` followed by `>` is JSX's self-closing tag, never a regex: after
+    // `name={r} />` the `}` makes a regex "allowed", and the blanked run then
+    // ate the closing braces of every component body (CAS-97).
+    if (ch === "/" && next !== ">" && regexAllowed(i)) {
       let k = i + 1;
       let cls = false;
       for (; k < n && text[k] !== "\n"; k++) {
@@ -274,7 +277,7 @@ function skipJsx(mask, i) {
 // Source model: one file's text, its masks, its line table and the `//`
 // comment block above any offset (one pass — CR-005).
 // ---------------------------------------------------------------------------
-function model(text) {
+export function model(text) {
   const { code, mask } = lex(text);
   const lineStart = [0];
   for (let i = 0; i < text.length; i++) if (text[i] === "\n") lineStart.push(i + 1);
@@ -571,7 +574,7 @@ const ID_RE = new RegExp(`^${ID}$`, "u");
 // and binds nothing (CR-018). Structure is found on the MASK (comments and
 // string bodies blanked), so an import spelled inside a string is not one
 // (CR-020); the module specifier is read from the text at the same offsets.
-function localImports(text) {
+export function localImports(text) {
   const { mask } = lex(text);
   const out = new Map();
   const note = (src, names, how) => {
