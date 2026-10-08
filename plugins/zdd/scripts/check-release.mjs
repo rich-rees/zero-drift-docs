@@ -6,14 +6,16 @@
 // That release brings one Pocock release (decision 0014). Nothing updates
 // itself, so when a PR moves the lock every other developer's next session
 // runs the old release until they refresh — and the mismatch was silent.
-// This prints one loud line per mismatch, naming expected and found and the
-// exact fix, then "restart Claude Code". Advisory, never blocking.
+// This prints one loud line naming expected and found, then the pin-move
+// route: restart, `claude plugin update`, restart again. Advisory, never
+// blocking.
 //
 // Three records are compared against the lock, all under ~/.claude/plugins:
 //   - the catalogue: known_marketplaces.json → zero-drift-docs.source.ref.
-//     One downloaded catalogue per machine, shared by every repo, refreshed
-//     only at `marketplace add`; `marketplace update` keeps the ref recorded
-//     at first add (found on CAS-96), so a moved lock needs remove + add.
+//     One downloaded catalogue per machine, shared by every repo. It follows
+//     the repo's declared ref on a restart (observed on Cascade's CAS-98);
+//     `marketplace update` keeps the ref recorded at first add (CAS-96), so
+//     it is never part of the route, and neither is a remove + add.
 //   - zdd@zero-drift-docs installed for THIS project path
 //     (installed_plugins.json, scope project, projectPath = the repo).
 //   - mattpocock-skills@zero-drift-docs installed for this project, against
@@ -33,7 +35,6 @@ import { homedir } from "node:os";
 import { parseArgs, adopterRoot, pocockPin, ZDD_PLUGIN_ID, MAX_CONFIG_BYTES } from "./lib/repo.mjs";
 
 export const MARKETPLACE = "zero-drift-docs";
-export const MARKETPLACE_REPO = "rich-rees/zero-drift-docs";
 const POCOCK_ID = `mattpocock-skills@${MARKETPLACE}`;
 const TAG = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?$/;
 const printable = (s) => String(s).replace(/[\x00-\x1f\x7f]/g, "?").slice(0, 120);
@@ -108,11 +109,19 @@ export function narrate(r) {
       return m.what === "catalogue" ? `the catalogue on this machine is at ${m.found === null ? "no recorded ref" : printable(m.found)}, this repo locks ${lock}` : `${m.what} expected ${printable(m.expected)}, ${found}`;
     })
     .join("; ");
+  // The pin-move route (CAS-99, observed on Cascade's CAS-98): a restart
+  // moves the catalogue to the lock, `plugin update` moves this project's
+  // install to the release the catalogue holds, a second restart loads it.
+  // A plugin with no install for this project has nothing to update, so it
+  // is installed. When only the catalogue is behind, one restart suffices.
   const catalogueMoved = r.mismatches.some((m) => m.what === "catalogue");
+  const plugins = r.mismatches
+    .filter((m) => m.what !== "catalogue")
+    .map((m) => (m.found === null ? `claude plugin install ${m.what} --scope project` : `claude plugin update ${m.what}`));
   const steps = [];
-  if (catalogueMoved) steps.push(`claude plugin marketplace remove ${MARKETPLACE}`, `claude plugin marketplace add ${MARKETPLACE_REPO}@${lock} --scope project`);
-  steps.push(`claude plugin install ${ZDD_PLUGIN_ID} --scope project`);
-  return [`ZDD release mismatch: ${said}. Fix, from this repo's folder: ${steps.join("; ")}; then restart Claude Code. (Installed is not loaded: this line clears on the next session.)`];
+  if (catalogueMoved) steps.push(`restart Claude Code (the catalogue follows this repo's lock on restart)`);
+  if (plugins.length) steps.push(...plugins, catalogueMoved ? "then restart Claude Code again" : "then restart Claude Code");
+  return [`ZDD release mismatch: ${said}. Fix, from this repo's folder: ${steps.join("; ")}. (Installed is not loaded: this line clears on the next session.)`];
 }
 
 function main() {
