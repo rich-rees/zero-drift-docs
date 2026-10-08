@@ -1,6 +1,6 @@
 ---
 name: bootstrap
-description: Adopt Zero-Drift Docs in a repo — the install runbook. Detects the stack of an existing codebase (or grills for the intended stack on a greenfield repo), proposes the extractors with evidence, offers the opt-ins (auto-load hook, generated-artifact fence, Stop prompt, CI workflow, pre-push hook) as yes/no with defaults on, and WRITES them plus the instruction snippet and a seeded ADR-0001. Idempotent — a second run repairs missing pieces and never overwrites curated content. With --upgrade, migrates a repo bootstrapped by an older plugin (adapter → extractors, engine pins, snippet), narrating every file it changes. Run once when adopting; run --upgrade after updating the plugin.
+description: Adopt Zero-Drift Docs in a repo — the install runbook. Detects the stack of an existing codebase (or grills for the intended stack on a greenfield repo), proposes the extractors with evidence, offers the opt-ins (auto-load hook, generated-artifact fence, Stop prompt, CI workflow, pre-push hook) as yes/no with defaults on, and WRITES them plus the instruction snippet, the release lock and a seeded ADR-0001. Idempotent — a second run repairs missing pieces and never overwrites curated content. Run once when adopting; a repo that already uses ZDD moves to a newer release with the upgrade skill ("upgrade ZDD").
 ---
 
 # zdd:bootstrap — day one in a repo (and `--upgrade` later)
@@ -29,7 +29,9 @@ when the host sets it, but the hosts do not promise it to skill-driven shells,
 so the SKILL.md path is the reliable source.) Run from the adopter's repo
 root, or pass `--root=<dir>`.
 
-If invoked with **`--upgrade`**, skip to [Upgrade](#upgrade).
+If invoked with **`--upgrade`**, or on a repo that already has `zdd/`
+because the user wants a newer release, follow the
+[`upgrade` skill](../upgrade/SKILL.md) instead.
 
 ## Step 1 — detect
 
@@ -60,7 +62,14 @@ installed (used in step 4):
      any import whose package matches). **Services are guessed by name:**
      show each and ask the user to confirm or rename it, and to say which
      prefixes are not a service (they go in `ignore`). Never add a vendor
-     the evidence did not show.
+     the evidence did not show. Say the limit as the evidence does: a
+     service's `usedBy` is the files carrying its marker, never those that
+     reach the provider through a settings object.
+
+  Then ask every **`ask:`** line detection printed, one at a time — today,
+  when Supabase sits beside a web app, whether the app subscribes to
+  Realtime through a wrapper of its own. Record a named wrapper's call names
+  in the answer set under the key the line names (`subscribeCalls`).
 - **GREENFIELD** — no source to read. Grill for the intended stack: what
   serves the API, what holds the data, what the apps are (web, mobile), and
   where each will live. Every part maps to an extractor at its stated future
@@ -151,10 +160,15 @@ hand). Then it narrates every file as **wrote / kept / skipped** and writes:
   `mattpocock-skills@claude-plugins-official` off. Claude Code loads two
   enabled copies of one plugin name as **one**, and the other copy can win,
   so this is what makes the pinned release load here; the other copies still
-  work in the adopter's other repos. A key-level merge: every other key in
-  the file is kept. Never a user or local settings file, never an uninstall.
-  Say it the way the script does — "switched off your other Pocock copies in
-  this repo; they still work in your other repos".
+  work in the adopter's other repos. Beside them, **the lock** (decision
+  0021): `extraKnownMarketplaces["zero-drift-docs"]` pinned to this
+  release's tag, auto-update off — every developer runs the same release,
+  and moving to a new one is a deliberate PR the session-start release check
+  announces. An existing declaration is kept (a fork's is never touched). A
+  key-level merge: every other key in the file is kept. Never a user or
+  local settings file, never an uninstall. Say it the way the script does —
+  "switched off your other Pocock copies in this repo; they still work in
+  your other repos".
 
 Relay the narration to the user verbatim — the point of the ledger is that
 nothing lands unannounced.
@@ -206,59 +220,10 @@ nothing lands unannounced.
 
 ## Upgrade
 
-`bootstrap --upgrade` is the only writer of the plugin-owned files after
-adoption (the other writer, the `extractor` skill's scaffold, writes only an
-extractor the adopter asked for). Updating the plugin never touches the repo
-by itself; this does, and narrates every file:
-
-```
-node "$PLUGIN/scripts/bootstrap.mjs" upgrade
-```
-
-- `zdd/config.json`: the pre-1.0 `adapter` → `extractors` + `extractorOptions`
-  (the same split the engine applies at derive time, now made permanent),
-  `viewer.nonAreaTags` → top-level `nonAreaTags`, `engine` pin → this plugin.
-- `.github/workflows/zdd.yml` and `.githooks/pre-push`: engine pin rewritten
-  (a managed pre-push is rewritten from the template).
-- `CLAUDE.md` / `AGENTS.md`: the marked block refreshed (exactly one
-  well-formed `<!-- zdd:begin -->` / `<!-- zdd:end -->` pair; anything else is
-  refused and named); a pre-0.4 unmarked snippet is replaced only when it is
-  recognisably ours — a customised section under that heading is left alone
-  and a fresh block appended.
-- A config holding both `adapter` and `extractors` is refused — keep one by
-  hand first, as the engine demands.
-- **The Stop prompt is a new opt-in (1.1).** `upgrade` names it when
-  `hooks.stop` is unset but never answers it. Ask the question as in step 2
-  (default yes), then record the answer with a repair `apply`:
-  `node "$PLUGIN/scripts/bootstrap.mjs" apply --answers=<file>` where the
-  file is `{ "optIns": { "stop": true } }` (or `false`). Repair mode keeps
-  every other choice as it is.
-- `docs/agents/domain.md`: written when absent (the Pocock 1.3 redirect,
-  above) and narrated; an existing one is kept and never edited.
-- `.claude/settings.json`: the same four `enabledPlugins` lines as adoption
-  (above), merged in and narrated; nothing else in the file is touched.
-- **Never** the glossary, ADRs, map, or metadata.
-
-If the engine pin moved, run `render` and commit the regenerated artifacts in
-the same PR — a pin bump that lands without them fails the next CI run. Then
-run `lint`: 1.1 adds the blessing-citation check to the blocking tier, so a
-map that carries a blessing citing a superseded or missing ADR goes red on
-the first push after upgrading — the lint doing its job; re-bless or drop the
-line in the upgrade PR, and say so.
-
-**Upgrading to 2.0 ("choose patterns").** Three things change, and the ledger
-names each:
-
-- `render` writes a fifth artifact, `zdd/blessing-index.md`. Commit it in the
-  upgrade PR, or `render --check` fails.
-- The workflow's lint step becomes `lint --merge` (an owned workflow is
-  migrated in place; another shape is named for you to change by hand), so
-  CI fails while a branch's `zdd/patterns-plan.md` exists.
-- A blessing that does not open with its **trigger question** now **fails**
-  `lint`. Run `lint` and show the developer every blessing it names. **Never
-  rewrite one yourself:** propose the question each one answers, and change
-  the map only on the developer's word, in the upgrade PR. Over-long and
-  reasonless blessings are warnings — worth a pass, not a blocker.
+A repo that already uses ZDD moves to a newer release with the [`upgrade`
+skill](../upgrade/SKILL.md) ("upgrade ZDD"): it checks for a newer release,
+shows every change before writing it, and lists what to commit. `bootstrap
+--upgrade` is the same flow.
 
 ## Boundary reminder
 

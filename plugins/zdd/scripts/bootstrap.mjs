@@ -440,6 +440,7 @@ export function detect(root) {
       services.push(entry);
       evidence.push(`\`${[...c.names].sort().join("`, `")}\` read in ${[...c.files].sort().map((f) => `\`${f}\``).join(", ")}${imports.length ? `; imports ${imports.map((i) => `\`${i}\``).join(", ")}` : ""} → service "${entry.name}"`);
     }
+    evidence.push("usedBy lists the files carrying a service's marker (its env name or a matching import), never the files that reach the provider through a settings object or a wrapper — say so when proposing");
     evidence.push("names are guessed from the env prefix — confirm or rename each; a prefix that is not a service goes in `ignore`");
     proposals.push({ name: "services", evidence, options: { services } });
   }
@@ -452,7 +453,22 @@ export function detect(root) {
   if (mode === "existing" && !proposals.length) {
     proposals.push({ name: "generic", evidence: ["source present but no known convention found — map-only ZDD; scaffold an extractor for it with the `extractor` skill once bootstrap is done"], options: {} });
   }
-  return { mode, proposals, apps, sourceFiles };
+  // Questions the evidence raises but cannot answer (CAS-101). Supabase beside
+  // a web app: Realtime subscriptions become `subscribes` edges, the client's
+  // own call is seen, a wrapper of the app's own is not until it is named.
+  const questions = [];
+  const names = proposals.map((p) => p.name);
+  const web = ["react-router", "nextjs"].find((n) => names.includes(n));
+  if (names.includes("supabase") && web) {
+    questions.push({
+      topic: "realtime",
+      ask:
+        'Does the app subscribe to Supabase Realtime through a wrapper of its own (e.g. `live.onInsert("table", …)`)? ' +
+        'The client\'s own `.on("postgres_changes", { table })` needs nothing; a wrapper is invisible until its call names are listed in subscribeCalls',
+      records: web === "nextjs" ? "extractorOptions.nextjs.refs.subscribeCalls" : "extractorOptions.react-router.subscribeCalls",
+    });
+  }
+  return { mode, proposals, apps, sourceFiles, questions };
 }
 
 // ---------------------------------------------------------------------------
@@ -1537,6 +1553,7 @@ export function narrateDetect(d, pocock) {
       out.push(`      options:  ${JSON.stringify(p.options)}`);
     }
     for (const a of d.apps) out.push(`  - map only: ${a.name} — ${a.evidence}; extractor ${a.extractor}`);
+    for (const q of d.questions ?? []) out.push(`  ask: ${q.ask} (recorded under ${q.records})`);
   }
   out.push(narratePocock(pocock));
   return out.map(printable).join("\n");
