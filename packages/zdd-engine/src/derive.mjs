@@ -33,6 +33,7 @@ const EXTRACTORS = {
   "react-router": "./extractors/react-router/index.mjs",
   components: "./extractors/components/index.mjs",
   "expo-router": "./extractors/expo-router/index.mjs",
+  jobs: "./extractors/jobs/index.mjs",
   generic: "./extractors/generic/index.mjs",
 };
 const NAME_RE = /^[a-z][a-z0-9-]*$/;

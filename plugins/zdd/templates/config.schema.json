@@ -16,7 +16,7 @@
       "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
       "minItems": 1,
       "uniqueItems": true,
-      "description": "Extractors to run, composed: one per convention in the stack (built-in: supabase, nextjs, fastapi, react-router, components, expo-router, generic). Selected by NAME from the engine's registry or from localExtractorDir — never by path. Records from every extractor are merged and cross-extractor refs resolved after the merge.",
+      "description": "Extractors to run, composed: one per convention in the stack (built-in: supabase, nextjs, fastapi, react-router, components, expo-router, jobs, generic). Selected by NAME from the engine's registry or from localExtractorDir — never by path. Records from every extractor are merged and cross-extractor refs resolved after the merge.",
       "examples": [["supabase", "nextjs"], ["supabase", "fastapi"], ["fastapi", "react-router"], ["generic"]]
     },
     "extractorOptions": {
@@ -101,6 +101,17 @@
           "properties": {
             "appDir": { "type": "string", "default": "app" },
             "srcAliasRoot": { "type": "string", "description": "Where the tsconfig @/ alias points; default appDir's parent." }
+          }
+        },
+        "jobs": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Workers and scheduled jobs from committed run manifests (ZDD 2.1, opt-in, decision 0020): package.json scripts that run a module as a process (python -m x, node x.mjs), Procfile lines, railway.toml/json startCommand (+ cronSchedule = scheduled). The mode is never guessed: scheduled from a Railway file, worker from `modes`, else unknown with a lint warning.",
+          "properties": {
+            "roots": { "type": "array", "items": { "type": "string" }, "default": ["."], "description": "Where manifests are looked for; node_modules and .git are never entered." },
+            "exclude": { "type": "array", "items": { "type": "string" }, "description": "Script names that are not jobs. Default: dev, start, test, lint, build, typecheck, format, prepare, postinstall, and anything test:*, lint:*, build:*, check:*." },
+            "modes": { "type": "object", "additionalProperties": { "type": "string", "enum": ["worker", "scheduled"] }, "description": "The mode of a job the manifests do not state, by job name." },
+            "entries": { "type": "array", "description": "Processes no manifest names.", "items": { "type": "object", "required": ["name"], "additionalProperties": false, "properties": { "name": { "type": "string" }, "module": { "type": "string", "description": "A Python module, dotted (app.housekeeping)." }, "file": { "type": "string", "description": "A JS/TS entry file, relative to cwd." }, "cwd": { "type": "string", "description": "The folder the command runs in (default the repo root)." }, "mode": { "type": "string", "enum": ["worker", "scheduled"] }, "schedule": { "type": "string" }, "command": { "type": "string" }, "description": { "type": "string" } } } }
           }
         },
         "generic": { "type": "object", "additionalProperties": false }

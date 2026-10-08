@@ -1,0 +1,2 @@
+web: uv run fastapi run apps/api/app/main.py
+nightly: node scripts/nightly.mjs
