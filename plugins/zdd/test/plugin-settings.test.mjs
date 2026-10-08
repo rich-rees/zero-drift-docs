@@ -184,3 +184,16 @@ test("writer binds to reader: a freshly bootstrapped repo's lock is what the rel
   machine("v1.3.1", "1.3.1");
   assert.ok(check().startsWith(`ZDD release mismatch: the catalogue on this machine is at v1.3.1, this repo locks v${PLUGIN_VERSION};`), "loud at a stale machine");
 });
+
+test("a lock that points here with auto-update on is turned off and said so, by apply and by upgrade (CR-006)", () => {
+  const on = { "zero-drift-docs": { source: { source: "github", repo: "rich-rees/zero-drift-docs", ref: `v${PLUGIN_VERSION}` }, autoUpdate: true } };
+  const repo = settingsRepo("auto-on", { enabledPlugins: PLUGIN_SETTINGS, extraKnownMarketplaces: on });
+  const json = JSON.parse(bootstrap(repo, ["upgrade", "--json"]));
+  assert.deepEqual(readSettings(repo).extraKnownMarketplaces, LOCK);
+  assert.ok(json.notes.some((n) => /auto-update switched off/.test(n)), json.notes.join("\n"));
+  const fresh = fastapiRepo("auto-on-apply");
+  mkdirSync(join(fresh, ".claude"));
+  writeFileSync(settingsPath(fresh), JSON.stringify({ extraKnownMarketplaces: on }, null, 2) + "\n");
+  applyJson(fresh, "auto-on-apply", { name: "X" });
+  assert.deepEqual(readSettings(fresh).extraKnownMarketplaces, LOCK);
+});

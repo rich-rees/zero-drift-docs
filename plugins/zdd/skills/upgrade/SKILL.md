@@ -32,24 +32,30 @@ It names the newest release tag, the repo's lock, and the release this
 session runs. (It reads the marketplace's tags over the network; if that
 fails, say so and continue at step 2 with the running release.)
 
-- **A newer release exists and the repo is locked** (Claude Code): tell the
-  user what it is, link its release notes as printed, and ask **"Move this
-  repo to vX.Y.Z?"** On yes:
+- **A newer release exists, in Claude Code:** tell the user what it is, link
+  its release notes as printed, and ask **"Move this repo to vX.Y.Z?"** — or,
+  when the repo has **no lock**, **"Lock this repo and move it to vX.Y.Z?"**
+  (decision 0021). On yes:
 
   ```
-  node "$PLUGIN/scripts/bootstrap.mjs" upgrade --to=vX.Y.Z
+  node "$PLUGIN/scripts/bootstrap.mjs" upgrade --to=vX.Y.Z           # add --lock when there was no lock
   ```
 
-  It moves only the lock's ref. Relay its ledger, then the route, word for
-  word: **restart Claude Code; the first line of the next session names the
-  commands that move this machine — run them, restart again; then say
-  "upgrade ZDD" again.** Claude Code loads a new plugin version only at
-  start, so the rest of the upgrade is the new release's own run. **Stop
-  here** — this run is complete when the lock has moved and the user has the
-  route.
-- **No newer release**, the user said no, or the host is Codex (no lock;
-  Codex users update their install by hand): continue at step 2 with the
-  release that is running.
+  It checks the tag exists, then writes only the lock. Relay its ledger,
+  then the route, word for word: **restart Claude Code; the first line of
+  the next session names the commands that move this machine — run them,
+  restart again; then say "upgrade ZDD" again.** Claude Code loads a new
+  plugin version only at start, so the rest of the upgrade is the new
+  release's own run. **Stop here** — this run is complete when the lock has
+  moved and the user has the route.
+- **A newer release exists, in Codex** (Codex reads no lock): ask **"Update
+  ZDD to vX.Y.Z?"** On yes, the user updates the install from a terminal —
+  `codex plugin marketplace upgrade zero-drift-docs`, then `codex plugin
+  remove zdd@zero-drift-docs` and `codex plugin add zdd@zero-drift-docs` —
+  starts a new session, and says "upgrade ZDD" again. **Stop here.**
+- **No newer release**, or the user said no: continue at step 2 with the
+  release that is running. If the repo already locks a newer release than
+  this session runs, step 2 refuses and names the update — relay it.
 
 ## Step 2 — the plan
 

@@ -898,15 +898,36 @@ function mergeLock(obj, version, mode, lock) {
         `and moving to a new one is a deliberate PR the session-start release check announces`,
     ];
   }
+  // Ours: a lock is only a lock with auto-update off (CR-006).
+  const notes = [];
+  let next = declared;
+  if (declared.autoUpdate !== false) {
+    next = { ...next, autoUpdate: false };
+    notes.push(`${SETTINGS_FILE}: auto-update switched off on the zero-drift-docs declaration — a locked release moves only by a PR`);
+  }
   const was = declared.source.ref;
-  if (was === tag) return [];
   const shown = typeof was === "string" ? was.slice(0, 40) : "(no ref)";
-  if (mode !== "upgrade") return [`${SETTINGS_FILE}: locked to ${shown} — kept; moving the lock is upgrade's job`];
-  obj.extraKnownMarketplaces = { ...ekm, [MARKETPLACE]: { ...declared, source: { ...declared.source, ref: tag } } };
-  return [
-    `${SETTINGS_FILE}: lock moved ${shown} → ${tag}. After this PR merges, each developer's next session prints the route ` +
-      `that moves their machine (restart, claude plugin update, restart)`,
-  ];
+  if (was !== tag && mode !== "upgrade") notes.push(`${SETTINGS_FILE}: locked to ${shown} — kept; moving the lock is upgrade's job`);
+  else if (was !== tag) {
+    next = { ...next, source: { ...next.source, ref: tag } };
+    notes.push(
+      `${SETTINGS_FILE}: lock moved ${shown} → ${tag}. After this PR merges, each developer's next session prints the route ` +
+        `that moves their machine (restart, claude plugin update, restart)`,
+    );
+  }
+  if (next !== declared) obj.extraKnownMarketplaces = { ...ekm, [MARKETPLACE]: next };
+  return notes;
+}
+
+// The repo's lock ref when the declaration is ours, else null.
+function ourLockRef(ledger) {
+  if (!ledger.exists(SETTINGS_FILE)) return null;
+  try {
+    const d = JSON.parse(ledger.read(SETTINGS_FILE))?.extraKnownMarketplaces?.[MARKETPLACE];
+    return isOurDeclaration(d) && typeof d.source.ref === "string" ? d.source.ref : null;
+  } catch {
+    return null;
+  }
 }
 
 function writePluginSettings(ledger, version, { mode = "apply", lock = false } = {}) {
@@ -1252,12 +1273,21 @@ function ledgerOut(l) {
 // change; `drop` (ids from the plan's duplicates) removes adopter sections the
 // block now covers, on the user's word; `to` (a tag newer than this plugin)
 // moves only the lock — the rest waits for that release's own upgrade.
-export function upgrade(root, { lock = false, plan = false, drop = null, to = null } = {}) {
+export function upgrade(root, { lock = false, plan = false, drop = null, to = null, remote } = {}) {
   const version = pluginVersion();
-  if (to !== null && to !== `v${version}`) return moveLockOnly(root, version, to);
+  if (to !== null) return moveLockOnly(root, version, to, { plan, lock, remote });
   const cfg = readConfig(root);
   if (cfg.state === "absent") throw new Error(`no zdd/config.json under ${root} — nothing to upgrade (run bootstrap without --upgrade to adopt)`);
   if (cfg.state === "invalid") throw new Error(`${cfg.error} — fix it by hand; upgrade never rewrites a config it cannot read`);
+  // Never backwards (CR-005): a teammate may already have moved the repo past
+  // the release this machine runs. The machine moves first.
+  const locked = ourLockRef(new Ledger(root));
+  if (locked && RELEASE_TAG.test(locked) && compareVersions(locked, version) > 0) {
+    throw new Error(`this repo locks ${locked}, newer than this plugin (${version}) — update this machine first (the session-start line names the commands), restart, then say "upgrade ZDD" again`);
+  }
+  if (typeof cfg.config.engine === "string" && /^\d+\.\d+\.\d+$/.test(cfg.config.engine) && compareVersions(cfg.config.engine, version) > 0) {
+    throw new Error(`zdd/config.json's engine pin ${cfg.config.engine} is newer than this plugin (${version}) — update this machine's plugin first; upgrade never moves a repo backwards`);
+  }
   const dropIds = parseDrop(drop);
   if (dropIds.length && !plan) {
     const known = upgrade(root, { lock, plan: true }).duplicates.map((d) => d.id);
@@ -1559,39 +1589,61 @@ export function releaseStatus(root, remote = `https://github.com/${MARKETPLACE_R
   } catch {
     /* no settings: no lock */
   }
-  const out = execFileSync("git", ["ls-remote", "--tags", "--refs", remote], { encoding: "utf8", timeout: 30000, stdio: ["ignore", "pipe", "pipe"] });
+  const out = remoteTags(remote);
   const newest = newestTag(out);
   return { lock, running, newest, newer: newest !== null && compareVersions(newest, running) > 0 };
 }
-function moveLockOnly(root, version, to) {
+function remoteTags(remote = `https://github.com/${MARKETPLACE_REPO}.git`) {
+  return execFileSync("git", ["ls-remote", "--tags", "--refs", remote], { encoding: "utf8", timeout: 30000, stdio: ["ignore", "pipe", "pipe"] });
+}
+// Every --to is lock-only (CR-004): the target must be a release tag the
+// marketplace's repository has (CR-003), never below this plugin or the
+// repo's current lock; an absent lock is written only with --lock (CR-008);
+// --plan writes nothing.
+function moveLockOnly(root, version, to, { plan = false, lock = false, remote } = {}) {
   if (!RELEASE_TAG.test(String(to))) throw new Error("--to must be a release tag, vX.Y.Z");
   if (compareVersions(to, version) < 0) throw new Error(`--to ${to} is older than this plugin (${version}) — upgrade never moves a lock backwards`);
-  const ledger = new Ledger(root);
-  if (!ledger.exists(SETTINGS_FILE)) throw new Error(`no lock — ${SETTINGS_FILE} is absent; run upgrade (without --to) on this release first, with --lock`);
-  let obj;
-  try {
-    obj = JSON.parse(ledger.read(SETTINGS_FILE));
-  } catch {
-    throw new Error(`${SETTINGS_FILE} is not valid JSON — fix it by hand`);
+  const ledger = new Ledger(root, { dryRun: plan });
+  let obj = {};
+  let existing = "";
+  if (ledger.exists(SETTINGS_FILE)) {
+    existing = ledger.read(SETTINGS_FILE);
+    try {
+      obj = JSON.parse(existing);
+    } catch {
+      throw new Error(`${SETTINGS_FILE} is not valid JSON — fix it by hand`);
+    }
+    if (!isPlainObject(obj)) throw new Error(`${SETTINGS_FILE} is not a JSON object — fix it by hand`);
   }
-  const d = obj?.extraKnownMarketplaces?.[MARKETPLACE];
-  if (d === undefined) throw new Error(`no lock in ${SETTINGS_FILE} — run upgrade (without --to) with --lock first`);
-  if (!isOurDeclaration(d)) throw new Error(`${SETTINGS_FILE} declares ${MARKETPLACE} from ${describeSource(d)}, not this plugin's repository — move it by hand`);
-  const was = typeof d.source.ref === "string" ? d.source.ref : "(no ref)";
-  if (was === to) {
+  const ekm = obj.extraKnownMarketplaces;
+  if (ekm !== undefined && !isPlainObject(ekm)) throw new Error(`${SETTINGS_FILE}: "extraKnownMarketplaces" is not an object — fix it by hand`);
+  const d = ekm?.[MARKETPLACE];
+  if (d === undefined && !lock) throw new Error(`no lock in ${SETTINGS_FILE} — add --lock to lock this repo at ${to} (on the user's word; decision 0021)`);
+  if (d !== undefined && !isOurDeclaration(d)) throw new Error(`${SETTINGS_FILE} declares ${MARKETPLACE} from ${describeSource(d)}, not this plugin's repository — move it by hand`);
+  const was = d === undefined ? null : typeof d.source.ref === "string" ? d.source.ref : null;
+  if (was && RELEASE_TAG.test(was) && compareVersions(to, was) < 0) throw new Error(`--to ${to} is older than this repo's lock (${was}) — upgrade never moves a lock backwards`);
+  let tags;
+  try {
+    tags = remoteTags(remote);
+  } catch {
+    throw new Error(`could not read the release tags from ${remote ?? MARKETPLACE_REPO} — check the network and try again; the lock is unchanged`);
+  }
+  if (!String(tags).split(/\r?\n/).some((l) => l.endsWith(`refs/tags/${to}`))) throw new Error(`${to} is not a release tag on ${remote ?? MARKETPLACE_REPO} — use the tag release-status printed`);
+
+  const next = d === undefined ? lockEntry(to.slice(1)) : { ...d, source: { ...d.source, ref: to }, autoUpdate: false };
+  if (JSON.stringify(next) === JSON.stringify(d)) {
     ledger.kept.push(SETTINGS_FILE);
   } else {
-    obj.extraKnownMarketplaces[MARKETPLACE] = { ...d, source: { ...d.source, ref: to } };
-    const existing = ledger.read(SETTINGS_FILE);
+    obj.extraKnownMarketplaces = { ...(ekm ?? {}), [MARKETPLACE]: next };
     let text = JSON.stringify(obj, null, 2) + "\n";
     if (/\r\n/.test(existing)) text = text.replace(/\n/g, "\r\n");
     ledger.overwrite(SETTINGS_FILE, text);
-    ledger.notes.push(`${SETTINGS_FILE}: lock moved ${was.slice(0, 40)} → ${to} — nothing else changes in this run`);
+    ledger.notes.push(`${SETTINGS_FILE}: ${was ? `lock moved ${was.slice(0, 40)} → ${to}` : `locked this repo to ZDD ${to}`} (auto-update off) — nothing else changes in this run`);
   }
   ledger.notes.push(
     `next: restart Claude Code; the first line of the new session names the commands that move this machine to ${to} — run them and restart again; then say "upgrade ZDD" again: that run is ${to}'s own, and shows the rest of the changes before writing them`,
   );
-  return { version, plan: false, to, ...ledgerOut(ledger), duplicates: [] };
+  return { version, plan, to, ...ledgerOut(ledger), duplicates: [] };
 }
 
 // ---------------------------------------------------------------------------
@@ -1657,7 +1709,8 @@ export function narrateApply(r) {
 }
 
 export function narrateUpgrade(r) {
-  const out = [r.plan ? `Upgrade plan for plugin ${r.version} — nothing written yet` : `Upgrade to plugin ${r.version}`];
+  const title = r.to ? `Lock move to ${r.to}` : `Upgrade to plugin ${r.version}`;
+  const out = [r.plan ? `${r.to ? `Lock move plan to ${r.to}` : `Upgrade plan for plugin ${r.version}`} — nothing written yet` : title];
   const verb = r.plan ? "would change" : "changed";
   if (!r.wrote.length) out.push("  nothing to change — every plugin-owned file is already at this version");
   for (const f of r.wrote) out.push(`  ${verb} ${f}`);
@@ -1696,7 +1749,8 @@ if (process.argv[1] && posixify(process.argv[1]).endsWith("/scripts/bootstrap.mj
       process.stdout.write(flags.json ? JSON.stringify(r, null, 2) + "\n" : narrateApply(r) + "\n");
     } else if (cmd === "upgrade") {
       const to = flags.to === undefined ? null : String(flags.to);
-      const r = upgrade(root, { lock: flags.lock === true, plan: flags.plan === true, drop: flags.drop ?? null, to });
+      const remote = typeof flags.remote === "string" ? flags.remote : undefined;
+      const r = upgrade(root, { lock: flags.lock === true, plan: flags.plan === true, drop: flags.drop ?? null, to, remote });
       process.stdout.write(flags.json ? JSON.stringify(r, null, 2) + "\n" : narrateUpgrade(r) + "\n");
     } else if (cmd === "release-status") {
       const s = releaseStatus(root, typeof flags.remote === "string" ? flags.remote : undefined);
