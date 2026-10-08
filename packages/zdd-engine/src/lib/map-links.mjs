@@ -23,13 +23,55 @@ const normalise = (text) => text.replace(/\r\n?/g, "\n");
 // `..`, by an absolute path, or on Windows by another drive or a UNC share
 // (where path.relative answers with an absolute path, not `..`; CR-023) — or
 // to a URL is not an edge.
-export const LINK_RE = /\]\(([^)\s]+\.(?:md|json))(?:#[A-Za-z0-9_-]*)?\)/g;
+//
+// A destination is read as CommonMark reads it (CAS-96, from CAS-94): either
+// `<…>` (no line break, no unescaped `<` or `>`), or a run with no whitespace
+// whose parentheses balance, with `\(` / `\)` escaped. Reading only to the
+// first `)` cut `(app)--_layout.json` at `(app` and dropped the link silently;
+// Next.js keeps route groups in layout names, so that is a real filename.
+const TARGET_RE = /^(.+\.(?:md|json))(?:#[A-Za-z0-9_-]*)?$/;
+
+// The destination after `](` at `start`, or null if none closes there.
+function readDestination(s, start) {
+  if (s[start] === "<") {
+    let t = "";
+    for (let i = start + 1; i < s.length; i++) {
+      const c = s[i];
+      if (c === "\\" && i + 1 < s.length && /[!-/:-@[-`{-~]/.test(s[i + 1])) t += s[++i];
+      else if (c === ">") return s[i + 1] === ")" ? t : null;
+      else if (c === "<" || c === "\n" || c === "\r") return null;
+      else t += c;
+    }
+    return null;
+  }
+  let t = "";
+  let depth = 0;
+  for (let i = start; i < s.length; i++) {
+    const c = s[i];
+    if (c === "\\" && i + 1 < s.length && /[!-/:-@[-`{-~]/.test(s[i + 1])) t += s[++i];
+    else if (/\s/.test(c) || c < " ") return null;
+    else if (c === "(") (depth++, (t += c));
+    else if (c === ")") {
+      if (depth === 0) return t || null;
+      depth--;
+      t += c;
+    } else t += c;
+  }
+  return null;
+}
+
+export function* linkTargets(body) {
+  for (let at = body.indexOf("]("); at !== -1; at = body.indexOf("](", at + 2)) {
+    const dest = readDestination(body, at + 2);
+    const m = dest === null ? null : TARGET_RE.exec(dest);
+    if (m) yield m[1];
+  }
+}
 
 export function extractLinks(body, docDir, bundleDir) {
   const out = [];
   const seen = new Set();
-  for (const m of body.matchAll(LINK_RE)) {
-    const target = m[1];
+  for (const target of linkTargets(body)) {
     if (target.includes("://")) continue;
     if (/^(\/\/|\\\\|[A-Za-z]:)/.test(target)) continue; // a UNC or drive-letter spelling is never a bundle link, on any platform (CR-023)
     const abs = target.startsWith("/") ? join(bundleDir, target.slice(1)) : resolve(docDir, target);

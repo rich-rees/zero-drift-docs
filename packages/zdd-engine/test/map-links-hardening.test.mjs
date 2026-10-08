@@ -104,6 +104,25 @@ test("extractLinks (CR-023): a target on another drive, a UNC share, or above th
   assert.deepEqual(ids, ["metadata/route/a", "metadata/route/f"]);
 });
 
+test("extractLinks (CAS-96, from CAS-94): a target reads as CommonMark does — balanced brackets, the <…> form, escaped parens — so a route-grouped layout is an edge", () => {
+  const bundle = process.platform === "win32" ? "C:\\r\\zdd" : "/r/zdd";
+  const doc = join(bundle, "map", "features");
+  const id = "metadata/surface/(app)--_layout";
+  assert.deepEqual(extractLinks("[l](/metadata/surface/(app)--_layout.json)", doc, bundle), [id], "absolute");
+  assert.deepEqual(extractLinks("[l](../../metadata/surface/(app)--_layout.json)", doc, bundle), [id], "relative");
+  assert.deepEqual(extractLinks("[l](<../../metadata/surface/(app)--_layout.json>)", doc, bundle), [id], "<…> form");
+  assert.deepEqual(extractLinks("[l](<../../metadata/route/a b.json#x>)", doc, bundle), ["metadata/route/a b"], "<…> may hold a space and an anchor");
+  assert.deepEqual(extractLinks("[l](../../metadata/surface/\\(app\\)--_layout.json)", doc, bundle), [id], "escaped parens");
+  assert.deepEqual(extractLinks("[l](../../metadata/surface/((app))--_layout.json#top)", doc, bundle), ["metadata/surface/((app))--_layout"], "nested and closed, with an anchor");
+  assert.deepEqual(extractLinks("[l](../../metadata/surface/(app--_layout.json)", doc, bundle), [], "unbalanced: not a link, as in CommonMark");
+  assert.deepEqual(extractLinks("[l](<x.json) [m](<a\nb.json>)", doc, bundle), [], "an unclosed or multi-line <…> is not a link");
+  assert.deepEqual(
+    extractLinks("[a](/metadata/route/a.json) and [b](/metadata/route/b.json#sec), [x](https://h/c.json)", doc, bundle),
+    ["metadata/route/a", "metadata/route/b"],
+    "the plain forms are unchanged",
+  );
+});
+
 test("walkMarkdown / readBounded: symlinks are skipped (file, directory, dangling, loop), non-md ignored, a file over the cap reads as null", (t) => {
   const root = mkdtempSync(join(tmpdir(), "zdd-walk-"));
   mkdirSync(join(root, "a", "b"), { recursive: true });
