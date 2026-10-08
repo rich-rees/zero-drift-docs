@@ -234,16 +234,63 @@ test("release-status reads the lock, the running plugin and the newest tag on th
   assert.match(text, /ZDD v9\.0\.0 is out; this repo locks v2\.1\.1 and this session runs \d+\.\d+\.\d+/, text);
 });
 
-test("upgrade --to a newer release moves only the lock and names the route; never backwards, never an absent or foreign lock", () => {
-  const repo = adopted("to", { settings: { extraKnownMarketplaces: LOCK("v2.0.0") } });
+// A local repo with release tags stands in for the marketplace's GitHub repo.
+let remoteDir;
+const remote = () => {
+  if (remoteDir) return remoteDir;
+  remoteDir = join(scratch, "tags-remote");
+  mkdirSync(remoteDir);
+  const git = (...a) => execFileSync("git", a, { cwd: remoteDir, encoding: "utf8" });
+  git("init", "-q");
+  git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "x");
+  for (const t of [`v${VERSION}`, "v9.0.0", "v9.1.0"]) git("tag", t);
+  return remoteDir;
+};
+const settingsOf = (repo) => JSON.parse(readFileSync(join(repo, ".claude", "settings.json"), "utf8"));
+
+test("upgrade --to a newer release moves only the lock (auto-update off) and names the route", () => {
+  const repo = adopted("to", { settings: { extraKnownMarketplaces: { "zero-drift-docs": { source: { source: "github", repo: "rich-rees/zero-drift-docs", ref: "v2.0.0" }, autoUpdate: true } } } });
   const before = readFileSync(join(repo, "zdd", "config.json"), "utf8");
-  const json = runJson(repo, ["upgrade", "--to=v9.0.0"]);
+  const json = runJson(repo, ["upgrade", "--to=v9.0.0", `--remote=${remote()}`]);
   assert.deepEqual(json.wrote, [".claude/settings.json"]);
-  assert.equal(JSON.parse(readFileSync(join(repo, ".claude", "settings.json"), "utf8")).extraKnownMarketplaces["zero-drift-docs"].source.ref, "v9.0.0");
+  assert.deepEqual(settingsOf(repo).extraKnownMarketplaces["zero-drift-docs"], LOCK("v9.0.0")["zero-drift-docs"]);
   assert.equal(readFileSync(join(repo, "zdd", "config.json"), "utf8"), before, "the rest waits for the new release's own upgrade");
   assert.ok(json.notes.some((n) => /restart Claude Code.*say "upgrade ZDD" again/i.test(n)), json.notes.join("\n"));
-  assert.match(fails(repo, ["upgrade", "--to=v1.0.0"]), /older than this plugin/);
-  assert.match(fails(repo, ["upgrade", "--to=latest"]), /--to must be a release tag/);
-  const none = adopted("to-none", { settings: {} });
-  assert.match(fails(none, ["upgrade", "--to=v9.0.0"]), /no lock/);
+  assert.match(run(repo, ["upgrade", "--to=v9.0.0", `--remote=${remote()}`]), /^Lock move to v9\.0\.0/, "narration names the target");
+});
+
+test("upgrade --to refuses before writing: a tag the remote does not have, one below this plugin or below the repo's lock, a non-tag, an absent or foreign lock (CR-003)", () => {
+  const repo = adopted("to-refuse", { settings: { extraKnownMarketplaces: LOCK("v9.1.0") } });
+  const bytes = readFileSync(join(repo, ".claude", "settings.json"), "utf8");
+  assert.match(fails(repo, ["upgrade", "--to=v9.2.0", `--remote=${remote()}`]), /v9\.2\.0 is not a release tag on/);
+  assert.match(fails(repo, ["upgrade", "--to=v1.0.0", `--remote=${remote()}`]), /older than this plugin/);
+  assert.match(fails(repo, ["upgrade", "--to=v9.0.0", `--remote=${remote()}`]), /older than this repo's lock \(v9\.1\.0\)/);
+  assert.match(fails(repo, ["upgrade", "--to=latest", `--remote=${remote()}`]), /--to must be a release tag/);
+  assert.equal(readFileSync(join(repo, ".claude", "settings.json"), "utf8"), bytes);
+  assert.match(fails(adopted("to-none", { settings: {} }), ["upgrade", "--to=v9.0.0", `--remote=${remote()}`]), /no lock .*--lock/);
+  const fork = adopted("to-fork", { settings: { extraKnownMarketplaces: { "zero-drift-docs": { source: { source: "github", repo: "me/fork", ref: "v2.0.0" } } } } });
+  assert.match(fails(fork, ["upgrade", "--to=v9.0.0", "--lock", `--remote=${remote()}`]), /not this plugin's repository/);
+});
+
+test("upgrade --to: with --lock an absent lock is written at the target; --plan writes nothing; --to the running release is lock-only too (CR-004, CR-008)", () => {
+  const none = adopted("to-lock", { settings: { enabledPlugins: {} } });
+  const planned = runJson(none, ["upgrade", "--to=v9.0.0", "--lock", "--plan", `--remote=${remote()}`]);
+  assert.deepEqual(planned.wrote, [".claude/settings.json"]);
+  assert.equal(settingsOf(none).extraKnownMarketplaces, undefined, "--plan wrote nothing");
+  runJson(none, ["upgrade", "--to=v9.0.0", "--lock", `--remote=${remote()}`]);
+  assert.deepEqual(settingsOf(none).extraKnownMarketplaces, LOCK("v9.0.0"));
+  const same = adopted("to-same", { engine: "2.0.0", settings: { extraKnownMarketplaces: LOCK("v2.0.0") } });
+  const config = readFileSync(join(same, "zdd", "config.json"), "utf8");
+  const json = runJson(same, ["upgrade", `--to=v${VERSION}`, `--remote=${remote()}`]);
+  assert.deepEqual(json.wrote, [".claude/settings.json"], "only the lock");
+  assert.equal(readFileSync(join(same, "zdd", "config.json"), "utf8"), config);
+});
+
+test("a plain upgrade never moves a repo backwards: a lock or engine pin newer than this plugin stops it before any write (CR-005)", () => {
+  const ahead = adopted("ahead-lock", { settings: { extraKnownMarketplaces: LOCK("v9.0.0") } });
+  const before = snapshot(ahead);
+  assert.match(fails(ahead, ["upgrade"]), /locks v9\.0\.0, newer than this plugin .*update this machine first/);
+  assert.deepEqual(snapshot(ahead), before);
+  const pinned = adopted("ahead-engine", { engine: "9.0.0" });
+  assert.match(fails(pinned, ["upgrade"]), /engine pin 9\.0\.0 is newer than this plugin/);
 });
