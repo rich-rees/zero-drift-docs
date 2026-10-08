@@ -19,12 +19,14 @@
 //       that already has a config (repair), an omitted answer keeps the
 //       current choice; only an explicit answer changes it.
 //
-//   bootstrap.mjs upgrade [--root=<dir>] [--json]
+//   bootstrap.mjs upgrade [--lock] [--root=<dir>] [--json]
 //       The only later writer into an adopter's repo. Migrates `adapter` →
 //       `extractors`, moves `viewer.nonAreaTags` to the top level, rewrites
 //       every plugin-OWNED file (engine pins, the managed hook, the marked
-//       snippet blocks) to this plugin's version, and names every file it
-//       changed. Never touches a curated artifact or a file it does not own.
+//       snippet blocks) to this plugin's version, moves our release lock's
+//       ref (decision 0021; `--lock` writes an absent one, on the user's
+//       word), and names every file it changed. Never touches a curated
+//       artifact or a file it does not own.
 //
 // Trust: the answer set, the existing config, and everything in the checkout
 // are untrusted input. Answers are validated whole before the first write;
@@ -817,7 +819,65 @@ function writeDomainDoc(ledger, paths) {
 // local settings file, never an uninstall. A file that is not a JSON object
 // is the adopter's problem to name, not ours to replace.
 const SETTINGS_FILE = ".claude/settings.json";
-function writePluginSettings(ledger, version) {
+// The lock (decision 0021, CAS-101): the marketplace declared at this
+// release's tag, auto-update off — what the session-start release check reads.
+// A declaration is OURS when its source is this marketplace's repository; any
+// other (a fork, a mirror, a path) is the adopter's, named and never touched.
+export const MARKETPLACE = "zero-drift-docs";
+export const MARKETPLACE_REPO = "rich-rees/zero-drift-docs";
+export const lockEntry = (version) => ({ source: { source: "github", repo: MARKETPLACE_REPO, ref: `v${version}` }, autoUpdate: false });
+const isPlainObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+const OUR_URL = /^(?:https:\/\/|git@)github\.com[/:]rich-rees\/zero-drift-docs(?:\.git)?\/?$/i;
+export function isOurDeclaration(decl) {
+  const src = isPlainObject(decl) ? decl.source : null;
+  if (!isPlainObject(src)) return false;
+  if (src.source === "github") return typeof src.repo === "string" && src.repo.toLowerCase() === MARKETPLACE_REPO;
+  return typeof src.url === "string" && OUR_URL.test(src.url);
+}
+const describeSource = (decl) => {
+  const src = isPlainObject(decl?.source) ? decl.source : {};
+  return String(src.repo ?? src.url ?? src.path ?? src.source ?? "an unknown source").slice(0, 120);
+};
+
+// The lock's half of the settings merge. mode "apply" writes the lock when
+// absent and keeps an existing one; "upgrade" moves our lock's ref, and writes
+// an absent one only on the user's word (`lock`, from `--lock`). Mutates `obj`;
+// returns the ledger notes.
+function mergeLock(obj, version, mode, lock) {
+  const ekm = obj.extraKnownMarketplaces;
+  const declared = isPlainObject(ekm) ? ekm[MARKETPLACE] : undefined;
+  const tag = `v${version}`;
+  if (ekm !== undefined && !isPlainObject(ekm)) {
+    return [`${SETTINGS_FILE}: "extraKnownMarketplaces" is not an object — left as it is, so this repo has no lock and the release check stays silent`];
+  }
+  if (declared !== undefined && !isOurDeclaration(declared)) {
+    return [`${SETTINGS_FILE}: declares ${MARKETPLACE} from ${describeSource(declared)}, not this plugin's repository (${MARKETPLACE_REPO}) — yours, left as it is`];
+  }
+  if (declared === undefined) {
+    if (mode === "upgrade" && !lock) {
+      return [
+        `${SETTINGS_FILE}: no lock — this repo floats on whatever ZDD each machine last fetched, and the release check stays silent. ` +
+          `Lock it to ${tag} with \`bootstrap.mjs upgrade --lock\`, on the user's word (decision 0021)`,
+      ];
+    }
+    obj.extraKnownMarketplaces = { ...(ekm ?? {}), [MARKETPLACE]: lockEntry(version) };
+    return [
+      `${SETTINGS_FILE}: locked this repo to ZDD ${tag} (extraKnownMarketplaces, auto-update off) — every developer runs this release, ` +
+        `and moving to a new one is a deliberate PR the session-start release check announces`,
+    ];
+  }
+  const was = declared.source.ref;
+  if (was === tag) return [];
+  const shown = typeof was === "string" ? was.slice(0, 40) : "(no ref)";
+  if (mode !== "upgrade") return [`${SETTINGS_FILE}: locked to ${shown} — kept; moving the lock is upgrade's job`];
+  obj.extraKnownMarketplaces = { ...ekm, [MARKETPLACE]: { ...declared, source: { ...declared.source, ref: tag } } };
+  return [
+    `${SETTINGS_FILE}: lock moved ${shown} → ${tag}. After this PR merges, each developer's next session prints the route ` +
+      `that moves their machine (restart, claude plugin update, restart)`,
+  ];
+}
+
+function writePluginSettings(ledger, version, { mode = "apply", lock = false } = {}) {
   const wanted = pluginSettings();
   const pin = pocockPin();
   let existing = "";
@@ -835,18 +895,23 @@ function writePluginSettings(ledger, version) {
       return;
     }
   }
+  const before = JSON.stringify(obj);
   const ep = obj.enabledPlugins;
   const enabled = ep && typeof ep === "object" && !Array.isArray(ep) ? ep : {};
-  if (!Object.entries(wanted).some(([k, v]) => enabled[k] !== v)) {
+  const pluginsMoved = Object.entries(wanted).some(([k, v]) => enabled[k] !== v);
+  if (pluginsMoved) obj.enabledPlugins = { ...enabled, ...wanted }; // existing keys keep their place; ours are updated or appended
+  const lockNotes = mergeLock(obj, version, mode, lock);
+  if (JSON.stringify(obj) === before) {
     ledger.kept.push(SETTINGS_FILE);
+    ledger.notes.push(...lockNotes);
     return;
   }
-  obj.enabledPlugins = { ...enabled, ...wanted }; // existing keys keep their place; ours are updated or appended
   let text = JSON.stringify(obj, null, 2) + "\n";
   if (/\r\n/.test(existing)) text = text.replace(/\n/g, "\r\n");
   if (existing) ledger.overwrite(SETTINGS_FILE, text);
   else if (!ledger.create(SETTINGS_FILE, text)) return;
-  ledger.notes.push(
+  ledger.notes.push(...lockNotes);
+  if (pluginsMoved) ledger.notes.push(
     `${SETTINGS_FILE}: switched off your other Pocock copies in this repo (${pin.otherCopies.join(", ")}) — each still works in your other repos — ` +
       `and switched on ${ZDD_PLUGIN_ID} and ${pin.plugin}@${pin.marketplace}, the ${pin.plugin} ${pin.version} release plugin ${version} is tested with. ` +
       `Only one copy of a plugin name loads per session, so this is what makes the pinned one load here. Claude Code reads this file; Codex ignores it`,
@@ -1110,7 +1175,7 @@ function ledgerOut(l) {
 // ---------------------------------------------------------------------------
 // upgrade
 // ---------------------------------------------------------------------------
-export function upgrade(root) {
+export function upgrade(root, { lock = false } = {}) {
   const ledger = new Ledger(root);
   const version = pluginVersion();
   const cfg = readConfig(root);
@@ -1202,7 +1267,7 @@ export function upgrade(root) {
     writeSnippet(ledger, file);
   }
   writeDomainDoc(ledger, artifactPaths(config, { lenient: true }));
-  writePluginSettings(ledger, version);
+  writePluginSettings(ledger, version, { mode: "upgrade", lock });
   if (stopUnset) ledger.notes.push('hooks.stop is not set (new in 1.1: the Stop hook prompts for the curated half once per session) — it stays OFF until answered: run bootstrap apply with {"optIns":{"stop":true}} (repair mode, keeps every other choice), or add "stop": true inside the existing "hooks" object by hand');
   ledger.notes.push("1.1 adds a blocking lint (a blessing citing a superseded or missing ADR fails `lint`) — run `npx -y " + ENGINE_PACKAGE + "@" + version + " lint` before pushing; a red result is the lint doing its job on a stale blessing");
   if (config.claims === undefined) {
@@ -1309,10 +1374,10 @@ if (process.argv[1] && posixify(process.argv[1]).endsWith("/scripts/bootstrap.mj
       const r = apply(root, answers, { date: flags.date || today(), home: flags.home });
       process.stdout.write(flags.json ? JSON.stringify(r, null, 2) + "\n" : narrateApply(r) + "\n");
     } else if (cmd === "upgrade") {
-      const r = upgrade(root);
+      const r = upgrade(root, { lock: flags.lock === true });
       process.stdout.write(flags.json ? JSON.stringify(r, null, 2) + "\n" : narrateUpgrade(r) + "\n");
     } else {
-      process.stderr.write("Usage: bootstrap.mjs <detect|apply --answers=<file>|upgrade> [--root=<dir>] [--date=YYYY-MM-DD] [--home=<dir>] [--json]\n");
+      process.stderr.write("Usage: bootstrap.mjs <detect|apply --answers=<file>|upgrade [--lock]> [--root=<dir>] [--date=YYYY-MM-DD] [--home=<dir>] [--json]\n");
       process.exit(2);
     }
   } catch (e) {
