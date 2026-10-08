@@ -51,6 +51,7 @@ import { join, posix } from "node:path";
 import { slugify } from "../../lib/slug.mjs";
 import { repoRelative } from "../../lib/paths.mjs";
 import { regularFileInside } from "../../lib/walk-markdown.mjs";
+import { expandTemplatePath } from "../../lib/template-paths.mjs";
 
 const RESOLVE_EXTS = [".tsx", ".ts", ".jsx", ".js", "/index.tsx", "/index.ts", "/index.jsx", "/index.js"];
 export const MAX_SOURCE_BYTES = 1024 * 1024;
@@ -803,8 +804,11 @@ export function normalizeApiPath(raw) {
 // one level — between the method and the call) and `fetch("/v1/x")`, string
 // or template literal, path starting with `/` once a leading `${base}` is
 // dropped. Call sites are found on the mask (never in a comment or a
-// string); the path is read from the original text.
-export function scanApiCalls(text) {
+// string); the path is read from the original text. A `${hole}` whose type
+// the surrounding text states as a union of string literals expands to one
+// path per literal (decision 0019); `context` is the text that may hold the
+// declaration — the whole module when `text` is one statement of it.
+export function scanApiCalls(text, context = text) {
   const m = model(text);
   const out = new Set();
   // `\bfetch`, but `.get` on ANY receiver — `client().get(…)` has no word
@@ -814,8 +818,13 @@ export function scanApiCalls(text) {
     const q = hit.index + hit[0].length - 1;
     const raw = stringAt(m, q);
     if (raw === null) continue;
-    const path = normalizeApiPath(raw);
-    if (path.startsWith("/") && path !== "/") out.add(path);
+    // A leading `${base}` is a host or prefix, never a path segment: dropped
+    // before expansion, so an expandable first hole is still read.
+    const stripped = raw.replace(/^\$\{[^}]*\}(?=\/)/, "");
+    for (const url of expandTemplatePath(stripped, context)) {
+      const path = normalizeApiPath(url);
+      if (path.startsWith("/") && path !== "/") out.add(path);
+    }
   }
   return out;
 }
@@ -936,9 +945,9 @@ export function derive({ repoRoot, options }) {
   // The refs one piece of source text calls out to; `consts` resolves
   // `.from(NAME)` against the whole module's bindings when the text is one
   // statement of it.
-  const refsOfText = (body, consts) => {
+  const refsOfText = (body, consts, context = body) => {
     const refs = new Set();
-    for (const p of scanApiCalls(body)) refs.add(`?route:${p}`);
+    for (const p of scanApiCalls(body, context)) refs.add(`?route:${p}`);
     const data = scanDataCalls(body, consts);
     for (const name of data.from) refs.add(`?from:${name}`);
     for (const name of data.rpc) refs.add(`?function:${name}`);
@@ -955,7 +964,7 @@ export function derive({ repoRoot, options }) {
       else {
         const model = topLevel(body);
         const consts = moduleConsts(body);
-        const stmtRefs = model.statements.map((st) => refsOfText(body.slice(st.start, st.end), consts));
+        const stmtRefs = model.statements.map((st) => refsOfText(body.slice(st.start, st.end), consts, body));
         modules.set(rel, { whole: refsOfText(body), model, stmtRefs, narrowed: new Map() });
       }
     }

@@ -10,6 +10,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { walkDir } from "../../lib/walk.mjs";
+import { expandTemplatePath } from "../../lib/template-paths.mjs";
 
 const posixify = (p) => p.split(/[\\/]/).join("/");
 
@@ -87,8 +88,10 @@ export function scanFileText(text) {
     else unresolvedFromIdents.add(m[1]);
   }
   for (const m of text.matchAll(/\.rpc\(\s*(['"])(\w+)\1/g)) rpcNames.add(m[2]);
+  // A `${hole}` typed as a union of literals in this file expands to one url
+  // per literal; any other hole is `*`, a route parameter only (decision 0019).
   for (const m of text.matchAll(/\bfetch\(\s*(['"`])(\/api\/[^'"`]*)\1/g)) {
-    fetchUrls.add(normalizeFetchUrl(m[2]));
+    for (const url of expandTemplatePath(m[2], text)) fetchUrls.add(normalizeFetchUrl(url));
   }
 
   return { fromNames, rpcNames, fetchUrls, unresolvedFromIdents };
