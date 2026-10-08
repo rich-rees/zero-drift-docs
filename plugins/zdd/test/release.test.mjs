@@ -235,3 +235,24 @@ test("a stray declaration from a fork or mirror is named, never removed by the r
     userDecl(null);
   }
 });
+
+test("a local declaration with no ref is still stray; an oversized user settings file is no declaration (CR-020: the cases the earlier names claimed)", () => {
+  lock("v2.1.0");
+  catalogue("v1.3.1", "1.3.1");
+  installed("1.3.1", "1.3.1");
+  writeFileSync(join(repo, ".claude", "settings.local.json"), JSON.stringify({ extraKnownMarketplaces: { "zero-drift-docs": { source: { source: "github", repo: "rich-rees/zero-drift-docs" } } } }));
+  try {
+    const out = run();
+    assert.match(out, /this repo's local settings \(\.claude\/settings\.local\.json\) also declare zero-drift-docs, which holds the catalogue there/, out);
+    assert.match(out, /claude plugin marketplace remove zero-drift-docs --scope local/, out);
+  } finally {
+    localDecl(null);
+  }
+  const huge = { extraKnownMarketplaces: { "zero-drift-docs": { source: { source: "github", repo: "rich-rees/zero-drift-docs", ref: "v1.3.1" } } }, pad: "x".repeat(2 * 1024 * 1024) };
+  writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify(huge));
+  try {
+    assert.doesNotMatch(run(), /marketplace remove/, "over the size cap: not read");
+  } finally {
+    userDecl(null);
+  }
+});

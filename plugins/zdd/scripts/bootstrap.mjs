@@ -1432,12 +1432,18 @@ export const UPGRADE_NOTES = {
   "1.1.0": ({ version }) => [
     "1.1 adds a blocking lint (a blessing citing a superseded or missing ADR fails `lint`) — run `npx -y " + ENGINE_PACKAGE + "@" + version + " lint` before pushing; a red result is the lint doing its job on a stale blessing",
   ],
-  "1.3.0": ({ config }) =>
-    config.claims === undefined
+  "1.2.0": () => [
+    "1.2 adds the `react-router` extractor (detection offers it), a lint warning listing unclaimed records (never a failure), and their count in the human index header — the human index re-renders on the bump",
+  ],
+  "1.3.0": ({ config }) => [
+    "1.3 adds the `extractor` skill: it scaffolds a local extractor for a stack ZDD does not read yet",
+    ...(config.claims === undefined
       ? [
           '1.3 adds claims.strict: lint can enforce "every record belongs to exactly one feature slice" — an unclaimed record not on an allow-list, a stale allow-list entry, or a record two slices claim then FAILS. It is off until you add it to zdd/config.json: "claims": { "strict": true, "allowUnclaimed": ["route:/health"] }. Without it, double claims are a warning beside the unclaimed list',
         ]
-      : [],
+      : []),
+  ],
+  "1.3.1": () => ["1.3.1 fixes the ADR index link cut — render bytes change only where an index line was cut inside a link"],
   "2.0.0": ({ paths }) => [
     `2.0 adds "choose patterns" (skill: patterns) and a fifth generated artifact, ${paths.blessingIndex} — run \`render\` and commit it in this PR, or render --check fails`,
     '2.0 makes a blessing that does not open with its trigger question ("Adding an endpoint? …") FAIL lint — run `lint` and show the developer every blessing it names; upgrade never rewrites the map, so add each question on their word',
