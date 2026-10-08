@@ -457,6 +457,30 @@ function buildConcepts() {
     concepts.push(derivedConcept(entry, tags));
   }
 
+  // App membership (decision 0018): a code record belongs to the Application
+  // page whose `resource` path is the longest prefix of the record's primary
+  // resource. A `belongsTo` edge and an `app` field on the node carry it; a
+  // record under no app page (a shared package) belongs to no app and is
+  // reached through its inbound edges. Nothing is guessed: an Application
+  // page without a resource, or two whose paths nest, is a warning, and the
+  // records under them stay unassigned.
+  const apps = concepts.filter((c) => c.type === "Application");
+  const appWarnings = [];
+  for (const a of apps) if (!a.resource) appWarnings.push(`${a.id}: Application page has no resource path — no record can belong to it`);
+  const appPaths = apps.filter((a) => a.resource).map((a) => ({ id: a.id, path: a.resource.replace(/\/+$/, "") }));
+  const nested = new Set();
+  for (const x of appPaths) for (const y of appPaths) if (x !== y && (x.path === y.path || x.path.startsWith(`${y.path}/`))) nested.add(x.id).add(y.id);
+  for (const id of [...nested].sort()) appWarnings.push(`${id}: Application pages' resource paths nest or coincide — records under them are not assigned to any app`);
+  const usable = appPaths.filter((a) => !nested.has(a.id)).sort((x, y) => y.path.length - x.path.length || (x.id < y.id ? -1 : 1));
+  for (const c of concepts) {
+    if (c.layer !== "metadata" || !c.resource) continue;
+    const app = usable.find((a) => c.resource === a.path || c.resource.startsWith(`${a.path}/`));
+    if (!app) continue;
+    c.app = app.id;
+    if (!c.linksTo.includes(app.id)) c.linksTo.push(app.id);
+    (c.verbs ??= new Map()).set(app.id, "belongsTo");
+  }
+
   // Semantic links must resolve — a broken link is a render error, surfaced
   // by --check in CI.
   const ids = new Set(concepts.map((c) => c.id));
@@ -471,7 +495,7 @@ function buildConcepts() {
     process.exit(1);
   }
 
-  return { concepts, features };
+  return { concepts, features, appWarnings };
 }
 
 // ---------------------------------------------------------------------------
@@ -495,6 +519,7 @@ function buildGraph(concepts) {
     resource: c.resource,
     tags: c.tags,
     ...(c.auth ? { auth: c.auth } : {}),
+    ...(c.app ? { app: c.app } : {}),
     body: c.body,
   }));
   const edges = [];
@@ -595,7 +620,8 @@ function buildAgentIndex(concepts, features, adrs) {
 
 // ---------------------------------------------------------------------------
 async function render() {
-  const { concepts, features } = buildConcepts();
+  const { concepts, features, appWarnings } = buildConcepts();
+  for (const w of appWarnings) console.error(`WARNING: ${w}`);
   const docs = loadDocs();
   const changed = computeStoreChanges(docs.glossary);
   const graph = buildGraph(concepts);

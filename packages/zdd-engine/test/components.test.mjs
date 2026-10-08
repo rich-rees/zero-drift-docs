@@ -156,6 +156,7 @@ test("CLI: derive and render are byte-stable on the fixture; the graph types a c
   assert.deepEqual(graph.edges.filter((e) => e.source === button.id && e.verb === "usedBy").map((e) => e.target).sort(), ["metadata/surface/jobs", "metadata/surface/native--jobs"]);
   const verbs = graph.edges.filter((e) => e.source === panel.id).map((e) => [e.target, e.verb]).sort();
   assert.deepEqual(verbs, [
+    ["map/apps/web", "belongsTo"],
     ["metadata/component/apps--web--src--components--Badge--Badge", "uses"],
     ["metadata/route/jobs--_job_id--route", "calls"],
     ["metadata/route/jobs--_job_id--route-search", "calls"],

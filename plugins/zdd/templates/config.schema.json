@@ -232,6 +232,7 @@
             "name": { "type": "string", "default": "cytoscape" },
             "defaultFocus": { "type": "string", "description": "cytoscape: node id the explorer view opens on." },
             "authHubs": { "type": "array", "items": { "type": "string" }, "description": "cytoscape: node ids whose edges to ordinary session-auth endpoints are stated, not drawn." },
+            "componentFanIn": { "type": "integer", "minimum": 1, "default": 8, "description": "cytoscape: a UI component used by this many surfaces or components, or more, draws its edges only on hover in the lanes view and shows a count instead — the design-system primitive rule (ZDD 2.1). A viewer choice: graph.json is unchanged." },
             "nonAreaTags": { "type": "array", "items": { "type": "string" }, "deprecated": true, "description": "DEPRECATED (pre-0.4 home): move to the top-level nonAreaTags key — it shapes graph.json, not just this viewer. Still honoured with a note." }
           }
         }
