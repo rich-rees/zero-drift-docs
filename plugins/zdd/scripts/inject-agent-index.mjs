@@ -19,9 +19,20 @@
 
 import { readConfig, artifactPaths, readInside, MAX_INDEX_BYTES, adopterRoot, pocockCopies } from "./lib/repo.mjs";
 import { narrate as narratePocockCopies } from "./check-pocock.mjs";
+import { inspect as inspectRelease, narrate as narrateRelease } from "./check-release.mjs";
 
 try {
   const root = adopterRoot();
+  // The release check first (CAS-97, from CAS-37): a repo that locks a ZDD
+  // release this machine does not have is told so where the session starts,
+  // whether or not the auto-load is on — the fix is per machine, and the
+  // person who moved the lock is not the one who will see this. Advisory.
+  try {
+    const lines = narrateRelease(inspectRelease(root));
+    if (lines.length) process.stdout.write(lines.join("\n") + "\n");
+  } catch {
+    /* advisory */
+  }
   const { state, config } = readConfig(root);
   if (state !== "valid" || config.hooks?.autoLoad === false) process.exit(0);
 
