@@ -98,8 +98,10 @@ recorded by the script, never by hand:
 - **The Stop prompt is unset** (1.1): ask (default yes), record it with a
   repair apply `{ "optIns": { "stop": true } }` (or `false`).
 - **Realtime wrappers** (2.1): ask whether the app subscribes through a
-  wrapper; record the names it gives under `subscribeCalls` with a repair
-  apply.
+  wrapper; record the call names with a repair apply — `{ "extractorOptions":
+  { "react-router": { "subscribeCalls": ["live.onInsert"] } } }`, or for
+  Next.js `{ "extractorOptions": { "nextjs": { "refs": { "subscribeCalls":
+  [...] } } } }`. Options merge into what is there; nothing else moves.
 
 ## Step 5 — regenerate, check, and list the commit
 
