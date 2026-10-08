@@ -18,7 +18,11 @@
 //   ?bucket:<name>    a bucket by name
 //   ?function:<name>  a database function by name
 //   ?route:<url>      the route whose path pattern matches <url>; `*` in the
-//                     url is one wildcard segment
+//                     url is one segment the scan could not read, and it
+//                     matches only a route PARAMETER (`{id}`, `[id]`, a
+//                     catch-all), never a fixed word (decision 0019). A url
+//                     with a `*` that matches nothing is recorded on the
+//                     record as `facts.unplaced`, so lint can name it
 //
 // <name> is the id's text after its `kind:` prefix, or after the namespace
 // slash when the id is namespaced (`table:db/things` -> `things`); a
@@ -29,12 +33,12 @@
 // would be unattributable.
 //
 // Route choice: every matching route is ranked by how many url segments it
-// matched literally, then by how few `*`s it had to take on a literal route
-// segment (a guess), then single-segment parameters over catch-alls (fit()
-// below). So `fetch('/api/things/*')` prefers `[id]` or `{id}` over a
-// literal sibling, and `fetch('/api/things/mine')` prefers the literal.
+// matched literally, then single-segment parameters over catch-alls (fit()
+// below). So `fetch('/api/things/mine')` prefers the literal over `[id]`.
 // Routes tied for the best fit are ALL kept, with a diagnostic (CAS-65):
-// `/users/${id}/${action}` refs every `/users/{id}/<verb>` it could be.
+// `/users/${id}` matches both `/users/{id}` and `/users/[id]` if a bundle
+// had both. A `*` never stands on a fixed word (decision 0019): before, it
+// did, ranked lower, and `/${plural}` reached `/health` through it.
 //
 // Determinism: resolution is a pure function of the merged record set.
 
@@ -52,7 +56,7 @@ const isDynamic = (s) => /^\[.+\]$/.test(s) || /^\{.+\}$/.test(s);
 // still required to match the url's tail (CAS-65 CR-033/034).
 export function makeRouteMatcher(routePath) {
   const segs = routePath.split("/").filter(Boolean);
-  const one = (s, u) => isDynamic(s) || s === "*" || u === "*" || s === u;
+  const one = (s, u) => isDynamic(s) || s === "*" || (u === "*" ? false : s === u);
   return (url) => {
     const uSegs = url.split("/").filter(Boolean);
     // (pattern index, url index) pairs already known to fail: each pair is
@@ -83,15 +87,12 @@ export function makeRouteMatcher(routePath) {
 }
 
 // How well a matching route fits a url, as a tuple compared in order:
-// literal segments matched (more is better), then GUESSES — a `*` in the url
-// standing on a literal route segment, a value the scan could not see (fewer
-// is better; a `*` on a parameter is the natural fit), then whether a
-// catch-all did the matching (a single-segment parameter is more specific).
+// literal segments matched (more is better), then whether a catch-all did
+// the matching (a single-segment parameter is more specific).
 function fit(routePath, url) {
   const segs = routePath.split("/").filter(Boolean);
   const uSegs = url.split("/").filter(Boolean);
   let literal = 0;
-  let guesses = 0;
   let catchAll = 0;
   for (let i = 0; i < segs.length && i < uSegs.length; i++) {
     if (isCatchAll(segs[i])) {
@@ -99,12 +100,11 @@ function fit(routePath, url) {
       break;
     }
     if (isDynamic(segs[i])) continue;
-    if (uSegs[i] === "*") guesses++;
-    else if (segs[i] === uSegs[i]) literal++;
+    if (segs[i] === uSegs[i]) literal++;
   }
-  return [-literal, guesses, catchAll];
+  return [-literal, catchAll];
 }
-const compareFit = (a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
+const compareFit = (a, b) => a[0] - b[0] || a[1] - b[1];
 
 export function resolveRefs(records) {
   const diagnostics = [];
@@ -175,7 +175,16 @@ export function resolveRefs(records) {
             bestFit = f;
           } else if (c === 0) best.push(rt.id);
         }
-        if (!best.length) return drop(`fetch('${target}') matches no route`);
+        if (!best.length) {
+          // A call the scan could not place because of a segment it could
+          // not read is a fact about the record (decision 0019): lint names
+          // it, where a verbose-only diagnostic would be read by nobody.
+          if (target.includes("*")) {
+            const list = record.facts.unplaced ?? (record.facts.unplaced = []);
+            if (!list.includes(target)) list.push(target);
+          }
+          return drop(`fetch('${target}') matches no route${target.includes("*") ? " — a variable segment matches only a route parameter; type it as a union of literals, or declare the route" : ""}`);
+        }
         if (best.length > 1) diagnostics.push(`[refs] ${where}: fetch('${target}') fits ${best.length} routes equally well (${best.join(", ")}) — all kept`);
         return best;
       }
@@ -210,6 +219,7 @@ export function resolveRefs(records) {
       else delete r.facts.edges;
     }
     r.refs = [...resolved].sort();
+    if (r.facts.unplaced) r.facts.unplaced.sort();
   }
   // Prune to a fixed point: dropping a record strips the refs that pointed
   // at it, which can empty another `requireRefs` record, which must then be

@@ -116,23 +116,35 @@ test("CAS-65: a wildcard facing a parameter beats one facing a literal, whatever
   assert.deepEqual(records.find((r) => r.id === "module:m").refs, ["route:/files/[id]", "route:/stuff/[id]", "route:/things/{id}"]);
 });
 
-test("CAS-65: a call that fits several routes equally well refs all of them, with a diagnostic naming the fan-out", () => {
+test("decision 0019 (supersedes CAS-65's fan-out in part): a `*` never stands on a fixed word — `/users/*/*` reaches no `/users/{id}/<verb>` route; the call is recorded as unplaced, with a diagnostic naming the fix; a `*` on a parameter still resolves", () => {
   const { records, diagnostics } = resolveRefs([
     rec("route", "route:/users/{user_id}"),
     rec("route", "route:/users/{user_id}/deactivate"),
     rec("route", "route:/users/{user_id}/reactivate"),
     rec("route", "route:/users/{user_id}/resend-invitation"),
     rec("route", "route:/users/invite"),
-    rec("surface", "surface:/admin/users", ["?route:/users/*/*", "?route:/users/invite"]),
+    rec("route", "route:/health"),
+    rec("surface", "surface:/admin/users", ["?route:/users/*/*", "?route:/users/invite", "?route:/users/*", "?route:/*"]),
   ]);
-  assert.deepEqual(records.find((r) => r.id === "surface:/admin/users").refs, [
-    "route:/users/invite",
-    "route:/users/{user_id}/deactivate",
-    "route:/users/{user_id}/reactivate",
-    "route:/users/{user_id}/resend-invitation",
+  const s = records.find((r) => r.id === "surface:/admin/users");
+  assert.deepEqual(s.refs, ["route:/users/invite", "route:/users/{user_id}"]);
+  assert.deepEqual(s.facts.unplaced, ["/*", "/users/*/*"], "sorted; `/*` no longer reaches /health, `/users/*/*` no longer reaches every verb");
+  assert.equal(diagnostics.length, 2);
+  assert.match(diagnostics[0], /fetch\('\/users\/\*\/\*'\) matches no route — a variable segment matches only a route parameter; type it as a union of literals, or declare the route — dropped/);
+  assert.match(diagnostics[1], /fetch\('\/\*'\) matches no route/);
+  // A literal miss is a plain drop, not an unplaced call — unchanged bytes for every adopter.
+  const r2 = resolveRefs([rec("route", "route:/a"), rec("surface", "surface:/x", ["?route:/nope"])]);
+  assert.equal(r2.records.find((r) => r.id === "surface:/x").facts.unplaced, undefined);
+});
+
+test("CAS-65: a tie among PARAMETER routes still fans out with a diagnostic", () => {
+  const { records, diagnostics } = resolveRefs([
+    rec("route", "route:/things/{id}"),
+    rec("route", "route:/things/[id]"),
+    rec("module", "module:m", ["?route:/things/*"]),
   ]);
-  assert.equal(diagnostics.length, 1);
-  assert.match(diagnostics[0], /fetch\('\/users\/\*\/\*'\) fits 3 routes equally well \(route:\/users\/\{user_id\}\/deactivate, route:\/users\/\{user_id\}\/reactivate, route:\/users\/\{user_id\}\/resend-invitation\) — all kept/);
+  assert.deepEqual(records.find((r) => r.id === "module:m").refs, ["route:/things/[id]", "route:/things/{id}"]);
+  assert.match(diagnostics[0], /fits 2 routes equally well/);
 });
 
 test("CAS-65 CR-033/034: a route-side `*` is one segment; a catch-all in the middle must still match the segments after it", async () => {

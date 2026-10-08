@@ -82,7 +82,7 @@ function walkJson(dir, out = [], state = { depth: 0, entries: 0 }) {
 
 // The claimable records under metadataDir, each with the node id a map link
 // resolves to (bundle-relative path minus extension), sorted by id.
-export function claimableRecords(metadataDir, bundleDir, skipped) {
+export function claimableRecords(metadataDir, bundleDir, skipped, unplaced) {
   const out = [];
   const why = (p) => {
     try {
@@ -105,9 +105,16 @@ export function claimableRecords(metadataDir, bundleDir, skipped) {
       skipped?.push({ path: p, reason: "not JSON" });
       continue;
     }
-    if (!record || typeof record !== "object" || !CLAIMABLE_KINDS.includes(record.kind)) continue;
+    if (!record || typeof record !== "object") continue;
     const nodeId = posixify(relative(bundleDir, p)).replace(/\.json$/, "");
-    out.push({ kind: record.kind, id: String(record.id ?? nodeId), title: String(record.title ?? record.id ?? nodeId), nodeId, file: posixify(relative(dirname(bundleDir), p)) });
+    const file = posixify(relative(dirname(bundleDir), p));
+    // A call the resolver could not place (decision 0019) rides on the
+    // record as facts.unplaced; collected here so lint names it in one walk.
+    if (unplaced && Array.isArray(record.facts?.unplaced) && record.facts.unplaced.length) {
+      unplaced.push({ id: String(record.id ?? nodeId), file, calls: record.facts.unplaced.map(String) });
+    }
+    if (!CLAIMABLE_KINDS.includes(record.kind)) continue;
+    out.push({ kind: record.kind, id: String(record.id ?? nodeId), title: String(record.title ?? record.id ?? nodeId), nodeId, file });
   }
   return out.sort((a, b) => (a.nodeId < b.nodeId ? -1 : 1));
 }
@@ -151,7 +158,9 @@ export function featureClaims(mapDir, bundleDir, skipped) {
 export function unclaimedRecords({ metadataDir, mapDir, bundleDir }) {
   const raw = [];
   const claimed = featureClaims(mapDir, bundleDir, raw);
-  const records = claimableRecords(metadataDir, bundleDir, raw);
+  const unplaced = [];
+  const records = claimableRecords(metadataDir, bundleDir, raw, unplaced);
+  unplaced.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   const skipped = raw
     .map((s) => {
       const inMetadata = !relative(metadataDir, s.path).startsWith("..");
@@ -160,6 +169,7 @@ export function unclaimedRecords({ metadataDir, mapDir, bundleDir }) {
     .sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : 0));
   return {
     skipped,
+    unplaced,
     total: records.length,
     records,
     unclaimed: records.filter((r) => !claimed.has(r.nodeId)),

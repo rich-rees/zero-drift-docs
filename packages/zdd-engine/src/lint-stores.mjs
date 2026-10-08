@@ -235,7 +235,7 @@ if (planPresent && args.includes("--merge")) {
 // Read after the blocking lints so a failure above is not buried under the
 // list. Absent metadata (greenfield, or derive not yet run) is an empty
 // inventory: nothing to claim, no line printed.
-const { total, records, unclaimed, doubleClaimed, skipped } = unclaimedRecords({ metadataDir: METADATA_DIR, mapDir: MAP_DIR, bundleDir });
+const { total, records, unclaimed, doubleClaimed, skipped, unplaced } = unclaimedRecords({ metadataDir: METADATA_DIR, mapDir: MAP_DIR, bundleDir });
 // Every adopter-controlled path is printable before it reaches the log — a
 // control character in a filename cannot forge a line (CAS-65 CR-032).
 const files = (list) => list.map(printable).join(", ");
@@ -270,6 +270,18 @@ if (STRICT) {
     console.error(`WARNING: ${skipped.length} claim file${skipped.length === 1 ? "" : "s"} could not be read — the claim picture is incomplete (claims.strict fails on these):`);
     for (const s of skipped) console.error(`  ${printable(s.file)} (${s.reason})`);
   }
+}
+
+// ---- 4b. API calls the resolver could not place (decision 0019) ----
+// A `${variable}` segment matches only a route parameter; a call whose
+// variable the scan could not read as a union of literals, and that fits no
+// route that way, has no edge — and that is said here, not only under
+// `derive --verbose`. A warning, never a failure: the fix is in the code
+// (type the variable) or in the routes, not in the stores.
+if (unplaced.length) {
+  const n = unplaced.reduce((sum, r) => sum + r.calls.length, 0);
+  console.error(`WARNING: ${n} API call${n === 1 ? "" : "s"} could not be placed on a route — a variable segment (\`*\`) matches only a route parameter, never a fixed word; type the variable as a union of string literals so the call expands, or the edge stays missing:`);
+  for (const r of unplaced) for (const c of r.calls) console.error(`  ${printable(r.id)}  ${printable(c)}  (${printable(r.file)})`);
 }
 
 // ---- 5. Stray root glossary (CAS-93) ----
