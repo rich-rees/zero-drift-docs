@@ -17,6 +17,10 @@
 //                 0013) — every surface record hangs on this one file
 //   srcAliasRoot  where the tsconfig `@/` alias points (default: routesFile's
 //                 directory)
+//   subscribeCalls  call names whose first string argument is a table the
+//                 screen subscribes to over Realtime (`live.onInsert`), beside
+//                 the client's own `.on("postgres_changes", { table })` — a
+//                 `subscribes` edge (CAS-97 item 5, decision 0016)
 // Purely textual — no TypeScript parser — but LEXICALLY honest (review
 // CR-006): one pass masks every comment, string body, template body and
 // regex literal to spaces, and every structural decision (bracket matching,
@@ -51,6 +55,7 @@ import { join, posix } from "node:path";
 import { slugify } from "../../lib/slug.mjs";
 import { repoRelative } from "../../lib/paths.mjs";
 import { regularFileInside } from "../../lib/walk-markdown.mjs";
+import { expandTemplatePath } from "../../lib/template-paths.mjs";
 
 const RESOLVE_EXTS = [".tsx", ".ts", ".jsx", ".js", "/index.tsx", "/index.ts", "/index.jsx", "/index.js"];
 export const MAX_SOURCE_BYTES = 1024 * 1024;
@@ -59,7 +64,7 @@ export const MAX_SOURCE_BYTES = 1024 * 1024;
 const MAX_TREE_DEPTH = 32;
 
 export const FACTS_KEY_ORDER = {
-  surface: ["element", "guards", "dynamicSegments"],
+  surface: ["element", "guards", "dynamicSegments", "edges"],
 };
 
 // ---------------------------------------------------------------------------
@@ -196,7 +201,10 @@ export function lex(text) {
       } else i = Math.min(k + 1, n);
       continue;
     }
-    if (ch === "/" && regexAllowed(i)) {
+    // A `/` followed by `>` is JSX's self-closing tag, never a regex: after
+    // `name={r} />` the `}` makes a regex "allowed", and the blanked run then
+    // ate the closing braces of every component body (CAS-97).
+    if (ch === "/" && next !== ">" && regexAllowed(i)) {
       let k = i + 1;
       let cls = false;
       for (; k < n && text[k] !== "\n"; k++) {
@@ -273,7 +281,7 @@ function skipJsx(mask, i) {
 // Source model: one file's text, its masks, its line table and the `//`
 // comment block above any offset (one pass — CR-005).
 // ---------------------------------------------------------------------------
-function model(text) {
+export function model(text) {
   const { code, mask } = lex(text);
   const lineStart = [0];
   for (let i = 0; i < text.length; i++) if (text[i] === "\n") lineStart.push(i + 1);
@@ -570,7 +578,7 @@ const ID_RE = new RegExp(`^${ID}$`, "u");
 // and binds nothing (CR-018). Structure is found on the MASK (comments and
 // string bodies blanked), so an import spelled inside a string is not one
 // (CR-020); the module specifier is read from the text at the same offsets.
-function localImports(text) {
+export function localImports(text) {
   const { mask } = lex(text);
   const out = new Map();
   const note = (src, names, how) => {
@@ -780,6 +788,39 @@ export function scanDataCalls(text, consts = moduleConsts(text)) {
   }
   return { from, rpc };
 }
+// Realtime subscriptions (CAS-97 item 5): a surface that reads a table over
+// Supabase Realtime bypasses the API, so the dependency is a `subscribes`
+// edge to the table. Two shapes, both on the mask: the client's own
+// `.on("postgres_changes", { …, table: "<name>" })` with a literal table,
+// and any call the adopter names in `subscribeCalls` (`live.onInsert`)
+// whose FIRST argument is the table name as a string literal. A table that
+// is a variable is not seen — the same honesty as the call scanners.
+export function scanSubscriptions(text, helpers = []) {
+  const m = model(text);
+  const out = new Set();
+  for (const hit of m.mask.matchAll(/\.on\(\s*(['"])/g)) {
+    const q = hit.index + hit[0].length - 1;
+    if (stringAt(m, q) !== "postgres_changes") continue;
+    const open = m.mask.indexOf("(", hit.index);
+    const close = matchBracket(m.mask, open);
+    if (close === -1) continue;
+    const args = m.mask.slice(open, close);
+    const t = /\btable\s*:\s*(['"])/.exec(args);
+    if (!t) continue;
+    const raw = stringAt(m, open + t.index + t[0].length - 1);
+    if (raw !== null && /^[\w-]+$/.test(raw)) out.add(raw);
+  }
+  for (const helper of helpers) {
+    if (typeof helper !== "string" || !/^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/.test(helper)) continue;
+    const re = new RegExp(`(?<![\\w$.])${helper.replace(/[.$]/g, "\\$&")}\\s*\\(\\s*(['"])`, "g");
+    for (const hit of m.mask.matchAll(re)) {
+      const raw = stringAt(m, hit.index + hit[0].length - 1);
+      if (raw !== null && /^[\w-]+$/.test(raw)) out.add(raw);
+    }
+  }
+  return out;
+}
+
 // A module's `const NAME = 'literal'` bindings, found on the mask.
 export function moduleConsts(text) {
   const m = model(text);
@@ -803,8 +844,11 @@ export function normalizeApiPath(raw) {
 // one level — between the method and the call) and `fetch("/v1/x")`, string
 // or template literal, path starting with `/` once a leading `${base}` is
 // dropped. Call sites are found on the mask (never in a comment or a
-// string); the path is read from the original text.
-export function scanApiCalls(text) {
+// string); the path is read from the original text. A `${hole}` whose type
+// the surrounding text states as a union of string literals expands to one
+// path per literal (decision 0019); `context` is the text that may hold the
+// declaration — the whole module when `text` is one statement of it.
+export function scanApiCalls(text, context = text) {
   const m = model(text);
   const out = new Set();
   // `\bfetch`, but `.get` on ANY receiver — `client().get(…)` has no word
@@ -814,8 +858,13 @@ export function scanApiCalls(text) {
     const q = hit.index + hit[0].length - 1;
     const raw = stringAt(m, q);
     if (raw === null) continue;
-    const path = normalizeApiPath(raw);
-    if (path.startsWith("/") && path !== "/") out.add(path);
+    // A leading `${base}` is a host or prefix, never a path segment: dropped
+    // before expansion, so an expandable first hole is still read.
+    const stripped = raw.replace(/^\$\{[^}]*\}(?=\/)/, "");
+    for (const url of expandTemplatePath(stripped, context)) {
+      const path = normalizeApiPath(url);
+      if (path.startsWith("/") && path !== "/") out.add(path);
+    }
   }
   return out;
 }
@@ -825,7 +874,8 @@ export function scanApiCalls(text) {
 // ---------------------------------------------------------------------------
 export function derive({ repoRoot, options }) {
   const diagnostics = [];
-  const { routesFile: routesOpt = "src/routes.tsx", srcAliasRoot: aliasOpt } = options;
+  const { routesFile: routesOpt = "src/routes.tsx", srcAliasRoot: aliasOpt, subscribeCalls = [] } = options;
+  if (!Array.isArray(subscribeCalls) || subscribeCalls.some((h) => typeof h !== "string")) throw new Error("react-router: 'subscribeCalls' must be an array of call names");
   const routesFile = repoRelative(routesOpt, "react-router.routesFile");
   const srcAliasRoot = repoRelative(aliasOpt ?? posix.dirname(routesFile), "react-router.srcAliasRoot");
   let realRoot;
@@ -936,9 +986,9 @@ export function derive({ repoRoot, options }) {
   // The refs one piece of source text calls out to; `consts` resolves
   // `.from(NAME)` against the whole module's bindings when the text is one
   // statement of it.
-  const refsOfText = (body, consts) => {
+  const refsOfText = (body, consts, context = body) => {
     const refs = new Set();
-    for (const p of scanApiCalls(body)) refs.add(`?route:${p}`);
+    for (const p of scanApiCalls(body, context)) refs.add(`?route:${p}`);
     const data = scanDataCalls(body, consts);
     for (const name of data.from) refs.add(`?from:${name}`);
     for (const name of data.rpc) refs.add(`?function:${name}`);
@@ -955,8 +1005,8 @@ export function derive({ repoRoot, options }) {
       else {
         const model = topLevel(body);
         const consts = moduleConsts(body);
-        const stmtRefs = model.statements.map((st) => refsOfText(body.slice(st.start, st.end), consts));
-        modules.set(rel, { whole: refsOfText(body), model, stmtRefs, narrowed: new Map() });
+        const stmtRefs = model.statements.map((st) => refsOfText(body.slice(st.start, st.end), consts, body));
+        modules.set(rel, { whole: refsOfText(body), model, stmtRefs, narrowed: new Map(), subs: scanSubscriptions(body, subscribeCalls) });
       }
     }
     return modules.get(rel);
@@ -966,16 +1016,23 @@ export function derive({ repoRoot, options }) {
   // diagnostic, when the import cannot be narrowed. One hop: the imported
   // module's own imports are not followed. Memoised per element file.
   const elements = new Map();
+  // Subscriptions per element file: its own, plus every one-hop module's
+  // whole (a subscription helper is called from the screen, and the table
+  // name is at the call — never narrowed away).
+  const subsOfElement = new Map();
   const refsOfElement = (rel) => {
     if (elements.has(rel)) return elements.get(rel);
     const body = readSource(rel);
     const refs = body === null ? new Set() : refsOfText(body);
     elements.set(rel, refs);
+    const subs = body === null ? new Set() : scanSubscriptions(body, subscribeCalls);
+    subsOfElement.set(rel, subs);
     if (body === null) return refs;
     for (const [source, { names, how }] of localImports(body)) {
       const target = resolveImport(rel, source);
       const mod = target && moduleOf(target);
       if (!mod) continue;
+      for (const t of mod.subs) subs.add(t);
       let hit = mod.whole;
       if (names === null) diagnostics.push(`${rel} imports ${target} ${how} — its calls are attributed whole`);
       else {
@@ -1008,7 +1065,9 @@ export function derive({ repoRoot, options }) {
     const elementFile = isLocal ? resolveImport(routesFile, source) : null;
     if (isLocal && !elementFile) diagnostics.push(`${routesFile}: ${r.element ?? "lazy route"} imports '${source}', which resolves to no file — routes file kept as resource`);
     const resource = elementFile ? [elementFile, routesFile] : [routesFile];
-    const refs = elementFile ? refsOfElement(elementFile) : new Set();
+    const refs = elementFile ? new Set(refsOfElement(elementFile)) : new Set();
+    const subscribes = elementFile ? [...(subsOfElement.get(elementFile) ?? [])].sort().map((t) => `?table:${t}`) : [];
+    for (const s of subscribes) refs.add(s);
     // Filename: React Router's `:id`, `*` and the optional `?` are not
     // filename characters; spelled the shared slug way (`_id`, `___splat`),
     // an optional marker as a trailing `~` so `task` and `task?` stay distinct.
@@ -1034,6 +1093,7 @@ export function derive({ repoRoot, options }) {
           .split("/")
           .filter((s) => s.startsWith(":"))
           .map((s) => s.slice(1).replace(/\?$/, "")),
+        ...(subscribes.length ? { edges: { subscribes } } : {}),
       },
       filename: `${slugify(slugPath)}.json`,
     });

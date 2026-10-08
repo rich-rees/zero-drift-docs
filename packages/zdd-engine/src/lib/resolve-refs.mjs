@@ -18,7 +18,19 @@
 //   ?bucket:<name>    a bucket by name
 //   ?function:<name>  a database function by name
 //   ?route:<url>      the route whose path pattern matches <url>; `*` in the
-//                     url is one wildcard segment
+//                     url is one segment the scan could not read, and it
+//                     matches only a route PARAMETER (`{id}`, `[id]`, a
+//                     catch-all), never a fixed word (decision 0019). A url
+//                     with a `*` that matches nothing is recorded on the
+//                     record as `facts.unplaced`, so lint can name it
+//   ?at:<file>        every record of any kind whose resource list holds
+//                     <file> — how a service names the routes, surfaces and
+//                     jobs in the files that use it (CAS-97); a file that is
+//                     nobody's resource is a plain drop
+//   ?surface:<file>   every surface whose resource list holds <file> — how
+//                     a component names the screens that import it (CAS-97);
+//                     a file that is the element of several routes is all
+//                     of them, silently
 //
 // <name> is the id's text after its `kind:` prefix, or after the namespace
 // slash when the id is namespaced (`table:db/things` -> `things`); a
@@ -29,12 +41,12 @@
 // would be unattributable.
 //
 // Route choice: every matching route is ranked by how many url segments it
-// matched literally, then by how few `*`s it had to take on a literal route
-// segment (a guess), then single-segment parameters over catch-alls (fit()
-// below). So `fetch('/api/things/*')` prefers `[id]` or `{id}` over a
-// literal sibling, and `fetch('/api/things/mine')` prefers the literal.
+// matched literally, then single-segment parameters over catch-alls (fit()
+// below). So `fetch('/api/things/mine')` prefers the literal over `[id]`.
 // Routes tied for the best fit are ALL kept, with a diagnostic (CAS-65):
-// `/users/${id}/${action}` refs every `/users/{id}/<verb>` it could be.
+// `/users/${id}` matches both `/users/{id}` and `/users/[id]` if a bundle
+// had both. A `*` never stands on a fixed word (decision 0019): before, it
+// did, ranked lower, and `/${plural}` reached `/health` through it.
 //
 // Determinism: resolution is a pure function of the merged record set.
 
@@ -52,7 +64,7 @@ const isDynamic = (s) => /^\[.+\]$/.test(s) || /^\{.+\}$/.test(s);
 // still required to match the url's tail (CAS-65 CR-033/034).
 export function makeRouteMatcher(routePath) {
   const segs = routePath.split("/").filter(Boolean);
-  const one = (s, u) => isDynamic(s) || s === "*" || u === "*" || s === u;
+  const one = (s, u) => isDynamic(s) || s === "*" || (u === "*" ? false : s === u);
   return (url) => {
     const uSegs = url.split("/").filter(Boolean);
     // (pattern index, url index) pairs already known to fail: each pair is
@@ -83,15 +95,12 @@ export function makeRouteMatcher(routePath) {
 }
 
 // How well a matching route fits a url, as a tuple compared in order:
-// literal segments matched (more is better), then GUESSES — a `*` in the url
-// standing on a literal route segment, a value the scan could not see (fewer
-// is better; a `*` on a parameter is the natural fit), then whether a
-// catch-all did the matching (a single-segment parameter is more specific).
+// literal segments matched (more is better), then whether a catch-all did
+// the matching (a single-segment parameter is more specific).
 function fit(routePath, url) {
   const segs = routePath.split("/").filter(Boolean);
   const uSegs = url.split("/").filter(Boolean);
   let literal = 0;
-  let guesses = 0;
   let catchAll = 0;
   for (let i = 0; i < segs.length && i < uSegs.length; i++) {
     if (isCatchAll(segs[i])) {
@@ -99,12 +108,11 @@ function fit(routePath, url) {
       break;
     }
     if (isDynamic(segs[i])) continue;
-    if (uSegs[i] === "*") guesses++;
-    else if (segs[i] === uSegs[i]) literal++;
+    if (segs[i] === uSegs[i]) literal++;
   }
-  return [-literal, guesses, catchAll];
+  return [-literal, catchAll];
 }
-const compareFit = (a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
+const compareFit = (a, b) => a[0] - b[0] || a[1] - b[1];
 
 export function resolveRefs(records) {
   const diagnostics = [];
@@ -125,6 +133,21 @@ export function resolveRefs(records) {
     add(map, short, r.id);
     const full = afterKind(r.id);
     if (full !== short) add(map, full, r.id);
+  }
+  const surfacesByFile = new Map();
+  const recordsByFile = new Map();
+  for (const r of records) {
+    for (const f of r.resource) {
+      // A service's resource is the file that declares it, not a file that
+      // "uses" it: a service never resolves as another service's dependant.
+      if (r.kind !== "service") {
+        if (!recordsByFile.has(f)) recordsByFile.set(f, []);
+        recordsByFile.get(f).push(r.id);
+      }
+      if (r.kind !== "surface") continue;
+      if (!surfacesByFile.has(f)) surfacesByFile.set(f, []);
+      surfacesByFile.get(f).push(r.id);
+    }
   }
   const routes = records
     .filter((r) => r.kind === "route")
@@ -159,6 +182,14 @@ export function resolveRefs(records) {
         const hit = lookup(kind, kind);
         return hit !== undefined ? hit : drop(`${kind} '${target}' matches no known ${kind}`);
       }
+      case "surface": {
+        const hits = surfacesByFile.get(target);
+        return hits ? [...hits].sort() : drop(`surface at '${target}' matches no known surface`);
+      }
+      case "at": {
+        const hits = (recordsByFile.get(target) ?? []).filter((id) => id !== record.id);
+        return hits.length ? [...hits].sort() : drop(`'${target}' is no record's resource`);
+      }
       case "route": {
         // Every route tied for the best fit is kept (CAS-65): with a `*` on
         // literal segments the scan cannot tell `/users/*/deactivate` from
@@ -175,7 +206,16 @@ export function resolveRefs(records) {
             bestFit = f;
           } else if (c === 0) best.push(rt.id);
         }
-        if (!best.length) return drop(`fetch('${target}') matches no route`);
+        if (!best.length) {
+          // A call the scan could not place because of a segment it could
+          // not read is a fact about the record (decision 0019): lint names
+          // it, where a verbose-only diagnostic would be read by nobody.
+          if (target.includes("*")) {
+            const list = record.facts.unplaced ?? (record.facts.unplaced = []);
+            if (!list.includes(target)) list.push(target);
+          }
+          return drop(`fetch('${target}') matches no route${target.includes("*") ? " — a variable segment matches only a route parameter; type it as a union of literals, or declare the route" : ""}`);
+        }
         if (best.length > 1) diagnostics.push(`[refs] ${where}: fetch('${target}') fits ${best.length} routes equally well (${best.join(", ")}) — all kept`);
         return best;
       }
@@ -184,13 +224,33 @@ export function resolveRefs(records) {
     }
   };
 
-  for (const r of records) {
+  const resolveList = (list, r) => {
     const resolved = new Set();
-    for (const ref of r.refs) {
+    for (const ref of list) {
       const hit = ref.startsWith("?") ? resolveOne(ref, r) : ref;
       for (const id of Array.isArray(hit) ? hit : [hit]) if (id && id !== r.id) resolved.add(id);
     }
+    return resolved;
+  };
+  for (const r of records) {
+    const resolved = resolveList(r.refs, r);
+    // Typed edges (decision 0016): `facts.edges` maps a verb to the refs it
+    // covers, resolved the same way; every id it names is also a plain ref,
+    // so every consumer of `refs` keeps working. Verbs and ids come out
+    // sorted; an empty verb is dropped, and an empty map is removed.
+    const edges = r.facts && r.facts.edges && typeof r.facts.edges === "object" && !Array.isArray(r.facts.edges) ? r.facts.edges : null;
+    if (edges) {
+      const out = {};
+      for (const verb of Object.keys(edges).sort()) {
+        const ids = resolveList(Array.isArray(edges[verb]) ? edges[verb] : [], r);
+        for (const id of ids) resolved.add(id);
+        if (ids.size) out[verb] = [...ids].sort();
+      }
+      if (Object.keys(out).length) r.facts.edges = out;
+      else delete r.facts.edges;
+    }
     r.refs = [...resolved].sort();
+    if (r.facts.unplaced) r.facts.unplaced.sort();
   }
   // Prune to a fixed point: dropping a record strips the refs that pointed
   // at it, which can empty another `requireRefs` record, which must then be
@@ -221,7 +281,17 @@ export function resolveRefs(records) {
     }
   }
   const kept = records.filter((r) => !dropped.has(r.id));
-  for (const r of kept) if (dropped.size) r.refs = r.refs.filter((id) => !dropped.has(id));
+  for (const r of kept) {
+    if (!dropped.size) break;
+    r.refs = r.refs.filter((id) => !dropped.has(id));
+    if (r.facts?.edges) {
+      for (const verb of Object.keys(r.facts.edges)) {
+        r.facts.edges[verb] = r.facts.edges[verb].filter((id) => !dropped.has(id));
+        if (!r.facts.edges[verb].length) delete r.facts.edges[verb];
+      }
+      if (!Object.keys(r.facts.edges).length) delete r.facts.edges;
+    }
+  }
   for (const r of kept) delete r.requireRefs;
   return { records: kept, diagnostics };
 }

@@ -43,6 +43,22 @@ where it is switched on, and the one-line fix (set it `false` in this repo's
 `.claude/settings.json`; never uninstall). **Relay it verbatim as the next line
 of your reply.** Silent when only ZDD's copy is on; do not mention it then.
 
+Then, the same way:
+
+```
+node "$PLUGIN/scripts/check-release.mjs"
+```
+
+A repo locks one ZDD release (`.claude/settings.json` →
+`extraKnownMarketplaces.zero-drift-docs.source.ref`), and nothing updates
+itself: when a PR moves the lock, this machine keeps running the old release
+until the catalogue and the install are refreshed. This prints one line when
+the catalogue, `zdd@zero-drift-docs` or `mattpocock-skills@zero-drift-docs`
+installed for this project differs from the lock, naming expected and found
+and the exact commands, then "restart Claude Code". **Relay it verbatim as the
+next line of your reply.** Silent when they match or the repo locks nothing;
+do not mention it then. (The session-start hook prints the same line.)
+
 ## Steps
 
 The paths below are the defaults. The repo's `zdd/config.json` may move any of

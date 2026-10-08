@@ -60,8 +60,9 @@ version:
 
 | Key | Default | What it is |
 |---|---|---|
-| `extractors` | *(required, unless legacy `adapter`)* | Extractors to run, composed per convention: `supabase`, `nextjs`, `fastapi`, `react-router`, `generic` (built-in), or a name from `localExtractorDir`. Names only, never paths |
-| `extractorOptions` | — | Per-extractor source layout, keyed by name — `supabase`: `migrationNamespaces`, `externalBuckets`; `nextjs`: `appDir`, `apiPrefix`, `middlewarePath`, `authPatterns`, `refs`, `srcAliasRoot`; `fastapi`: `roots`, `excludeDirs`, `appVar`; `react-router`: `routesFile`, `srcAliasRoot` |
+| `extractors` | *(required, unless legacy `adapter`)* | Extractors to run, composed per convention: `supabase`, `nextjs`, `fastapi`, `react-router`, `components`, `expo-router`, `jobs`, `services`, `generic` (built-in), or a name from `localExtractorDir`. Names only, never paths |
+| `extractorOptions` | — | Per-extractor source layout, keyed by name — `supabase`: `migrationNamespaces`, `externalBuckets`; `nextjs`: `appDir`, `apiPrefix`, `middlewarePath`, `authPatterns`, `refs` (+ `subscribeCalls`), `srcAliasRoot`; `fastapi`: `roots`, `excludeDirs`, `appVar`; `react-router`: `routesFile`, `srcAliasRoot`, `subscribeCalls`; `components`: `roots`, `pageDirs`, `sharedDirs`, …; `expo-router`: `appDir`; `jobs`: `roots`, `exclude`, `modes`, `entries`; `services`: `services`, `ignore`, `roots` — all in `config.schema.json` |
+| `claims.strictKinds` | `[]` | The opt-in kinds (`component`, `job`, `service`) that `claims.strict` also fails on; unlisted they warn (decision 0017) |
 | `localExtractorDir` | — | Repo-relative folder of repo-local extractors (`<name>.mjs` or `<name>/index.mjs`) — the one place config may point at code |
 | `adapter` / `adapterOptions` | *(deprecated)* | The pre-1.0 single adapter; `nextjs-supabase` still expands to `[supabase, nextjs]` with a deprecation note |
 | `name` | `"Codebase"` | Display name for the indexes |
@@ -86,15 +87,20 @@ git history only. `test/determinism.test.mjs` is the guard; the blocking
 ## Extractors
 
 An extractor is one module implementing `derive({ repoRoot, options, io })` →
-`{ records, diagnostics }` plus a `FACTS_KEY_ORDER` map, keyed to **one
-convention** (see `src/extractors/`). `io` (since 1.3.0) is the engine's safe
+`{ records, diagnostics, warnings? }` plus a `FACTS_KEY_ORDER` map, keyed to **one
+convention** (see `src/extractors/`). A record's `refs` may carry verbs
+through `facts.edges` (`uses`, `usedBy`, `calls`, `subscribes`, `reads`,
+`writes`, `dependsOn`, `belongsTo` — decision 0016), which the graph keeps as
+`verb` on the edge. `io` (since 1.3.0) is the engine's safe
 reader, built fresh per extractor per run: `io.read` returns a regular file
 inside the repo under a 1 MiB cap, and `io.walk` lists files, sorted, without
 following links, on one shared entry budget. A local extractor cannot import
 the engine, so this is how it reads safely. Config lists the extractors in use and the
 deriver merges their records, then resolves cross-extractor refs — a record
-emits `?from:<name>` / `?function:<name>` / `?route:<url>` for a target another
-convention owns, and the deriver turns those into ids after the merge. Missing
+emits `?from:<name>` / `?function:<name>` / `?route:<url>` / `?surface:<file>` /
+`?at:<file>` for a target another convention owns, and the deriver turns those
+into ids after the merge (a `*` in a url matches a route parameter only,
+never a fixed word — decision 0019). Missing
 source roots are "nothing to inventory", so a greenfield repo derives clean.
 Extractors are selected by name from a static registry in `src/derive.mjs` or
 from the declared `localExtractorDir` — never by path. The plugin's `extractor`
@@ -125,6 +131,10 @@ Pure-logic units plus end-to-end canaries and determinism checks against
 sweeps, triggers, wrapper pages, middleware auth, buckets, and module records —
 `test/fixture-fastapi/` (FastAPI + Supabase), `test/fixture-react-router/`
 (FastAPI + a React Router route tree declared in code, one feature claiming
-three of twelve records) and `test/fixture-greenfield/` (config only). `test/golden/` pins v0.3.1 output: the composed `[supabase, nextjs]` pair must
+three of twelve records), `test/fixture-components/` (a web app, an Expo app
+and a shared component kit over one API), `test/fixture-jobs/` (manifests
+that run processes, a Railway file, a Procfile), `test/fixture-services/`
+(Sentry and Resend by marker, Stripe undeclared) and `test/fixture-greenfield/`
+(config only). `test/golden/` pins v0.3.1 output: the composed `[supabase, nextjs]` pair must
 reproduce the adapter's metadata byte for byte, and the `cytoscape` viewer must
 embed the same `BUNDLE` the pre-registry renderer did.

@@ -573,7 +573,7 @@ test("CAS-65 (Cascade CAS-64): a routes file missing beside an existing folder F
   }
 });
 
-test("CAS-65 (Cascade CAS-64 #1, end to end): `/things/${id}/${verb}` refs both FastAPI routes of that shape, and the fan-out is a diagnostic", () => {
+test("CAS-65 (Cascade CAS-64 #1) under decision 0019: `/things/${id}/${verb}` with `verb: \"a\" | \"b\"` EXPANDS to both FastAPI routes — no wildcard on a fixed word, no fan-out", () => {
   const root = scratch({
     "api/main.py": 'from fastapi import FastAPI\napp = FastAPI()\n\n@app.post("/things/{id}/a")\nasync def a(id: str):\n    return {}\n\n@app.post("/things/{id}/b")\nasync def b(id: str):\n    return {}\n',
     "web/src/routes.tsx": 'import { Things } from "./Things";\nexport const routes = [{ path: "/things", element: <Things /> }];\n',
@@ -585,7 +585,8 @@ test("CAS-65 (Cascade CAS-64 #1, end to end): `/things/${id}/${verb}` refs both 
     const web = derive({ repoRoot: root, options: { routesFile: "web/src/routes.tsx" } });
     const { records, diagnostics } = resolveRefs([...api.records, ...web.records]);
     assert.deepEqual(records.find((r) => r.id === "surface:/things").refs, ["route:/things/{id}/a", "route:/things/{id}/b"]);
-    assert.ok(diagnostics.some((d) => /fetch\('\/things\/\*\/\*'\) fits 2 routes equally well/.test(d)), diagnostics.join("\n"));
+    assert.ok(!diagnostics.some((d) => /fits 2 routes/.test(d)), diagnostics.join("\n"));
+    assert.equal(records.find((r) => r.id === "surface:/things").facts.unplaced, undefined);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

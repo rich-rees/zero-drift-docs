@@ -31,6 +31,10 @@ const EXTRACTORS = {
   nextjs: "./extractors/nextjs/index.mjs",
   fastapi: "./extractors/fastapi/index.mjs",
   "react-router": "./extractors/react-router/index.mjs",
+  components: "./extractors/components/index.mjs",
+  "expo-router": "./extractors/expo-router/index.mjs",
+  jobs: "./extractors/jobs/index.mjs",
+  services: "./extractors/services/index.mjs",
   generic: "./extractors/generic/index.mjs",
 };
 const NAME_RE = /^[a-z][a-z0-9-]*$/;
@@ -40,6 +44,10 @@ const FILENAME_RE = /^[A-Za-z0-9._~()\[\]-]+\.json$/;
 // `kind` is a directory name under metadataDir — a record with kind `..`
 // would write outside it (CR-003).
 const KIND_RE = /^[a-z][a-z0-9_-]*$/;
+// An edge verb (decision 0016): `uses`, `calls`, `subscribes`, `reads`,
+// `writes`, `dependsOn`, `belongsTo` are the documented vocabulary; any
+// letters-only name is accepted so a local extractor may coin one.
+const VERB_RE = /^[a-z][A-Za-z]*$/;
 
 function fail(msg) {
   console.error(msg);
@@ -113,10 +121,30 @@ function validateRecords(records) {
     }
   }
   // Every ref must resolve to an emitted record — dangling refs are extractor
-  // bugs, caught here rather than shipped.
+  // bugs, caught here rather than shipped. A typed edge (decision 0016) names
+  // a verb and ids that are also plain refs; the resolver guarantees the
+  // union, this checks the shape an extractor handed over.
   for (const r of records) {
     for (const ref of r.refs) {
       if (!ids.has(ref)) fail(`Record ${r.id}: dangling ref '${ref}'`);
+    }
+    for (const [verb, list] of Object.entries(r.facts?.edges ?? {})) {
+      for (const id of list) if (!r.refs.includes(id)) fail(`Record ${r.id}: facts.edges.${verb} names '${id}', which is not among its refs`);
+    }
+  }
+}
+
+// The shape of `facts.edges` as an extractor handed it over, checked BEFORE
+// resolution (which would otherwise quietly drop a malformed entry): an
+// object, letters-only verbs, an array of refs per verb.
+function validateEdgeShapes(records) {
+  for (const r of records) {
+    const edges = r && r.facts ? r.facts.edges : undefined;
+    if (edges === undefined) continue;
+    if (!edges || typeof edges !== "object" || Array.isArray(edges)) fail(`Record ${r.id}: facts.edges must be an object mapping a verb to ids`);
+    for (const [verb, list] of Object.entries(edges)) {
+      if (!VERB_RE.test(verb)) fail(`Record ${r.id}: bad edge verb '${verb}' (letters only, camelCase)`);
+      if (!Array.isArray(list) || list.some((id) => typeof id !== "string")) fail(`Record ${r.id}: facts.edges.${verb} must be an array of ids`);
     }
   }
 }
@@ -236,6 +264,7 @@ export async function deriveRecords({ repoRoot, config }) {
   const selection = resolveExtractors(config);
   if (selection.error) fail(selection.error);
   const diagnostics = [];
+  const warnings = [];
   const configDiagnostics = selection.diagnostics;
   let records = [];
   const factsOrder = {};
@@ -253,18 +282,27 @@ export async function deriveRecords({ repoRoot, config }) {
     if (!out || !Array.isArray(out.records) || !Array.isArray(out.diagnostics)) fail(`Extractor '${name}' must return { records: [], diagnostics: [] }`);
     records.push(...out.records);
     diagnostics.push(...out.diagnostics.map((d) => `[${name}] ${d}`));
+    // An optional third channel (CAS-97): warnings print on EVERY derive,
+    // not only under --verbose — for what the branch that caused it should
+    // hear (an environment name no declared service covers). Still never
+    // a failure.
+    if (out.warnings !== undefined) {
+      if (!Array.isArray(out.warnings) || out.warnings.some((w) => typeof w !== "string")) fail(`Extractor '${name}': warnings must be an array of strings`);
+      warnings.push(...out.warnings.map((w) => `WARNING [${name}]: ${w}`));
+    }
     // Facts key orders merge per kind in config order: first extractor's keys
     // first, later extractors' unseen keys appended.
     for (const [kind, order] of Object.entries(extractor.FACTS_KEY_ORDER ?? {})) {
       factsOrder[kind] = [...new Set([...(factsOrder[kind] ?? []), ...order])];
     }
   }
+  validateEdgeShapes(records);
   const resolved = resolveRefs(records);
   records = resolved.records;
   diagnostics.push(...resolved.diagnostics);
   validateRecords(records);
   records.sort((a, b) => (a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : a.id < b.id ? -1 : 1));
-  return { records, factsOrder, diagnostics, configDiagnostics };
+  return { records, factsOrder, diagnostics, configDiagnostics, warnings };
 }
 
 export async function run(args) {
@@ -279,10 +317,11 @@ export async function run(args) {
   if (!metadataDir.startsWith(REPO + sep)) fail(`metadataDir '${metadataRel}' resolves outside the repo`);
   assertMetadataDirContained(REPO, metadataDir, metadataRel);
 
-  const { records, factsOrder, diagnostics, configDiagnostics } = await deriveRecords({ repoRoot: REPO, config });
-  // Config-level notes (deprecations) always print; extractor diagnostics are
-  // opt-in noise.
+  const { records, factsOrder, diagnostics, configDiagnostics, warnings } = await deriveRecords({ repoRoot: REPO, config });
+  // Config-level notes (deprecations) and extractor warnings always print;
+  // extractor diagnostics are opt-in noise.
   for (const d of configDiagnostics) console.error(d);
+  for (const w of warnings) console.error(w);
   if (VERBOSE) for (const d of diagnostics) console.error(d);
 
   const expected = new Map(); // rel path under metadataDir -> content

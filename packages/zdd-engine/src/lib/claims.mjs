@@ -24,6 +24,14 @@ import { extractLinks } from "./map-links.mjs";
 import { walkMarkdown, readBounded, MAX_STORE_FILE_BYTES } from "./walk-markdown.mjs";
 
 export const CLAIMABLE_KINDS = ["route", "table", "function", "surface"];
+// The kinds ZDD 2.1 added (decision 0017): claimable, warned about when
+// unclaimed, but under `claims.strict` a FAILURE only when
+// `claims.strictKinds` names the kind — switching an extractor on never
+// turns a green lint red by itself. A component is claimable only when it
+// is shared (two importers or a shared folder); a page-private one folds
+// into its page.
+export const OPT_IN_CLAIMABLE_KINDS = ["component", "job", "service"];
+const claimable = (record) => CLAIMABLE_KINDS.includes(record.kind) || (OPT_IN_CLAIMABLE_KINDS.includes(record.kind) && (record.kind !== "component" || record.facts?.shared === true));
 const MAX_DEPTH = 4; // metadataDir/<kind>/<file>.json — anything deeper is not derive's
 const MAX_ENTRIES = 20_000;
 
@@ -82,7 +90,7 @@ function walkJson(dir, out = [], state = { depth: 0, entries: 0 }) {
 
 // The claimable records under metadataDir, each with the node id a map link
 // resolves to (bundle-relative path minus extension), sorted by id.
-export function claimableRecords(metadataDir, bundleDir, skipped) {
+export function claimableRecords(metadataDir, bundleDir, skipped, unplaced, unknownJobs) {
   const out = [];
   const why = (p) => {
     try {
@@ -105,9 +113,19 @@ export function claimableRecords(metadataDir, bundleDir, skipped) {
       skipped?.push({ path: p, reason: "not JSON" });
       continue;
     }
-    if (!record || typeof record !== "object" || !CLAIMABLE_KINDS.includes(record.kind)) continue;
+    if (!record || typeof record !== "object") continue;
     const nodeId = posixify(relative(bundleDir, p)).replace(/\.json$/, "");
-    out.push({ kind: record.kind, id: String(record.id ?? nodeId), title: String(record.title ?? record.id ?? nodeId), nodeId, file: posixify(relative(dirname(bundleDir), p)) });
+    const file = posixify(relative(dirname(bundleDir), p));
+    // A call the resolver could not place (decision 0019) rides on the
+    // record as facts.unplaced; collected here so lint names it in one walk.
+    if (unplaced && Array.isArray(record.facts?.unplaced) && record.facts.unplaced.length) {
+      unplaced.push({ id: String(record.id ?? nodeId), file, calls: record.facts.unplaced.map(String) });
+    }
+    // A job whose mode the manifests do not state (decision 0020): lint asks
+    // for a committed Railway file or a `modes` entry rather than guessing.
+    if (unknownJobs && record.kind === "job" && record.facts?.mode === "unknown") unknownJobs.push({ id: String(record.id ?? nodeId), file, manifest: String(record.facts.manifest ?? "") });
+    if (!claimable(record)) continue;
+    out.push({ kind: record.kind, id: String(record.id ?? nodeId), title: String(record.title ?? record.id ?? nodeId), nodeId, file, optIn: OPT_IN_CLAIMABLE_KINDS.includes(record.kind) });
   }
   return out.sort((a, b) => (a.nodeId < b.nodeId ? -1 : 1));
 }
@@ -151,7 +169,11 @@ export function featureClaims(mapDir, bundleDir, skipped) {
 export function unclaimedRecords({ metadataDir, mapDir, bundleDir }) {
   const raw = [];
   const claimed = featureClaims(mapDir, bundleDir, raw);
-  const records = claimableRecords(metadataDir, bundleDir, raw);
+  const unplaced = [];
+  const unknownJobs = [];
+  const records = claimableRecords(metadataDir, bundleDir, raw, unplaced, unknownJobs);
+  unplaced.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  unknownJobs.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   const skipped = raw
     .map((s) => {
       const inMetadata = !relative(metadataDir, s.path).startsWith("..");
@@ -160,6 +182,8 @@ export function unclaimedRecords({ metadataDir, mapDir, bundleDir }) {
     .sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : 0));
   return {
     skipped,
+    unplaced,
+    unknownJobs,
     total: records.length,
     records,
     unclaimed: records.filter((r) => !claimed.has(r.nodeId)),

@@ -79,9 +79,12 @@
   // Functions sit in their own band beneath Tables (DIO-149): sharing a lane
   // put a trigger function *next to* its tables, collapsing the join edges
   // into invisible sub-node-width stubs. Storage buckets stay with Tables.
+  // UI Components get a band of their own (they are many); Jobs share the
+  // API band (they are few and sit at the same depth); External Services
+  // stay on the rail, since their edges come from several bands (ZDD 2.1).
   const LANE_BY_TYPE = {
-    "UI Surface": 0, "Feature": 1, "API Endpoint": 2,
-    "Table": 3, "Storage Bucket": 3, "Database Function": 4,
+    "UI Surface": 0, "UI Component": 1, "Feature": 2, "API Endpoint": 3, "Job": 3,
+    "Table": 4, "Storage Bucket": 4, "Database Function": 5,
   };
   const own = (table, key) => (Object.hasOwn(table, key) ? table[key] : undefined); // CR-010: static tables, source keys
   const layerOf = (id) => own(LANE_BY_TYPE, nodeIndex[id]?.type) ?? "rail";
@@ -120,7 +123,18 @@
     degree[e.data.target] = (degree[e.data.target] || 0) + 1;
   }
   const HUB_DEG = 20;
-  const isHub = (id) => (degree[id] || 0) >= HUB_DEG;
+  // A UI component used by this many nodes or more is a hub at a lower bar:
+  // a design-system primitive's thirty "used by" edges would be the hairball.
+  // Its caption carries the count instead; the detail panel lists every user.
+  const FAN_IN = Number((bundle.viewer && bundle.viewer.componentFanIn) || 8);
+  const fanIn = dict();
+  for (const e of visEdges) {
+    const t = nodeIndex[e.data.target], s = nodeIndex[e.data.source];
+    if (t && t.type === "UI Component" && e.data.verb === "uses") fanIn[t.id] = (fanIn[t.id] || 0) + 1;
+    if (s && s.type === "UI Component" && e.data.verb === "usedBy") fanIn[s.id] = (fanIn[s.id] || 0) + 1;
+  }
+  const isHub = (id) => (degree[id] || 0) >= HUB_DEG || (nodeIndex[id]?.type === "UI Component" && (fanIn[id] || 0) >= FAN_IN);
+  for (const n of bundle.nodes) if (n.data.type === "UI Component" && (fanIn[n.data.id] || 0) >= FAN_IN) n.data.display = `${n.data.display} · used by ${fanIn[n.data.id]}`;
 
   // Product areas, derived from concept tags (never a hand-maintained list).
   // Tags that describe properties rather than areas are excluded; areas with
@@ -157,6 +171,7 @@
     "#2a78d6": "#3987e5", "#e87ba4": "#d55181", "#eda100": "#c98500",
     "#4a3aa7": "#94a3b8", "#008300": "#008300",
     "#0d9488": "#14b8a6", "#b45309": "#d97706",
+    "#9333ea": "#a855f7", "#475569": "#94a3b8",
   };
   const themedColor = (d) => (theme() === "dark" ? (own(DARK_NODE, d.color) || d.color) : d.color);
   const THEMES = {
@@ -186,6 +201,12 @@
       { selector: "edge", style: {
           width: 1.2, "line-color": T.edge, "curve-style": "straight",
           "target-arrow-shape": "none", opacity: 0.12 } },
+      // Typed edges (decision 0016): a subscription is dashed; a call or a
+      // write points at what it reaches; a component-to-component edge is
+      // recorded but hidden until a node is lit.
+      { selector: "edge[verb = 'subscribes']", style: { "line-style": "dashed" } },
+      { selector: "edge[verb = 'calls'], edge[verb = 'writes'], edge[verb = 'dependsOn']", style: { "target-arrow-shape": "triangle", "arrow-scale": 0.7 } },
+      { selector: "edge.c2c", style: { opacity: 0 } },
       { selector: "edge.crossarea", style: { opacity: 0.3, "line-color": T.cross } },
       { selector: "edge.hubedge", style: { opacity: 0 } },
       { selector: "edge.lit", style: { opacity: 0.95, width: 1.6, "line-color": T.lit, "z-index": 9 } },
@@ -334,17 +355,20 @@
   }
 
   const markHubEdges = () => {
-    for (const e of cy.edges()) if (isHub(e.source().id()) || isHub(e.target().id())) e.addClass("hubedge");
+    for (const e of cy.edges()) {
+      if (isHub(e.source().id()) || isHub(e.target().id())) e.addClass("hubedge");
+      if (e.data("verb") === "uses" && nodeIndex[e.source().id()]?.type === "UI Component" && nodeIndex[e.target().id()]?.type === "UI Component") e.addClass("c2c");
+    }
   };
   const presetNodes = (pos) => bundle.nodes
     .filter((n) => pos[n.data.id])
     .map((n) => ({ data: n.data, position: pos[n.data.id] }));
 
   // ---------- views ----------
-  const LANE_NAMES = ["UI Surfaces", "Features — curated slices", "API", "Tables", "DB Functions"];
+  const LANE_NAMES = ["UI Surfaces", "UI Components", "Features — curated slices", "API & Jobs", "Tables", "DB Functions"];
 
   function viewLanes() {
-    const lanes = [[], [], [], [], []];
+    const lanes = [[], [], [], [], [], []];
     const rail = [];
     for (const n of bundle.nodes) {
       // Modules (lib/component files) would swamp the orientation view — the
@@ -386,7 +410,7 @@
     let yCursor = 0;
     lanes.forEach((ids) => {
       laneY.push(yCursor);
-      yCursor += Math.ceil(ids.length / PER_ROW) * ROW_H + LANE_PAD;
+      if (ids.length) yCursor += Math.ceil(ids.length / PER_ROW) * ROW_H + LANE_PAD;
     });
     const pos = dict();
     lanes.forEach((ids, li) => {
@@ -409,10 +433,12 @@
     cy.nodes().style({ width: 46, height: 46 });
     markHubEdges();
     addAcrs();
-    LANE_NAMES.forEach((nm, i) => addLaneLabel(nm, 0, laneY[i] - 44, true));
+    // An empty band takes no room: its label is skipped and its height is
+    // zero (a repo with no components or functions keeps its old picture).
+    LANE_NAMES.forEach((nm, i) => { if (lanes[i].length) addLaneLabel(nm, 0, laneY[i] - 44, true); });
     addLaneLabel("Apps & Services", maxW + 190, -70);
     fitWithFloor(40, 0.65);
-    legendEl.innerHTML = "<b>Architecture view.</b> UI → features → API → tables → functions, top to bottom; apps &amp; external services on the rail. Features (◆) are curated vertical slices, not an architectural tier — the Area coupling view shows the feature-first projection. Hover or tap a node to light its connections; high-traffic nodes show edges only then. <span class=\"authdot\"></span>&nbsp;= auth exception — ordinary session auth is stated per endpoint, not drawn.";
+    legendEl.innerHTML = "<b>Architecture view.</b> UI → components → features → API &amp; jobs → tables → functions, top to bottom; apps &amp; external services on the rail. Dashed = subscribes; a component used by many shows the count and lights its edges on hover. Features (◆) are curated vertical slices, not an architectural tier — the Area coupling view shows the feature-first projection. Hover or tap a node to light its connections; high-traffic nodes show edges only then. <span class=\"authdot\"></span>&nbsp;= auth exception — ordinary session auth is stated per endpoint, not drawn.";
     legendEl.hidden = false;
   }
 
@@ -425,8 +451,8 @@
     AREAS.forEach((area, ci) => {
       const ids = cols[area];
       ids.sort((a, b) => {
-        const la = layerOf(a) === "rail" ? 4 : layerOf(a);
-        const lb = layerOf(b) === "rail" ? 4 : layerOf(b);
+        const la = layerOf(a) === "rail" ? 6 : layerOf(a);
+        const lb = layerOf(b) === "rail" ? 6 : layerOf(b);
         return la - lb || a.localeCompare(b);
       });
       ids.forEach((id, i) => {
@@ -786,6 +812,25 @@
       resourceEl.appendChild(a);
     } else resourceEl.textContent = data.resource || "—";
 
+    // App (decision 0018): the Application page the record sits under, or,
+    // for a record under none, the apps reached by its inbound edges.
+    const appEl = document.getElementById("detail-app");
+    appEl.innerHTML = "";
+    const appIds = data.app ? [data.app] : [...new Set((backlinks[conceptId] || []).concat(bundle.edges.filter((e) => e.data.source === conceptId && e.data.verb === "usedBy").map((e) => e.data.target)).map((id) => nodeIndex[id]?.app).filter(Boolean))].sort();
+    if (!appIds.length) appEl.textContent = "—";
+    else {
+      appIds.forEach((id, i) => {
+        if (i) appEl.append(", ");
+        const a = document.createElement("a");
+        a.textContent = nodeIndex[id]?.label || id;
+        a.href = "javascript:void(0)";
+        a.className = "internal";
+        a.addEventListener("click", () => reveal(id));
+        appEl.appendChild(a);
+      });
+      if (!data.app && appIds.length > 1) appEl.append(" (shared)");
+    }
+
     const tagsEl = document.getElementById("detail-tags");
     tagsEl.innerHTML = "";
     if (data.tags && data.tags.length) {
@@ -905,6 +950,41 @@
     if (currentView === "explorer") return;
     t ? applyDim((n) => n.data("type") === t) : cy.elements().removeClass("dim");
   });
+  // App filter (decision 0018): each Application page, plus "Shared" for the
+  // records reached from more than one app. Hidden when the map has no apps.
+  const appSelect = document.getElementById("filter-app");
+  const appsOfNode = (id) => {
+    const d = nodeIndex[id];
+    if (!d) return [];
+    if (d.app) return [d.app];
+    const reached = new Set();
+    for (const src of backlinks[id] || []) if (nodeIndex[src]?.app) reached.add(nodeIndex[src].app);
+    for (const e of bundle.edges) if (e.data.source === id && e.data.verb === "usedBy" && nodeIndex[e.data.target]?.app) reached.add(nodeIndex[e.data.target].app);
+    return [...reached];
+  };
+  if (bundle.apps && bundle.apps.length) {
+    appSelect.hidden = false;
+    for (const a of bundle.apps) {
+      const opt = document.createElement("option");
+      opt.value = a.id;
+      opt.textContent = a.title;
+      appSelect.appendChild(opt);
+    }
+    const shared = document.createElement("option");
+    shared.value = "__shared__";
+    shared.textContent = "Shared by apps";
+    appSelect.appendChild(shared);
+    appSelect.addEventListener("change", (e) => {
+      const v = e.target.value;
+      if (currentView === "explorer") return;
+      if (!v) { cy.elements().removeClass("dim"); return; }
+      applyDim((n) => {
+        const apps = appsOfNode(n.id());
+        if (v === "__shared__") return apps.length > 1;
+        return n.id() === v || apps.includes(v) || (n.data("layer") !== "metadata" && !apps.length);
+      });
+    });
+  }
   document.getElementById("search").addEventListener("input", (e) => {
     const q = e.target.value.trim().toLowerCase();
     if (currentView === "explorer") {

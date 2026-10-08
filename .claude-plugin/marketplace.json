@@ -8,12 +8,12 @@
     {
       "name": "zdd",
       "source": "./plugins/zdd",
-      "description": "Zero-Drift Docs — seven documentation artifacts kept at most one unit of work behind the code.",
-      "version": "2.0.0"
+      "description": "Zero-Drift Docs \u2014 seven documentation artifacts kept at most one unit of work behind the code.",
+      "version": "2.1.0"
     },
     {
       "name": "mattpocock-skills",
-      "description": "Matt Pocock's agent skills (grilling, domain modelling, TDD, code review and more) — the exact release this ZDD release was tested with. zdd depends on it; installing zdd brings it. Matt's plugin, uncopied, from his repository.",
+      "description": "Matt Pocock's agent skills (grilling, domain modelling, TDD, code review and more) \u2014 the exact release this ZDD release was tested with. zdd depends on it; installing zdd brings it. Matt's plugin, uncopied, from his repository.",
       "source": {
         "source": "url",
         "url": "https://github.com/mattpocock/skills.git",

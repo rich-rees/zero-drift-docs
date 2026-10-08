@@ -50,7 +50,17 @@ installed (used in step 4):
      configured *ahead* of the code (an extractor at its future path, or an
      Application concept in the map when no extractor exists yet — a React
      Router web app gets the `react-router` extractor at its routes file plus
-     its Application; Expo is map-only today).
+     its Application; an Expo app gets `expo-router` at its `app/` folder —
+     early, built against a fixture — or stays map-only until that folder
+     exists). Four more proposals carry their own evidence (ZDD 2.1):
+     `components` (the `.tsx`/`.jsx` roots), `expo-router` (an `app/` folder
+     with a `_layout` file), `jobs` (package scripts, a Procfile or a Railway
+     file that run a process) and `services` (environment names read in
+     source — `RESEND_API_KEY` — grouped by prefix into a service each, with
+     any import whose package matches). **Services are guessed by name:**
+     show each and ask the user to confirm or rename it, and to say which
+     prefixes are not a service (they go in `ignore`). Never add a vendor
+     the evidence did not show.
 - **GREENFIELD** — no source to read. Grill for the intended stack: what
   serves the API, what holds the data, what the apps are (web, mobile), and
   where each will live. Every part maps to an extractor at its stated future
@@ -151,17 +161,17 @@ nothing lands unannounced.
 
 ## Step 4 — the engine, the mapping session, and the recommendation
 
-1. **Derive** — `npx -y @rich-rees/zdd-engine@2.0.0 derive`. On a greenfield
+1. **Derive** — `npx -y @rich-rees/zdd-engine@2.1.0 derive`. On a greenfield
    repo this writes nothing and passes; that is correct.
 2. **Mapping session** (the only LLM-heavy step, paid once; skip on greenfield
    beyond the declared apps) — scan the code with the glossary + ADRs loaded,
    propose feature groupings, and **ask** wherever evidence is thin. Answers
    route by kind, per [authoring.md](../authoring.md): verdicts → ADRs,
    vocabulary → glossary, pure connective fact → the map.
-3. **Render** — `npx -y @rich-rees/zdd-engine@2.0.0 render`. Commit the
+3. **Render** — `npx -y @rich-rees/zdd-engine@2.1.0 render`. Commit the
    generated artifacts (`zdd/graph.json`, the agent, ADR and blessing indexes, the human index);
    never edit them.
-4. **Lint** — `npx -y @rich-rees/zdd-engine@2.0.0 lint`. The same blocking
+4. **Lint** — `npx -y @rich-rees/zdd-engine@2.1.0 lint`. The same blocking
    lint CI runs: ADR numbering, supersession symmetry, and every blessing's
    citation and trigger question. A failure here is fixed now, in the mapping session, not
    discovered on the first PR. It also prints the **unclaimed records** — on

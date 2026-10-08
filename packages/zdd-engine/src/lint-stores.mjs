@@ -52,7 +52,7 @@ import { loadConfig, absentStoreNotes } from "./lib/config.mjs";
 import { parseFrontmatter } from "./lib/frontmatter.mjs";
 import { extractBlessings, forwardStamps, blessingShape, BLESSING_LENGTH_BUDGET } from "./lib/map-links.mjs";
 import { walkMarkdown, readBounded, MAX_STORE_FILE_BYTES } from "./lib/walk-markdown.mjs";
-import { unclaimedRecords } from "./lib/claims.mjs";
+import { unclaimedRecords, CLAIMABLE_KINDS, OPT_IN_CLAIMABLE_KINDS } from "./lib/claims.mjs";
 
 export function run(args) {
   const { repoRoot: REPO, config, paths, bundleDir } = loadConfig(args);
@@ -62,10 +62,12 @@ export function run(args) {
   // never strict silently off (CAS-65 CR-027/028); the allow-list is bounded
   // (CR-031).
   const claimsCfg = config.claims === undefined ? {} : config.claims;
-  const CLAIMS_KEYS = ["strict", "allowUnclaimed"];
+  const CLAIMS_KEYS = ["strict", "allowUnclaimed", "strictKinds"];
   const isObject = claimsCfg !== null && typeof claimsCfg === "object" && !Array.isArray(claimsCfg);
   const unknownKey = isObject ? Object.keys(claimsCfg).find((k) => !CLAIMS_KEYS.includes(k)) : undefined;
   const allow = isObject ? claimsCfg.allowUnclaimed : undefined;
+  const strictKinds = isObject ? claimsCfg.strictKinds : undefined;
+  const badKind = Array.isArray(strictKinds) ? strictKinds.find((k) => typeof k !== "string" || !OPT_IN_CLAIMABLE_KINDS.includes(k)) : undefined;
   const claimsError =
     !isObject ? "'claims' must be an object"
     : unknownKey !== undefined ? `'claims' has an unknown key '${unknownKey.replace(/[\x00-\x1f\x7f]/g, "?").slice(0, 40)}' (known: ${CLAIMS_KEYS.join(", ")})`
@@ -74,6 +76,11 @@ export function run(args) {
       ? "'claims.allowUnclaimed' must be an array of record ids (\"route:/health\")"
     : allow !== undefined && allow.length > 10_000 ? "'claims.allowUnclaimed' lists more than 10000 ids"
     : allow !== undefined && allow.some((x) => x.length > 512) ? "'claims.allowUnclaimed' ids must be at most 512 characters"
+    : strictKinds !== undefined && !Array.isArray(strictKinds) ? `'claims.strictKinds' must be an array of kinds (${OPT_IN_CLAIMABLE_KINDS.join(", ")})`
+    : badKind !== undefined
+      ? CLAIMABLE_KINDS.includes(badKind)
+        ? `'claims.strictKinds' lists '${badKind}', which 'claims.strict' already governs — remove it`
+        : `'claims.strictKinds' lists '${String(badKind).replace(/[\x00-\x1f\x7f]/g, "?").slice(0, 40)}', which is no opt-in claimable kind (${OPT_IN_CLAIMABLE_KINDS.join(", ")})`
       : null;
   if (claimsError) {
     console.error(`zdd/config.json: ${claimsError}`);
@@ -81,6 +88,9 @@ export function run(args) {
   }
   const STRICT = claimsCfg.strict === true;
   const ALLOWED = new Set(claimsCfg.allowUnclaimed ?? []);
+  // Which kinds strict governs (decision 0017): the original five always;
+  // an opt-in kind only when strictKinds names it.
+  const STRICT_KINDS = new Set([...CLAIMABLE_KINDS, ...(claimsCfg.strictKinds ?? [])]);
   const ADR_DIR = resolve(REPO, paths.adrDir);
   const MAP_DIR = resolve(REPO, paths.mapDir);
   const METADATA_DIR = resolve(REPO, paths.metadataDir);
@@ -235,7 +245,7 @@ if (planPresent && args.includes("--merge")) {
 // Read after the blocking lints so a failure above is not buried under the
 // list. Absent metadata (greenfield, or derive not yet run) is an empty
 // inventory: nothing to claim, no line printed.
-const { total, records, unclaimed, doubleClaimed, skipped } = unclaimedRecords({ metadataDir: METADATA_DIR, mapDir: MAP_DIR, bundleDir });
+const { total, records, unclaimed, doubleClaimed, skipped, unplaced, unknownJobs } = unclaimedRecords({ metadataDir: METADATA_DIR, mapDir: MAP_DIR, bundleDir });
 // Every adopter-controlled path is printable before it reaches the log — a
 // control character in a filename cannot forge a line (CAS-65 CR-032).
 const files = (list) => list.map(printable).join(", ");
@@ -245,14 +255,22 @@ if (STRICT) {
     problems.push(`claims.strict: ${printable(s.file)} could not be read (${s.reason}) — ${s.record ? "its record is unknown" : "its claims are unknown"}`);
   }
   const ids = new Set(records.map((r) => r.id));
+  const softUnclaimed = [];
   for (const r of unclaimed) {
-    if (!ALLOWED.has(r.id)) problems.push(`${printable(r.id)} is unclaimed — claims.strict: link it from one feature slice, or add it to claims.allowUnclaimed (${printable(r.file)})`);
+    if (ALLOWED.has(r.id)) continue;
+    if (STRICT_KINDS.has(r.kind)) problems.push(`${printable(r.id)} is unclaimed — claims.strict: link it from one feature slice, or add it to claims.allowUnclaimed (${printable(r.file)})`);
+    else softUnclaimed.push(r);
+  }
+  if (softUnclaimed.length) {
+    console.error(`WARNING: ${softUnclaimed.length} record${softUnclaimed.length === 1 ? "" : "s"} of an opt-in kind unclaimed — not a failure until claims.strictKinds names the kind (${[...new Set(softUnclaimed.map((r) => r.kind))].sort().join(", ")}):`);
+    for (const r of softUnclaimed) console.error(`  ${r.kind.padEnd(9)} ${printable(r.title)}  (${printable(r.file)})`);
   }
   for (const id of [...ALLOWED].sort()) {
     if (!ids.has(id)) problems.push(`claims.allowUnclaimed lists '${printable(id)}', which is no claimable record — remove it`);
   }
   for (const r of doubleClaimed) {
-    problems.push(`${printable(r.id)} is claimed by ${r.features.length} feature slices (${files(r.features)}) — claims.strict: exactly one owns a record`);
+    if (STRICT_KINDS.has(r.kind)) problems.push(`${printable(r.id)} is claimed by ${r.features.length} feature slices (${files(r.features)}) — claims.strict: exactly one owns a record`);
+    else console.error(`WARNING: ${printable(r.id)} is claimed by ${r.features.length} feature slices (${files(r.features)}) — a failure once claims.strictKinds names '${r.kind}'`);
   }
 } else {
   if (unclaimed.length) {
@@ -270,6 +288,24 @@ if (STRICT) {
     console.error(`WARNING: ${skipped.length} claim file${skipped.length === 1 ? "" : "s"} could not be read — the claim picture is incomplete (claims.strict fails on these):`);
     for (const s of skipped) console.error(`  ${printable(s.file)} (${s.reason})`);
   }
+}
+
+// ---- 4b. API calls the resolver could not place (decision 0019) ----
+// A `${variable}` segment matches only a route parameter; a call whose
+// variable the scan could not read as a union of literals, and that fits no
+// route that way, has no edge — and that is said here, not only under
+// `derive --verbose`. A warning, never a failure: the fix is in the code
+// (type the variable) or in the routes, not in the stores.
+if (unplaced.length) {
+  const n = unplaced.reduce((sum, r) => sum + r.calls.length, 0);
+  console.error(`WARNING: ${n} API call${n === 1 ? "" : "s"} could not be placed on a route — a variable segment (\`*\`) matches only a route parameter, never a fixed word; type the variable as a union of string literals so the call expands, or the edge stays missing:`);
+  for (const r of unplaced) for (const c of r.calls) console.error(`  ${printable(r.id)}  ${printable(c)}  (${printable(r.file)})`);
+}
+
+// ---- 4c. Jobs whose mode is unknown (decision 0020) ----
+if (unknownJobs.length) {
+  console.error(`WARNING: ${unknownJobs.length} job${unknownJobs.length === 1 ? "" : "s"} with no stated mode — a worker or a scheduled job? The manifests do not say: commit a railway.toml/json with its startCommand (and cronSchedule for a scheduled one), or set extractorOptions.jobs.modes["<name>"] to "worker" or "scheduled":`);
+  for (const j of unknownJobs) console.error(`  ${printable(j.id)}  (from ${printable(j.manifest)}; ${printable(j.file)})`);
 }
 
 // ---- 5. Stray root glossary (CAS-93) ----

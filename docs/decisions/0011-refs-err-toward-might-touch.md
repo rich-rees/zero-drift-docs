@@ -1,6 +1,6 @@
 # 0011 — Route refs err toward "might touch": ties fan out, imports narrow to what they reach
 
-**Date:** 2026-09-28 · **Status:** accepted · **Origin:** CAS-65, from two findings in Cascade's CAS-64 review of the `react-router` extractor. **Supersedes, in part:** [0001](0001-composed-extractors.md) (route ties broken by id) and [0009](0009-unclaimed-records-warn-never-fail.md) (a data module attributed whole to every screen importing it).
+**Date:** 2026-09-28 · **Status:** accepted · **Origin:** CAS-65, from two findings in Cascade's CAS-64 review of the `react-router` extractor. **Superseded, in part, by [0019](0019-a-variable-segment-matches-a-parameter-never-a-fixed-word.md)** (2026-10-08): decision 1's `*` on a literal route segment is no longer a ranked guess; it is not a match. Decisions 2 and 3 stand. **Supersedes, in part:** [0001](0001-composed-extractors.md) (route ties broken by id) and [0009](0009-unclaimed-records-warn-never-fail.md) (a data module attributed whole to every screen importing it).
 
 ## Context
 

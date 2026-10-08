@@ -16,7 +16,7 @@
       "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
       "minItems": 1,
       "uniqueItems": true,
-      "description": "Extractors to run, composed: one per convention in the stack (built-in: supabase, nextjs, fastapi, react-router, generic). Selected by NAME from the engine's registry or from localExtractorDir — never by path. Records from every extractor are merged and cross-extractor refs resolved after the merge.",
+      "description": "Extractors to run, composed: one per convention in the stack (built-in: supabase, nextjs, fastapi, react-router, components, expo-router, jobs, services, generic). Selected by NAME from the engine's registry or from localExtractorDir — never by path. Records from every extractor are merged and cross-extractor refs resolved after the merge.",
       "examples": [["supabase", "nextjs"], ["supabase", "fastapi"], ["fastapi", "react-router"], ["generic"]]
     },
     "extractorOptions": {
@@ -56,7 +56,8 @@
                 "roots": { "type": "array", "items": { "type": "string" } },
                 "extensions": { "type": "array", "items": { "type": "string" }, "default": [".ts", ".tsx", ".js", ".jsx"] },
                 "excludeDirs": { "type": "array", "items": { "type": "string" }, "default": ["node_modules"] },
-                "excludeSuffixes": { "type": "array", "items": { "type": "string" }, "default": [".test.ts", ".test.tsx", ".test.js", ".test.jsx", ".d.ts"] }
+                "excludeSuffixes": { "type": "array", "items": { "type": "string" }, "default": [".test.ts", ".test.tsx", ".test.js", ".test.jsx", ".d.ts"] },
+                "subscribeCalls": { "type": "array", "items": { "type": "string" }, "default": [], "description": "Call names whose first string argument is a table a page subscribes to over Supabase Realtime, beside .on(\"postgres_changes\", { table }) — a `subscribes` edge (ZDD 2.1)." }
               }
             }
           }
@@ -75,7 +76,53 @@
           "additionalProperties": false,
           "properties": {
             "routesFile": { "type": "string", "default": "src/routes.tsx", "description": "The file declaring the route tree in code: a RouteObject[] / createBrowserRouter([...]) array, or <Route> elements. One surface per route with a path; layout ancestors become facts.guards." },
-            "srcAliasRoot": { "type": "string", "description": "Where the tsconfig @/ alias points; default the routes file's directory." }
+            "srcAliasRoot": { "type": "string", "description": "Where the tsconfig @/ alias points; default the routes file's directory." },
+            "subscribeCalls": { "type": "array", "items": { "type": "string" }, "default": [], "description": "Call names whose first string argument is a table the screen subscribes to over Supabase Realtime (e.g. \"live.onInsert\"), beside the client's own .on(\"postgres_changes\", { table }) — a `subscribes` edge (ZDD 2.1)." }
+          }
+        },
+        "components": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "React and React Native components (ZDD 2.1, opt-in): exported capitalised functions returning JSX in .tsx/.jsx files under roots. Pages and screens under pageDirs stay the routing extractors'. A component is shared when two or more files import it or it sits under a sharedDirs folder.",
+          "properties": {
+            "roots": { "type": "array", "items": { "type": "string" }, "default": ["src"] },
+            "extensions": { "type": "array", "items": { "type": "string" }, "default": [".tsx", ".jsx"] },
+            "excludeDirs": { "type": "array", "items": { "type": "string" }, "default": ["node_modules"] },
+            "excludeSuffixes": { "type": "array", "items": { "type": "string" }, "default": [".test.tsx", ".test.jsx", ".spec.tsx", ".spec.jsx", ".stories.tsx", ".stories.jsx", ".d.ts"] },
+            "pageDirs": { "type": "array", "items": { "type": "string" }, "default": ["pages", "screens", "app"], "description": "Folder names whose files are surfaces (pages, screens), not components." },
+            "sharedDirs": { "type": "array", "items": { "type": "string" }, "default": ["components", "ui"], "description": "Folder names that mark every component under them shared, whatever its import count." },
+            "srcAliasRoot": { "type": "string", "description": "Where the tsconfig @/ alias points; default the first root." }
+          }
+        },
+        "expo-router": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Native screens from an Expo Router file tree (ZDD 2.1, opt-in, early): one surface per screen file under appDir, namespaced `surface:native:/path` so a native screen and a web page may share a URL; _layout files are layouts; (group) folders are stripped; [id] is dynamic.",
+          "properties": {
+            "appDir": { "type": "string", "default": "app" },
+            "srcAliasRoot": { "type": "string", "description": "Where the tsconfig @/ alias points; default appDir's parent." }
+          }
+        },
+        "jobs": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Workers and scheduled jobs from committed run manifests (ZDD 2.1, opt-in, decision 0020): package.json scripts that run a module as a process (python -m x, node x.mjs), Procfile lines, railway.toml/json startCommand (+ cronSchedule = scheduled). The mode is never guessed: scheduled from a Railway file, worker from `modes`, else unknown with a lint warning.",
+          "properties": {
+            "roots": { "type": "array", "items": { "type": "string" }, "default": ["."], "description": "Where manifests are looked for; node_modules and .git are never entered." },
+            "exclude": { "type": "array", "items": { "type": "string" }, "description": "Script names that are not jobs. Default: dev, start, test, lint, build, typecheck, format, prepare, postinstall, and anything test:*, lint:*, build:*, check:*." },
+            "modes": { "type": "object", "additionalProperties": { "type": "string", "enum": ["worker", "scheduled"] }, "description": "The mode of a job the manifests do not state, by job name." },
+            "entries": { "type": "array", "description": "Processes no manifest names.", "items": { "type": "object", "required": ["name"], "additionalProperties": false, "properties": { "name": { "type": "string" }, "module": { "type": "string", "description": "A Python module, dotted (app.housekeeping)." }, "file": { "type": "string", "description": "A JS/TS entry file, relative to cwd." }, "cwd": { "type": "string", "description": "The folder the command runs in (default the repo root)." }, "mode": { "type": "string", "enum": ["worker", "scheduled"] }, "schedule": { "type": "string" }, "command": { "type": "string" }, "description": { "type": "string" } } } }
+          }
+        },
+        "services": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "External services a module depends on (ZDD 2.1, opt-in, decision 0020): declared with the markers that reveal them — imports of a package and/or environment variable NAME prefixes read in source (names only, never values). One record per declared service; usedBy edges to the records in the files that hit a marker. An env name with a credential-shaped suffix no service covers is a warning on every derive.",
+          "properties": {
+            "services": { "type": "array", "items": { "type": "object", "required": ["name"], "additionalProperties": false, "properties": { "name": { "type": "string" }, "imports": { "type": "array", "items": { "type": "string" } }, "env": { "type": "array", "items": { "type": "string" }, "description": "Env name prefixes, e.g. \"SENTRY_\"." } } } },
+            "ignore": { "type": "array", "items": { "type": "string" }, "description": "Env name prefixes that are not services (beside the built-in database and platform prefixes)." },
+            "roots": { "type": "array", "items": { "type": "string" }, "default": ["."] },
+            "extensions": { "type": "array", "items": { "type": "string" }, "default": [".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"] }
           }
         },
         "generic": { "type": "object", "additionalProperties": false }
@@ -103,7 +150,7 @@
       "type": "string",
       "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(\\.(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*))?(\\+([0-9a-zA-Z-]+(\\.[0-9a-zA-Z-]+)*))?$",
       "description": "The @rich-rees/zdd-engine version this repo was bootstrapped for — written by bootstrap, rewritten by bootstrap --upgrade, compared against the plugin by load (skew warning). Mirrors the pin in the CI workflow / pre-push hook so a repo without CI still has one.",
-      "examples": ["2.0.0"]
+      "examples": ["2.1.0"]
     },
     "hooks": {
       "type": "object",
@@ -187,6 +234,13 @@
           "items": { "type": "string" },
           "description": "Record ids that may stay unclaimed under strict — plumbing no feature owns. Read only when strict is true.",
           "examples": [["route:/health", "route:/ready", "route:/docs", "route:/openapi.json"]]
+        },
+        "strictKinds": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["component", "job", "service"] },
+          "uniqueItems": true,
+          "default": [],
+          "description": "The opt-in kinds (ZDD 2.1: component, job, service) that strict also governs. Unlisted, an unclaimed record of such a kind is a warning under strict, never a failure, so switching an extractor on never turns a green lint red by itself (decision 0017). A shared component is claimable; a page-private one is not."
         }
       }
     },
@@ -209,6 +263,7 @@
             "name": { "type": "string", "default": "cytoscape" },
             "defaultFocus": { "type": "string", "description": "cytoscape: node id the explorer view opens on." },
             "authHubs": { "type": "array", "items": { "type": "string" }, "description": "cytoscape: node ids whose edges to ordinary session-auth endpoints are stated, not drawn." },
+            "componentFanIn": { "type": "integer", "minimum": 1, "default": 8, "description": "cytoscape: a UI component used by this many surfaces or components, or more, draws its edges only on hover in the lanes view and shows a count instead — the design-system primitive rule (ZDD 2.1). A viewer choice: graph.json is unchanged." },
             "nonAreaTags": { "type": "array", "items": { "type": "string" }, "deprecated": true, "description": "DEPRECATED (pre-0.4 home): move to the top-level nonAreaTags key — it shapes graph.json, not just this viewer. Still honoured with a note." }
           }
         }

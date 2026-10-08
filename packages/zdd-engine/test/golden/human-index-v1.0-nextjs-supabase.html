@@ -556,6 +556,9 @@ button:focus-visible, .item:focus-visible { outline: 2px solid #c98500; outline-
     <select id="filter-type">
       <option value="">All types</option>
     </select>
+    <select id="filter-app" hidden>
+      <option value="">All apps</option>
+    </select>
     <select id="view">
       <option value="lanes">Architecture (lanes)</option>
       <option value="columns">Area coupling (columns)</option>
@@ -600,6 +603,7 @@ button:focus-visible, .item:focus-visible { outline: 2px solid #c98500; outline-
       <dl class="frontmatter">
         <dt>Description</dt><dd id="detail-description"></dd>
         <dt>Resource</dt><dd id="detail-resource"></dd>
+        <dt>App</dt><dd id="detail-app">—</dd>
         <dt>Tags</dt><dd id="detail-tags"></dd>
       </dl>
       <hr>
@@ -625,7 +629,7 @@ button:focus-visible, .item:focus-visible { outline: 2px solid #c98500; outline-
 
 <script>
 window.BUNDLE_NAME = "Fixture App";
-window.BUNDLE = {"nodes":[{"data":{"id":"map/apps/fixture-app","label":"Fixture App","type":"Application","description":"The fixture Next.js app the engine tests derive against.","resource":"src","tags":["things"],"color":"#94a3b8","size":31}},{"data":{"id":"map/features/things","label":"Things","type":"Feature","description":"CRUD for things with an audit trail (ADR-0002).","resource":"src/components","tags":["things"],"color":"#4a3aa7","size":32}},{"data":{"id":"metadata/bucket/db--cdn-assets","label":"cdn-assets (db)","type":"Storage Bucket","description":"","resource":"","tags":["db"],"color":"#b45309","size":30}},{"data":{"id":"metadata/bucket/db--uploads","label":"uploads (db)","type":"Storage Bucket","description":"","resource":"migrations/00002_things.sql","tags":["db"],"color":"#b45309","size":30}},{"data":{"id":"metadata/function/db--save_thing","label":"save_thing()","type":"Database Function","description":"save a thing and log the change","resource":"migrations/00002_things.sql","tags":["things"],"color":"#0d9488","size":31}},{"data":{"id":"metadata/function/db--set_updated_at","label":"set_updated_at()","type":"Database Function","description":"touch updated_at on every write","resource":"migrations/00001_init.sql","tags":["db"],"color":"#0d9488","size":31}},{"data":{"id":"metadata/route/hooks--callback","label":"/api/hooks/callback","type":"API Endpoint","description":"Machine-to-machine callback from the external worker — HMAC-verified.","resource":"src/app/api/hooks/callback/route.ts","tags":["hooks"],"auth":"hmac","color":"#2a78d6","size":30}},{"data":{"id":"metadata/route/hooks--status","label":"/api/hooks/status","type":"API Endpoint","description":"Worker status probe — checks the caller's session inside the handler","resource":"src/app/api/hooks/status/route.ts","tags":["hooks"],"auth":"session-in-handler","color":"#2a78d6","size":30}},{"data":{"id":"metadata/route/things--_id","label":"/api/things/[id]","type":"API Endpoint","description":"Read (GET), save (PUT), and delete (DELETE) one thing.","resource":"src/app/api/things/[id]/route.ts","tags":["things"],"auth":"session","color":"#2a78d6","size":31}},{"data":{"id":"metadata/route/things","label":"/api/things","type":"API Endpoint","description":"List (GET) and create (POST) things.","resource":"src/app/api/things/route.ts","tags":["things"],"auth":"session","color":"#2a78d6","size":30}},{"data":{"id":"metadata/surface/(app)--_layout","label":"/(app)/_layout","type":"UI Surface","description":"src/app/(app)/layout.tsx","resource":"src/app/(app)/layout.tsx","tags":["things"],"color":"#e87ba4","size":30}},{"data":{"id":"metadata/surface/_layout","label":"/_layout","type":"UI Surface","description":"Root layout — nav shell around every page.","resource":"src/app/layout.tsx","tags":["_layout"],"color":"#e87ba4","size":30}},{"data":{"id":"metadata/surface/index","label":"/","type":"UI Surface","description":"Home — thin wrapper around the HomePage component.","resource":"src/components/HomePage.tsx","tags":["root"],"color":"#e87ba4","size":30}},{"data":{"id":"metadata/surface/things--_id","label":"/things/[id]","type":"UI Surface","description":"Thing detail — loads one thing and renders it inline (real logic, no wrapper).","resource":"src/app/things/[id]/page.tsx","tags":["things"],"color":"#e87ba4","size":30}},{"data":{"id":"metadata/table/db--audit_log","label":"audit_log (db)","type":"Table","description":"append-only audit trail","resource":"migrations/00001_init.sql","tags":["db"],"color":"#008300","size":31}},{"data":{"id":"metadata/table/db--things","label":"things (db)","type":"Table","description":"the widget catalogue","resource":"migrations/00001_init.sql","tags":["things"],"color":"#008300","size":30}},{"data":{"id":"metadata/module/src--components--HomePage-tsx","label":"src/components/HomePage.tsx","type":"Module","description":"Client-side things list — fetches the catalogue and renders it.","resource":"src/components/HomePage.tsx","tags":["things"],"color":"#64748b","size":30}},{"data":{"id":"metadata/module/src--lib--things-api-ts","label":"src/lib/things-api.ts","type":"Module","description":"Shared data-access helpers for things — used by pages and scripts alike.","resource":"src/lib/things-api.ts","tags":["things"],"color":"#64748b","size":31}}],"edges":[{"data":{"id":"20:map/apps/fixture-app__map/features/things","source":"map/apps/fixture-app","target":"map/features/things"}},{"data":{"id":"19:map/features/things__metadata/table/db--things","source":"map/features/things","target":"metadata/table/db--things"}},{"data":{"id":"19:map/features/things__metadata/route/things","source":"map/features/things","target":"metadata/route/things"}},{"data":{"id":"19:map/features/things__metadata/route/things--_id","source":"map/features/things","target":"metadata/route/things--_id"}},{"data":{"id":"19:map/features/things__metadata/function/db--save_thing","source":"map/features/things","target":"metadata/function/db--save_thing"}},{"data":{"id":"19:map/features/things__metadata/surface/(app)--_layout","source":"map/features/things","target":"metadata/surface/(app)--_layout"}},{"data":{"id":"32:metadata/function/db--save_thing__metadata/table/db--audit_log","source":"metadata/function/db--save_thing","target":"metadata/table/db--audit_log"}},{"data":{"id":"32:metadata/function/db--save_thing__metadata/table/db--things","source":"metadata/function/db--save_thing","target":"metadata/table/db--things"}},{"data":{"id":"36:metadata/function/db--set_updated_at__metadata/table/db--things","source":"metadata/function/db--set_updated_at","target":"metadata/table/db--things"}},{"data":{"id":"30:metadata/route/hooks--callback__metadata/table/db--audit_log","source":"metadata/route/hooks--callback","target":"metadata/table/db--audit_log"}},{"data":{"id":"26:metadata/route/things--_id__metadata/function/db--save_thing","source":"metadata/route/things--_id","target":"metadata/function/db--save_thing"}},{"data":{"id":"26:metadata/route/things--_id__metadata/table/db--things","source":"metadata/route/things--_id","target":"metadata/table/db--things"}},{"data":{"id":"21:metadata/route/things__metadata/table/db--things","source":"metadata/route/things","target":"metadata/table/db--things"}},{"data":{"id":"28:metadata/surface/things--_id__metadata/route/things--_id","source":"metadata/surface/things--_id","target":"metadata/route/things--_id"}},{"data":{"id":"28:metadata/table/db--audit_log__metadata/table/db--things","source":"metadata/table/db--audit_log","target":"metadata/table/db--things"}},{"data":{"id":"45:metadata/module/src--components--HomePage-tsx__metadata/route/things","source":"metadata/module/src--components--HomePage-tsx","target":"metadata/route/things"}},{"data":{"id":"39:metadata/module/src--lib--things-api-ts__metadata/route/things--_id","source":"metadata/module/src--lib--things-api-ts","target":"metadata/route/things--_id"}},{"data":{"id":"39:metadata/module/src--lib--things-api-ts__metadata/table/db--audit_log","source":"metadata/module/src--lib--things-api-ts","target":"metadata/table/db--audit_log"}},{"data":{"id":"39:metadata/module/src--lib--things-api-ts__metadata/table/db--things","source":"metadata/module/src--lib--things-api-ts","target":"metadata/table/db--things"}}],"bodies":{"map/apps/fixture-app":"\nA deliberately tiny Next.js App Router app: one feature, one wrapper page,\none hooks route pair, two migrations.\n\n- [Things](../features/things.md)\n\n# Blessings\n- Adding a page? Make it a thin wrapper over a component in `src/components/`,\n  as `src/app/page.tsx` does, because the component is what a test renders —\n  never logic in the page file.\n","map/features/things":"\nThe things catalogue: list, edit, and audit things.\n\n- [things table](../../metadata/table/db--things.json)\n- [/api/things](../../metadata/route/things.json)\n- [/api/things/[id]](../../metadata/route/things--_id.json)\n- [save_thing()](../../metadata/function/db--save_thing.json)\n- [signed-in layout](\u003c../../metadata/surface/(app)--_layout.json>)\n\n# Blessings\n- Adding an endpoint for things? Copy [/api/things](../../metadata/route/things.json),\n  per ADR-0002 — never a route named for widgets.\n","metadata/bucket/db--cdn-assets":"# Facts\n\n- origin: external\n","metadata/bucket/db--uploads":"# Facts\n\n- origin: migration\n- public: false\n- file size limit: 5242880\n- mime types: image/png, image/jpeg\n","metadata/function/db--save_thing":"save a thing and log the change\n\n# Signature\n\n```sql\nsave_thing(p_id uuid, p_title text)\nRETURNS void LANGUAGE plpgsql\n```\n\n# References\n\n- [table:db/audit_log](/metadata/table/db--audit_log.json)\n- [table:db/things](/metadata/table/db--things.json)\n","metadata/function/db--set_updated_at":"touch updated_at on every write\n\n# Signature\n\n```sql\nset_updated_at()\nRETURNS trigger LANGUAGE plpgsql\n```\n\n# Trigger attachments\n\n- `BEFORE UPDATE ON things`\n\n# References\n\n- [table:db/things](/metadata/table/db--things.json)\n","metadata/route/hooks--callback":"Machine-to-machine callback from the external worker — HMAC-verified.\n\n# Methods\n\n- `POST`\n\n# Auth\n\nhmac\n\n# References\n\n- [table:db/audit_log](/metadata/table/db--audit_log.json)\n","metadata/route/hooks--status":"Worker status probe — checks the caller's session inside the handler\n\n# Methods\n\n- `GET`\n\n# Auth\n\nsession-in-handler\n","metadata/route/things--_id":"Read (GET), save (PUT), and delete (DELETE) one thing.\n\n# Methods\n\n- `GET`\n- `PUT`\n- `DELETE`\n\n# Auth\n\nsession\n\n# References\n\n- [function:db/save_thing](/metadata/function/db--save_thing.json)\n- [table:db/things](/metadata/table/db--things.json)\n","metadata/route/things":"List (GET) and create (POST) things.\n\n# Methods\n\n- `GET`\n- `POST`\n\n# Auth\n\nsession\n\n# References\n\n- [table:db/things](/metadata/table/db--things.json)\n","metadata/surface/(app)--_layout":"src/app/(app)/layout.tsx\n","metadata/surface/_layout":"Root layout — nav shell around every page.\n","metadata/surface/index":"Home — thin wrapper around the HomePage component.\n","metadata/surface/things--_id":"Thing detail — loads one thing and renders it inline (real logic, no wrapper).\n\n# References\n\n- [route:/api/things/[id]](/metadata/route/things--_id.json)\n","metadata/table/db--audit_log":"append-only audit trail\n\n# Columns (db)\n\n| column | type |\n| --- | --- |\n| id | uuid |\n| thing_id → things(id) | uuid |\n| note | text |\n\n# References\n\n- [table:db/things](/metadata/table/db--things.json)\n","metadata/table/db--things":"the widget catalogue\n\n# Columns (db)\n\n| column | type |\n| --- | --- |\n| id | uuid |\n| title | text |\n| updated_at | timestamptz |\n\nRenamed from: widgets\n","metadata/module/src--components--HomePage-tsx":"Client-side things list — fetches the catalogue and renders it.\n\n# References\n\n- [route:/api/things](/metadata/route/things.json)\n","metadata/module/src--lib--things-api-ts":"Shared data-access helpers for things — used by pages and scripts alike.\n\n# References\n\n- [route:/api/things/[id]](/metadata/route/things--_id.json)\n- [table:db/audit_log](/metadata/table/db--audit_log.json)\n- [table:db/things](/metadata/table/db--things.json)\n"},"types":["API Endpoint","Application","Database Function","Feature","Module","Storage Bucket","Table","UI Surface"],"palette":{"API Endpoint":"#2a78d6","Table":"#008300","UI Surface":"#e87ba4","Feature":"#4a3aa7","External Service":"#eda100","Database Function":"#0d9488","Storage Bucket":"#b45309","Module":"#64748b"},"repoBase":"https://github.com/example/fixture/tree/main/","viewer":{},"docs":{"glossary":"# Glossary\n\n**Thing**: A catalogued item in the fixture app. Renamed from \"widget\" in ADR-0002.\n\n**Audit trail**: The append-only `audit_log` table recording every change to a Thing.\n","adrs":[{"num":"0001","file":"0001-widgets-are-the-core-entity.md","title":"Widgets are the core entity","body":"# Widgets are the core entity\n\n> **Superseded by [ADR-0002](0002-things-replace-widgets.md)** (2026-01-02): the entity was renamed.\n\nThe catalogue's core entity is the widget. Everything hangs off the `widgets` table.\n\n## Rejected alternatives\n\n- Calling them \"items\" — too generic to search for.\n"},{"num":"0002","file":"0002-things-replace-widgets.md","title":"Things replace widgets","body":"# Things replace widgets\n\nThis supersedes ADR-0001: the core entity is renamed to \"thing\", and the\n`widgets` table becomes `things` via an in-place rename so history survives.\n\n## Why\n\n\"Widget\" collided with the UI sense of the word.\n"}],"changed":{"adrs":[],"glossaryTerms":[]}}};
+window.BUNDLE = {"nodes":[{"data":{"id":"map/apps/fixture-app","label":"Fixture App","type":"Application","description":"The fixture Next.js app the engine tests derive against.","resource":"src","tags":["things"],"layer":"map","color":"#94a3b8","size":31}},{"data":{"id":"map/features/things","label":"Things","type":"Feature","description":"CRUD for things with an audit trail (ADR-0002).","resource":"src/components","tags":["things"],"layer":"map","color":"#4a3aa7","size":32}},{"data":{"id":"metadata/bucket/db--cdn-assets","label":"cdn-assets (db)","type":"Storage Bucket","description":"","resource":"","tags":["db"],"layer":"metadata","color":"#b45309","size":30}},{"data":{"id":"metadata/bucket/db--uploads","label":"uploads (db)","type":"Storage Bucket","description":"","resource":"migrations/00002_things.sql","tags":["db"],"layer":"metadata","color":"#b45309","size":30}},{"data":{"id":"metadata/function/db--save_thing","label":"save_thing()","type":"Database Function","description":"save a thing and log the change","resource":"migrations/00002_things.sql","tags":["things"],"layer":"metadata","color":"#0d9488","size":31}},{"data":{"id":"metadata/function/db--set_updated_at","label":"set_updated_at()","type":"Database Function","description":"touch updated_at on every write","resource":"migrations/00001_init.sql","tags":["db"],"layer":"metadata","color":"#0d9488","size":31}},{"data":{"id":"metadata/route/hooks--callback","label":"/api/hooks/callback","type":"API Endpoint","description":"Machine-to-machine callback from the external worker — HMAC-verified.","resource":"src/app/api/hooks/callback/route.ts","tags":["hooks"],"auth":"hmac","app":"map/apps/fixture-app","layer":"metadata","color":"#2a78d6","size":30}},{"data":{"id":"metadata/route/hooks--status","label":"/api/hooks/status","type":"API Endpoint","description":"Worker status probe — checks the caller's session inside the handler","resource":"src/app/api/hooks/status/route.ts","tags":["hooks"],"auth":"session-in-handler","app":"map/apps/fixture-app","layer":"metadata","color":"#2a78d6","size":30}},{"data":{"id":"metadata/route/things--_id","label":"/api/things/[id]","type":"API Endpoint","description":"Read (GET), save (PUT), and delete (DELETE) one thing.","resource":"src/app/api/things/[id]/route.ts","tags":["things"],"auth":"session","app":"map/apps/fixture-app","layer":"metadata","color":"#2a78d6","size":31}},{"data":{"id":"metadata/route/things","label":"/api/things","type":"API Endpoint","description":"List (GET) and create (POST) things.","resource":"src/app/api/things/route.ts","tags":["things"],"auth":"session","app":"map/apps/fixture-app","layer":"metadata","color":"#2a78d6","size":30}},{"data":{"id":"metadata/surface/(app)--_layout","label":"/(app)/_layout","type":"UI Surface","description":"src/app/(app)/layout.tsx","resource":"src/app/(app)/layout.tsx","tags":["things"],"app":"map/apps/fixture-app","layer":"metadata","color":"#e87ba4","size":30}},{"data":{"id":"metadata/surface/_layout","label":"/_layout","type":"UI Surface","description":"Root layout — nav shell around every page.","resource":"src/app/layout.tsx","tags":["_layout"],"app":"map/apps/fixture-app","layer":"metadata","color":"#e87ba4","size":30}},{"data":{"id":"metadata/surface/index","label":"/","type":"UI Surface","description":"Home — thin wrapper around the HomePage component.","resource":"src/components/HomePage.tsx","tags":["root"],"app":"map/apps/fixture-app","layer":"metadata","color":"#e87ba4","size":30}},{"data":{"id":"metadata/surface/things--_id","label":"/things/[id]","type":"UI Surface","description":"Thing detail — loads one thing and renders it inline (real logic, no wrapper).","resource":"src/app/things/[id]/page.tsx","tags":["things"],"app":"map/apps/fixture-app","layer":"metadata","color":"#e87ba4","size":30}},{"data":{"id":"metadata/table/db--audit_log","label":"audit_log (db)","type":"Table","description":"append-only audit trail","resource":"migrations/00001_init.sql","tags":["db"],"layer":"metadata","color":"#008300","size":31}},{"data":{"id":"metadata/table/db--things","label":"things (db)","type":"Table","description":"the widget catalogue","resource":"migrations/00001_init.sql","tags":["things"],"layer":"metadata","color":"#008300","size":30}},{"data":{"id":"metadata/module/src--components--HomePage-tsx","label":"src/components/HomePage.tsx","type":"Module","description":"Client-side things list — fetches the catalogue and renders it.","resource":"src/components/HomePage.tsx","tags":["things"],"app":"map/apps/fixture-app","layer":"metadata","color":"#64748b","size":30}},{"data":{"id":"metadata/module/src--lib--things-api-ts","label":"src/lib/things-api.ts","type":"Module","description":"Shared data-access helpers for things — used by pages and scripts alike.","resource":"src/lib/things-api.ts","tags":["things"],"app":"map/apps/fixture-app","layer":"metadata","color":"#64748b","size":31}}],"edges":[{"data":{"id":"20:map/apps/fixture-app__map/features/things","source":"map/apps/fixture-app","target":"map/features/things"}},{"data":{"id":"19:map/features/things__metadata/table/db--things","source":"map/features/things","target":"metadata/table/db--things"}},{"data":{"id":"19:map/features/things__metadata/route/things","source":"map/features/things","target":"metadata/route/things"}},{"data":{"id":"19:map/features/things__metadata/route/things--_id","source":"map/features/things","target":"metadata/route/things--_id"}},{"data":{"id":"19:map/features/things__metadata/function/db--save_thing","source":"map/features/things","target":"metadata/function/db--save_thing"}},{"data":{"id":"19:map/features/things__metadata/surface/(app)--_layout","source":"map/features/things","target":"metadata/surface/(app)--_layout"}},{"data":{"id":"32:metadata/function/db--save_thing__metadata/table/db--audit_log","source":"metadata/function/db--save_thing","target":"metadata/table/db--audit_log"}},{"data":{"id":"32:metadata/function/db--save_thing__metadata/table/db--things","source":"metadata/function/db--save_thing","target":"metadata/table/db--things"}},{"data":{"id":"36:metadata/function/db--set_updated_at__metadata/table/db--things","source":"metadata/function/db--set_updated_at","target":"metadata/table/db--things"}},{"data":{"id":"30:metadata/route/hooks--callback__metadata/table/db--audit_log","source":"metadata/route/hooks--callback","target":"metadata/table/db--audit_log"}},{"data":{"id":"30:metadata/route/hooks--callback__map/apps/fixture-app","source":"metadata/route/hooks--callback","target":"map/apps/fixture-app","verb":"belongsTo"}},{"data":{"id":"28:metadata/route/hooks--status__map/apps/fixture-app","source":"metadata/route/hooks--status","target":"map/apps/fixture-app","verb":"belongsTo"}},{"data":{"id":"26:metadata/route/things--_id__metadata/function/db--save_thing","source":"metadata/route/things--_id","target":"metadata/function/db--save_thing"}},{"data":{"id":"26:metadata/route/things--_id__metadata/table/db--things","source":"metadata/route/things--_id","target":"metadata/table/db--things"}},{"data":{"id":"26:metadata/route/things--_id__map/apps/fixture-app","source":"metadata/route/things--_id","target":"map/apps/fixture-app","verb":"belongsTo"}},{"data":{"id":"21:metadata/route/things__metadata/table/db--things","source":"metadata/route/things","target":"metadata/table/db--things"}},{"data":{"id":"21:metadata/route/things__map/apps/fixture-app","source":"metadata/route/things","target":"map/apps/fixture-app","verb":"belongsTo"}},{"data":{"id":"31:metadata/surface/(app)--_layout__map/apps/fixture-app","source":"metadata/surface/(app)--_layout","target":"map/apps/fixture-app","verb":"belongsTo"}},{"data":{"id":"24:metadata/surface/_layout__map/apps/fixture-app","source":"metadata/surface/_layout","target":"map/apps/fixture-app","verb":"belongsTo"}},{"data":{"id":"22:metadata/surface/index__map/apps/fixture-app","source":"metadata/surface/index","target":"map/apps/fixture-app","verb":"belongsTo"}},{"data":{"id":"28:metadata/surface/things--_id__metadata/route/things--_id","source":"metadata/surface/things--_id","target":"metadata/route/things--_id"}},{"data":{"id":"28:metadata/surface/things--_id__map/apps/fixture-app","source":"metadata/surface/things--_id","target":"map/apps/fixture-app","verb":"belongsTo"}},{"data":{"id":"28:metadata/table/db--audit_log__metadata/table/db--things","source":"metadata/table/db--audit_log","target":"metadata/table/db--things"}},{"data":{"id":"45:metadata/module/src--components--HomePage-tsx__metadata/route/things","source":"metadata/module/src--components--HomePage-tsx","target":"metadata/route/things"}},{"data":{"id":"45:metadata/module/src--components--HomePage-tsx__map/apps/fixture-app","source":"metadata/module/src--components--HomePage-tsx","target":"map/apps/fixture-app","verb":"belongsTo"}},{"data":{"id":"39:metadata/module/src--lib--things-api-ts__metadata/route/things--_id","source":"metadata/module/src--lib--things-api-ts","target":"metadata/route/things--_id"}},{"data":{"id":"39:metadata/module/src--lib--things-api-ts__metadata/table/db--audit_log","source":"metadata/module/src--lib--things-api-ts","target":"metadata/table/db--audit_log"}},{"data":{"id":"39:metadata/module/src--lib--things-api-ts__metadata/table/db--things","source":"metadata/module/src--lib--things-api-ts","target":"metadata/table/db--things"}},{"data":{"id":"39:metadata/module/src--lib--things-api-ts__map/apps/fixture-app","source":"metadata/module/src--lib--things-api-ts","target":"map/apps/fixture-app","verb":"belongsTo"}}],"bodies":{"map/apps/fixture-app":"\nA deliberately tiny Next.js App Router app: one feature, one wrapper page,\none hooks route pair, two migrations.\n\n- [Things](../features/things.md)\n\n# Blessings\n- Adding a page? Make it a thin wrapper over a component in `src/components/`,\n  as `src/app/page.tsx` does, because the component is what a test renders —\n  never logic in the page file.\n","map/features/things":"\nThe things catalogue: list, edit, and audit things.\n\n- [things table](../../metadata/table/db--things.json)\n- [/api/things](../../metadata/route/things.json)\n- [/api/things/[id]](../../metadata/route/things--_id.json)\n- [save_thing()](../../metadata/function/db--save_thing.json)\n- [signed-in layout](\u003c../../metadata/surface/(app)--_layout.json>)\n\n# Blessings\n- Adding an endpoint for things? Copy [/api/things](../../metadata/route/things.json),\n  per ADR-0002 — never a route named for widgets.\n","metadata/bucket/db--cdn-assets":"# Facts\n\n- origin: external\n","metadata/bucket/db--uploads":"# Facts\n\n- origin: migration\n- public: false\n- file size limit: 5242880\n- mime types: image/png, image/jpeg\n","metadata/function/db--save_thing":"save a thing and log the change\n\n# Signature\n\n```sql\nsave_thing(p_id uuid, p_title text)\nRETURNS void LANGUAGE plpgsql\n```\n\n# References\n\n- [table:db/audit_log](/metadata/table/db--audit_log.json)\n- [table:db/things](/metadata/table/db--things.json)\n","metadata/function/db--set_updated_at":"touch updated_at on every write\n\n# Signature\n\n```sql\nset_updated_at()\nRETURNS trigger LANGUAGE plpgsql\n```\n\n# Trigger attachments\n\n- `BEFORE UPDATE ON things`\n\n# References\n\n- [table:db/things](/metadata/table/db--things.json)\n","metadata/route/hooks--callback":"Machine-to-machine callback from the external worker — HMAC-verified.\n\n# Methods\n\n- `POST`\n\n# Auth\n\nhmac\n\n# References\n\n- [table:db/audit_log](/metadata/table/db--audit_log.json)\n","metadata/route/hooks--status":"Worker status probe — checks the caller's session inside the handler\n\n# Methods\n\n- `GET`\n\n# Auth\n\nsession-in-handler\n","metadata/route/things--_id":"Read (GET), save (PUT), and delete (DELETE) one thing.\n\n# Methods\n\n- `GET`\n- `PUT`\n- `DELETE`\n\n# Auth\n\nsession\n\n# References\n\n- [function:db/save_thing](/metadata/function/db--save_thing.json)\n- [table:db/things](/metadata/table/db--things.json)\n","metadata/route/things":"List (GET) and create (POST) things.\n\n# Methods\n\n- `GET`\n- `POST`\n\n# Auth\n\nsession\n\n# References\n\n- [table:db/things](/metadata/table/db--things.json)\n","metadata/surface/(app)--_layout":"src/app/(app)/layout.tsx\n","metadata/surface/_layout":"Root layout — nav shell around every page.\n","metadata/surface/index":"Home — thin wrapper around the HomePage component.\n","metadata/surface/things--_id":"Thing detail — loads one thing and renders it inline (real logic, no wrapper).\n\n# References\n\n- [route:/api/things/[id]](/metadata/route/things--_id.json)\n","metadata/table/db--audit_log":"append-only audit trail\n\n# Columns (db)\n\n| column | type |\n| --- | --- |\n| id | uuid |\n| thing_id → things(id) | uuid |\n| note | text |\n\n# References\n\n- [table:db/things](/metadata/table/db--things.json)\n","metadata/table/db--things":"the widget catalogue\n\n# Columns (db)\n\n| column | type |\n| --- | --- |\n| id | uuid |\n| title | text |\n| updated_at | timestamptz |\n\nRenamed from: widgets\n","metadata/module/src--components--HomePage-tsx":"Client-side things list — fetches the catalogue and renders it.\n\n# References\n\n- [route:/api/things](/metadata/route/things.json)\n","metadata/module/src--lib--things-api-ts":"Shared data-access helpers for things — used by pages and scripts alike.\n\n# References\n\n- [route:/api/things/[id]](/metadata/route/things--_id.json)\n- [table:db/audit_log](/metadata/table/db--audit_log.json)\n- [table:db/things](/metadata/table/db--things.json)\n"},"types":["API Endpoint","Application","Database Function","Feature","Module","Storage Bucket","Table","UI Surface"],"apps":[{"id":"map/apps/fixture-app","title":"Fixture App"}],"palette":{"API Endpoint":"#2a78d6","Table":"#008300","UI Surface":"#e87ba4","Feature":"#4a3aa7","External Service":"#eda100","Database Function":"#0d9488","Storage Bucket":"#b45309","Module":"#64748b","UI Component":"#9333ea","Job":"#475569"},"repoBase":"https://github.com/example/fixture/tree/main/","viewer":{},"docs":{"glossary":"# Glossary\n\n**Thing**: A catalogued item in the fixture app. Renamed from \"widget\" in ADR-0002.\n\n**Audit trail**: The append-only `audit_log` table recording every change to a Thing.\n","adrs":[{"num":"0001","file":"0001-widgets-are-the-core-entity.md","title":"Widgets are the core entity","body":"# Widgets are the core entity\n\n> **Superseded by [ADR-0002](0002-things-replace-widgets.md)** (2026-01-02): the entity was renamed.\n\nThe catalogue's core entity is the widget. Everything hangs off the `widgets` table.\n\n## Rejected alternatives\n\n- Calling them \"items\" — too generic to search for.\n"},{"num":"0002","file":"0002-things-replace-widgets.md","title":"Things replace widgets","body":"# Things replace widgets\n\nThis supersedes ADR-0001: the core entity is renamed to \"thing\", and the\n`widgets` table becomes `things` via an in-place rename so history survives.\n\n## Why\n\n\"Widget\" collided with the UI sense of the word.\n"}],"changed":{"adrs":[],"glossaryTerms":[]}}};
 document.getElementById("bundle-name").textContent = window.BUNDLE_NAME;
 </script>
 <script>
@@ -710,9 +714,12 @@ document.getElementById("bundle-name").textContent = window.BUNDLE_NAME;
   // Functions sit in their own band beneath Tables (DIO-149): sharing a lane
   // put a trigger function *next to* its tables, collapsing the join edges
   // into invisible sub-node-width stubs. Storage buckets stay with Tables.
+  // UI Components get a band of their own (they are many); Jobs share the
+  // API band (they are few and sit at the same depth); External Services
+  // stay on the rail, since their edges come from several bands (ZDD 2.1).
   const LANE_BY_TYPE = {
-    "UI Surface": 0, "Feature": 1, "API Endpoint": 2,
-    "Table": 3, "Storage Bucket": 3, "Database Function": 4,
+    "UI Surface": 0, "UI Component": 1, "Feature": 2, "API Endpoint": 3, "Job": 3,
+    "Table": 4, "Storage Bucket": 4, "Database Function": 5,
   };
   const own = (table, key) => (Object.hasOwn(table, key) ? table[key] : undefined); // CR-010: static tables, source keys
   const layerOf = (id) => own(LANE_BY_TYPE, nodeIndex[id]?.type) ?? "rail";
@@ -751,7 +758,18 @@ document.getElementById("bundle-name").textContent = window.BUNDLE_NAME;
     degree[e.data.target] = (degree[e.data.target] || 0) + 1;
   }
   const HUB_DEG = 20;
-  const isHub = (id) => (degree[id] || 0) >= HUB_DEG;
+  // A UI component used by this many nodes or more is a hub at a lower bar:
+  // a design-system primitive's thirty "used by" edges would be the hairball.
+  // Its caption carries the count instead; the detail panel lists every user.
+  const FAN_IN = Number((bundle.viewer && bundle.viewer.componentFanIn) || 8);
+  const fanIn = dict();
+  for (const e of visEdges) {
+    const t = nodeIndex[e.data.target], s = nodeIndex[e.data.source];
+    if (t && t.type === "UI Component" && e.data.verb === "uses") fanIn[t.id] = (fanIn[t.id] || 0) + 1;
+    if (s && s.type === "UI Component" && e.data.verb === "usedBy") fanIn[s.id] = (fanIn[s.id] || 0) + 1;
+  }
+  const isHub = (id) => (degree[id] || 0) >= HUB_DEG || (nodeIndex[id]?.type === "UI Component" && (fanIn[id] || 0) >= FAN_IN);
+  for (const n of bundle.nodes) if (n.data.type === "UI Component" && (fanIn[n.data.id] || 0) >= FAN_IN) n.data.display = `${n.data.display} · used by ${fanIn[n.data.id]}`;
 
   // Product areas, derived from concept tags (never a hand-maintained list).
   // Tags that describe properties rather than areas are excluded; areas with
@@ -788,6 +806,7 @@ document.getElementById("bundle-name").textContent = window.BUNDLE_NAME;
     "#2a78d6": "#3987e5", "#e87ba4": "#d55181", "#eda100": "#c98500",
     "#4a3aa7": "#94a3b8", "#008300": "#008300",
     "#0d9488": "#14b8a6", "#b45309": "#d97706",
+    "#9333ea": "#a855f7", "#475569": "#94a3b8",
   };
   const themedColor = (d) => (theme() === "dark" ? (own(DARK_NODE, d.color) || d.color) : d.color);
   const THEMES = {
@@ -817,6 +836,12 @@ document.getElementById("bundle-name").textContent = window.BUNDLE_NAME;
       { selector: "edge", style: {
           width: 1.2, "line-color": T.edge, "curve-style": "straight",
           "target-arrow-shape": "none", opacity: 0.12 } },
+      // Typed edges (decision 0016): a subscription is dashed; a call or a
+      // write points at what it reaches; a component-to-component edge is
+      // recorded but hidden until a node is lit.
+      { selector: "edge[verb = 'subscribes']", style: { "line-style": "dashed" } },
+      { selector: "edge[verb = 'calls'], edge[verb = 'writes'], edge[verb = 'dependsOn']", style: { "target-arrow-shape": "triangle", "arrow-scale": 0.7 } },
+      { selector: "edge.c2c", style: { opacity: 0 } },
       { selector: "edge.crossarea", style: { opacity: 0.3, "line-color": T.cross } },
       { selector: "edge.hubedge", style: { opacity: 0 } },
       { selector: "edge.lit", style: { opacity: 0.95, width: 1.6, "line-color": T.lit, "z-index": 9 } },
@@ -965,17 +990,20 @@ document.getElementById("bundle-name").textContent = window.BUNDLE_NAME;
   }
 
   const markHubEdges = () => {
-    for (const e of cy.edges()) if (isHub(e.source().id()) || isHub(e.target().id())) e.addClass("hubedge");
+    for (const e of cy.edges()) {
+      if (isHub(e.source().id()) || isHub(e.target().id())) e.addClass("hubedge");
+      if (e.data("verb") === "uses" && nodeIndex[e.source().id()]?.type === "UI Component" && nodeIndex[e.target().id()]?.type === "UI Component") e.addClass("c2c");
+    }
   };
   const presetNodes = (pos) => bundle.nodes
     .filter((n) => pos[n.data.id])
     .map((n) => ({ data: n.data, position: pos[n.data.id] }));
 
   // ---------- views ----------
-  const LANE_NAMES = ["UI Surfaces", "Features — curated slices", "API", "Tables", "DB Functions"];
+  const LANE_NAMES = ["UI Surfaces", "UI Components", "Features — curated slices", "API & Jobs", "Tables", "DB Functions"];
 
   function viewLanes() {
-    const lanes = [[], [], [], [], []];
+    const lanes = [[], [], [], [], [], []];
     const rail = [];
     for (const n of bundle.nodes) {
       // Modules (lib/component files) would swamp the orientation view — the
@@ -1017,7 +1045,7 @@ document.getElementById("bundle-name").textContent = window.BUNDLE_NAME;
     let yCursor = 0;
     lanes.forEach((ids) => {
       laneY.push(yCursor);
-      yCursor += Math.ceil(ids.length / PER_ROW) * ROW_H + LANE_PAD;
+      if (ids.length) yCursor += Math.ceil(ids.length / PER_ROW) * ROW_H + LANE_PAD;
     });
     const pos = dict();
     lanes.forEach((ids, li) => {
@@ -1040,10 +1068,12 @@ document.getElementById("bundle-name").textContent = window.BUNDLE_NAME;
     cy.nodes().style({ width: 46, height: 46 });
     markHubEdges();
     addAcrs();
-    LANE_NAMES.forEach((nm, i) => addLaneLabel(nm, 0, laneY[i] - 44, true));
+    // An empty band takes no room: its label is skipped and its height is
+    // zero (a repo with no components or functions keeps its old picture).
+    LANE_NAMES.forEach((nm, i) => { if (lanes[i].length) addLaneLabel(nm, 0, laneY[i] - 44, true); });
     addLaneLabel("Apps & Services", maxW + 190, -70);
     fitWithFloor(40, 0.65);
-    legendEl.innerHTML = "<b>Architecture view.</b> UI → features → API → tables → functions, top to bottom; apps &amp; external services on the rail. Features (◆) are curated vertical slices, not an architectural tier — the Area coupling view shows the feature-first projection. Hover or tap a node to light its connections; high-traffic nodes show edges only then. <span class=\"authdot\"></span>&nbsp;= auth exception — ordinary session auth is stated per endpoint, not drawn.";
+    legendEl.innerHTML = "<b>Architecture view.</b> UI → components → features → API &amp; jobs → tables → functions, top to bottom; apps &amp; external services on the rail. Dashed = subscribes; a component used by many shows the count and lights its edges on hover. Features (◆) are curated vertical slices, not an architectural tier — the Area coupling view shows the feature-first projection. Hover or tap a node to light its connections; high-traffic nodes show edges only then. <span class=\"authdot\"></span>&nbsp;= auth exception — ordinary session auth is stated per endpoint, not drawn.";
     legendEl.hidden = false;
   }
 
@@ -1056,8 +1086,8 @@ document.getElementById("bundle-name").textContent = window.BUNDLE_NAME;
     AREAS.forEach((area, ci) => {
       const ids = cols[area];
       ids.sort((a, b) => {
-        const la = layerOf(a) === "rail" ? 4 : layerOf(a);
-        const lb = layerOf(b) === "rail" ? 4 : layerOf(b);
+        const la = layerOf(a) === "rail" ? 6 : layerOf(a);
+        const lb = layerOf(b) === "rail" ? 6 : layerOf(b);
         return la - lb || a.localeCompare(b);
       });
       ids.forEach((id, i) => {
@@ -1417,6 +1447,25 @@ document.getElementById("bundle-name").textContent = window.BUNDLE_NAME;
       resourceEl.appendChild(a);
     } else resourceEl.textContent = data.resource || "—";
 
+    // App (decision 0018): the Application page the record sits under, or,
+    // for a record under none, the apps reached by its inbound edges.
+    const appEl = document.getElementById("detail-app");
+    appEl.innerHTML = "";
+    const appIds = data.app ? [data.app] : [...new Set((backlinks[conceptId] || []).concat(bundle.edges.filter((e) => e.data.source === conceptId && e.data.verb === "usedBy").map((e) => e.data.target)).map((id) => nodeIndex[id]?.app).filter(Boolean))].sort();
+    if (!appIds.length) appEl.textContent = "—";
+    else {
+      appIds.forEach((id, i) => {
+        if (i) appEl.append(", ");
+        const a = document.createElement("a");
+        a.textContent = nodeIndex[id]?.label || id;
+        a.href = "javascript:void(0)";
+        a.className = "internal";
+        a.addEventListener("click", () => reveal(id));
+        appEl.appendChild(a);
+      });
+      if (!data.app && appIds.length > 1) appEl.append(" (shared)");
+    }
+
     const tagsEl = document.getElementById("detail-tags");
     tagsEl.innerHTML = "";
     if (data.tags && data.tags.length) {
@@ -1536,6 +1585,41 @@ document.getElementById("bundle-name").textContent = window.BUNDLE_NAME;
     if (currentView === "explorer") return;
     t ? applyDim((n) => n.data("type") === t) : cy.elements().removeClass("dim");
   });
+  // App filter (decision 0018): each Application page, plus "Shared" for the
+  // records reached from more than one app. Hidden when the map has no apps.
+  const appSelect = document.getElementById("filter-app");
+  const appsOfNode = (id) => {
+    const d = nodeIndex[id];
+    if (!d) return [];
+    if (d.app) return [d.app];
+    const reached = new Set();
+    for (const src of backlinks[id] || []) if (nodeIndex[src]?.app) reached.add(nodeIndex[src].app);
+    for (const e of bundle.edges) if (e.data.source === id && e.data.verb === "usedBy" && nodeIndex[e.data.target]?.app) reached.add(nodeIndex[e.data.target].app);
+    return [...reached];
+  };
+  if (bundle.apps && bundle.apps.length) {
+    appSelect.hidden = false;
+    for (const a of bundle.apps) {
+      const opt = document.createElement("option");
+      opt.value = a.id;
+      opt.textContent = a.title;
+      appSelect.appendChild(opt);
+    }
+    const shared = document.createElement("option");
+    shared.value = "__shared__";
+    shared.textContent = "Shared by apps";
+    appSelect.appendChild(shared);
+    appSelect.addEventListener("change", (e) => {
+      const v = e.target.value;
+      if (currentView === "explorer") return;
+      if (!v) { cy.elements().removeClass("dim"); return; }
+      applyDim((n) => {
+        const apps = appsOfNode(n.id());
+        if (v === "__shared__") return apps.length > 1;
+        return n.id() === v || apps.includes(v) || (n.data("layer") !== "metadata" && !apps.length);
+      });
+    });
+  }
   document.getElementById("search").addEventListener("input", (e) => {
     const q = e.target.value.trim().toLowerCase();
     if (currentView === "explorer") {

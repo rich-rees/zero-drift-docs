@@ -74,7 +74,7 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
   comments and strings masked, so a commented-out declaration never becomes a
   record.
 - Each **record** has: `kind` (`route` | `table` | `surface` | `function` |
-  `bucket` | `module` | `job` | …), `id`, `title`, a one-sentence `description`
+  `bucket` | `module` | `component` | `job` | `service` | …), `id`, `title`, a one-sentence `description`
   *where mechanically extractable*, repo-relative POSIX `resource` path(s),
   `refs` (outbound references discovered by static scan), `facts` (convention-
   specific key–values), and `filename` (the metadata file, unique per kind).
@@ -82,10 +82,27 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
   cannot see the others' records, so it emits a resolved id only for targets it
   minted itself, and a `?`-prefixed lookup for the rest: `?from:<name>` (a table,
   else a bucket), `?table:<name>`, `?bucket:<name>`, `?function:<name>`,
-  `?route:<url>` (`*` = one wildcard segment). The deriver resolves them after the
+  `?route:<url>` (`*` = one segment the scan could not read; it matches a
+  route parameter only, never a fixed word, and a template hole typed as a
+  union of literals is expanded before emission — [decision 0019](docs/decisions/0019-a-variable-segment-matches-a-parameter-never-a-fixed-word.md),
+  `src/lib/template-paths.mjs`). The deriver resolves them after the
   merge, drops misses with a diagnostic, and drops a record flagged
   `requireRefs: true` when nothing resolved (how a "module" record means "a file
   that references something"). See `src/lib/resolve-refs.mjs`.
+- **A ref may carry a verb** ([decision 0016](docs/decisions/0016-typed-edges-are-additive.md)):
+  `facts.edges` maps a verb to the refs it covers, resolved and unresolved
+  forms alike — `{ "subscribes": ["?table:audit_events"] }`. Every id there
+  is also a plain ref (the deriver makes the union), so `refs` keeps its
+  meaning. The documented vocabulary is `uses`, `usedBy`, `calls`,
+  `subscribes`, `reads`, `writes`, `dependsOn`, `belongsTo` (`usedBy` is how
+  a record names another extractor's record that imports it — a component
+  cannot write into a surface's refs); any letters-only verb is
+  accepted and drawn plain. The graph's edge gains `verb`; a record with no
+  `facts.edges` renders exactly as before.
+- **A third channel, `warnings`, is optional** and prints on every derive,
+  not only under `--verbose`: for what the branch that caused it should
+  hear (the `services` extractor's "this env name matches no declared
+  service"). Diagnostics stay the quiet channel. Neither ever fails derive.
 - **Missing source is "nothing to inventory."** A configured root that does not
   exist yields no records and a diagnostic, never an error — greenfield repos
   adopt ZDD before any code exists. The one exception is a single named file

@@ -1,6 +1,6 @@
 # 0012 — Strict claims are an opt-in; a double claim fails only there
 
-**Date:** 2026-09-28 · **Status:** accepted · **Origin:** CAS-65, from Cascade's CAS-64 review campaign. Cascade's rule is "every record belongs to exactly one feature slice, except the plumbing routes", and lint could enforce neither half. **Supersedes, in part:** [0009](0009-unclaimed-records-warn-never-fail.md) ("nothing … fails, blocks or gates on an unclaimed record" — true now only while `claims.strict` is off).
+**Date:** 2026-09-28 · **Status:** accepted · **Origin:** CAS-65, from Cascade's CAS-64 review campaign. Cascade's rule is "every record belongs to exactly one feature slice, except the plumbing routes", and lint could enforce neither half. **Extended by [0017](0017-strict-claims-never-widen-on-an-extractor-opt-in.md)** (2026-10-08): the kinds strict covers are opt-in too, through `claims.strictKinds`. Nothing here is superseded. **Supersedes, in part:** [0009](0009-unclaimed-records-warn-never-fail.md) ("nothing … fails, blocks or gates on an unclaimed record" — true now only while `claims.strict` is off).
 
 ## Decision
 

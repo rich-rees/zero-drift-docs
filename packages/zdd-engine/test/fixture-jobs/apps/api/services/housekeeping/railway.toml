@@ -1,0 +1,7 @@
+# The housekeeping service: the API image, run and exit on a schedule.
+[build]
+builder = "DOCKERFILE"
+
+[deploy]
+startCommand = "uv run python -m app.housekeeping"
+cronSchedule = "0 * * * *"

@@ -1,0 +1,10 @@
+{
+  "name": "Fixture Jobs",
+  "baseBranch": "main",
+  "extractors": ["supabase", "jobs"],
+  "render": { "storeChanges": false },
+  "extractorOptions": {
+    "supabase": { "migrationNamespaces": [{ "name": "db", "dir": "supabase/migrations" }] },
+    "jobs": { "modes": { "worker": "worker" } }
+  }
+}

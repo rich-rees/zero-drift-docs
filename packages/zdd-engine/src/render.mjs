@@ -51,6 +51,21 @@ const KIND_DISPLAY = {
   bucket: "Storage Bucket",
   module: "Module",
   job: "Job",
+  component: "UI Component",
+  service: "External Service",
+};
+
+// Edge verbs (decision 0016) -> how a body and the agent index say them.
+// An unknown verb is said as written.
+const VERB_LABELS = {
+  uses: "uses",
+  usedBy: "used by",
+  calls: "calls",
+  subscribes: "subscribes to",
+  reads: "reads",
+  writes: "writes",
+  dependsOn: "depends on",
+  belongsTo: "belongs to",
 };
 
 const posixify = (p) => p.split(/[\\/]/).join("/");
@@ -275,9 +290,15 @@ function synthesizeBody(record, idOfRef) {
   }
   if (record.refs.length) {
     lines.push(`# References`, "");
+    // A typed edge (decision 0016) says its verb; a plain ref says nothing,
+    // exactly as before, so a record without edges renders the same bytes.
+    const verbOf = new Map();
+    for (const [verb, ids] of Object.entries(f.edges ?? {})) for (const id of ids) if (!verbOf.has(id)) verbOf.set(id, verb);
     for (const ref of record.refs) {
       const id = idOfRef.get(ref);
-      if (id) lines.push(`- [${ref}](/${id}.json)`);
+      if (!id) continue;
+      const verb = verbOf.get(ref);
+      lines.push(verb ? `- ${VERB_LABELS[verb] ?? verb} [${ref}](/${id}.json)` : `- [${ref}](/${id}.json)`);
     }
     lines.push("");
   }
@@ -384,7 +405,7 @@ function buildConcepts() {
   };
   const fallbackTag = (record) => {
     if (record.kind === "route") return routeArea(record);
-    if (record.kind === "surface") return record.title.split("/").filter(Boolean)[0] ?? "root";
+    if (record.kind === "surface") return record.title.replace(/\s\([^)]*\)$/, "").split("/").filter(Boolean)[0] ?? "root";
     if (record.facts.namespace) return record.facts.namespace;
     return record.kind;
   };
@@ -409,6 +430,8 @@ function buildConcepts() {
     body: synthesizeBody(record, idOfRef),
     linksTo: record.refs.map((r) => idOfRef.get(r)).filter(Boolean),
     auth: record.kind === "route" ? record.facts.auth : undefined,
+    // target node id -> verb (decision 0016); absent when the record has none.
+    verbs: record.facts.edges ? new Map(Object.entries(record.facts.edges).flatMap(([verb, ids]) => ids.map((r) => [idOfRef.get(r), verb]).filter(([id]) => id))) : undefined,
   });
   for (const entry of derivedRecords.filter(({ record }) => record.kind !== "module")) {
     const feature = featureOf.get(entry.nodeId);
@@ -434,6 +457,30 @@ function buildConcepts() {
     concepts.push(derivedConcept(entry, tags));
   }
 
+  // App membership (decision 0018): a code record belongs to the Application
+  // page whose `resource` path is the longest prefix of the record's primary
+  // resource. A `belongsTo` edge and an `app` field on the node carry it; a
+  // record under no app page (a shared package) belongs to no app and is
+  // reached through its inbound edges. Nothing is guessed: an Application
+  // page without a resource, or two whose paths nest, is a warning, and the
+  // records under them stay unassigned.
+  const apps = concepts.filter((c) => c.type === "Application");
+  const appWarnings = [];
+  for (const a of apps) if (!a.resource) appWarnings.push(`${a.id}: Application page has no resource path — no record can belong to it`);
+  const appPaths = apps.filter((a) => a.resource).map((a) => ({ id: a.id, path: a.resource.replace(/\/+$/, "") }));
+  const nested = new Set();
+  for (const x of appPaths) for (const y of appPaths) if (x !== y && (x.path === y.path || x.path.startsWith(`${y.path}/`))) nested.add(x.id).add(y.id);
+  for (const id of [...nested].sort()) appWarnings.push(`${id}: Application pages' resource paths nest or coincide — records under them are not assigned to any app`);
+  const usable = appPaths.filter((a) => !nested.has(a.id)).sort((x, y) => y.path.length - x.path.length || (x.id < y.id ? -1 : 1));
+  for (const c of concepts) {
+    if (c.layer !== "metadata" || !c.resource) continue;
+    const app = usable.find((a) => c.resource === a.path || c.resource.startsWith(`${a.path}/`));
+    if (!app) continue;
+    c.app = app.id;
+    if (!c.linksTo.includes(app.id)) c.linksTo.push(app.id);
+    (c.verbs ??= new Map()).set(app.id, "belongsTo");
+  }
+
   // Semantic links must resolve — a broken link is a render error, surfaced
   // by --check in CI.
   const ids = new Set(concepts.map((c) => c.id));
@@ -448,7 +495,7 @@ function buildConcepts() {
     process.exit(1);
   }
 
-  return { concepts, features };
+  return { concepts, features, appWarnings };
 }
 
 // ---------------------------------------------------------------------------
@@ -457,6 +504,8 @@ function buildConcepts() {
 // those are a viewer's business (src/viewers/). Node ids are bundle-relative
 // paths minus extension, so a node links back to the file it was built from;
 // `resource` links it to the source. Edges are deduped and self-refs dropped.
+// An edge carries `verb` when the record typed it (decision 0016); a graph
+// with no verbs is still zdd-graph/1 and viewers treat a missing verb as plain.
 // ---------------------------------------------------------------------------
 function buildGraph(concepts) {
   const ids = new Set(concepts.map((c) => c.id));
@@ -470,6 +519,7 @@ function buildGraph(concepts) {
     resource: c.resource,
     tags: c.tags,
     ...(c.auth ? { auth: c.auth } : {}),
+    ...(c.app ? { app: c.app } : {}),
     body: c.body,
   }));
   const edges = [];
@@ -483,7 +533,8 @@ function buildGraph(concepts) {
       if (!seen.has(c.id)) seen.set(c.id, new Set());
       if (seen.get(c.id).has(target)) continue;
       seen.get(c.id).add(target);
-      edges.push({ source: c.id, target });
+      const verb = c.verbs?.get(target);
+      edges.push(verb ? { source: c.id, target, verb } : { source: c.id, target });
     }
   }
   return { schema: "zdd-graph/1", name: BUNDLE_NAME, repoBase: REPO_BASE, nodes, edges };
@@ -569,7 +620,8 @@ function buildAgentIndex(concepts, features, adrs) {
 
 // ---------------------------------------------------------------------------
 async function render() {
-  const { concepts, features } = buildConcepts();
+  const { concepts, features, appWarnings } = buildConcepts();
+  for (const w of appWarnings) console.error(`WARNING: ${w}`);
   const docs = loadDocs();
   const changed = computeStoreChanges(docs.glossary);
   const graph = buildGraph(concepts);
