@@ -149,6 +149,8 @@
         "metadataDir": { "type": "string", "default": "zdd/metadata" },
         "agentIndex": { "type": "string", "default": "zdd/agent-index.md" },
         "adrIndex": { "type": "string", "default": "zdd/adr-index.md" },
+        "blessingIndex": { "type": "string", "default": "zdd/blessing-index.md", "description": "One line per blessing in the semantic map, by trigger question, read whole when choosing patterns — generated, checked by render --check." },
+        "patternsPlan": { "type": "string", "default": "zdd/patterns-plan.md", "description": "The branch's pattern plan, written by \"choose patterns\" and reconciled and deleted by \"update ZDD\"; lint --merge (CI) fails while it exists." },
         "humanIndex": { "type": "string", "default": "zdd/human-index.html" },
         "graph": { "type": "string", "default": "zdd/graph.json", "description": "The graph artifact (schema zdd-graph/1) the human index is rendered from — generated, checked by render --check." },
         "bundleDir": {

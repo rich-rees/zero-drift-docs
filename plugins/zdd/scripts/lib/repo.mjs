@@ -33,6 +33,8 @@ export const DEFAULT_PATHS = {
   metadataDir: "zdd/metadata",
   agentIndex: "zdd/agent-index.md",
   adrIndex: "zdd/adr-index.md",
+  blessingIndex: "zdd/blessing-index.md",
+  patternsPlan: "zdd/patterns-plan.md",
   humanIndex: "zdd/human-index.html",
   graph: "zdd/graph.json",
   bundleDir: "zdd",
@@ -173,8 +175,10 @@ export function repoRelative(value, label, { exact = false } = {}) {
 // adrDir, mapDir) or zdd/config.json, a generated file that IS one of those,
 // or two keys sharing one value — otherwise the fence would block the very
 // file its reason text tells the agent to edit. Such a value is invalid the
-// same way an escaping one is: strict throws, lenient falls back.
-export const GENERATED_KEYS = ["metadataDir", "graph", "agentIndex", "adrIndex", "humanIndex"];
+// same way an escaping one is: strict throws, lenient falls back. The pattern
+// plan (paths.patternsPlan, CAS-96) is a session's working file, so it is
+// left alone like a curated path.
+export const GENERATED_KEYS = ["metadataDir", "graph", "agentIndex", "adrIndex", "blessingIndex", "humanIndex"];
 export const CURATED_KEYS = ["glossary", "adrDir", "mapDir"];
 export const CONFIG_REL = "zdd/config.json";
 // Two repo-relative paths share ground: one is the other, or sits under it.
@@ -207,7 +211,7 @@ export function artifactPaths(config, { lenient = false } = {}) {
   const overlap = (key) => {
     const p = out[key];
     if (key === "metadataDir") {
-      for (const c of [...CURATED_KEYS.map((k) => out[k]), CONFIG_REL]) if (posixPrefix(p, c)) return `paths.${key} ${JSON.stringify(p)} contains ${JSON.stringify(c)}`;
+      for (const c of [...CURATED_KEYS.map((k) => out[k]), out.patternsPlan, CONFIG_REL]) if (posixPrefix(p, c)) return `paths.${key} ${JSON.stringify(p)} contains ${JSON.stringify(c)}`;
     } else if (samePosix(p, CONFIG_REL)) return `paths.${key} ${JSON.stringify(p)} is the config file`;
     for (const other of Object.keys(out)) if (other !== key && samePosix(p, out[other])) return `paths.${key} and paths.${other} are both ${JSON.stringify(p)}`;
     return null;

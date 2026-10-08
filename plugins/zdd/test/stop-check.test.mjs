@@ -258,3 +258,12 @@ test("the git runner shares one deadline across calls; classify folds case on Wi
   if (process.platform === "win32") assert.deepEqual(split, { zdd: ["ZDD/map/x.md"], code: ["src/a.ts"] });
   else assert.deepEqual(split, { zdd: [], code: ["ZDD/map/x.md", "src/a.ts"] });
 });
+
+test("CAS-96: the pattern plan alone is not the curated half — code plus only the plan still blocks; the blessing index counts as ZDD", () => {
+  const repo = mkRepo();
+  touchCode(repo);
+  writeFileSync(join(repo, "zdd", "patterns-plan.md"), "# Pattern plan\n");
+  blocked(run(repo), "only the plan moved");
+  writeFileSync(join(repo, "zdd", "blessing-index.md"), "# Blessing index\n");
+  silent(run(repo), "a regenerated index is a ZDD change");
+});

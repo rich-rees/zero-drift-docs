@@ -710,6 +710,17 @@ function pinEngine(text, version) {
   const re = new RegExp(ENGINE_PACKAGE.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&") + "@[^\"'\\s]*", "g");
   return text.replace(re, `${ENGINE_PACKAGE}@${version}`);
 }
+// 2.0 (CAS-96): the workflow's lint step gates the merge, so it runs
+// `lint --merge` — the pattern plan must be gone. An owned workflow is only
+// re-pinned by upgrade, never rewritten, so the step is migrated in place: a
+// `run:` line invoking the pinned engine's bare `lint` gains the flag. A
+// workflow whose lint step has another shape is reported, not guessed at.
+export function mergeGate(text) {
+  const re = /^(\s*(?:-\s+)?run:\s*npx -y "\$ZDD_ENGINE" lint)[ \t]*(\r?)$/m;
+  if (/\blint --merge\b/.test(text)) return { text, how: "present" };
+  if (!re.test(text)) return { text, how: "absent" };
+  return { text: text.replace(re, "$1 --merge$2"), how: "added" };
+}
 const workflowText = (version) => pinEngine(readFileSync(join(TEMPLATES, "zdd.yml"), "utf8"), version);
 const prePushText = (version) => pinEngine(readFileSync(join(TEMPLATES, "pre-push"), "utf8"), version);
 
@@ -1016,10 +1027,19 @@ export function upgrade(root) {
       ledger.kept.push(`${rel} (not managed by zdd — left untouched; check its engine pin by hand)`);
       continue;
     }
-    const next = rel.endsWith("pre-push") ? fresh() : pinEngine(cur, version);
+    let next = rel.endsWith("pre-push") ? fresh() : pinEngine(cur, version);
+    let gate = null;
+    if (rel.endsWith("zdd.yml")) {
+      gate = mergeGate(next);
+      next = gate.text;
+      if (gate.how === "absent") {
+        ledger.notes.push(`${rel}: no \`run: npx -y "$ZDD_ENGINE" lint\` step found — add --merge to your lint step by hand, so the merge gate fails while ${artifactPaths(config, { lenient: true }).patternsPlan} exists`);
+      }
+    }
     if (next !== cur) {
       ledger.overwrite(rel, next);
       ledger.notes.push(`${rel}: ${rel.endsWith("pre-push") ? "rewritten from the template" : "engine pin updated"} (${version})`);
+      if (gate?.how === "added") ledger.notes.push(`${rel}: the lint step now runs \`lint --merge\` (2.0) — the merge gate fails while the branch's pattern plan exists`);
     } else ledger.kept.push(rel);
   }
   for (const file of ["CLAUDE.md", "AGENTS.md"]) {
@@ -1038,6 +1058,13 @@ export function upgrade(root) {
   if (config.claims === undefined) {
     ledger.notes.push('claims.strict (new in 1.3): lint can enforce "every record belongs to exactly one feature slice" — an unclaimed record not on an allow-list, a stale allow-list entry, or a record two slices claim then FAILS. It is off until you add it to zdd/config.json: "claims": { "strict": true, "allowUnclaimed": ["route:/health"] }. Without it, double claims are a warning beside the unclaimed list');
   }
+  const upgradedPaths = artifactPaths(config, { lenient: true });
+  ledger.notes.push(
+    `2.0 adds "choose patterns" (skill: patterns) and a fifth generated artifact, ${upgradedPaths.blessingIndex} — run \`render\` and commit it in this PR, or render --check fails`,
+  );
+  ledger.notes.push(
+    '2.0 makes a blessing that does not open with its trigger question ("Adding an endpoint? …") FAIL lint — run `lint` and show the developer every blessing it names; upgrade never rewrites the map, so add each question on their word',
+  );
   ledger.notes.push("curated artifacts (glossary, ADRs, map, metadata) untouched — upgrade never writes them");
   ledger.notes.push("if the engine pin moved: run `render` and commit the regenerated artifacts in the same PR");
   return { version, ...ledgerOut(ledger) };

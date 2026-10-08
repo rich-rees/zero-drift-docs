@@ -508,3 +508,13 @@ test("every engine pin in the plugin (skills, templates) equals the plugin versi
   assert.ok(pins.length >= 4, "pins found");
   for (const p of pins) assert.equal(p.version, version(), p.file);
 });
+
+test("fence (CAS-96): the blessing index is generated and fenced; the pattern plan is a session's working file and is not", () => {
+  blocked(fence("Write", { file_path: join(repo, "zdd", "blessing-index.md") }), "blessing index");
+  blocked(fence("Bash", { command: "echo x > zdd/blessing-index.md" }), "blessing index by shell");
+  silent(fence("Write", { file_path: join(repo, "zdd", "patterns-plan.md") }), "the pattern plan is written by the session");
+  // A generated path configured onto the plan is invalid and falls back, so the plan is never fenced.
+  const paths = artifactPaths({ paths: { blessingIndex: "zdd/patterns-plan.md" } }, { lenient: true });
+  assert.equal(paths.blessingIndex, "zdd/blessing-index.md");
+  assert.throws(() => artifactPaths({ paths: { metadataDir: "zdd/work", patternsPlan: "zdd/work/plan.md" } }), /contains "zdd\/work\/plan\.md"/);
+});
