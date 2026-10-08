@@ -95,7 +95,7 @@ test("CAS-65 CR-027/028/031: `claims: null`, an unknown key, and an oversized al
   const repo = derived(t);
   for (const [claims, re] of [
     [null, /'claims' must be an object/],
-    [{ strcit: true }, /'claims' has an unknown key 'strcit' \(known: strict, allowUnclaimed\)/],
+    [{ strcit: true }, /'claims' has an unknown key 'strcit' \(known: strict, allowUnclaimed, strictKinds\)/],
     [{ strict: true, allowUnclaimed: Array.from({ length: 10_001 }, (_, i) => `route:/r${i}`) }, /'claims\.allowUnclaimed' lists more than 10000 ids/],
     [{ strict: true, allowUnclaimed: ["route:/" + "x".repeat(600)] }, /'claims\.allowUnclaimed' ids must be at most 512 characters/],
   ]) {

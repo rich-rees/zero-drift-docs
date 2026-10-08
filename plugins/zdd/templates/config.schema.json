@@ -234,6 +234,13 @@
           "items": { "type": "string" },
           "description": "Record ids that may stay unclaimed under strict — plumbing no feature owns. Read only when strict is true.",
           "examples": [["route:/health", "route:/ready", "route:/docs", "route:/openapi.json"]]
+        },
+        "strictKinds": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["component", "job", "service"] },
+          "uniqueItems": true,
+          "default": [],
+          "description": "The opt-in kinds (ZDD 2.1: component, job, service) that strict also governs. Unlisted, an unclaimed record of such a kind is a warning under strict, never a failure, so switching an extractor on never turns a green lint red by itself (decision 0017). A shared component is claimable; a page-private one is not."
         }
       }
     },
