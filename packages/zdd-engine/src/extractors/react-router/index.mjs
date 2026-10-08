@@ -794,7 +794,10 @@ export function scanDataCalls(text, consts = moduleConsts(text)) {
 // `.on("postgres_changes", { …, table: "<name>" })` with a literal table,
 // and any call the adopter names in `subscribeCalls` (`live.onInsert`)
 // whose FIRST argument is the table name as a string literal. A table that
-// is a variable is not seen — the same honesty as the call scanners.
+// is a variable is not seen — the same honesty as the call scanners. A name
+// may carry its schema (`public.audit_events`); the resolver matches it
+// either way (CAS-99).
+const TABLE_NAME = /^(?:[\w-]+\.)?[\w-]+$/;
 export function scanSubscriptions(text, helpers = []) {
   const m = model(text);
   const out = new Set();
@@ -808,14 +811,14 @@ export function scanSubscriptions(text, helpers = []) {
     const t = /\btable\s*:\s*(['"])/.exec(args);
     if (!t) continue;
     const raw = stringAt(m, open + t.index + t[0].length - 1);
-    if (raw !== null && /^[\w-]+$/.test(raw)) out.add(raw);
+    if (raw !== null && TABLE_NAME.test(raw)) out.add(raw);
   }
   for (const helper of helpers) {
     if (typeof helper !== "string" || !/^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/.test(helper)) continue;
     const re = new RegExp(`(?<![\\w$.])${helper.replace(/[.$]/g, "\\$&")}\\s*\\(\\s*(['"])`, "g");
     for (const hit of m.mask.matchAll(re)) {
       const raw = stringAt(m, hit.index + hit[0].length - 1);
-      if (raw !== null && /^[\w-]+$/.test(raw)) out.add(raw);
+      if (raw !== null && TABLE_NAME.test(raw)) out.add(raw);
     }
   }
   return out;

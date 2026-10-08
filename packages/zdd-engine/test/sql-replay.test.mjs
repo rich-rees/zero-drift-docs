@@ -197,3 +197,56 @@ test("replay tripwire: unrecognized schema-like statements are reported", () => 
   assert.equal(skipped.length, 1);
   assert.match(skipped[0].statement, /drop index/i);
 });
+
+test("replay: `things` and `public.things` are one table — an ALTER, RENAME, DROP or trigger in the other spelling still lands; the name stays as first written (CAS-99, PressPlay's member_topics / test_runs)", () => {
+  const byName = (tables) => new Map([...tables.values()].map((t) => [t.name, t]));
+  const qualifiedFirst = byName(replayMigrations([
+    { name: "1.sql", text: "create table public.things (id uuid primary key);\ncreate table public.other (id uuid);" },
+    { name: "2.sql", text: "alter table things add column name text;\nalter table only public.things add column size int;\nalter table things rename column name to label;" },
+  ]).tables);
+  assert.deepEqual([...qualifiedFirst.keys()].sort(), ["public.other", "public.things"]);
+  assert.deepEqual(qualifiedFirst.get("public.things").columns.map((c) => c.name), ["id", "label", "size"]);
+  assert.deepEqual(qualifiedFirst.get("public.things").resources, ["1.sql", "2.sql"]);
+
+  const bareFirst = replayMigrations([
+    { name: "1.sql", text: "create table member_topics (id uuid primary key);\ncreate table kids (id uuid, topic_id uuid references public.member_topics(id));\ncreate or replace function touch() returns trigger language plpgsql as $$ begin return new; end; $$;\ncreate trigger trg_touch before update on public.member_topics for each row execute function touch();" },
+    { name: "2.sql", text: "alter table public.member_topics add column title text;\nalter table public.member_topics rename to topics;" },
+  ]);
+  const t = byName(bareFirst.tables);
+  assert.deepEqual([...t.keys()].sort(), ["kids", "topics"]);
+  assert.deepEqual(t.get("topics").columns.map((c) => c.name), ["id", "title"]);
+  assert.deepEqual(t.get("topics").renamedFrom, ["member_topics"]);
+  assert.equal(t.get("kids").columns.find((c) => c.name === "topic_id").references, "topics(id)", "the FK follows a rename spelled the other way");
+  assert.deepEqual(bareFirst.triggers.map((x) => x.table), ["topics"], "the trigger follows it too");
+
+  const dropped = replayMigrations([
+    { name: "1.sql", text: "create table gone (id uuid);\ncreate or replace function f() returns trigger language plpgsql as $$ begin return new; end; $$;\ncreate trigger trg_f after insert on gone for each row execute function f();" },
+    { name: "2.sql", text: "drop trigger trg_f on public.gone;\ndrop table public.gone;" },
+  ]);
+  assert.equal(dropped.tables.size, 0);
+  assert.deepEqual(dropped.triggers, []);
+
+  const otherSchema = byName(replayMigrations([{ name: "1.sql", text: "create table archive.things (id uuid);\ncreate table things (id uuid);\nalter table things add column x int;" }]).tables);
+  assert.deepEqual([...otherSchema.keys()].sort(), ["archive.things", "things"], "a schema other than public is another table");
+  assert.deepEqual(otherSchema.get("archive.things").columns.map((c) => c.name), ["id"]);
+});
+
+test("replay: CREATE TABLE IF NOT EXISTS under either spelling of an existing table is a no-op, as in Postgres — the first table, its name and its provenance stay (CAS-99 CR-001)", () => {
+  for (const [first, second] of [["things", "public.things"], ["public.things", "things"], ["things", "things"]]) {
+    const [t, ...rest] = [...replayMigrations([
+      { name: "1.sql", text: `-- The real one.\ncreate table ${first} (id uuid, kept text);` },
+      { name: "2.sql", text: `create table if not exists ${second} (id uuid, other text);` },
+    ]).tables.values()];
+    assert.equal(rest.length, 0);
+    assert.equal(t.name, first, `${first} then ${second}`);
+    assert.deepEqual(t.columns.map((c) => c.name), ["id", "kept"]);
+    assert.equal(t.createdIn, "1.sql");
+    assert.equal(t.description, "The real one.");
+  }
+});
+
+test("replay: CREATE OR REPLACE TRIGGER replaces across `x` / `public.x` (CAS-99 CR-011)", () => {
+  const { triggers } = replayMigrations([{ name: "1.sql", text: "create table things (id uuid);\ncreate or replace function f() returns trigger language plpgsql as $$ begin return new; end; $$;\ncreate trigger trg after insert on things for each row execute function f();\ncreate or replace trigger trg before update on public.things for each row execute function f();" }]);
+  assert.equal(triggers.length, 1);
+  assert.equal(triggers[0].timing, "before");
+});

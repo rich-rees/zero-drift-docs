@@ -547,6 +547,11 @@ function buildGraph(concepts) {
 // ---------------------------------------------------------------------------
 function buildAgentIndex(concepts, features, adrs) {
   const byId = new Map(concepts.map((c) => [c.id, c]));
+  // A concept's file: a metadata record is JSON, a map page is markdown —
+  // the External services list linked a service record as `.md` (CAS-99).
+  // Read from the concept's layer, never its path: `paths.metadataDir` moves
+  // the folder (CR-005).
+  const hrefOf = (id) => `${id}${byId.get(id)?.layer === "metadata" ? ".json" : ".md"}`;
   // Pointer descriptions: first sentence, capped — the full text lives on the
   // concept; the agent index is a router, and its ~2k-token budget is the
   // constraint that keeps it loadable whole.
@@ -581,8 +586,7 @@ function buildAgentIndex(concepts, features, adrs) {
       if (pointers.length >= 5) break;
       const t = byId.get(target);
       if (!t) continue;
-      const ext = target.startsWith("metadata/") ? ".json" : ".md";
-      pointers.push({ label: t.title, href: `${target}${ext}`, desc: brief(t.description, t.title) });
+      pointers.push({ label: t.title, href: hrefOf(target), desc: brief(t.description, t.title) });
     }
     for (const p of pointers.slice(0, 5)) {
       lines.push(`- [${p.label}](${p.href})${p.desc ? ` — ${p.desc}` : ""}`);
@@ -599,7 +603,7 @@ function buildAgentIndex(concepts, features, adrs) {
     lines.push("");
     for (const s of items) {
       const d = brief(s.description, s.title);
-      lines.push(`- [${s.title}](${s.id}.md)${d ? ` — ${d}` : ""}`);
+      lines.push(`- [${s.title}](${hrefOf(s.id)})${d ? ` — ${d}` : ""}`);
     }
     lines.push("");
   };

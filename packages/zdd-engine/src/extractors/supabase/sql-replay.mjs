@@ -252,7 +252,17 @@ export function commentsToDescription(comments) {
 // ---------------------------------------------------------------------------
 
 // files: [{ name, text }] already sorted into apply order by the caller.
-// Returns { tables: Map, functions: Map, buckets: Map, triggers: [], skipped: [] }.
+// One table, two spellings: Postgres resolves a bare name through
+// search_path, `public` by default, so `things` and `public.things` are the
+// same table and a migration may use either (PressPlay does, CAS-99). The
+// tables map is keyed by tableKey(); a table's `name` stays as first
+// written (as renamed), so record ids never change with the spelling of a
+// later statement. Any other schema is another table.
+export const tableKey = (name) => (name.startsWith("public.") ? name.slice("public.".length) : name);
+const sameTable = (a, b) => tableKey(a) === tableKey(b);
+
+// Returns { tables: Map (key -> table, key = tableKey(name)), functions: Map,
+// buckets: Map, triggers: [], skipped: [] }.
 // `skipped` lists statements that LOOK like schema changes (CREATE TABLE /
 // ALTER TABLE / DROP ...) but matched no recognizer — the tripwire against
 // silently missing a schema mutation.
@@ -269,8 +279,11 @@ export function replayMigrations(files) {
 
       let m;
       // CREATE TABLE
-      if ((m = /^create\s+table\s+(?:if\s+not\s+exists\s+)?([\w".]+)/i.exec(sql))) {
-        const name = foldIdent(m[1]);
+      if ((m = /^create\s+table\s+(if\s+not\s+exists\s+)?([\w".]+)/i.exec(sql))) {
+        const name = foldIdent(m[2]);
+        // IF NOT EXISTS over a table that exists, in either spelling, is a
+        // no-op in Postgres: the first table and its name stay (CR-001).
+        if (m[1] && tables.has(tableKey(name))) continue;
         const paren = parenBody(sql, m[0].length);
         if (!paren) {
           skipped.push({ file: file.name, statement: head });
@@ -281,7 +294,7 @@ export function replayMigrations(files) {
           const col = parseColumnDef(def);
           if (col) columns.push(col);
         }
-        tables.set(name, {
+        tables.set(tableKey(name), {
           name,
           columns,
           renamedFrom: [],
@@ -295,7 +308,7 @@ export function replayMigrations(files) {
       // ALTER TABLE
       if ((m = /^alter\s+table\s+(?:only\s+)?(?:if\s+exists\s+)?([\w".]+)\s+([\s\S]+)$/i.exec(sql))) {
         const name = foldIdent(m[1]);
-        const table = tables.get(name);
+        const table = tables.get(tableKey(name));
         // Unknown table (e.g. storage.objects) — not ours to model.
         if (!table) continue;
         let touched = false;
@@ -306,19 +319,20 @@ export function replayMigrations(files) {
             const oldName = table.name;
             table.renamedFrom.push(oldName);
             table.name = newName;
-            tables.delete(name);
-            tables.set(newName, table);
+            tables.delete(tableKey(name));
+            tables.set(tableKey(newName), table);
             // Sweep FK references in every table: `references old(col)` must
             // follow the rename or the FK graph silently rots (00009 renames
             // surveys -> journeys while journey_edges still points at surveys).
             for (const other of tables.values()) {
               for (const col of other.columns) {
-                if (col.references?.startsWith(`${oldName}(`)) {
-                  col.references = `${newName}(${col.references.slice(oldName.length + 1)}`;
+                const target = col.references?.split("(")[0];
+                if (target !== undefined && sameTable(target, oldName)) {
+                  col.references = `${newName}${col.references.slice(target.length)}`;
                 }
               }
             }
-            for (const t of triggers) if (t.table === oldName) t.table = newName;
+            for (const t of triggers) if (sameTable(t.table, oldName)) t.table = newName;
             touched = true;
           } else if ((a = /^rename\s+(?:column\s+)?([\w"]+)\s+to\s+([\w"]+)$/i.exec(action))) {
             const col = table.columns.find((c) => c.name === foldIdent(a[1]));
@@ -343,7 +357,7 @@ export function replayMigrations(files) {
           // ROW LEVEL SECURITY, VALIDATE, ...) are deliberately ignored.
         }
         if (touched) {
-          const current = tables.get(table.name);
+          const current = tables.get(tableKey(table.name));
           if (current && !current.resources.includes(file.name)) current.resources.push(file.name);
         }
         continue;
@@ -353,8 +367,8 @@ export function replayMigrations(files) {
       if ((m = /^drop\s+table\s+(?:if\s+exists\s+)?([\s\S]+)$/i.exec(sql))) {
         for (const rawName of splitTopLevel(m[1])) {
           const name = foldIdent(rawName.replace(/\s+(cascade|restrict)\s*$/i, ""));
-          tables.delete(name);
-          for (let i = triggers.length - 1; i >= 0; i--) if (triggers[i].table === name) triggers.splice(i, 1);
+          tables.delete(tableKey(name));
+          for (let i = triggers.length - 1; i >= 0; i--) if (sameTable(triggers[i].table, name)) triggers.splice(i, 1);
         }
         continue;
       }
@@ -402,7 +416,7 @@ export function replayMigrations(files) {
         const name = foldIdent(m[1]);
         const table = foldIdent(m[4]);
         // CREATE OR REPLACE (PG14+) / re-run idempotency: same name+table replaces.
-        const existingIdx = triggers.findIndex((t) => t.name === name && t.table === table);
+        const existingIdx = triggers.findIndex((t) => t.name === name && sameTable(t.table, table));
         if (existingIdx !== -1) triggers.splice(existingIdx, 1);
         triggers.push({
           name,
@@ -419,7 +433,7 @@ export function replayMigrations(files) {
         const name = foldIdent(m[1]);
         const table = foldIdent(m[2]);
         for (let i = triggers.length - 1; i >= 0; i--) {
-          if (triggers[i].name === name && triggers[i].table === table) triggers.splice(i, 1);
+          if (triggers[i].name === name && sameTable(triggers[i].table, table)) triggers.splice(i, 1);
         }
         continue;
       }

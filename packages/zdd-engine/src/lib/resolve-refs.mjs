@@ -38,7 +38,9 @@
 // UNQUALIFIED name that several records share is ambiguous: the ref is
 // dropped with a diagnostic naming the candidates — never a first-wins guess
 // (CR-008). A table name minted twice is an error outright: `.from()` calls
-// would be unattributable.
+// would be unattributable. A table minted in the default schema
+// (`table:db/public.things`) is also found by its bare name (`things`), so
+// `.from('things')` and `?table:public.things` both reach it (CAS-99).
 //
 // Route choice: every matching route is ranked by how many url segments it
 // matched literally, then single-segment parameters over catch-alls (fit()
@@ -123,16 +125,25 @@ export function resolveRefs(records) {
     if (!list.includes(id)) list.push(id);
     map.set(key, list);
   };
+  const minted = new Map(); // a table's exact short name -> its id
   for (const r of records) {
     const map = index[r.kind];
     if (!map) continue;
     const short = shortName(r.id);
-    if (r.kind === "table" && map.has(short) && !map.get(short).includes(r.id)) {
-      throw new Error(`Table '${short}' minted twice (${map.get(short)[0]} and ${r.id}) — cannot attribute .from() calls`);
+    if (r.kind === "table") {
+      if (minted.has(short) && minted.get(short) !== r.id) {
+        throw new Error(`Table '${short}' minted twice (${minted.get(short)} and ${r.id}) — cannot attribute .from() calls`);
+      }
+      minted.set(short, r.id);
     }
     add(map, short, r.id);
     const full = afterKind(r.id);
     if (full !== short) add(map, full, r.id);
+    // A table the migrations named in the default schema
+    // (`public.audit_events`) answers to its bare name too, as Postgres
+    // resolves it: a client call names the table alone (CAS-99). Another
+    // schema's table never does, and a function keeps its exact names (CR-007).
+    if (r.kind === "table" && short.startsWith("public.")) add(map, short.slice("public.".length), r.id);
   }
   const surfacesByFile = new Map();
   const recordsByFile = new Map();
@@ -166,7 +177,7 @@ export function resolveRefs(records) {
     const lookup = (k, label) => {
       const hits = index[k].get(target);
       if (!hits) return undefined;
-      if (hits.length > 1) return drop(`${label} '${target}' is ambiguous (${hits.join(", ")}) — qualify it with its namespace`);
+      if (hits.length > 1) return drop(`${label} '${target}' is ambiguous (${[...hits].sort().join(", ")}) — qualify it with its namespace`);
       return hits[0];
     };
     switch (kind) {

@@ -15,6 +15,11 @@
 // records at those files (`?at:<file>`, resolved after the merge to every
 // record whose resource list holds the file — a route, a surface, a job).
 // A declared service with no hits is a diagnostic and no record.
+// Limit (CAS-99, documented, not fixed): `usedBy` is the files that carry a
+// marker, never the files that reach the provider through them. A module
+// that reads `RESEND_API_KEY` into a settings object is a user; the sender
+// that takes the key from that object (`senders.py`, `postcodes.py` on
+// Cascade) is not seen, and neither are the routes that call it.
 //
 // Candidates: an env name read in source whose suffix says "a credential or
 // an address" (`_API_KEY`, `_DSN`, `_SECRET`, `_TOKEN`, `_URL`, `_KEY`),

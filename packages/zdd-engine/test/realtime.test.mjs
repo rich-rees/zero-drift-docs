@@ -90,3 +90,27 @@ test("nextjs: a page's own .on('postgres_changes', { table: 'things' }) and a na
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("a subscribes ref resolves against a schema-qualified table (CAS-99): migrations that say `public.audit_events` still give the Activity page its edge, from a bare name or a `schema.table` one", () => {
+  const root = scratch({
+    "migrations/0001.sql": "create table public.audit_events (id uuid primary key);\ncreate table public.jobs (id uuid primary key);\n",
+    "web/src/routes.tsx": 'import { ActivityPage } from "./ActivityPage";\nexport const routes = [{ path: "/activity", element: <ActivityPage /> }];\n',
+    "web/src/ActivityPage.tsx": 'export function ActivityPage() {\n  live.onInsert("audit_events", (row) => row);\n  live.onInsert("public.jobs", (row) => row);\n  return <main />;\n}\n',
+  });
+  try {
+    const db = supabase({ repoRoot: root, options: { migrationNamespaces: [{ name: "db", dir: "migrations" }] } });
+    assert.ok(db.records.some((r) => r.id === "table:db/public.audit_events"), "the table keeps its schema in its id");
+    const web = reactRouter({ repoRoot: root, options: { routesFile: "web/src/routes.tsx", subscribeCalls: ["live.onInsert"] } });
+    const { records, diagnostics } = resolveRefs([...db.records, ...web.records]);
+    const activity = records.find((r) => r.id === "surface:/activity");
+    assert.deepEqual(activity.facts.edges, { subscribes: ["table:db/public.audit_events", "table:db/public.jobs"] });
+    assert.deepEqual(diagnostics, []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("scanSubscriptions: the client's own .on('postgres_changes') with a schema-qualified table is seen, like the helper form (CAS-99 CR-009)", () => {
+  const text = `sb.on("postgres_changes", { schema: "public", table: "public.audit_events" }, cb);\nsb.on("postgres_changes", { table: "a.b.c" }, cb);\n`;
+  assert.deepEqual([...scanSubscriptions(text)], ["public.audit_events"], "one schema qualifier at most");
+});

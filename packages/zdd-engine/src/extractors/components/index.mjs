@@ -175,7 +175,11 @@ export function scanComponents(text) {
   const add = (name, exportKind, at, paramsText, bodyMaskText, wrapper) => {
     if (!/^[A-Z]/.test(name) || seen.has(name) || !hasJsx(bodyMaskText)) return;
     seen.add(name);
-    const jsdoc = /\/\*\*([\s\S]*?)\*\/\s*$/.exec(text.slice(Math.max(0, at - 2000), at));
+    // The JSDoc attached to the component: the LAST `/** … */` before it,
+    // with only whitespace between. A body that may not hold `*/` keeps the
+    // match from starting at an earlier JSDoc (a type's, a constant's) and
+    // running across the code between (CAS-99).
+    const jsdoc = /\/\*\*((?:(?!\*\/)[\s\S])*)\*\/\s*$/.exec(text.slice(Math.max(0, at - 2000), at));
     const description = jsdoc ? jsdoc[1].split("\n").map((l) => l.replace(/^\s*\*\s?/, "").trim()).filter((l) => l && !l.startsWith("@")).join(" ") : m.commentAbove(at);
     // `forwardRef<Ref, Props>` / `memo<Props>`: the props type when the
     // parameter list itself carries no annotation.

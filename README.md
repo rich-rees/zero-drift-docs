@@ -4,7 +4,7 @@ A documentation architecture for repos built by **human + agent pairs**. ZDD kee
 seven documentation artifacts *at most one unit of work behind the code* — and, with
 CI, makes drift in the machine-generated ones **un-mergeable**.
 
-> **Status: 2.1.0.** The plugin installs in Claude Code
+> **Status: 2.1.1.** The plugin installs in Claude Code
 > and in Codex from this one repo; `bootstrap` detects your stack (or grills
 > for it on a greenfield repo), proposes extractors with evidence, and *writes*
 > the opt-ins; the engine (`packages/zdd-engine`, npm `@rich-rees/zdd-engine`)
@@ -136,7 +136,7 @@ hook, config schema + example, the seed ADR-0001, and the extractor scaffold).
 | Native screens | `expo-router` *(early)* | the Expo Router folder tree: screens, layouts, `[id]` segments, platform pairs — namespaced so a native `/jobs` and a web `/jobs` are two surfaces |
 | Components | `components` | React and React Native: exported, capitalised, returning JSX; props as written; **used by** / **uses** / **calls**; shared vs page-private |
 | Background work | `jobs` | package scripts, a Procfile and Railway files that run a process; `reads` / `writes` from the tables a module names; the mode never guessed |
-| External services | `services` | declared markers — a package import, an env-name prefix (names only, never values); **depends on** from the files that use them; undeclared candidates warned about on every derive |
+| External services | `services` | declared markers — a package import, an env-name prefix (names only, never values); **depends on** from the files that carry a marker — never a file that reaches the provider through a settings object; undeclared candidates warned about on every derive |
 | Realtime | *(in `react-router` / `nextjs`)* | a page's Supabase Realtime subscription — `.on('postgres_changes', { table })` or a helper you name — as a **subscribes** edge |
 
 Vue, Svelte and Angular are not read: write a local extractor with the
@@ -414,6 +414,14 @@ saying no to a row is a visible choice, not a fork.
       in the viewer; `claims.strictKinds`; the plugin's session-start
       release check *(engine + plugin 2.1.0, CAS-97; decisions
       [0016](docs/decisions/0016-typed-edges-are-additive.md)–[0020](docs/decisions/0020-jobs-from-manifests-services-from-declared-markers.md))*.
+- [x] **2.1.1** — fixes from the first real adoption of 2.1 (Cascade): a
+      subscribes or `.from()` ref reaches a table the migrations named with
+      its schema (`public.audit_events`), and the migration replay treats
+      `things` and `public.things` as one table, so a trigger or ALTER in
+      the other spelling lands; the agent index links a service
+      record as `.json`; a component's description is the comment attached to it, never an earlier JSDoc;
+      the release check prints the route that moves a machine — restart,
+      `claude plugin update`, restart *(engine + plugin 2.1.1, CAS-99)*.
 - [ ] Next: a second viewer; Vue / Svelte / Angular extractors on their first
       real adoption.
 
@@ -496,6 +504,14 @@ warning can say "behind".
   the four extractors' options, `react-router.subscribeCalls`,
   `nextjs.refs.subscribeCalls`, `viewer.componentFanIn`) are additive. The
   extractor contract gains an optional `warnings` channel.
+
+- **`2.1.1` — fixes.** A patch; no config or contract change, but bytes move
+  on the pin bump wherever a fix applies, so re-derive and re-render: a
+  table minted with its schema gains the edges that named it bare; a
+  trigger function whose `create trigger … on public.x` targets a table
+  created as `x` (or the reverse) gains its trigger facts and table edge; a
+  component whose JSDoc sat after an exported type or constant gets its own
+  description; an agent index with an External services list links `.json`.
 
 ## Contributing
 
