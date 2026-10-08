@@ -14,6 +14,7 @@ commit, and say so in the commit body.
 | `agent-index-v0.3.1-nextjs-supabase.md` | `test/fixture` | `viewers.test.mjs` |
 | `human-index-bundle-v0.3.1-nextjs-supabase.json` | `test/fixture` | `viewers.test.mjs` — the raw `window.BUNDLE = …;` literal plus a trailing newline |
 | `human-index-v1.0-nextjs-supabase.html` | `test/fixture` | `viewers.test.mjs` — the whole page with the two vendor bodies replaced by their placeholders (CR-096) |
+| `blessing-index-nextjs-supabase.md` | `test/fixture` | `blessing-index.test.mjs` |
 | `fastapi-supabase-metadata/`, `fastapi-supabase-graph.json`, `fastapi-supabase-agent-index.md` | `test/fixture-fastapi` | `extractors.test.mjs` (CR-097) |
 
 ## Provenance
@@ -22,7 +23,8 @@ The `v0.3.1` goldens were captured from engine 0.3.0 (tag `v0.3.1`) by running
 that engine's `derive` + `render` on `test/fixture`, before the extractor split
 and the viewer registry; reproducing them byte-for-byte is the contract those
 refactors met. The `v1.0` / FastAPI goldens were generated at engine 1.0.0 with
-the DIO-312 review fixes applied, by the commands below.
+the DIO-312 review fixes applied, by the commands below. The blessing-index
+golden was generated at engine 2.0.0 (CAS-96).
 
 ## Regenerating
 
@@ -30,11 +32,12 @@ From `packages/zdd-engine`, POSIX shell (Git Bash on Windows). Each block
 renders a scratch copy of a fixture — the fixtures themselves stay untouched.
 
 ```sh
-# Next.js fixture: metadata tree, agent index, BUNDLE literal, full page.
+# Next.js fixture: metadata tree, agent index, blessing index, BUNDLE literal, full page.
 T=$(mktemp -d) && cp -r test/fixture/. "$T"
 node bin/zdd-engine.mjs derive --root="$T" && node bin/zdd-engine.mjs render --root="$T"
 rm -rf test/golden/nextjs-supabase-metadata && cp -r "$T/zdd/metadata" test/golden/nextjs-supabase-metadata
 cp "$T/zdd/agent-index.md" test/golden/agent-index-v0.3.1-nextjs-supabase.md
+cp "$T/zdd/blessing-index.md" test/golden/blessing-index-nextjs-supabase.md
 node -e '
   const fs = require("fs"); const html = fs.readFileSync(process.argv[1] + "/zdd/human-index.html", "utf8");
   fs.writeFileSync("test/golden/human-index-bundle-v0.3.1-nextjs-supabase.json", /window\.BUNDLE = (.*);\n/.exec(html)[1] + "\n");
