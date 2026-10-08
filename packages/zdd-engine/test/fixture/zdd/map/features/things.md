@@ -12,3 +12,4 @@ The things catalogue: list, edit, and audit things.
 - [/api/things](../../metadata/route/things.json)
 - [/api/things/[id]](../../metadata/route/things--_id.json)
 - [save_thing()](../../metadata/function/db--save_thing.json)
+- [signed-in layout](<../../metadata/surface/(app)--_layout.json>)
