@@ -73,7 +73,11 @@ export function extractLinks(body, docDir, bundleDir) {
   const seen = new Set();
   for (const target of linkTargets(body)) {
     if (target.includes("://")) continue;
-    if (/^(\/\/|\\\\|[A-Za-z]:)/.test(target)) continue; // a UNC or drive-letter spelling is never a bundle link, on any platform (CR-023)
+    if (/^(\/\/|[A-Za-z]:)/.test(target)) continue; // a UNC or drive-letter spelling is never a bundle link, on any platform (CR-023)
+    // Nor is any backslash: CommonMark unescapes `\\server` to `\server`,
+    // which POSIX reads as a relative filename and Windows as a root path —
+    // the two platforms would disagree about the edge. Bundle links are POSIX.
+    if (target.includes("\\")) continue;
     const abs = target.startsWith("/") ? join(bundleDir, target.slice(1)) : resolve(docDir, target);
     const rel = posixify(relative(bundleDir, abs));
     if (rel === ".." || rel.startsWith("../") || isAbsolute(rel) || /^[A-Za-z]:/.test(rel)) continue;

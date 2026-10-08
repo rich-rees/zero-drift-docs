@@ -113,6 +113,9 @@ test("extractLinks (CAS-96, from CAS-94): a target reads as CommonMark does — 
   assert.deepEqual(extractLinks("[l](<../../metadata/surface/(app)--_layout.json>)", doc, bundle), [id], "<…> form");
   assert.deepEqual(extractLinks("[l](<../../metadata/route/a b.json#x>)", doc, bundle), ["metadata/route/a b"], "<…> may hold a space and an anchor");
   assert.deepEqual(extractLinks("[l](../../metadata/surface/\\(app\\)--_layout.json)", doc, bundle), [id], "escaped parens");
+  for (const t of ["\\\\server\\share\\x.json", "\\server\\x.json", "<\\\\server\\share\\x.json>", "..\\..\\metadata\\route\\a.json"]) {
+    assert.deepEqual(extractLinks(`[u](${t})`, doc, bundle), [], `a backslash spelling is never a bundle link, on any platform: ${t}`);
+  }
   assert.deepEqual(extractLinks("[l](../../metadata/surface/((app))--_layout.json#top)", doc, bundle), ["metadata/surface/((app))--_layout"], "nested and closed, with an anchor");
   assert.deepEqual(extractLinks("[l](../../metadata/surface/(app--_layout.json)", doc, bundle), [], "unbalanced: not a link, as in CommonMark");
   assert.deepEqual(extractLinks("[l](<x.json) [m](<a\nb.json>)", doc, bundle), [], "an unclosed or multi-line <…> is not a link");
