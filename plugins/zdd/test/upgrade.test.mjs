@@ -330,6 +330,21 @@ test("two identical duplicate sections get distinct ids, and --drop removes only
   assert.equal(after.split("## Loading ZDD").length - 1, 1, "exactly one removed");
 });
 
+test("adjacent identical copies: whichever copy the id lands on after a shift, the file comes out byte-identical to removing the planned one (CR-024 claim, shown false)", () => {
+  const a = ["## Loading ZDD", "", 'Say "load ZDD".', ""];
+  const tail = ["<!-- zdd:begin -->", "x", "<!-- zdd:end -->", ""];
+  const doc = ["# T", "", ...a, ...a, ...tail];
+  const repo = adopted("identical-adjacent", { claude: doc.join("\n") });
+  const second = runJson(repo, ["upgrade", "--plan"]).duplicates[1];
+  // A third identical copy lands above both; the saved id now names the old first copy's new place.
+  const shifted = ["# T", "", ...a, ...a, ...a, ...tail];
+  writeFileSync(join(repo, "CLAUDE.md"), shifted.join("\n"));
+  runJson(repo, ["upgrade", `--drop=${second.id}`]);
+  const intent = ["# T", "", ...a, ...a, ...tail]; // the shifted file with the planned (now third) copy removed
+  const out = readFileSync(join(repo, "CLAUDE.md"), "utf8");
+  assert.equal(out.slice(0, out.indexOf("<!-- zdd:begin -->")), intent.join("\n").slice(0, intent.join("\n").indexOf("<!-- zdd:begin -->")));
+});
+
 test("a planned id is bound to the section's text AND place: when an identical copy inserted above shifts the planned one, the write refuses (CR-023)", () => {
   // A, then an unrelated section, then A again; the plan names the second A.
   const doc = ["# T", "", "## Loading ZDD", "", 'Say "load ZDD".', "", "## Testing", "", "Run the tests.", "", "## Loading ZDD", "", 'Say "load ZDD".', "", "<!-- zdd:begin -->", "x", "<!-- zdd:end -->", ""];
