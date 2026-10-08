@@ -6,7 +6,7 @@ at **both ends** of the pipeline: **extractors** feed data in (one per
 convention), and **viewers** render it out (one per visualization), with a stable
 graph in the middle.
 
-> **Status.** ZDD is `2.0.0` and public. The engine (`packages/zdd-engine`, on
+> **Status.** ZDD is `2.1.1` and public. The engine (`packages/zdd-engine`, on
 > npm as `@rich-rees/zdd-engine`) is what the plugin's skills and adopters' CI
 > both run, and both contracts below — extractors and viewers — are the ones it
 > executes today. Issues and discussion are welcome; the tests are the contract
@@ -186,7 +186,7 @@ How a viewer becomes part of the product: like extractors, viewers are selected 
 config (`"viewer": "minimal"`, or `{ "name": "cytoscape", ...options }`), so a
 merged viewer ships as a **selectable option** in the registry —
 `packages/zdd-engine/src/viewers/index.mjs`, one line per viewer — a minor version
-bump, live for everyone on the next marketplace update. Model yours on
+bump, live for each adopter when their repo moves its lock to that release. Model yours on
 `src/viewers/minimal/` (the smallest honest viewer: no libraries, nodes grouped by
 type, edges listed) and read `src/viewers/cytoscape/index.mjs` for how a viewer
 builds its own private data shape from the graph.
