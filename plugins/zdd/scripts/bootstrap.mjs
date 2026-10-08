@@ -1553,21 +1553,21 @@ export function findDuplicates(text) {
   }
   return out;
 }
-// A duplicate's id is a hash of its file and its exact text (CR-014): the
-// user approves a section as the plan showed it, and a section edited since —
-// or a different one now at that position — no longer answers to the id.
+// A duplicate's id is a hash of its file, its first line and its exact text
+// (CR-014): the user approves a section as and where the plan showed it, and
+// a section edited or moved since no longer answers to the id.
 function findAllDuplicates(ledger) {
   const all = [];
   for (const file of ["CLAUDE.md", "AGENTS.md"]) {
     if (!ledger.exists(file)) continue;
     const text = ledger.read(file);
     const lines = text.split(/\r?\n/);
-    const seen = new Map(); // identical sections: the nth copy hashes with n (CR-022)
+    // The id binds the section's text AND its place (CR-022, CR-023): identical
+    // copies differ by line, and any edit above or inside the section between
+    // the plan and the write changes the id, so the write refuses.
     for (const d of findDuplicates(text)) {
       const body = lines.slice(d.from - 1, d.to).join("\n");
-      const nth = (seen.get(body) ?? 0) + 1;
-      seen.set(body, nth);
-      const id = createHash("sha256").update(`${file}\0${nth}\0${body}`).digest("hex").slice(0, 8);
+      const id = createHash("sha256").update(`${file}\0${d.from}\0${body}`).digest("hex").slice(0, 8);
       all.push({ id, file, ...d });
     }
   }
