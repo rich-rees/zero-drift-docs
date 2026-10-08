@@ -64,8 +64,9 @@ node "$PLUGIN/scripts/bootstrap.mjs" upgrade --plan
 ```
 
 It writes nothing. Relay it verbatim: every file it **would change**, every
-file it keeps, every note — the notes are this upgrade's changelog, one per
-release the repo crosses, and the "Upgrading to X.Y" sections below say what
+file it keeps, every note — the notes are this upgrade's changelog, a line
+or two for each release the repo crosses, and the "Upgrading to X.Y" sections
+below (for the releases that ask something of you) say what
 each one asks of you — and every **section outside the ZDD block** it names.
 
 For each named section, read it against the new block and tell the user, by

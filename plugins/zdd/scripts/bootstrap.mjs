@@ -1724,7 +1724,7 @@ export function narrateApply(r) {
     out.push("One step only you can do: in branch protection, require the `zdd` check to pass and require branches to be up to date before merging. Now stale generated artifacts cannot merge.");
   } else {
     out.push(
-      "CI declined: ZDD runs on the two verbs alone" +
+      "CI declined: ZDD runs on the spoken verbs alone" +
         (r.optIns.prePush ? ", with the pre-push hook making a forgotten update loud" : "") +
         ". The guarantee is weaker without CI — drift is a habit you keep, not a check that blocks a merge.",
     );
