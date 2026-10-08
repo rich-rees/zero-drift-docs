@@ -1562,8 +1562,12 @@ function findAllDuplicates(ledger) {
     if (!ledger.exists(file)) continue;
     const text = ledger.read(file);
     const lines = text.split(/\r?\n/);
+    const seen = new Map(); // identical sections: the nth copy hashes with n (CR-022)
     for (const d of findDuplicates(text)) {
-      const id = createHash("sha256").update(`${file}\0${lines.slice(d.from - 1, d.to).join("\n")}`).digest("hex").slice(0, 8);
+      const body = lines.slice(d.from - 1, d.to).join("\n");
+      const nth = (seen.get(body) ?? 0) + 1;
+      seen.set(body, nth);
+      const id = createHash("sha256").update(`${file}\0${nth}\0${body}`).digest("hex").slice(0, 8);
       all.push({ id, file, ...d });
     }
   }
