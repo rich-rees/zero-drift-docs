@@ -332,7 +332,10 @@ export function pluginsDir(home) {
   return join(claudeDir(home), "plugins");
 }
 // The user settings file as a person should be told it (CR-204): the familiar
-// name for the default profile, the real path for any other.
+// name for the default profile, the real path for any other. An explicit home
+// (--home, ZDD_HOME) stands in for `~` itself — that is how the tests stage a
+// user — so `~/.claude/settings.json` is the true name relative to it; only
+// CLAUDE_CONFIG_DIR puts the file somewhere `~` does not describe.
 export function userSettingsLabel(home) {
   const custom = !(home || process.env.ZDD_HOME) && process.env.CLAUDE_CONFIG_DIR;
   return custom ? join(claudeDir(home), "settings.json") : "~/.claude/settings.json";
