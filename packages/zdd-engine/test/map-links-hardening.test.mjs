@@ -181,7 +181,7 @@ test("lint (CR-018/CR-019/CR-025): a symlinked concept is skipped, a loop does n
 
 test("lint: the CommonMark cases end to end — a fenced example neither hides a later stale blessing nor fails on a fake one; CR-only and indented headings work", () => {
   const repo = mkRepo();
-  concept(repo, "fenced", "# Blessings\n```md\n# Example\n- copy x, per ADR-9999\n```\n- the real one, per ADR-0002\n");
+  concept(repo, "fenced", "# Blessings\n```md\n# Example\n- copy x, per ADR-9999\n```\n- Real? the real one, per ADR-0002\n");
   let r = lint(repo);
   assert.equal(r.status, 0, r.stderr);
   concept(repo, "hidden", "# Blessings\n```\n# Key paths\n```\n- stale, per ADR-0001\n");
