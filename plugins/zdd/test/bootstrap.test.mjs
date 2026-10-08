@@ -655,11 +655,13 @@ test("upgrade a v0.3.1 repo: adapter → extractors, every owned file rewritten 
   const untouched = CANARY.map((p) => hashTree(join(repo, "zdd", p)));
   assert.ok(!untouched.includes("absent"), "every canary exists before upgrade");
 
+  // A release's notes are said by the run that crosses it (CAS-101); its plan carries the same notes.
+  const crossing = JSON.parse(bootstrap(repo, ["upgrade", "--plan", "--json"]));
   const out = bootstrap(repo, ["upgrade"]);
   const json = JSON.parse(bootstrap(repo, ["upgrade", "--json"])); // second run: nothing to do
   // 1.1's two migration notes: the unanswered Stop opt-in, and the lint that can newly go red (CR-031, CR-027).
-  assert.ok(json.notes.some((n) => /hooks\.stop is not set .*stays OFF until answered/.test(n)), json.notes.join("\n"));
-  assert.ok(json.notes.some((n) => n.includes(`@rich-rees/zdd-engine@${PLUGIN_VERSION} lint`) && /blessing/.test(n)), "the lint note names the pinned command");
+  assert.ok(crossing.notes.some((n) => /hooks\.stop is not set .*stays OFF until answered/.test(n)), crossing.notes.join("\n"));
+  assert.ok(crossing.notes.some((n) => n.includes(`@rich-rees/zdd-engine@${PLUGIN_VERSION} lint`) && /blessing/.test(n)), "the lint note names the pinned command");
 
   const config = JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8"));
   assert.deepEqual(config.extractors, ["supabase", "nextjs"]);
@@ -712,17 +714,17 @@ test("upgrade leaves alone what it does not own: a customised legacy section, an
   }
 });
 
-test("upgrade names the opt-in strict claims setting while config has no `claims` block, and says nothing once it has one (CAS-65)", () => {
+test("upgrade across 1.3 names the opt-in strict claims setting while config has no `claims` block, and says nothing once it has one (CAS-65)", () => {
   const repo = fresh("upgrade-claims");
   mkdirSync(join(repo, "zdd"));
-  writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], engine: PLUGIN_VERSION }));
-  const before = JSON.parse(bootstrap(repo, ["upgrade", "--json"]));
+  writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], engine: "1.2.0" }));
+  const before = JSON.parse(bootstrap(repo, ["upgrade", "--plan", "--json"]));
   assert.ok(
-    before.notes.some((n) => /claims\.strict \(new in 1\.3\).*"claims": \{ "strict": true, "allowUnclaimed": \[/.test(n) && /off until you add it/.test(n)),
+    before.notes.some((n) => /^1\.3 adds claims\.strict.*"claims": \{ "strict": true, "allowUnclaimed": \[/.test(n) && /off until you add it/.test(n)),
     before.notes.join("\n"),
   );
   assert.equal(JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8")).claims, undefined, "a note, never a write");
-  writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], engine: PLUGIN_VERSION, claims: { strict: false } }));
+  writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], engine: "1.2.0", claims: { strict: false } }));
   const after = JSON.parse(bootstrap(repo, ["upgrade", "--json"]));
   assert.ok(!after.notes.some((n) => n.includes("claims.strict")), after.notes.join("\n"));
 });
@@ -853,6 +855,8 @@ test("upgrade (CAS-96, 2.0): an owned workflow's bare lint step gains --merge an
   applyJson(repo, "mg", { extractors: ["generic"], optIns: { autoLoad: true, fence: true, stop: true, ci: true } });
   const wf = join(repo, ".github", "workflows", "zdd.yml");
   writeFileSync(wf, readFileSync(wf, "utf8").replace("lint --merge", "lint").replace(/@rich-rees\/zdd-engine@[0-9.]+/, "@rich-rees/zdd-engine@1.3.1"));
+  const cfgPath = join(repo, "zdd", "config.json");
+  writeFileSync(cfgPath, JSON.stringify({ ...JSON.parse(readFileSync(cfgPath, "utf8")), engine: "1.3.1" })); // a 1.3.1 repo: this run crosses 2.0
   const json = JSON.parse(bootstrap(repo, ["upgrade", "--json"]));
   assert.ok(readFileSync(wf, "utf8").includes('run: npx -y "$ZDD_ENGINE" lint --merge'));
   assert.ok(json.notes.some((n) => /zdd\.yml: the lint step now runs `lint --merge` \(2\.0\)/.test(n)), json.notes.join("\n"));

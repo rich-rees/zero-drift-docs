@@ -618,8 +618,13 @@ export function validateAnswers(a) {
 // (CR-010).
 // ---------------------------------------------------------------------------
 export class Ledger {
-  constructor(root) {
+  // dryRun (`upgrade --plan`, CAS-101): every write is recorded, none lands;
+  // a later read of a file this run "wrote" sees the pending content, so a
+  // plan computes exactly what the real run will.
+  constructor(root, { dryRun = false } = {}) {
     this.root = root;
+    this.dryRun = dryRun;
+    this.pending = new Map();
     this.wrote = [];
     this.kept = [];
     this.skipped = [];
@@ -630,11 +635,21 @@ export class Ledger {
   }
   overwrite(rel, content) {
     const path = this.abs(rel);
+    if (!this.wrote.includes(rel)) this.wrote.push(rel);
+    if (this.dryRun) return void this.pending.set(rel, content);
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, content);
-    this.wrote.push(rel);
   }
   create(rel, content, { executable = false } = {}) {
+    if (this.dryRun) {
+      if (this.exists(rel)) {
+        this.kept.push(rel);
+        return false;
+      }
+      this.pending.set(rel, content);
+      this.wrote.push(rel);
+      return true;
+    }
     const path = this.abs(rel);
     mkdirSync(dirname(path), { recursive: true });
     let fd;
@@ -663,6 +678,7 @@ export class Ledger {
     return true;
   }
   exists(rel) {
+    if (this.pending.has(rel)) return true;
     try {
       return lstatSync(this.abs(rel)).isFile();
     } catch {
@@ -670,7 +686,7 @@ export class Ledger {
     }
   }
   read(rel) {
-    return readFileSync(this.abs(rel), "utf8");
+    return this.pending.has(rel) ? this.pending.get(rel) : readFileSync(this.abs(rel), "utf8");
   }
 }
 
@@ -1175,13 +1191,25 @@ function ledgerOut(l) {
 // ---------------------------------------------------------------------------
 // upgrade
 // ---------------------------------------------------------------------------
-export function upgrade(root, { lock = false } = {}) {
-  const ledger = new Ledger(root);
+// The guided upgrade (CAS-101): `plan` writes nothing and says what would
+// change; `drop` (ids from the plan's duplicates) removes adopter sections the
+// block now covers, on the user's word; `to` (a tag newer than this plugin)
+// moves only the lock — the rest waits for that release's own upgrade.
+export function upgrade(root, { lock = false, plan = false, drop = null, to = null } = {}) {
   const version = pluginVersion();
+  if (to !== null && to !== `v${version}`) return moveLockOnly(root, version, to);
   const cfg = readConfig(root);
   if (cfg.state === "absent") throw new Error(`no zdd/config.json under ${root} — nothing to upgrade (run bootstrap without --upgrade to adopt)`);
   if (cfg.state === "invalid") throw new Error(`${cfg.error} — fix it by hand; upgrade never rewrites a config it cannot read`);
+  const dropIds = parseDrop(drop);
+  if (dropIds.length && !plan) {
+    const known = upgrade(root, { lock, plan: true }).duplicates.map((d) => d.id);
+    const bad = dropIds.find((id) => !known.includes(id));
+    if (bad !== undefined) throw new Error(`--drop: no duplicate ${bad} (this run names ${known.length ? known.join(", ") : "none"}) — run upgrade --plan for the list`);
+  }
+  const ledger = new Ledger(root, { dryRun: plan });
   const config = cfg.config;
+  const fromEngine = typeof config.engine === "string" ? config.engine : null;
   const hasLegacy = config.adapter !== undefined || config.adapterOptions !== undefined;
   const hasNew = config.extractors !== undefined || config.extractorOptions !== undefined;
   if (hasLegacy && hasNew) throw new Error("zdd/config.json has both 'adapter' and 'extractors' — keep one by hand before upgrading (the engine refuses this shape too)"); // CR-008
@@ -1266,23 +1294,226 @@ export function upgrade(root, { lock = false } = {}) {
     }
     writeSnippet(ledger, file);
   }
+  // Adopter text outside the block that the block now covers (CAS-101):
+  // named with its lines, removed only by --drop, after the block refresh so
+  // the plan's line numbers are the real run's.
+  let duplicates = findAllDuplicates(ledger);
+  if (dropIds.length && !plan) {
+    dropSections(ledger, duplicates.filter((d) => dropIds.includes(d.id)));
+    duplicates = findAllDuplicates(ledger);
+  }
   writeDomainDoc(ledger, artifactPaths(config, { lenient: true }));
   writePluginSettings(ledger, version, { mode: "upgrade", lock });
   if (stopUnset) ledger.notes.push('hooks.stop is not set (new in 1.1: the Stop hook prompts for the curated half once per session) — it stays OFF until answered: run bootstrap apply with {"optIns":{"stop":true}} (repair mode, keeps every other choice), or add "stop": true inside the existing "hooks" object by hand');
-  ledger.notes.push("1.1 adds a blocking lint (a blessing citing a superseded or missing ADR fails `lint`) — run `npx -y " + ENGINE_PACKAGE + "@" + version + " lint` before pushing; a red result is the lint doing its job on a stale blessing");
-  if (config.claims === undefined) {
-    ledger.notes.push('claims.strict (new in 1.3): lint can enforce "every record belongs to exactly one feature slice" — an unclaimed record not on an allow-list, a stale allow-list entry, or a record two slices claim then FAILS. It is off until you add it to zdd/config.json: "claims": { "strict": true, "allowUnclaimed": ["route:/health"] }. Without it, double claims are a warning beside the unclaimed list');
+  const ctx = { root, config, version, paths: artifactPaths(config, { lenient: true }) };
+  for (const [release, notes] of Object.entries(UPGRADE_NOTES)) {
+    if (fromEngine && compareVersions(release, fromEngine) <= 0) continue;
+    ledger.notes.push(...notes(ctx));
   }
-  const upgradedPaths = artifactPaths(config, { lenient: true });
-  ledger.notes.push(
-    `2.0 adds "choose patterns" (skill: patterns) and a fifth generated artifact, ${upgradedPaths.blessingIndex} — run \`render\` and commit it in this PR, or render --check fails`,
-  );
-  ledger.notes.push(
-    '2.0 makes a blessing that does not open with its trigger question ("Adding an endpoint? …") FAIL lint — run `lint` and show the developer every blessing it names; upgrade never rewrites the map, so add each question on their word',
-  );
   ledger.notes.push("curated artifacts (glossary, ADRs, map, metadata) untouched — upgrade never writes them");
-  ledger.notes.push("if the engine pin moved: run `render` and commit the regenerated artifacts in the same PR");
-  return { version, ...ledgerOut(ledger) };
+  ledger.notes.push("if the engine pin moved: run `derive` and `render`, then `lint`, and commit the regenerated artifacts in the same PR");
+  return { version, plan, ...ledgerOut(ledger), duplicates };
+}
+
+// ---------------------------------------------------------------------------
+// What each release brings an existing adopter (CAS-101): one entry per
+// release an upgrade crosses, said only when the repo's engine pin is older.
+// Every minor has an entry — a test fails a release without one, and the
+// `upgrade` skill carries a matching "Upgrading to X.Y" section. Each note
+// opens with its release so the narration reads as a changelog.
+// ---------------------------------------------------------------------------
+const OPT_IN_EXTRACTORS = ["components", "expo-router", "jobs", "services"];
+export const UPGRADE_NOTES = {
+  "1.1.0": ({ version }) => [
+    "1.1 adds a blocking lint (a blessing citing a superseded or missing ADR fails `lint`) — run `npx -y " + ENGINE_PACKAGE + "@" + version + " lint` before pushing; a red result is the lint doing its job on a stale blessing",
+  ],
+  "1.3.0": ({ config }) =>
+    config.claims === undefined
+      ? [
+          '1.3 adds claims.strict: lint can enforce "every record belongs to exactly one feature slice" — an unclaimed record not on an allow-list, a stale allow-list entry, or a record two slices claim then FAILS. It is off until you add it to zdd/config.json: "claims": { "strict": true, "allowUnclaimed": ["route:/health"] }. Without it, double claims are a warning beside the unclaimed list',
+        ]
+      : [],
+  "2.0.0": ({ paths }) => [
+    `2.0 adds "choose patterns" (skill: patterns) and a fifth generated artifact, ${paths.blessingIndex} — run \`render\` and commit it in this PR, or render --check fails`,
+    '2.0 makes a blessing that does not open with its trigger question ("Adding an endpoint? …") FAIL lint — run `lint` and show the developer every blessing it names; upgrade never rewrites the map, so add each question on their word',
+  ],
+  "2.1.0": ({ root, config }) => {
+    const notes = [];
+    const have = new Set(Array.isArray(config.extractors) ? config.extractors : []);
+    let proposals = [];
+    try {
+      proposals = detect(root).proposals ?? [];
+    } catch {
+      notes.push("2.1 could not re-run detection here — run `bootstrap.mjs detect` to see whether the opt-in extractors (components, expo-router, jobs, services) apply");
+    }
+    for (const p of proposals) {
+      if (!OPT_IN_EXTRACTORS.includes(p.name) || have.has(p.name)) continue;
+      notes.push(
+        `2.1 offers the opt-in extractor \`${p.name}\` — evidence: ${(p.evidence ?? []).join("; ")}. ` +
+          `Never added by upgrade: on the user's word, a repair apply with it in "extractors" (and its options: ${JSON.stringify(p.options ?? {})})`,
+      );
+    }
+    const opts = config.extractorOptions ?? {};
+    if (have.has("supabase") && (have.has("react-router") || have.has("nextjs"))) {
+      const named = [...(opts["react-router"]?.subscribeCalls ?? []), ...(opts.nextjs?.refs?.subscribeCalls ?? [])];
+      if (!named.length) {
+        notes.push(
+          '2.1 maps realtime subscriptions as `subscribes` edges: the Supabase client\'s own `.on("postgres_changes", { table })` needs nothing, but a wrapper (e.g. `live.onInsert("table", …)`) is invisible until named — ask whether the app has one, and add it to `subscribeCalls` under the react-router (or nextjs.refs) options',
+        );
+      }
+    }
+    if (config.claims?.strict === true && config.claims.strictKinds === undefined) {
+      notes.push("2.1 adds claims.strictKinds: strict governs the new kinds (component, job, service) only where listed, so switching an opt-in extractor on never turns lint red by itself (decision 0017)");
+    }
+    notes.push(
+      "2.1 corrects a `*` in a scanned url: it no longer matches a fixed route segment (`/health`), so refs drop wherever a wildcard had reached one — expect a `derive --check` diff on the pin bump, and lint names the calls it could not place",
+    );
+    return notes;
+  },
+  "2.1.1": () => [
+    "2.1.1 moves bytes wherever a fix applies — schema-qualified tables (`public.x`) gain their edges and trigger facts, component descriptions come from the comment attached to the component, an External services list links `.json` — so re-derive and re-render on the bump",
+  ],
+  "2.2.0": () => [
+    '2.2 locks the repo to its ZDD release (decision 0021) and adds a spoken verb, "upgrade ZDD" (skill: upgrade) — this guided flow. The instruction block gains the rules every adopter needs: a release or skew line is the first line of the reply; generated-file conflicts are merged, committed, then regenerated, never hand-resolved; "update ZDD" is never delegated; a developer joining the repo installs zdd for this project',
+    "2.2 next step for the team: after this PR merges, each developer's next session start prints one line naming the exact commands that move their machine to this release — run them, then restart",
+  ],
+};
+
+export function compareVersions(a, b) {
+  const pa = String(a).replace(/^v/, "").split(/[.-]/).map(Number);
+  const pb = String(b).replace(/^v/, "").split(/[.-]/).map(Number);
+  for (let i = 0; i < 3; i++) if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) - (pb[i] || 0);
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Duplicates outside the managed block (CAS-101). A markdown section — its
+// heading down to the next heading of the same or a higher level — is named
+// when its own text (heading and the lines before its first child) speaks of
+// ZDD, and every child section is named too: a section that also carries
+// unrelated subsections is never named whole. Lines inside the managed block
+// and inside fenced code are not read. Line numbers are 1-based, inclusive.
+// ---------------------------------------------------------------------------
+const ZDD_TALK = /\bZDD\b|zero[- ]drift|\bzdd\/|zdd-engine|agent-index|blessing-index|choose patterns/i;
+export function findDuplicates(text) {
+  const lines = text.split(/\r?\n/);
+  const b = lines.findIndex((l) => l.trimEnd() === SNIPPET_BEGIN);
+  const e = lines.findIndex((l) => l.trimEnd() === SNIPPET_END);
+  let fence = false;
+  const heads = [];
+  lines.forEach((l, i) => {
+    if (b !== -1 && e !== -1 && i >= b && i <= e) return;
+    if (/^\s*(```|~~~)/.test(l)) fence = !fence;
+    const m = !fence && /^(#{1,6})\s+\S/.exec(l);
+    if (m) heads.push({ i, level: m[1].length });
+  });
+  const blank = (i) => b !== -1 && e !== -1 && i >= b && i <= e;
+  const sections = heads.map((h, k) => {
+    const nextAny = k + 1 < heads.length ? heads[k + 1].i : lines.length;
+    const after = heads.slice(k + 1).find((x) => x.level <= h.level);
+    let end = after ? after.i : lines.length;
+    // A span never swallows the managed block: it stops where the block starts.
+    if (b !== -1 && b > h.i && b < end) end = b;
+    const own = lines.slice(h.i, nextAny).filter((_, j) => !blank(h.i + j)).join("\n");
+    const children = heads.slice(k + 1).filter((x) => x.i < end && x.level > h.level && heads.slice(k + 1).find((y) => y.i < x.i && y.level < x.level && y.level > h.level) === undefined);
+    return { ...h, end, talks: ZDD_TALK.test(own), children: children.map((c) => c.i) };
+  });
+  const byLine = new Map(sections.map((s) => [s.i, s]));
+  const named = (s) => s.talks && s.children.every((c) => named(byLine.get(c)));
+  const out = [];
+  const covered = (i) => out.some((d) => i >= d.from - 1 && i < d.to);
+  for (const s of sections) {
+    if (covered(s.i) || !named(s)) continue;
+    out.push({ heading: lines[s.i].trim(), from: s.i + 1, to: s.end });
+  }
+  return out;
+}
+function findAllDuplicates(ledger) {
+  const all = [];
+  for (const file of ["CLAUDE.md", "AGENTS.md"]) {
+    if (!ledger.exists(file)) continue;
+    for (const d of findDuplicates(ledger.read(file))) all.push({ id: all.length + 1, file, ...d });
+  }
+  return all;
+}
+function dropSections(ledger, chosen) {
+  for (const file of new Set(chosen.map((d) => d.file))) {
+    const text = ledger.read(file);
+    const eol = /\r\n/.test(text) ? "\r\n" : "\n";
+    const lines = text.split(/\r?\n/);
+    const mine = chosen.filter((d) => d.file === file).sort((x, y) => y.from - x.from);
+    for (const d of mine) lines.splice(d.from - 1, d.to - d.from + 1);
+    ledger.overwrite(file, lines.join(eol));
+    for (const d of mine.reverse()) ledger.notes.push(`${file}: removed "${d.heading}" (lines ${d.from}–${d.to}), on the user's word — the ZDD block now carries it`);
+  }
+}
+function parseDrop(drop) {
+  if (drop === null || drop === undefined || drop === false) return [];
+  const ids = String(drop).split(",").map((s) => s.trim());
+  if (!ids.every((s) => /^[1-9]\d{0,3}$/.test(s))) throw new Error("--drop takes duplicate ids from upgrade --plan, comma-separated (e.g. --drop=1,3)");
+  return [...new Set(ids.map(Number))];
+}
+
+// ---------------------------------------------------------------------------
+// A newer release than the running plugin (CAS-101). `release-status` finds
+// the newest release tag on the marketplace's repository; `upgrade --to`
+// moves only our lock to it. Claude Code loads a new plugin version only at
+// start, so the rest of the upgrade is that release's own run, after the
+// restart and the update the session-start line names.
+// ---------------------------------------------------------------------------
+const RELEASE_TAG = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+export function newestTag(lsRemote) {
+  let best = null;
+  for (const line of String(lsRemote).split(/\r?\n/)) {
+    const m = /\trefs\/tags\/(\S+)$/.exec(line);
+    if (!m || !RELEASE_TAG.test(m[1])) continue;
+    if (!best || compareVersions(m[1], best) > 0) best = m[1];
+  }
+  return best;
+}
+export function releaseStatus(root, remote = `https://github.com/${MARKETPLACE_REPO}.git`) {
+  const running = pluginVersion();
+  let lock = null;
+  try {
+    const s = JSON.parse(readFileSync(join(root, SETTINGS_FILE), "utf8"));
+    const d = s?.extraKnownMarketplaces?.[MARKETPLACE];
+    if (isOurDeclaration(d) && typeof d.source.ref === "string") lock = d.source.ref;
+  } catch {
+    /* no settings: no lock */
+  }
+  const out = execFileSync("git", ["ls-remote", "--tags", "--refs", remote], { encoding: "utf8", timeout: 30000, stdio: ["ignore", "pipe", "pipe"] });
+  const newest = newestTag(out);
+  return { lock, running, newest, newer: newest !== null && compareVersions(newest, running) > 0 };
+}
+function moveLockOnly(root, version, to) {
+  if (!RELEASE_TAG.test(String(to))) throw new Error("--to must be a release tag, vX.Y.Z");
+  if (compareVersions(to, version) < 0) throw new Error(`--to ${to} is older than this plugin (${version}) — upgrade never moves a lock backwards`);
+  const ledger = new Ledger(root);
+  if (!ledger.exists(SETTINGS_FILE)) throw new Error(`no lock — ${SETTINGS_FILE} is absent; run upgrade (without --to) on this release first, with --lock`);
+  let obj;
+  try {
+    obj = JSON.parse(ledger.read(SETTINGS_FILE));
+  } catch {
+    throw new Error(`${SETTINGS_FILE} is not valid JSON — fix it by hand`);
+  }
+  const d = obj?.extraKnownMarketplaces?.[MARKETPLACE];
+  if (d === undefined) throw new Error(`no lock in ${SETTINGS_FILE} — run upgrade (without --to) with --lock first`);
+  if (!isOurDeclaration(d)) throw new Error(`${SETTINGS_FILE} declares ${MARKETPLACE} from ${describeSource(d)}, not this plugin's repository — move it by hand`);
+  const was = typeof d.source.ref === "string" ? d.source.ref : "(no ref)";
+  if (was === to) {
+    ledger.kept.push(SETTINGS_FILE);
+  } else {
+    obj.extraKnownMarketplaces[MARKETPLACE] = { ...d, source: { ...d.source, ref: to } };
+    const existing = ledger.read(SETTINGS_FILE);
+    let text = JSON.stringify(obj, null, 2) + "\n";
+    if (/\r\n/.test(existing)) text = text.replace(/\n/g, "\r\n");
+    ledger.overwrite(SETTINGS_FILE, text);
+    ledger.notes.push(`${SETTINGS_FILE}: lock moved ${was.slice(0, 40)} → ${to} — nothing else changes in this run`);
+  }
+  ledger.notes.push(
+    `next: restart Claude Code; the first line of the new session names the commands that move this machine to ${to} — run them and restart again; then say "upgrade ZDD" again: that run is ${to}'s own, and shows the rest of the changes before writing them`,
+  );
+  return { version, plan: false, to, ...ledgerOut(ledger), duplicates: [] };
 }
 
 // ---------------------------------------------------------------------------
@@ -1347,12 +1578,23 @@ export function narrateApply(r) {
 }
 
 export function narrateUpgrade(r) {
-  const out = [`Upgrade to plugin ${r.version}`];
+  const out = [r.plan ? `Upgrade plan for plugin ${r.version} — nothing written yet` : `Upgrade to plugin ${r.version}`];
+  const verb = r.plan ? "would change" : "changed";
   if (!r.wrote.length) out.push("  nothing to change — every plugin-owned file is already at this version");
-  for (const f of r.wrote) out.push(`  changed ${f}`);
+  for (const f of r.wrote) out.push(`  ${verb} ${f}`);
   for (const f of r.kept) out.push(`  kept    ${f}`);
   for (const n of r.notes) out.push(`  note    ${n}`);
+  for (const d of r.duplicates ?? []) {
+    out.push(`  outside the ZDD block: [${d.id}] ${d.file} lines ${d.from}–${d.to} "${d.heading}" — read it against the block; remove it only on the user's word (--drop=${d.id})`);
+  }
   return out.map(printable).join("\n");
+}
+
+export function narrateReleaseStatus(s) {
+  if (!s.newest) return "No ZDD release tag found on the marketplace's repository.";
+  const lock = s.lock ? `this repo locks ${s.lock}` : "this repo has no lock";
+  if (s.newer) return `ZDD ${s.newest} is out; ${lock} and this session runs ${s.running}. Release notes: https://github.com/${MARKETPLACE_REPO}/releases/tag/${s.newest}`;
+  return `ZDD ${s.running} is the newest release; ${lock}.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -1374,10 +1616,14 @@ if (process.argv[1] && posixify(process.argv[1]).endsWith("/scripts/bootstrap.mj
       const r = apply(root, answers, { date: flags.date || today(), home: flags.home });
       process.stdout.write(flags.json ? JSON.stringify(r, null, 2) + "\n" : narrateApply(r) + "\n");
     } else if (cmd === "upgrade") {
-      const r = upgrade(root, { lock: flags.lock === true });
+      const to = flags.to === undefined ? null : String(flags.to);
+      const r = upgrade(root, { lock: flags.lock === true, plan: flags.plan === true, drop: flags.drop ?? null, to });
       process.stdout.write(flags.json ? JSON.stringify(r, null, 2) + "\n" : narrateUpgrade(r) + "\n");
+    } else if (cmd === "release-status") {
+      const s = releaseStatus(root, typeof flags.remote === "string" ? flags.remote : undefined);
+      process.stdout.write(flags.json ? JSON.stringify(s) + "\n" : printable(narrateReleaseStatus(s)) + "\n");
     } else {
-      process.stderr.write("Usage: bootstrap.mjs <detect|apply --answers=<file>|upgrade [--lock]> [--root=<dir>] [--date=YYYY-MM-DD] [--home=<dir>] [--json]\n");
+      process.stderr.write("Usage: bootstrap.mjs <detect|apply --answers=<file>|upgrade [--plan] [--lock] [--drop=<ids>] [--to=vX.Y.Z]|release-status [--remote=<url>]> [--root=<dir>] [--date=YYYY-MM-DD] [--home=<dir>] [--json]\n");
       process.exit(2);
     }
   } catch (e) {
