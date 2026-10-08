@@ -329,3 +329,14 @@ test("two identical duplicate sections get distinct ids, and --drop removes only
   const after = readFileSync(join(repo, "CLAUDE.md"), "utf8");
   assert.equal(after.split("## Loading ZDD").length - 1, 1, "exactly one removed");
 });
+
+test("a planned id is bound to the section's text AND place: when an identical copy inserted above shifts the planned one, the write refuses (CR-023)", () => {
+  // A, then an unrelated section, then A again; the plan names the second A.
+  const doc = ["# T", "", "## Loading ZDD", "", 'Say "load ZDD".', "", "## Testing", "", "Run the tests.", "", "## Loading ZDD", "", 'Say "load ZDD".', "", "<!-- zdd:begin -->", "x", "<!-- zdd:end -->", ""];
+  const repo = adopted("identical-shift", { claude: doc.join("\n") });
+  const second = runJson(repo, ["upgrade", "--plan"]).duplicates[1];
+  assert.equal(second.from, 11);
+  // Another copy of A lands above everything: the planned place now holds a different section.
+  writeFileSync(join(repo, "CLAUDE.md"), [...doc.slice(0, 2), "## Loading ZDD", "", 'Say "load ZDD".', "", ...doc.slice(2)].join("\n"));
+  assert.match(fails(repo, ["upgrade", `--drop=${second.id}`]), new RegExp(`--drop: no duplicate ${second.id}`));
+});
