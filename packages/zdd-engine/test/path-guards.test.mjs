@@ -100,7 +100,7 @@ test("CR-059: derive refuses to prune a folder holding JSON it did not write; no
   writeFileSync(join(repo, "zdd", "metadata", "README.md"), "generated — do not edit\n");
   writeFileSync(join(repo, "zdd", "metadata", "route", ".gitkeep"), "");
   writeFileSync(join(repo, "zdd", "metadata", "route", "stale.json"), "{}\n");
-  assert.match(run(repo, ["derive"]), /Wrote 15 records/);
+  assert.match(run(repo, ["derive"]), /Wrote 16 records/);
   assert.ok(existsSync(join(repo, "zdd", "metadata", "README.md")));
   assert.ok(existsSync(join(repo, "zdd", "metadata", "route", ".gitkeep")));
   assert.ok(!existsSync(join(repo, "zdd", "metadata", "route", "stale.json")), "a stale <kind>/*.json is still pruned");
@@ -308,7 +308,7 @@ test("CR-108: a repo reached through a symlinked root derives and renders into t
     return;
   }
   // Invoked with cwd = the link: every write lands in the real tree, --check is green.
-  assert.match(run(viaLink, ["derive"]), /Wrote 15 records/);
+  assert.match(run(viaLink, ["derive"]), /Wrote 16 records/);
   run(viaLink, ["render"]);
   assert.match(run(viaLink, ["derive", "--check"]), /in sync/);
   assert.match(run(viaLink, ["render", "--check"]), /in sync/);
@@ -322,7 +322,7 @@ test("CR-108: a repo reached through a symlinked root derives and renders into t
   const config = readConfig(real);
   config.adapterOptions.migrationNamespaces = [{ name: "db", dir: "db-link" }];
   writeConfig(real, config);
-  assert.match(run(real, ["derive"]), /Wrote 15 records/);
+  assert.match(run(real, ["derive"]), /Wrote 16 records/);
   const things = JSON.parse(readFileSync(join(real, "zdd", "metadata", "table", "db--things.json"), "utf8"));
   assert.deepEqual(things.resource, ["db-link/00001_init.sql", "db-link/00002_things.sql"], "migrations reached through the link, named by the configured path");
   rmSync(real, { recursive: true, force: true });

@@ -195,3 +195,13 @@ test("lint: the CommonMark cases end to end — a fenced example neither hides a
   assert.match(r.stderr, /cr\.md:10 .*superseded by ADR-0002/);
   rmSync(repo, { recursive: true, force: true });
 });
+
+test("lint (CAS-96): the fixture's bracketed link to a route-grouped layout claims that record", () => {
+  const repo = mkRepo();
+  assert.equal(spawnSync(process.execPath, [BIN, "derive"], { cwd: repo, encoding: "utf8" }).status, 0);
+  const r = lint(repo);
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stderr, /\(app\)--_layout/, "not listed as unclaimed");
+  assert.match(r.stdout, /5\/12 records claimed/);
+  rmSync(repo, { recursive: true, force: true });
+});
