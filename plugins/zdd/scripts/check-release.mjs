@@ -7,15 +7,21 @@
 // itself, so when a PR moves the lock every other developer's next session
 // runs the old release until they refresh — and the mismatch was silent.
 // This prints one loud line naming expected and found, then the pin-move
-// route: restart, `claude plugin update`, restart again. Advisory, never
-// blocking.
+// route: restart, `claude plugin update`, restart again — preceded, only on
+// a machine that has one, by removing a stray declaration (below). Advisory,
+// never blocking.
 //
 // Three records are compared against the lock, all under ~/.claude/plugins:
 //   - the catalogue: known_marketplaces.json → zero-drift-docs.source.ref.
 //     One downloaded catalogue per machine, shared by every repo. It follows
-//     the repo's declared ref on a restart (observed on Cascade's CAS-98);
-//     `marketplace update` keeps the ref recorded at first add (CAS-96), so
-//     it is never part of the route, and neither is a remove + add.
+//     the repo's declared ref on a restart — unless the user's settings (or
+//     this repo's local settings) ALSO declare zero-drift-docs, which a plain
+//     `claude plugin marketplace add` does silently: that declaration holds
+//     the catalogue where it is (decision 0022, reproduced on clean profiles
+//     for CAS-101). So the route first removes the stray declaration by its
+//     scope — the catalogue and installs survive while the repo declares the
+//     marketplace. `marketplace update` keeps the recorded ref (CAS-96), so
+//     it is never part of the route, and neither is an add.
 //   - zdd@zero-drift-docs installed for THIS project path
 //     (installed_plugins.json, scope project, projectPath = the repo).
 //   - mattpocock-skills@zero-drift-docs installed for this project, against
@@ -63,6 +69,22 @@ export function lockedRef(root) {
   return typeof ref === "string" && TAG.test(ref) ? ref : null;
 }
 
+// Declarations of the marketplace outside the repo's project settings: the
+// user's (what a plain `marketplace add` writes) and this repo's local file.
+// Any ref, or none — each one can hold the catalogue.
+const STRAY = [
+  { scope: "user", file: (root, home) => join(home, ".claude", "settings.json") },
+  { scope: "local", file: (root) => join(root, ".claude", "settings.local.json") },
+];
+export function strayDeclarations(root, home) {
+  return STRAY.flatMap(({ scope, file }) => {
+    const decl = readJsonObject(file(root, home))?.extraKnownMarketplaces?.[MARKETPLACE];
+    if (!isObject(decl)) return [];
+    const ref = decl.source?.ref;
+    return [{ scope, ref: typeof ref === "string" ? ref : null }];
+  });
+}
+
 export function inspect(root, home = process.env.ZDD_HOME || homedir()) {
   const lock = lockedRef(root);
   if (!lock) return { lock: null, mismatches: [] };
@@ -97,7 +119,8 @@ export function inspect(root, home = process.env.ZDD_HOME || homedir()) {
   if (catalogue !== lock) mismatches.push({ what: "catalogue", expected: lock, found: catalogue });
   if (foundZdd !== expectedZdd) mismatches.push({ what: ZDD_PLUGIN_ID, expected: expectedZdd, found: foundZdd });
   if (foundPocock !== expectedPocock) mismatches.push({ what: POCOCK_ID, expected: expectedPocock, found: foundPocock });
-  return { lock, catalogue, expected: { zdd: expectedZdd, pocock: expectedPocock }, found: { zdd: foundZdd, pocock: foundPocock }, mismatches };
+  const strays = catalogue !== lock ? strayDeclarations(root, home) : [];
+  return { lock, catalogue, expected: { zdd: expectedZdd, pocock: expectedPocock }, found: { zdd: foundZdd, pocock: foundPocock }, strayDeclarations: strays, mismatches };
 }
 
 export function narrate(r) {
@@ -109,7 +132,10 @@ export function narrate(r) {
       return m.what === "catalogue" ? `the catalogue on this machine is at ${m.found === null ? "no recorded ref" : printable(m.found)}, this repo locks ${lock}` : `${m.what} expected ${printable(m.expected)}, ${found}`;
     })
     .join("; ");
-  // The pin-move route (CAS-99, observed on Cascade's CAS-98): a restart
+  const where = { user: "your user settings (~/.claude/settings.json)", local: "this repo's local settings (.claude/settings.local.json)" };
+  const strays = Array.isArray(r.strayDeclarations) ? r.strayDeclarations.filter((d) => where[d.scope]) : [];
+  const strayText = strays.map((d) => `; ${where[d.scope]} also declare ${MARKETPLACE}${d.ref ? ` at ${printable(d.ref)}` : ""}, which holds the catalogue there`).join("");
+  // The pin-move route (CAS-99; decision 0022): with no stray declaration, a restart
   // moves the catalogue to the lock, `plugin update` moves this project's
   // install to the release the catalogue holds, a second restart loads it.
   // A plugin with no install for this project has nothing to update, so it
@@ -122,9 +148,10 @@ export function narrate(r) {
     .filter((id) => r.mismatches.some((m) => m.what === id) || (catalogueMoved && found[id] !== null))
     .map((id) => (found[id] === null ? `claude plugin install ${id} --scope project` : `claude plugin update ${id}`));
   const steps = [];
+  for (const d of strays) steps.push(`claude plugin marketplace remove ${MARKETPLACE} --scope ${d.scope}`);
   if (catalogueMoved) steps.push(`restart Claude Code (the catalogue follows this repo's lock on restart)`);
   if (plugins.length) steps.push(...plugins, catalogueMoved ? "then restart Claude Code again" : "then restart Claude Code");
-  return [`ZDD release mismatch: ${said}. Fix, from this repo's folder: ${steps.join("; ")}. (Installed is not loaded: this line clears on the next session.)`];
+  return [`ZDD release mismatch: ${said}${strayText}. Fix, from this repo's folder: ${steps.join("; ")}. (Installed is not loaded: this line clears on the next session.)`];
 }
 
 function main() {
