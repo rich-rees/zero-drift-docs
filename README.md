@@ -319,8 +319,9 @@ by hand once:
 3. Say **"upgrade ZDD"**: from here it is the guided flow above.
 
 From 1.3.1 (no session-start release check yet), step 2 is: `claude plugin
-marketplace remove zero-drift-docs --scope user` if `~/.claude/settings.json`
-mentions `zero-drift-docs`, restart, `claude plugin update
+marketplace remove zero-drift-docs --scope user` if your user settings
+(`~/.claude/settings.json`, or `settings.json` in `$CLAUDE_CONFIG_DIR` when you
+set it) mention `zero-drift-docs`, restart, `claude plugin update
 zdd@zero-drift-docs`, restart.
 
 ## Repo layout
@@ -612,7 +613,9 @@ warning can say "behind".
   session-start release check and the Pocock-copy check read Claude Code's
   config folder from `CLAUDE_CONFIG_DIR` when it is set, instead of always
   `~/.claude` — under a custom profile they reported a false mismatch every
-  session. No config, contract or artifact change; only the engine pin moves.
+  session (also `CLAUDE_CODE_PLUGIN_CACHE_DIR`, and a hook whose environment
+  was scrubbed finds the profile from its transcript). No config, contract or
+  artifact change; the bump moves the engine pins and the release lock.
 
 ## Contributing
 

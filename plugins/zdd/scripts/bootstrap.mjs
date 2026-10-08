@@ -1489,7 +1489,7 @@ export const UPGRADE_NOTES = {
     '2.2 locks the repo to its ZDD release (decision 0021) and adds a spoken verb, "upgrade ZDD" (skill: upgrade) — this guided flow. The instruction block gains the rules every adopter needs: a release or skew line is the first line of the reply; generated-file conflicts are merged, committed, then regenerated, never hand-resolved; "update ZDD" is never delegated; a developer joining the repo installs zdd for this project',
     "2.2 next step for the team: after this PR merges, each developer's next session start prints one line naming the exact commands that move their machine to this release — run them, then restart",
   ],
-  "2.2.1": () => ["2.2.1 makes the session-start checks read Claude Code's own profile (CLAUDE_CONFIG_DIR when set) — no file in the repo changes beyond the engine pin"],
+  "2.2.1": () => ["2.2.1 makes the session-start checks read Claude Code's own profile (CLAUDE_CONFIG_DIR when set, CLAUDE_CODE_PLUGIN_CACHE_DIR for the plugins folder, and the transcript path when a hook's environment is scrubbed) — in the repo only the engine pins and the lock move"],
 };
 
 export function compareVersions(a, b) {

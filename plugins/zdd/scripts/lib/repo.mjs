@@ -14,7 +14,7 @@
 // which refuses symlinks and a real path outside the real checkout.
 
 import { readFileSync, existsSync, readdirSync, statSync, lstatSync, realpathSync, openSync, readSync, closeSync } from "node:fs";
-import { dirname, join, resolve, relative, isAbsolute, sep } from "node:path";
+import { dirname, basename, join, resolve, relative, isAbsolute, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 
@@ -324,11 +324,63 @@ export function claudeDir(home) {
   if (process.env.CLAUDE_CONFIG_DIR) return resolve(process.env.CLAUDE_CONFIG_DIR);
   return join(homedir(), ".claude");
 }
+// The plugins folder (CR-201): CLAUDE_CODE_PLUGIN_CACHE_DIR moves it on its
+// own — despite the name it is the parent of marketplaces/ and cache/ — else
+// it sits under the config folder.
+export function pluginsDir(home) {
+  if (!(home || process.env.ZDD_HOME) && process.env.CLAUDE_CODE_PLUGIN_CACHE_DIR) return resolve(process.env.CLAUDE_CODE_PLUGIN_CACHE_DIR);
+  return join(claudeDir(home), "plugins");
+}
+// The user settings file as a person should be told it (CR-204): the familiar
+// name for the default profile, the real path for any other.
+export function userSettingsLabel(home) {
+  const custom = !(home || process.env.ZDD_HOME) && process.env.CLAUDE_CONFIG_DIR;
+  return custom ? join(claudeDir(home), "settings.json") : "~/.claude/settings.json";
+}
+
+// A hook's JSON payload on stdin, or null — read up to a cap (CR-003).
+export const MAX_STDIN_BYTES = 256 * 1024; // a hook payload is a few hundred bytes; over this is not a payload
+export function readHookInput() {
+  try {
+    const chunks = [];
+    let total = 0;
+    const buf = Buffer.alloc(16 * 1024);
+    for (;;) {
+      let n;
+      try {
+        n = readSync(0, buf, 0, buf.length, null);
+      } catch (e) {
+        if (e.code === "EAGAIN") continue;
+        if (e.code === "EOF") break;
+        throw e;
+      }
+      if (n === 0) break;
+      total += n;
+      if (total > MAX_STDIN_BYTES) return null;
+      chunks.push(Buffer.from(buf.subarray(0, n)));
+    }
+    const parsed = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+// The config folder a Claude Code hook's own transcript lives in (CR-202):
+// <config>/projects/<project>/<session>.jsonl. CLAUDE_CODE_SUBPROCESS_ENV_SCRUB
+// removes CLAUDE_CONFIG_DIR from hook environments; the payload still says
+// where the session is. Null when the path does not have that shape.
+export function configDirFromTranscript(input) {
+  const p = typeof input?.transcript_path === "string" ? input.transcript_path : null;
+  if (!p || p.length > 4096) return null;
+  const project = dirname(resolve(p));
+  const projects = dirname(project);
+  return basename(projects) === "projects" ? dirname(projects) : null;
+}
 
 export function pocockLocations(root, home) {
   const claude = claudeDir(home);
   return {
-    pluginCache: join(claude, "plugins", "cache"),
+    pluginCache: join(pluginsDir(home), "cache"),
     userSkill: join(claude, "skills", "domain-modeling", "SKILL.md"),
     codexSkill: join(home || process.env.ZDD_HOME || homedir(), ".codex", "skills", "domain-modeling", "SKILL.md"),
     projectSkill: join(root, ".claude", "skills", "domain-modeling", "SKILL.md"),
@@ -402,7 +454,7 @@ export function pluginSettings() {
 }
 
 const settingsSources = (root, home) => [
-  { source: "user", label: "~/.claude/settings.json, user settings", path: join(claudeDir(home), "settings.json") },
+  { source: "user", label: `${userSettingsLabel(home)}, user settings`, path: join(claudeDir(home), "settings.json") },
   { source: "project", label: ".claude/settings.json, project settings", path: join(root, ".claude", "settings.json") },
   { source: "local", label: ".claude/settings.local.json, local settings", path: join(root, ".claude", "settings.local.json") },
 ];
@@ -420,7 +472,7 @@ function readJsonObject(path) {
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}@[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 function installedVersions(home) {
   const out = new Map();
-  const j = readJsonObject(join(claudeDir(home), "plugins", "installed_plugins.json"));
+  const j = readJsonObject(join(pluginsDir(home), "installed_plugins.json"));
   if (!j || !isObject(j.plugins)) return out;
   for (const [id, rows] of Object.entries(j.plugins)) {
     if (!SAFE_ID.test(id) || !Array.isArray(rows)) continue;

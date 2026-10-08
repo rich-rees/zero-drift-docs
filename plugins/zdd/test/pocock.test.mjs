@@ -138,7 +138,8 @@ test("the Pocock check reads user settings and installs from CLAUDE_CONFIG_DIR w
     delete env.ZDD_HOME;
     const r = spawnSync(process.execPath, [CHECK, `--root=${repo}`], { encoding: "utf8", env });
     assert.equal(r.status, 0, r.stderr);
-    assert.match(r.stdout, /mattpocock-skills@claude-plugins-official 7\.7\.7 \(enabled in ~\/\.claude\/settings\.json, user settings\)/, r.stdout);
+    // Named by the file actually read, not the default's name (CR-204).
+    assert.ok(r.stdout.includes(`mattpocock-skills@claude-plugins-official 7.7.7 (enabled in ${join(home, ".claude", "settings.json")}, user settings)`), r.stdout);
   } finally {
     reset();
   }

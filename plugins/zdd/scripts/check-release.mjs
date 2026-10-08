@@ -39,7 +39,7 @@
 
 import { readFileSync, lstatSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { parseArgs, adopterRoot, pocockPin, ZDD_PLUGIN_ID, MAX_CONFIG_BYTES, MARKETPLACE, MARKETPLACE_REPO, isOurDeclaration, claudeDir } from "./lib/repo.mjs";
+import { parseArgs, adopterRoot, pocockPin, ZDD_PLUGIN_ID, MAX_CONFIG_BYTES, MARKETPLACE, MARKETPLACE_REPO, isOurDeclaration, claudeDir, pluginsDir, userSettingsLabel } from "./lib/repo.mjs";
 
 export { MARKETPLACE };
 const POCOCK_ID = `mattpocock-skills@${MARKETPLACE}`;
@@ -99,7 +99,7 @@ export function inspect(root, home) {
   const lock = lockedRef(root);
   if (!lock || !underClaudeCode()) return { lock, mismatches: [] };
   const expectedZdd = lock.slice(1);
-  const plugins = join(claudeDir(home), "plugins");
+  const plugins = pluginsDir(home);
 
   const known = readJsonObject(join(plugins, "known_marketplaces.json"));
   const catalogueRef = known?.[MARKETPLACE]?.source?.ref;
@@ -130,7 +130,7 @@ export function inspect(root, home) {
   if (foundZdd !== expectedZdd) mismatches.push({ what: ZDD_PLUGIN_ID, expected: expectedZdd, found: foundZdd });
   if (foundPocock !== expectedPocock) mismatches.push({ what: POCOCK_ID, expected: expectedPocock, found: foundPocock });
   const strays = catalogue !== lock ? strayDeclarations(root, home) : [];
-  return { lock, catalogue, expected: { zdd: expectedZdd, pocock: expectedPocock }, found: { zdd: foundZdd, pocock: foundPocock }, strayDeclarations: strays, mismatches };
+  return { lock, catalogue, expected: { zdd: expectedZdd, pocock: expectedPocock }, found: { zdd: foundZdd, pocock: foundPocock }, strayDeclarations: strays, userSettings: userSettingsLabel(home), mismatches };
 }
 
 export function narrate(r) {
@@ -142,7 +142,7 @@ export function narrate(r) {
       return m.what === "catalogue" ? `the catalogue on this machine is at ${m.found === null ? "no recorded ref" : printable(m.found)}, this repo locks ${lock}` : `${m.what} expected ${printable(m.expected)}, ${found}`;
     })
     .join("; ");
-  const where = { user: "your user settings (~/.claude/settings.json)", local: "this repo's local settings (.claude/settings.local.json)" };
+  const where = { user: `your user settings (${printable(r.userSettings ?? "~/.claude/settings.json")})`, local: "this repo's local settings (.claude/settings.local.json)" };
   const strays = Array.isArray(r.strayDeclarations) ? r.strayDeclarations.filter((d) => where[d.scope]) : [];
   const strayText = strays
     .map((d) =>

@@ -144,3 +144,23 @@ test("subscribeCalls must be an array of strings, in both places, before anythin
   assert.equal(readFileSync(join(repo, "zdd", "config.json"), "utf8"), config);
   applyIn(repo, { extractorOptions: { nextjs: { refs: { subscribeCalls: ["live.onInsert"] } } } });
 });
+
+test("bootstrap's Pocock detection looks in the active profile: CLAUDE_CONFIG_DIR's skills, and CLAUDE_CODE_PLUGIN_CACHE_DIR's cache (CR-206)", (t) => {
+  const repo = scratch(t);
+  writeFileSync(join(repo, "package.json"), JSON.stringify({ dependencies: {} }));
+  const empty = join(repo, "empty-home");
+  const profile = join(repo, "profile");
+  mkdirSync(join(profile, "skills", "domain-modeling"), { recursive: true });
+  writeFileSync(join(profile, "skills", "domain-modeling", "SKILL.md"), "---\nname: domain-modeling\n---\n");
+  const cache = join(repo, "plugins-root");
+  mkdirSync(join(cache, "cache", "m", "mattpocock-skills", "1.3.1", "skills", "x", "domain-modeling"), { recursive: true });
+  writeFileSync(join(cache, "cache", "m", "mattpocock-skills", "1.3.1", "skills", "x", "domain-modeling", "SKILL.md"), "");
+  const run = (env) => {
+    const e = { ...process.env, HOME: empty, USERPROFILE: empty, ...env };
+    for (const k of ["ZDD_HOME", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_PLUGIN_CACHE_DIR"]) if (!(k in env)) delete e[k];
+    return JSON.parse(execFileSync(process.execPath, [BOOTSTRAP, "detect", "--json", `--root=${repo}`], { encoding: "utf8", env: e })).pocock;
+  };
+  assert.equal(run({}).installed, false, "the empty default holds nothing");
+  assert.deepEqual(run({ CLAUDE_CONFIG_DIR: profile }).hits.map((h) => h.where), ["userSkill"]);
+  assert.deepEqual(run({ CLAUDE_CONFIG_DIR: join(repo, "nowhere"), CLAUDE_CODE_PLUGIN_CACHE_DIR: cache }).hits.map((h) => h.where), ["pluginCache"]);
+});
