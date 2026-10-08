@@ -1410,7 +1410,14 @@ export function compareVersions(a, b) {
 // unrelated subsections is never named whole. Lines inside the managed block
 // and inside fenced code are not read. Line numbers are 1-based, inclusive.
 // ---------------------------------------------------------------------------
-const ZDD_TALK = /\bZDD\b|zero[- ]drift|\bzdd\/|zdd-engine|agent-index|blessing-index|choose patterns/i;
+// A section speaks of ZDD when its heading does, when it uses a spoken verb,
+// or when it mentions ZDD at least twice — one passing mention ("the ZDD
+// check runs in CI", a title's "smoke-test the ZDD plugin") is not a rule the
+// block duplicates (found by the CAS-101 smoke). The document's title (its
+// first heading, at level 1) is never named.
+const ZDD_VERB = /\b(?:load|update|upgrade) ZDD\b|choose patterns/i;
+const ZDD_MENTION = /\bZDD\b|zero[- ]drift|\bzdd\/|zdd-engine|agent-index|blessing-index/gi;
+const talksZdd = (heading, own) => new RegExp(ZDD_MENTION.source, "i").test(heading) || ZDD_VERB.test(own) || (own.match(ZDD_MENTION) ?? []).length >= 2;
 export function findDuplicates(text) {
   const lines = text.split(/\r?\n/);
   const b = lines.findIndex((l) => l.trimEnd() === SNIPPET_BEGIN);
@@ -1432,7 +1439,8 @@ export function findDuplicates(text) {
     if (b !== -1 && b > h.i && b < end) end = b;
     const own = lines.slice(h.i, nextAny).filter((_, j) => !blank(h.i + j)).join("\n");
     const children = heads.slice(k + 1).filter((x) => x.i < end && x.level > h.level && heads.slice(k + 1).find((y) => y.i < x.i && y.level < x.level && y.level > h.level) === undefined);
-    return { ...h, end, talks: ZDD_TALK.test(own), children: children.map((c) => c.i) };
+    const title = k === 0 && h.level === 1;
+    return { ...h, end, talks: !title && talksZdd(lines[h.i], own), children: children.map((c) => c.i) };
   });
   const byLine = new Map(sections.map((s) => [s.i, s]));
   const named = (s) => s.talks && s.children.every((c) => named(byLine.get(c)));

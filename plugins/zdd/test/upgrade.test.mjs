@@ -151,6 +151,29 @@ test("text outside the managed block that the block now covers is named with its
   assert.match(text, /outside the ZDD block: \[1\] CLAUDE\.md lines 5–8 "## Loading ZDD"/, text);
 });
 
+test("a passing mention is not a duplicate: the document's title, and a section that names ZDD once, are never named (CAS-101 smoke: `# Bookmarks … smoke-test the ZDD plugin`)", async () => {
+  const { findDuplicates } = await import("../scripts/bootstrap.mjs");
+  const text = [
+    "# Bookmarks",
+    "",
+    "A tiny app used to smoke-test the ZDD plugin.",
+    "",
+    "<!-- zdd:begin -->",
+    "## Documentation — Zero-Drift Docs (ZDD)",
+    "<!-- zdd:end -->",
+    "",
+    "## Deploying",
+    "",
+    "Push to main; the ZDD check runs in CI.",
+    "",
+    "## Documentation",
+    "",
+    "Load ZDD first. Never hand-edit zdd/graph.json.",
+    "",
+  ].join("\n");
+  assert.deepEqual(findDuplicates(text).map((d) => d.heading), ["## Documentation"]);
+});
+
 test("--drop removes only the named sections, after the block is refreshed; ids out of range are refused before any write", () => {
   const repo = adopted("drop", { claude: CLAUDE_WITH_DUPES });
   assert.match(fails(repo, ["upgrade", "--drop=3"]), /--drop: no duplicate 3/);
