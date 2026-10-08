@@ -175,3 +175,34 @@ test("CLI: derive and render are byte-stable on the fixture; the graph types a c
   assert.match(bad.stderr, /Extractor 'components' failed: components\.roots must be an array of strings/);
 });
 
+
+test("a component's description is the JSDoc attached to it alone — an exported type or constant between an earlier JSDoc and the component never splices in (CAS-99, Cascade's Button.tsx / Icon.tsx)", () => {
+  const button = `import type { ReactNode } from "react";
+
+/** The look of a button. */
+export type ButtonVariant = "primary" | "secondary";
+
+export interface ButtonProps {
+  variant?: ButtonVariant;
+  children: ReactNode;
+}
+
+/** Sizes, in pixels. */
+export const BUTTON_SIZES = { sm: 28, md: 36 } as const;
+
+/**
+ * The app's button: one look per variant.
+ * @param props the props
+ */
+export function Button({ variant = "primary", children }: ButtonProps) {
+  return <button data-variant={variant}>{children}</button>;
+}
+`;
+  assert.equal(scanComponents(button).components.find((c) => c.name === "Button").description, "The app's button: one look per variant.");
+  const icon = `/** Every icon name the set knows. */
+export type IconName = "plus" | "minus";
+export const ICONS: Record<IconName, string> = { plus: "+", minus: "-" };
+export const Icon = ({ name }: { name: IconName }) => <span>{ICONS[name]}</span>;
+`;
+  assert.equal(scanComponents(icon).components.find((c) => c.name === "Icon").description, "", "the type's JSDoc is not the component's");
+});
