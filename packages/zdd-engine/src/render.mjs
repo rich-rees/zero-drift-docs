@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // ZDD renderer.
 //
-//   zdd-engine render           # write human-index.html + agent-index.md + adr-index.md
+//   zdd-engine render           # write human-index.html + agent-index.md + adr-index.md + blessing-index.md
 //   zdd-engine render --check   # exit 1 if any is stale
 //
 // Renders the semantic map + codebase metadata join into the machine products:
@@ -12,6 +12,7 @@
 //                    (src/viewers/index.mjs) by config `viewer`
 //   - agent index  — llms.txt-shaped, feature-first, budget ~2k tokens
 //   - ADR index    — one orientation line per ADR
+//   - blessing index — one line per blessing, by trigger question (CAS-96)
 // Renderings carry no facts of their own and are never edited; if one looks
 // wrong the fix is in a store, the derived layer, or this renderer.
 // Deterministic: same inputs in, byte-identical outputs. Node stdlib only.
@@ -29,13 +30,14 @@ import { extractLinks as extractMapLinks } from "./lib/map-links.mjs";
 import { changedTerms, parseNameStatus } from "./lib/store-changes.mjs";
 import { refreshOriginBase } from "./lib/fetch-freshness.mjs";
 import { buildAdrIndex } from "./lib/adr-index.mjs";
+import { buildBlessingIndex } from "./lib/blessing-index.mjs";
 import { loadConfig, resolveViewer, resolveNonAreaTags, validateRepoBase, absentStoreNotes } from "./lib/config.mjs";
 import { loadViewer, DEFAULT_VIEWER } from "./viewers/index.mjs";
 
 // Per-run state, set by run() from the adopter's config: repo root, artifact
 // paths, the bundle folder node ids are relative to (the zdd/ folder), the
 // display name, the GitHub base URL for source links, and the base branch.
-let REPO, CONFIG, PATHS, BUNDLE, SEMANTIC, DERIVED, OUT_HTML, OUT_INDEX, OUT_ADR_INDEX, OUT_GRAPH;
+let REPO, CONFIG, PATHS, BUNDLE, SEMANTIC, DERIVED, OUT_HTML, OUT_INDEX, OUT_ADR_INDEX, OUT_BLESSING_INDEX, OUT_GRAPH;
 let BUNDLE_NAME, REPO_BASE, BASE_BRANCH, VIEWER, NON_AREA_TAGS;
 
 // Record kind -> the graph's display type. These names are the graph
@@ -555,9 +557,10 @@ function buildAgentIndex(concepts, features, adrs) {
 
   lines.push("---");
   lines.push("");
-  lines.push("Reading path: task → feature section above → its pointers → code. The codebase");
-  lines.push(`metadata (\`${PATHS.metadataDir}/\`) is the mechanical inventory — regenerate with`);
-  lines.push("`zdd-engine derive`; never edit.");
+  lines.push("Reading path: task → feature section above → its pointers → code. Before building,");
+  lines.push(`choose patterns: \`${PATHS.blessingIndex}\` lists every blessing by its trigger question.`);
+  lines.push(`The codebase metadata (\`${PATHS.metadataDir}/\`) is the mechanical inventory — regenerate`);
+  lines.push("with `zdd-engine derive`; never edit.");
   lines.push("");
   // Bare ADR citations become links — hrefs are relative to the bundle folder
   // so they resolve on GitHub, like resource pointers.
@@ -586,13 +589,17 @@ async function render() {
   // ADR index (DIO-180, ADR-0035): the always-load-whole orientation summary of
   // the ADR corpus — one line per ADR, so full bodies are drill-in-when-cited.
   const adrIndex = buildAdrIndex(docs.adrs);
+  // Blessing index (CAS-96): read whole when choosing patterns. Hrefs are
+  // relative to the bundle folder, like the agent index's.
+  const adrFile = new Map(docs.adrs.map((a) => [a.num, a.file]));
+  const { text: blessingIndex, count: blessings } = buildBlessingIndex(concepts.filter((c) => c.layer === "map"), (num) => (adrFile.has(num) ? `adr/${adrFile.get(num)}` : null));
   // ~4 chars/token; the budget is a warning, not a gate — the fix is trimming
   // semantic link lists, which is a judgment call (spec §4).
   const approxTokens = Math.round(agentIndex.length / 4);
   if (approxTokens > 2000) {
     console.error(`WARNING: agent index ≈${approxTokens} tokens (budget ~2000) — trim semantic feature links`);
   }
-  return { html, graphJson, agentIndex, adrIndex, counts: { concepts: concepts.length, edges: graph.edges.length, features: features.length, adrs: docs.adrs.length } };
+  return { html, graphJson, agentIndex, adrIndex, blessingIndex, counts: { blessings, concepts: concepts.length, edges: graph.edges.length, features: features.length, adrs: docs.adrs.length } };
 }
 
 export async function run(args) {
@@ -606,6 +613,7 @@ export async function run(args) {
   OUT_HTML = resolve(REPO, PATHS.humanIndex);
   OUT_INDEX = resolve(REPO, PATHS.agentIndex);
   OUT_ADR_INDEX = resolve(REPO, PATHS.adrIndex);
+  OUT_BLESSING_INDEX = resolve(REPO, PATHS.blessingIndex);
   OUT_GRAPH = resolve(REPO, PATHS.graph);
   BUNDLE_NAME = CONFIG.name ?? "Codebase";
   REPO_BASE = CONFIG.repoBase ?? "";
@@ -639,13 +647,14 @@ export async function run(args) {
     process.exit(1);
   }
 
-  const { html, graphJson, agentIndex, adrIndex, counts } = await render();
+  const { html, graphJson, agentIndex, adrIndex, blessingIndex, counts } = await render();
   const norm = (s) => s.replace(/\r\n/g, "\n");
   const outputs = [
     ["graph.json", OUT_GRAPH, graphJson],
     ["human-index.html", OUT_HTML, html],
     ["agent-index.md", OUT_INDEX, agentIndex],
     ["adr-index.md", OUT_ADR_INDEX, adrIndex],
+    ["blessing-index.md", OUT_BLESSING_INDEX, blessingIndex],
   ];
   if (args.includes("--check")) {
     const stale = [];
@@ -665,7 +674,7 @@ export async function run(args) {
     }
     console.log(`renderings in sync (${counts.concepts} concepts, ${counts.edges} edges, ${counts.features} features, viewer ${VIEWER.name})`);
   } else {
-    // Stage every output to a sibling temp file, then rename all four: a
+    // Stage every output to a sibling temp file, then rename all five: a
     // failure part-way (disk, permissions, a parent that turns out to be a
     // file) leaves the previous generation intact and no half-written
     // artifact behind (CR-098). rename over an existing file is atomic on
@@ -682,7 +691,7 @@ export async function run(args) {
         }
         staged.push([tmp, path]);
       }
-      // Ceiling: four renames are not one transaction — a crash between them
+      // Ceiling: five renames are not one transaction — a crash between them
       // leaves a mixed generation, which the next `render --check` reports as stale.
       for (const [tmp, path] of staged) renameSync(tmp, path);
     } catch (e) {
@@ -690,6 +699,6 @@ export async function run(args) {
       console.error(e.message);
       process.exit(1);
     }
-    console.log(`Wrote ${counts.concepts} concepts, ${counts.edges} edges -> graph.json + human-index.html (viewer ${VIEWER.name}); ${counts.features} feature sections -> agent-index.md; ${counts.adrs} ADRs -> adr-index.md`);
+    console.log(`Wrote ${counts.concepts} concepts, ${counts.edges} edges -> graph.json + human-index.html (viewer ${VIEWER.name}); ${counts.features} feature sections -> agent-index.md; ${counts.adrs} ADRs -> adr-index.md; ${counts.blessings} blessings -> blessing-index.md`);
   }
 }

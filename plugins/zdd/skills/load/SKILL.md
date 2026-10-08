@@ -1,6 +1,6 @@
 ---
 name: load
-description: "\"load ZDD\" — the declared load. Read the glossary whole, the ADR index whole, the ADRs your task cites, and the agent-index sections for the feature, say what you loaded, then read the code fresh. First checks the adopter's engine pin against the plugin and warns on skew. Use before designing or building in a repo that uses Zero-Drift Docs; triggers on \"load ZDD\"."
+description: "\"load ZDD\" — the declared load. Read the glossary whole, the ADR index whole, the ADRs your task cites, and the agent-index sections for the feature, say what you loaded, then read the code fresh, and point at the next step (choose patterns). First checks the adopter's engine pin against the plugin and warns on skew. Use before designing or building in a repo that uses Zero-Drift Docs; triggers on \"load ZDD\"."
 ---
 
 # zdd:load — the declared load
@@ -65,6 +65,11 @@ names; the `zdd/…` names apply only where a key is absent.
 5. **Read the code fresh.** The artifacts orient you; they never replace reading
    the source. Where prose and code disagree, the code wins — and the prose is a
    ritual finding to fix (see `update`).
+6. **End with the next step, in one line:** *"Next: once the design is settled,
+   and before any code, choose patterns."* That is the `patterns` skill — it
+   reads the blessing index (`paths.blessingIndex`, default
+   `zdd/blessing-index.md`) against the design and commits a pattern plan.
+   Do not run it now unless the design is already settled.
 
 ## Why this is a skill, not just the hook
 

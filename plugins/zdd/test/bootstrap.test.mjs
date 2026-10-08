@@ -312,7 +312,7 @@ test("the written workflow: exact ordered command list, the pin once in env, rea
   const wf = readFileSync(join(repo, ".github", "workflows", "zdd.yml"), "utf8");
   const lines = wf.split("\n");
   const runs = lines.filter((l) => /^\s*run:\s/.test(l)).map((l) => l.replace(/^\s*run:\s*/, "").trim());
-  assert.deepEqual(runs, ['npx -y "$ZDD_ENGINE" derive --check', 'npx -y "$ZDD_ENGINE" render --check', 'npx -y "$ZDD_ENGINE" lint', 'npx -y "$ZDD_ENGINE" freshness >> "$GITHUB_STEP_SUMMARY"']);
+  assert.deepEqual(runs, ['npx -y "$ZDD_ENGINE" derive --check', 'npx -y "$ZDD_ENGINE" render --check', 'npx -y "$ZDD_ENGINE" lint --merge', 'npx -y "$ZDD_ENGINE" freshness >> "$GITHUB_STEP_SUMMARY"']);
   const pins = lines.filter((l) => l.includes("@rich-rees/zdd-engine@"));
   assert.deepEqual(pins, [`  ZDD_ENGINE: "@rich-rees/zdd-engine@${PLUGIN_VERSION}"`], "the pin appears exactly once, in env");
   // A contributor's local extractor runs in this job (decision 0001): the token
@@ -841,4 +841,25 @@ test("upgrade offers docs/agents/domain.md to an existing adopter: written when 
   const again = JSON.parse(bootstrap(repo, ["upgrade", "--json"]));
   assert.deepEqual(again.wrote, []);
   assert.ok(again.kept.some((k) => k.startsWith("docs/agents/domain.md")), again.kept.join("\n"));
+});
+
+test("upgrade (CAS-96, 2.0): an owned workflow's bare lint step gains --merge and is named; one already gated is kept; another shape is reported, not guessed", async () => {
+  const { mergeGate } = await import("../scripts/bootstrap.mjs");
+  const template = readFileSync(join(PLUGIN, "templates", "zdd.yml"), "utf8");
+  assert.equal(mergeGate(template).how, "present", "the template itself is gated");
+  const repo = fresh("upgrade-merge-gate");
+  applyJson(repo, "mg", { extractors: ["generic"], optIns: { autoLoad: true, fence: true, stop: true, ci: true } });
+  const wf = join(repo, ".github", "workflows", "zdd.yml");
+  writeFileSync(wf, readFileSync(wf, "utf8").replace("lint --merge", "lint").replace(/@rich-rees\/zdd-engine@[0-9.]+/, "@rich-rees/zdd-engine@1.3.1"));
+  const json = JSON.parse(bootstrap(repo, ["upgrade", "--json"]));
+  assert.ok(readFileSync(wf, "utf8").includes('run: npx -y "$ZDD_ENGINE" lint --merge'));
+  assert.ok(json.notes.some((n) => /zdd\.yml: the lint step now runs `lint --merge` \(2\.0\)/.test(n)), json.notes.join("\n"));
+  assert.ok(json.notes.some((n) => /zdd\/blessing-index\.md — run `render`/.test(n)));
+  assert.ok(json.notes.some((n) => /trigger question .*FAIL lint .*upgrade never rewrites the map/.test(n)));
+  const again = JSON.parse(bootstrap(repo, ["upgrade", "--json"]));
+  assert.ok(!again.notes.some((n) => /now runs `lint --merge`/.test(n)), "second run: nothing to add");
+  writeFileSync(wf, readFileSync(wf, "utf8").replace('run: npx -y "$ZDD_ENGINE" lint --merge', "run: make lint"));
+  const odd = JSON.parse(bootstrap(repo, ["upgrade", "--json"]));
+  assert.ok(odd.notes.some((n) => /no `run: npx -y "\$ZDD_ENGINE" lint` step found — add --merge to your lint step by hand/.test(n)), odd.notes.join("\n"));
+  assert.ok(readFileSync(wf, "utf8").includes("run: make lint"), "a workflow of another shape is left as it is");
 });

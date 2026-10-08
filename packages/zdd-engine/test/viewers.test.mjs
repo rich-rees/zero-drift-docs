@@ -233,7 +233,7 @@ test("edges: every fixture map link and ref is an edge, exactly once, and self-l
   const idOf = new Map(graph.nodes.filter((n) => n.layer === "metadata").map((n) => [n.recordId, n.id]));
   const expected = new Set();
   for (const r of records) for (const ref of r.refs) expected.add(`${idOf.get(r.id)}→${idOf.get(ref)}`);
-  for (const link of ["map/apps/fixture-app→map/features/things", "map/features/things→metadata/table/db--things", "map/features/things→metadata/route/things", "map/features/things→metadata/route/things--_id", "map/features/things→metadata/function/db--save_thing"]) expected.add(link);
+  for (const link of ["map/apps/fixture-app→map/features/things", "map/features/things→metadata/table/db--things", "map/features/things→metadata/route/things", "map/features/things→metadata/route/things--_id", "map/features/things→metadata/function/db--save_thing", "map/features/things→metadata/surface/(app)--_layout"]) expected.add(link);
   const actual = graph.edges.map((e) => `${e.source}→${e.target}`);
   assert.equal(new Set(actual).size, actual.length, "no duplicate edges");
   assert.deepEqual(new Set(actual), expected);

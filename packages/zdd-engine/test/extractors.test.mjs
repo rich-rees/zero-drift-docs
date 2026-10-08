@@ -68,7 +68,7 @@ test("legacy adapter key still works: golden output + one deprecation line", () 
   const repo = mkRepo(FIXTURE);
   const { status, stdout, stderr } = spawnSync(process.execPath, [BIN, "derive"], { cwd: repo, encoding: "utf8" });
   assert.equal(status, 0, stderr);
-  assert.match(stdout, /Wrote 15 records/);
+  assert.match(stdout, /Wrote 16 records/);
   assertTreesEqual(tree(join(repo, "zdd", "metadata")), tree(GOLDEN), "legacy vs golden");
   // Deprecation note is printed on stderr, without --verbose, exactly once.
   const lines = stderr.split("\n").filter((l) => /deprecated/.test(l));

@@ -24,6 +24,8 @@ export const DEFAULT_PATHS = {
   metadataDir: "zdd/metadata",
   agentIndex: "zdd/agent-index.md",
   adrIndex: "zdd/adr-index.md",
+  blessingIndex: "zdd/blessing-index.md",
+  patternsPlan: "zdd/patterns-plan.md",
   humanIndex: "zdd/human-index.html",
   graph: "zdd/graph.json",
   bundleDir: "zdd",
@@ -91,7 +93,7 @@ export function validateRepoBase(repoBase) {
 //    path — or the config file itself — would let a one-line config typo
 //    (`"metadataDir": "zdd"`) delete the glossary, the map and config.json
 //    as "orphaned records" (CR-059).
-// 2. `render` writes its four outputs last and unconditionally, so they must
+// 2. `render` writes its five outputs last and unconditionally, so they must
 //    be pairwise distinct and disjoint from everything it reads: two outputs
 //    on one file leave `--check` permanently red, and an output on the
 //    glossary or config.json clobbers a curated store (CR-061).
@@ -100,14 +102,16 @@ export function validateRepoBase(repoBase) {
 // is not in the set. `configRel` is the config file's repo-relative name (it
 // may start with `..` when --config= points elsewhere; then it overlaps
 // nothing). Returns an error string or null.
-const OUTPUT_KEYS = ["graph", "humanIndex", "agentIndex", "adrIndex"];
-const INPUT_KEYS = ["glossary", "adrDir", "mapDir", "metadataDir"];
+const OUTPUT_KEYS = ["graph", "humanIndex", "agentIndex", "adrIndex", "blessingIndex"];
+// patternsPlan is the branch's working file (CAS-96): written by a session,
+// never by the engine, so it is kept apart from the outputs like a store.
+const INPUT_KEYS = ["glossary", "adrDir", "mapDir", "metadataDir", "patternsPlan"];
 export function validatePathLayout(paths, configRel) {
   const label = (key) => (key === "config" ? "the config file" : `paths.${key}`);
   const value = (key) => (key === "config" ? configRel : paths[key]);
   const clash = (a, b, why) => `${label(a)} '${value(a)}' overlaps ${label(b)} '${value(b)}' — ${why}`;
   const metadataWhy = "metadataDir must be a dedicated folder (derive prunes everything in it that is not a current record)";
-  for (const key of ["glossary", "adrDir", "mapDir", ...OUTPUT_KEYS, "config"]) {
+  for (const key of ["glossary", "adrDir", "mapDir", "patternsPlan", ...OUTPUT_KEYS, "config"]) {
     if (overlaps(paths.metadataDir, value(key))) return clash("metadataDir", key, metadataWhy);
   }
   const outputWhy = "render's outputs must be distinct files, apart from every store and the config it reads";

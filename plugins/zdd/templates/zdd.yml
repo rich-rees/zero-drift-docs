@@ -24,7 +24,7 @@ on:
   workflow_dispatch:
 
 env:
-  ZDD_ENGINE: "@rich-rees/zdd-engine@1.3.1"
+  ZDD_ENGINE: "@rich-rees/zdd-engine@2.0.0"
 
 jobs:
   zero-drift:
@@ -53,8 +53,11 @@ jobs:
       - name: Indexes match their inputs
         run: npx -y "$ZDD_ENGINE" render --check
 
-      - name: Store lints (supersession symmetry, etc.)
-        run: npx -y "$ZDD_ENGINE" lint
+      # --merge: this job gates the merge, so the branch's pattern plan
+      # (zdd/patterns-plan.md) must be gone — "update ZDD" reconciles it and
+      # deletes it in the update commit. A local lint only warns about it.
+      - name: Store lints (supersession symmetry, blessings, no pattern plan left)
+        run: npx -y "$ZDD_ENGINE" lint --merge
 
       - name: Semantic-map freshness (advisory)
         run: npx -y "$ZDD_ENGINE" freshness >> "$GITHUB_STEP_SUMMARY"

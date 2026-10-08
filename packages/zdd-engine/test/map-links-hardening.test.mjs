@@ -104,6 +104,28 @@ test("extractLinks (CR-023): a target on another drive, a UNC share, or above th
   assert.deepEqual(ids, ["metadata/route/a", "metadata/route/f"]);
 });
 
+test("extractLinks (CAS-96, from CAS-94): a target reads as CommonMark does — balanced brackets, the <…> form, escaped parens — so a route-grouped layout is an edge", () => {
+  const bundle = process.platform === "win32" ? "C:\\r\\zdd" : "/r/zdd";
+  const doc = join(bundle, "map", "features");
+  const id = "metadata/surface/(app)--_layout";
+  assert.deepEqual(extractLinks("[l](/metadata/surface/(app)--_layout.json)", doc, bundle), [id], "absolute");
+  assert.deepEqual(extractLinks("[l](../../metadata/surface/(app)--_layout.json)", doc, bundle), [id], "relative");
+  assert.deepEqual(extractLinks("[l](<../../metadata/surface/(app)--_layout.json>)", doc, bundle), [id], "<…> form");
+  assert.deepEqual(extractLinks("[l](<../../metadata/route/a b.json#x>)", doc, bundle), ["metadata/route/a b"], "<…> may hold a space and an anchor");
+  assert.deepEqual(extractLinks("[l](../../metadata/surface/\\(app\\)--_layout.json)", doc, bundle), [id], "escaped parens");
+  for (const t of ["\\\\server\\share\\x.json", "\\server\\x.json", "<\\\\server\\share\\x.json>", "..\\..\\metadata\\route\\a.json"]) {
+    assert.deepEqual(extractLinks(`[u](${t})`, doc, bundle), [], `a backslash spelling is never a bundle link, on any platform: ${t}`);
+  }
+  assert.deepEqual(extractLinks("[l](../../metadata/surface/((app))--_layout.json#top)", doc, bundle), ["metadata/surface/((app))--_layout"], "nested and closed, with an anchor");
+  assert.deepEqual(extractLinks("[l](../../metadata/surface/(app--_layout.json)", doc, bundle), [], "unbalanced: not a link, as in CommonMark");
+  assert.deepEqual(extractLinks("[l](<x.json) [m](<a\nb.json>)", doc, bundle), [], "an unclosed or multi-line <…> is not a link");
+  assert.deepEqual(
+    extractLinks("[a](/metadata/route/a.json) and [b](/metadata/route/b.json#sec), [x](https://h/c.json)", doc, bundle),
+    ["metadata/route/a", "metadata/route/b"],
+    "the plain forms are unchanged",
+  );
+});
+
 test("walkMarkdown / readBounded: symlinks are skipped (file, directory, dangling, loop), non-md ignored, a file over the cap reads as null", (t) => {
   const root = mkdtempSync(join(tmpdir(), "zdd-walk-"));
   mkdirSync(join(root, "a", "b"), { recursive: true });
@@ -162,7 +184,7 @@ test("lint (CR-018/CR-019/CR-025): a symlinked concept is skipped, a loop does n
 
 test("lint: the CommonMark cases end to end — a fenced example neither hides a later stale blessing nor fails on a fake one; CR-only and indented headings work", () => {
   const repo = mkRepo();
-  concept(repo, "fenced", "# Blessings\n```md\n# Example\n- copy x, per ADR-9999\n```\n- the real one, per ADR-0002\n");
+  concept(repo, "fenced", "# Blessings\n```md\n# Example\n- copy x, per ADR-9999\n```\n- Real? the real one, per ADR-0002\n");
   let r = lint(repo);
   assert.equal(r.status, 0, r.stderr);
   concept(repo, "hidden", "# Blessings\n```\n# Key paths\n```\n- stale, per ADR-0001\n");
@@ -174,5 +196,15 @@ test("lint: the CommonMark cases end to end — a fenced example neither hides a
   r = lint(repo);
   assert.equal(r.status, 1, "CR-only + indented heading");
   assert.match(r.stderr, /cr\.md:10 .*superseded by ADR-0002/);
+  rmSync(repo, { recursive: true, force: true });
+});
+
+test("lint (CAS-96): the fixture's bracketed link to a route-grouped layout claims that record", () => {
+  const repo = mkRepo();
+  assert.equal(spawnSync(process.execPath, [BIN, "derive"], { cwd: repo, encoding: "utf8" }).status, 0);
+  const r = lint(repo);
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stderr, /\(app\)--_layout/, "not listed as unclaimed");
+  assert.match(r.stdout, /5\/12 records claimed/);
   rmSync(repo, { recursive: true, force: true });
 });

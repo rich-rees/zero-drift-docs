@@ -1,0 +1,17 @@
+{
+  "kind": "surface",
+  "id": "surface:/(app)/_layout",
+  "title": "/(app)/_layout",
+  "description": "src/app/(app)/layout.tsx",
+  "resource": [
+    "src/app/(app)/layout.tsx"
+  ],
+  "refs": [],
+  "facts": {
+    "file": "layout",
+    "routeGroups": [
+      "(app)"
+    ],
+    "dynamicSegments": []
+  }
+}

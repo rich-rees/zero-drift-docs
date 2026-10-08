@@ -64,6 +64,7 @@ test("watchedPaths: the resource plus every linked metadata record's source, ded
   assert.ok(watched.some((w) => w.path === "src/app/api/things/route.ts" && w.via.includes("metadata/route/things")), JSON.stringify(watched));
   assert.ok(watched.some((w) => w.path === "src/app/api/things/[id]/route.ts" && w.via.includes("metadata/route/things--_id")));
   assert.ok(watched.some((w) => w.via.includes("metadata/table/db--things")), "a table record's migration file is watched too");
+  assert.ok(watched.some((w) => w.path === "src/app/(app)/layout.tsx" && w.via.includes("metadata/surface/(app)--_layout")), "a route-grouped layout linked with brackets is watched (CAS-96)");
   assert.equal(new Set(watched.map((w) => w.path)).size, watched.length, "no duplicate paths");
   // A path reached through several records keeps every attribution (CR-030).
   const twice = text + "\n- [things again](/metadata/route/things.json)\n- [helper](/metadata/module/src--lib--things-api-ts.json)\n";
@@ -79,6 +80,13 @@ test("watchedPaths: the resource plus every linked metadata record's source, ded
     watched,
   );
 });
+
+test("freshness (CAS-96): a change to a route-grouped layout fires the concept that links it through the bracketed path", () =>
+  scenario(() => {
+    appendFileSync(join(repo, "src", "app", "(app)", "layout.tsx"), "\n// touched\n");
+    commit("touch grouped layout");
+    assert.match(freshness(), /\| `zdd\/map\/features\/things\.md` \| src\/app\/\(app\)\/layout\.tsx \| `metadata\/surface\/\(app\)--_layout` \|/);
+  }));
 
 test("freshness: no diff against the base says so", () => {
   assert.match(freshness(), /No changes against main/);

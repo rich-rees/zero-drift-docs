@@ -248,6 +248,7 @@ function main() {
     { rel: paths.graph, kind: "file" },
     { rel: paths.agentIndex, kind: "file" },
     { rel: paths.adrIndex, kind: "file" },
+    { rel: paths.blessingIndex, kind: "file" },
     { rel: paths.humanIndex, kind: "file" },
   ]) {
     if (!g.rel) continue; // no safe location for this key (CR-075)

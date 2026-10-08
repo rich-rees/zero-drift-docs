@@ -21,6 +21,7 @@ CRUD for things with an audit trail ([ADR-0002](adr/0002-things-replace-widgets.
 
 ---
 
-Reading path: task → feature section above → its pointers → code. The codebase
-metadata (`zdd/metadata/`) is the mechanical inventory — regenerate with
-`zdd-engine derive`; never edit.
+Reading path: task → feature section above → its pointers → code. Before building,
+choose patterns: `zdd/blessing-index.md` lists every blessing by its trigger question.
+The codebase metadata (`zdd/metadata/`) is the mechanical inventory — regenerate
+with `zdd-engine derive`; never edit.

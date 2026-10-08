@@ -188,10 +188,13 @@ export function classify(changed, root, config) {
   if (rootRel.startsWith("..") || isAbsolute(rootRel)) return null; // the adopter root is not inside this git checkout
   const prefix = rootRel && rootRel !== "." ? rootRel + "/" : "";
   const paths = artifactPaths(config, { lenient: true });
-  const zddPrefixes = [paths.bundleDir, paths.glossary, paths.adrDir, paths.mapDir, paths.metadataDir, paths.agentIndex, paths.adrIndex, paths.humanIndex, paths.graph]
+  const zddPrefixes = [paths.bundleDir, paths.glossary, paths.adrDir, paths.mapDir, paths.metadataDir, paths.agentIndex, paths.adrIndex, paths.blessingIndex, paths.humanIndex, paths.graph]
     .filter(Boolean)
     .map(fold);
-  const isZdd = (f) => zddPrefixes.some((z) => fold(f) === z || fold(f).startsWith(z + "/"));
+  // The pattern plan is a session's working file, not the curated half: a
+  // branch whose only zdd/ change is its plan has not run "update" (CAS-96).
+  const plan = paths.patternsPlan ? fold(paths.patternsPlan) : null;
+  const isZdd = (f) => fold(f) !== plan && zddPrefixes.some((z) => fold(f) === z || fold(f).startsWith(z + "/"));
   const zdd = [];
   const code = [];
   for (const f of changed.paths) {

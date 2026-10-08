@@ -100,7 +100,7 @@ test("CR-059: derive refuses to prune a folder holding JSON it did not write; no
   writeFileSync(join(repo, "zdd", "metadata", "README.md"), "generated — do not edit\n");
   writeFileSync(join(repo, "zdd", "metadata", "route", ".gitkeep"), "");
   writeFileSync(join(repo, "zdd", "metadata", "route", "stale.json"), "{}\n");
-  assert.match(run(repo, ["derive"]), /Wrote 15 records/);
+  assert.match(run(repo, ["derive"]), /Wrote 16 records/);
   assert.ok(existsSync(join(repo, "zdd", "metadata", "README.md")));
   assert.ok(existsSync(join(repo, "zdd", "metadata", "route", ".gitkeep")));
   assert.ok(!existsSync(join(repo, "zdd", "metadata", "route", "stale.json")), "a stale <kind>/*.json is still pruned");
@@ -117,7 +117,7 @@ test("CR-059: derive refuses to prune a folder holding JSON it did not write; no
 });
 
 // ---------------------------------------------------------------------------
-// CR-061: the four render outputs are written last and unconditionally, so
+// CR-061: the five render outputs are written last and unconditionally, so
 // they must be pairwise distinct and disjoint from everything render reads.
 // ---------------------------------------------------------------------------
 
@@ -133,6 +133,9 @@ test("CR-061: render refuses outputs that coincide with each other or with an in
     [{ adrIndex: "zdd/adr/index.md" }, /paths\.adrIndex 'zdd\/adr\/index\.md' overlaps paths\.adrDir/],
     [{ graph: "zdd/map/graph.json" }, /paths\.graph 'zdd\/map\/graph\.json' overlaps paths\.mapDir/],
     [{ humanIndex: "zdd/metadata/index.html" }, /overlaps/],
+    [{ blessingIndex: "zdd/agent-index.md" }, /paths\.agentIndex 'zdd\/agent-index\.md' .*paths\.blessingIndex/],
+    [{ blessingIndex: "zdd/patterns-plan.md" }, /paths\.blessingIndex 'zdd\/patterns-plan\.md' overlaps paths\.patternsPlan/],
+    [{ patternsPlan: "zdd/metadata/plan.md" }, /paths\.metadataDir 'zdd\/metadata' overlaps paths\.patternsPlan/],
   ];
   for (const [paths, re] of cases) {
     withPaths(repo, paths);
@@ -144,7 +147,7 @@ test("CR-061: render refuses outputs that coincide with each other or with an in
   assert.equal(readFileSync(join(repo, "zdd", "glossary.md"), "utf8"), glossaryBefore, "glossary never clobbered");
   assert.match(readFileSync(join(repo, "zdd", "config.json"), "utf8"), /"name": "Fixture App"/, "config never clobbered");
   // A legal relocation still works and --check stays green.
-  withPaths(repo, { graph: "docs/graph.json", humanIndex: "docs/index.html", agentIndex: "docs/agent.md", adrIndex: "docs/adrs.md" });
+  withPaths(repo, { graph: "docs/graph.json", humanIndex: "docs/index.html", agentIndex: "docs/agent.md", adrIndex: "docs/adrs.md", blessingIndex: "docs/blessings.md" });
   mkdirSync(join(repo, "docs"));
   run(repo, ["render"]);
   assert.match(run(repo, ["render", "--check"]), /in sync/);
@@ -169,7 +172,7 @@ const symlinkOrSkip = (t, target, path, type) => {
   }
 };
 const noLeak = (repo) => {
-  for (const f of ["human-index.html", "graph.json", "agent-index.md", "adr-index.md"]) {
+  for (const f of ["human-index.html", "graph.json", "agent-index.md", "adr-index.md", "blessing-index.md"]) {
     const p = join(repo, "zdd", f);
     if (existsSync(p)) assert.ok(!readFileSync(p, "utf8").includes("hunter2"), `${f} does not embed the sentinel`);
   }
@@ -308,7 +311,7 @@ test("CR-108: a repo reached through a symlinked root derives and renders into t
     return;
   }
   // Invoked with cwd = the link: every write lands in the real tree, --check is green.
-  assert.match(run(viaLink, ["derive"]), /Wrote 15 records/);
+  assert.match(run(viaLink, ["derive"]), /Wrote 16 records/);
   run(viaLink, ["render"]);
   assert.match(run(viaLink, ["derive", "--check"]), /in sync/);
   assert.match(run(viaLink, ["render", "--check"]), /in sync/);
@@ -322,7 +325,7 @@ test("CR-108: a repo reached through a symlinked root derives and renders into t
   const config = readConfig(real);
   config.adapterOptions.migrationNamespaces = [{ name: "db", dir: "db-link" }];
   writeConfig(real, config);
-  assert.match(run(real, ["derive"]), /Wrote 15 records/);
+  assert.match(run(real, ["derive"]), /Wrote 16 records/);
   const things = JSON.parse(readFileSync(join(real, "zdd", "metadata", "table", "db--things.json"), "utf8"));
   assert.deepEqual(things.resource, ["db-link/00001_init.sql", "db-link/00002_things.sql"], "migrations reached through the link, named by the configured path");
   rmSync(real, { recursive: true, force: true });
@@ -354,7 +357,7 @@ test("CR-098: a write failure on the last output leaves the previous generation 
   const after = tree(join(repo, "zdd"));
   after.delete("config.json");
   before.delete("config.json");
-  for (const k of ["graph.json", "human-index.html", "agent-index.md", "adr-index.md"]) {
+  for (const k of ["graph.json", "human-index.html", "agent-index.md", "adr-index.md", "blessing-index.md"]) {
     assert.equal(after.get(k), before.get(k), `${k} still the previous generation`);
   }
   assert.ok(![...after.keys()].some((k) => /\.tmp/.test(k)), `no temp residue after a failed render: ${[...after.keys()].join(", ")}`);
@@ -375,9 +378,11 @@ test("CR-068/CR-099: an absent store dir in a populated bundle is noted on stder
   run(repo, ["derive"]);
   withPaths(repo, { adrDir: "zdd/decisions" }); // typo for zdd/adr
   let out = spawn(repo, ["lint"]);
-  assert.equal(out.status, 0, out.stderr);
   assert.match(out.stderr, /^WARNING: paths\.adrDir 'zdd\/decisions' does not exist.*not greenfield/m, out.stderr);
-  assert.match(out.stdout, /store lints passed/);
+  // The fixture's blessings cite ADR-0002, so the typo is also a failure: the
+  // citation names an ADR the (empty) corpus does not hold.
+  assert.equal(out.status, 1, out.stderr);
+  assert.match(out.stderr, /things\.md:\d+ .*cites ADR-0002, which does not exist/);
   out = spawn(repo, ["render"]);
   assert.equal(out.status, 0, out.stderr);
   assert.match(out.stderr, /^WARNING: paths\.adrDir 'zdd\/decisions' does not exist/m, out.stderr);

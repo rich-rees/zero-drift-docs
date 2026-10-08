@@ -1,18 +1,20 @@
 // The blessing-citation lint (DIO-313): the semantic map's first hard check.
 // A blessing that cites a fully superseded ADR, or one that does not exist,
-// fails `zdd-engine lint`; a citation of an ADR superseded in part, or a
-// blessing with no citation, is a WARNING on stderr and exit 0. Observed at
-// the CLI seam on scratch copies of the Next.js fixture (whose ADR-0001 is
-// superseded by ADR-0002), plus the section parser on its own.
+// fails `zdd-engine lint`; a citation of an ADR superseded in part is a
+// WARNING on stderr and exit 0. The blessing's shape (CAS-96): no trigger
+// question fails; no reason (neither an ADR nor "because …") and over the
+// length budget warn. The pattern plan warns, and fails with --merge.
+// Observed at the CLI seam on scratch copies of the Next.js fixture (whose
+// ADR-0001 is superseded by ADR-0002), plus the parsers on their own.
 // Run: node --test "test/*.test.mjs"
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { writeFileSync, rmSync, mkdtempSync, cpSync, mkdirSync } from "node:fs";
+import { writeFileSync, rmSync, mkdtempSync, cpSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { extractBlessings, forwardStamps } from "../src/lib/map-links.mjs";
+import { extractBlessings, forwardStamps, blessingShape } from "../src/lib/map-links.mjs";
 
 const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const BIN = join(PKG, "bin", "zdd-engine.mjs");
@@ -97,18 +99,80 @@ test("lint: a blessing citing the current ADR passes; citing a non-existent ADR 
   rmSync(repo, { recursive: true, force: true });
 });
 
-test("lint: a partial supersession and a citation-less blessing are WARNING lines, exit 0", () => {
+test("lint: a partial supersession and a reasonless blessing are WARNING lines, exit 0; an inline 'because' is a reason", () => {
   const repo = mkRepo();
   const adrDir = join(repo, "zdd", "adr");
   writeFileSync(join(adrDir, "0003-things-get-audit.md"), "# Things get an audit trail\n\nThis supersedes ADR-0002 in part: the audit half.\n");
   writeFileSync(join(adrDir, "0002-things-replace-widgets.md"), "# Things replace widgets\n\n**Superseded in part by ADR-0003** (2026-02-01): the audit half.\n\nThis supersedes ADR-0001: the core entity is renamed.\n");
-  concept(repo, "things", "# Blessings\n- Copy the things route, per ADR-0002.\n- Copy the audit log — no decision named.\n");
+  concept(
+    repo,
+    "things",
+    "# Blessings\n- Adding a things route? Copy the things route, per ADR-0002.\n- Auditing a change? Copy the audit log — no decision named.\n- Naming a file? Use kebab-case because the deploy is case-sensitive.\n",
+  );
   const r = lint(repo);
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /store lints passed/);
   assert.match(r.stderr, /^WARNING: zdd\/map\/features\/things\.md:10 .*cites ADR-0002, superseded in part by ADR-0003/m);
-  assert.match(r.stderr, /^WARNING: zdd\/map\/features\/things\.md:11 .*cites no ADR/m);
+  assert.match(r.stderr, /^WARNING: zdd\/map\/features\/things\.md:11 .*gives no reason — cite the ADR that blessed it, or say why inline/m);
+  assert.doesNotMatch(r.stderr, /things\.md:12/, "a 'because' clause is a reason; no ADR is required");
   rmSync(repo, { recursive: true, force: true });
+});
+
+test("lint (CAS-96): a blessing that opens with no trigger question FAILS, naming the fix; a question after the first sentence is not one", () => {
+  const repo = mkRepo();
+  concept(repo, "things", "# Blessings\n- Copy the things route, per ADR-0002.\n- Copy it. Adding a route? per ADR-0002.\n- Adding a route (any route; even a hook)? Copy [/api/things](/metadata/route/things.json?x=1), per ADR-0002.\n");
+  const r = lint(repo);
+  assert.equal(r.status, 1, r.stderr);
+  assert.match(r.stderr, /Store lints failed \(2\)/);
+  assert.match(r.stderr, /things\.md:10 .*opens with no trigger question — start it with the question it answers/);
+  assert.match(r.stderr, /things\.md:11 .*opens with no trigger question/);
+  assert.doesNotMatch(r.stderr, /things\.md:12 .*trigger question/, "a semicolon inside the question, and a ? inside a URL, are fine");
+  rmSync(repo, { recursive: true, force: true });
+});
+
+test("lint (CAS-96): over the length budget is a WARNING; link targets do not count, link text does", () => {
+  const repo = mkRepo();
+  const long = "Adding a route? " + "word ".repeat(60) + "per ADR-0002.";
+  const linky = `Adding a route? Copy [x](/metadata/route/${"a".repeat(400)}.json), per ADR-0002.`;
+  concept(repo, "things", `# Blessings\n- ${long}\n- ${linky}\n`);
+  const r = lint(repo);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stderr, /^WARNING: zdd\/map\/features\/things\.md:10 .*is 329 characters \(budget 300\) — .*the detail belongs in the ADR/m);
+  assert.doesNotMatch(r.stderr, /things\.md:11 .*characters/);
+  rmSync(repo, { recursive: true, force: true });
+});
+
+test("lint (CAS-96): the pattern plan warns on a plain run and fails with --merge, at its configured path", () => {
+  const repo = mkRepo();
+  writeFileSync(join(repo, "zdd", "patterns-plan.md"), "# Pattern plan\n");
+  let r = lint(repo);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stderr, /^WARNING: zdd\/patterns-plan\.md is on this branch — "update ZDD" reconciles and deletes it/m);
+  r = spawnSync(process.execPath, [BIN, "lint", "--merge"], { cwd: repo, encoding: "utf8" });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /zdd\/patterns-plan\.md: the pattern plan must be reconciled before merge — say "update ZDD"/);
+  rmSync(join(repo, "zdd", "patterns-plan.md"));
+  r = spawnSync(process.execPath, [BIN, "lint", "--merge"], { cwd: repo, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const cfg = join(repo, "zdd", "config.json");
+  writeFileSync(cfg, JSON.stringify({ ...JSON.parse(readFileSync(cfg, "utf8")), paths: { patternsPlan: "plan.md" } }));
+  writeFileSync(join(repo, "plan.md"), "x\n");
+  r = spawnSync(process.execPath, [BIN, "lint", "--merge"], { cwd: repo, encoding: "utf8" });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /plan\.md: the pattern plan must be reconciled/);
+  rmSync(repo, { recursive: true, force: true });
+});
+
+test("blessingShape: visible text, the question, the because clause", () => {
+  const s = blessingShape("Adding a thing? Copy [the route](/metadata/route/things.json \"t\") because the auth lives there; never inline it.");
+  assert.equal(s.question, "Adding a thing?");
+  assert.equal(s.visible, "Adding a thing? Copy the route because the auth lives there; never inline it.");
+  assert.equal(s.because, "because the auth lives there");
+  assert.equal(s.length, s.visible.length);
+  assert.equal(blessingShape("Copy x. Why? Because.").question, null);
+  assert.equal(blessingShape("Using e.g. a queue? Copy y.").question, "Using e.g. a queue?");
+  assert.equal(blessingShape("x".repeat(201) + "?").question, null, "a 'question' over 200 characters is not a trigger");
+  assert.equal(blessingShape("[(app) layout](</metadata/surface/(app)--_layout.json>)? Copy it.").question, "(app) layout?");
 });
 
 test("lint: an absent mapDir is greenfield-tolerated; a mistyped one in a populated bundle gets the CR-068 note", () => {
