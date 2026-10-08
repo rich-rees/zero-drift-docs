@@ -79,6 +79,12 @@ const LEGACY_SNIPPET_HEADING = "## Documentation — Zero-Drift Docs (ZDD)";
 const LEGACY_FINGERPRINT = ["/zdd:orient", "/zdd:update"];
 // Ownership line carried by every file the plugin writes besides config.
 export const OWNER_MARK = "Managed by Zero-Drift Docs (zdd)";
+// Mirrors of the engine's services extractor (src/extractors/services/
+// index.mjs: CANDIDATE_SUFFIXES, BUILT_IN_IGNORE) — the plugin cannot import
+// the engine under npx; a test keeps the two pairs equal.
+export const SERVICE_SUFFIXES = ["_API_KEY", "_DSN", "_SECRET", "_TOKEN", "_URL", "_KEY"];
+export const SERVICE_IGNORE = ["DATABASE", "SUPABASE", "PG", "POSTGRES", "NODE", "NEXT", "VITE", "EXPO", "PUBLIC", "CI", "GITHUB", "RAILWAY", "VERCEL", "PORT", "HOST", "BASE", "API", "APP", "WEB", "SERVER", "CLIENT", "AUTH", "JWT", "SESSION", "COOKIE", "TEST", "DEV", "LOG"];
+
 const SKIP_DIRS = new Set(["node_modules", ".git", ".next", "dist", "build", "coverage", ".venv", "venv", "__pycache__", ".expo", "zdd"]);
 const MAX_NAME = 120;
 const MAX_SCAN_BYTES = 1024 * 1024; // detection never reads a file larger than this (CR-091)
@@ -183,6 +189,13 @@ export function detect(root) {
   let middlewarePath = null;
   const routesFiles = []; // react-router: files declaring a route tree in code
   const packageJsons = []; // nested package.json files (workspaces)
+  // ZDD 2.1 (CAS-97): the four opt-in extractors' signals.
+  const tsxFiles = []; // components: every .tsx/.jsx file (bounded); roots are computed after the walk
+  const MAX_TSX = 20_000;
+  const expoAppDirs = new Set(); // expo-router: an `app/` folder holding a `_layout` file
+  const jobManifests = []; // jobs: { manifest, scripts } with a job-shaped command
+  const envCandidates = new Map(); // services: env prefix -> { names, files, imports }
+  const importSpecs = new Set(); // every package imported anywhere, for the services' import markers
   let probeBytes = 0;
   let probeTruncated = false;
   const skippedRoutesFiles = []; // route trees at paths the engine would refuse
@@ -194,6 +207,75 @@ export function detect(root) {
     if (name.endsWith(".sql") && /(^|\/)migrations\//.test(rel + "/")) {
       const dir = posixify(dirname(rel));
       sqlDirs.set(dir, (sqlDirs.get(dir) ?? 0) + 1);
+    }
+    // components: every .tsx/.jsx file, counted under its nearest `src/`
+    // (or, without one, its top-level folder) — the roots to propose.
+    if (/\.(tsx|jsx)$/.test(name) && !/\.(test|spec|stories|story)\.[tj]sx$/.test(name) && tsxFiles.length < MAX_TSX) tsxFiles.push(rel);
+    // expo-router: a `_layout` file under an `app/` folder (Next.js's is `layout`).
+    if (/^_layout\.(tsx|jsx|ts|js)$/.test(name)) {
+      const segs = posixify(dirname(rel)).split("/");
+      const app = segs.lastIndexOf("app");
+      if (app !== -1) expoAppDirs.add(segs.slice(0, app + 1).join("/"));
+    }
+    // jobs: a manifest naming a process — a package script that runs a
+    // module (`python -m x`, `node x.mjs`), a Procfile line, a Railway file.
+    if (name === "package.json" || name === "Procfile" || name === "railway.toml" || name === "railway.json") {
+      let text = "";
+      try {
+        text = readFileSync(abs, "utf8");
+      } catch {
+        return;
+      }
+      const jobShaped = (cmd) => /(?:^|\s)python[0-9.]*\s+-m\s+[\w.]+/.test(cmd) || /(?:^|\s)(?:node|tsx|ts-node|bun|deno)\s+(?:-[^\s]+\s+)*[\w./-]+\.(?:m?[jt]s|cjs)\b/.test(cmd);
+      const notAJob = (n) => /^(dev|start|test|lint|build|typecheck|format|prepare|postinstall)$/.test(n) || /^(test|lint|build|check|typecheck|format)[:.-]/.test(n);
+      if (name === "package.json") {
+        try {
+          const scripts = JSON.parse(text).scripts ?? {};
+          const hits = Object.entries(scripts).filter(([n, c]) => !notAJob(n) && typeof c === "string" && jobShaped(c)).map(([n]) => n).sort();
+          if (hits.length) jobManifests.push({ manifest: rel, scripts: hits });
+        } catch {
+          /* not JSON: not a manifest */
+        }
+      } else if (name === "Procfile") {
+        const hits = text.split("\n").map((l) => /^\s*([A-Za-z_][\w-]*)\s*:\s*(.+)$/.exec(l)).filter((m) => m && m[1] !== "web" && jobShaped(m[2])).map((m) => m[1]);
+        if (hits.length) jobManifests.push({ manifest: rel, scripts: hits });
+      } else if (/startCommand/.test(text)) jobManifests.push({ manifest: rel, scripts: ["startCommand"] });
+    }
+    // services: environment variable NAMES read in source whose suffix says
+    // "a credential or an address", grouped by prefix — a mirror of the
+    // engine's services extractor (a test pins the two lists together), so
+    // the proposal and the warning agree. Names only, never a value.
+    if (/\.(py|ts|tsx|js|jsx|mjs|cjs)$/.test(name) && !/\.(test|spec|stories)\.[cm]?[jt]sx?$|\.d\.ts$/.test(name) && !/(^|\/)(test_[^/]*\.py|[^/]*_test\.py|conftest\.py)$/.test(rel)) {
+      let text = "";
+      try {
+        text = readFileSync(abs, "utf8");
+      } catch {
+        return;
+      }
+      for (const m of text.matchAll(/^\s*import\s+([\w.]+)\s*(?:#.*)?$/gm)) importSpecs.add(m[1]);
+      for (const m of text.matchAll(/^\s*from\s+([\w.]+)\s+import\b/gm)) importSpecs.add(m[1]);
+      for (const m of text.matchAll(/\bimport\s*(?:[^'"`;]*?\bfrom\s*)?(['"])([^'"]+)\1|\brequire\s*\(\s*(['"])([^'"]+)\3\s*\)/g)) importSpecs.add(m[2] ?? m[4]);
+      const NAME = "([A-Z][A-Z0-9_]{2,})";
+      const reads = [
+        new RegExp(`\\bos\\.environ(?:\\.get)?\\s*[\\[(]\\s*['"]${NAME}['"]`, "g"),
+        new RegExp(`\\bos\\.getenv\\s*\\(\\s*['"]${NAME}['"]`, "g"),
+        new RegExp(`\\.get\\s*\\(\\s*['"]${NAME}['"]`, "g"),
+        new RegExp(`\\bprocess\\.env(?:\\.${NAME}|\\s*\\[\\s*['"]${NAME}['"])`, "g"),
+        new RegExp(`\\bimport\\.meta\\.env(?:\\.${NAME}|\\s*\\[\\s*['"]${NAME}['"])`, "g"),
+        new RegExp(`\\bDeno\\.env\\.get\\s*\\(\\s*['"]${NAME}['"]`, "g"),
+      ];
+      for (const re of reads) {
+        for (const m of text.matchAll(re)) {
+          const envName = m[1] ?? m[2];
+          if (!SERVICE_SUFFIXES.some((suf) => envName.endsWith(suf))) continue;
+          const prefix = envName.replace(/^(NEXT_PUBLIC_|VITE_|EXPO_PUBLIC_|REACT_APP_|PUBLIC_)/, "").split("_")[0];
+          if (!prefix || SERVICE_IGNORE.includes(prefix)) continue;
+          const c = envCandidates.get(prefix) ?? { names: new Set(), files: new Set() };
+          c.names.add(envName);
+          c.files.add(rel);
+          envCandidates.set(prefix, c);
+        }
+      }
     }
     if (name.endsWith(".py")) {
       let text = "";
@@ -307,8 +389,61 @@ export function detect(root) {
     proposals.push({ name: "react-router", evidence: ev, options: { routesFile: routesFiles[0] ?? posixify(join(rrDir, "src/routes.tsx")) } });
   }
 
+  // ZDD 2.1's opt-ins (CAS-97). Each is proposed on its own evidence; an
+  // adopter who says no to one sees nothing change.
+  // A component root is the file's nearest `src/`; without one, the nearest
+  // folder holding a package.json (a workspace app); without that, the
+  // top-level folder (or the repo root for a root-level file).
+  const packageDirs = packageJsons.map((rel) => posixify(dirname(rel))).sort((a, b) => b.length - a.length);
+  const tsxDirs = new Map();
+  for (const rel of tsxFiles) {
+    const segs = rel.split("/");
+    const src = segs.lastIndexOf("src");
+    let root;
+    if (src !== -1) root = segs.slice(0, src + 1).join("/");
+    else root = packageDirs.find((d) => rel.startsWith(`${d}/`)) ?? (segs.length > 1 ? segs[0] : ".");
+    tsxDirs.set(root, (tsxDirs.get(root) ?? 0) + 1);
+  }
+  if (tsxDirs.size) {
+    const dirs = [...tsxDirs.keys()].sort();
+    proposals.push({
+      name: "components",
+      evidence: dirs.map((d) => `${tsxDirs.get(d)} .tsx/.jsx file${tsxDirs.get(d) === 1 ? "" : "s"} under \`${d}\``),
+      options: { roots: dirs },
+    });
+  }
+  const expoDirs = [...expoAppDirs].sort();
+  if (expoDirs.length) {
+    proposals.push({
+      name: "expo-router",
+      evidence: [`Expo Router tree at \`${expoDirs[0]}\` (a \`_layout\` file)${expoDirs.length > 1 ? ` — also ${expoDirs.slice(1).map((d) => `\`${d}\``).join(", ")}; one appDir per extractor, confirm which` : ""}`],
+      options: { appDir: expoDirs[0] },
+    });
+  }
+  if (jobManifests.length) {
+    jobManifests.sort((a, b) => (a.manifest < b.manifest ? -1 : 1));
+    proposals.push({
+      name: "jobs",
+      evidence: jobManifests.map((m) => `\`${m.manifest}\` runs a process: ${m.scripts.map((s) => `\`${s}\``).join(", ")}`).concat(["the mode (worker or scheduled) is never guessed: a committed railway.toml/json states it, else set extractorOptions.jobs.modes after bootstrap — lint names the ones left unknown"]),
+      options: {},
+    });
+  }
+  if (envCandidates.size) {
+    const services = [];
+    const evidence = [];
+    for (const [prefix, c] of [...envCandidates].sort(([a], [b]) => (a < b ? -1 : 1))) {
+      const imports = [...importSpecs].filter((spec) => spec.toLowerCase().replace(/^@/, "").split(/[/.]/)[0].replace(/[-_]/g, "").includes(prefix.toLowerCase().replace(/[-_]/g, ""))).sort();
+      const entry = { name: prefix.charAt(0) + prefix.slice(1).toLowerCase(), env: [`${prefix}_`] };
+      if (imports.length) entry.imports = imports;
+      services.push(entry);
+      evidence.push(`\`${[...c.names].sort().join("`, `")}\` read in ${[...c.files].sort().map((f) => `\`${f}\``).join(", ")}${imports.length ? `; imports ${imports.map((i) => `\`${i}\``).join(", ")}` : ""} → service "${entry.name}"`);
+    }
+    evidence.push("names are guessed from the env prefix — confirm or rename each; a prefix that is not a service goes in `ignore`");
+    proposals.push({ name: "services", evidence, options: { services } });
+  }
+
   const apps = [];
-  if (deps.expo || deps["expo-router"] || nestedDeps.has("expo") || nestedDeps.has("expo-router")) apps.push({ name: "Mobile (Expo)", evidence: "`expo` in package.json", extractor: "expo-router (not yet shipped — the map carries the surfaces)" });
+  if (deps.expo || deps["expo-router"] || nestedDeps.has("expo") || nestedDeps.has("expo-router") || expoDirs.length) apps.push({ name: "Mobile (Expo)", evidence: expoDirs.length ? `Expo Router tree at \`${expoDirs[0]}\`` : "`expo` in package.json", extractor: expoDirs.length ? "expo-router (proposed above)" : "expo-router — switched on by an `app/` folder with a `_layout` file (ZDD 2.1, early); map-only until then" });
   if (routesFiles.length || reactRouterDep || skippedRoutesFiles.length) apps.push({ name: "Web (React)", evidence: routesFiles.length ? `route tree in \`${routesFiles[0]}\`` : reactRouterDep ? "`react-router` in package.json" : `route tree at a refused path (\`${skippedRoutesFiles[0]}\`)`, extractor: "react-router (proposed above)" });
 
   const mode = sourceFiles === 0 && !pkg ? "greenfield" : "existing";
@@ -327,6 +462,9 @@ const STACK_RULES = [
   { match: /fastapi/i, extractor: "fastapi", options: (path) => ({ roots: [path || "api"] }) },
   { match: /supabase|postgres/i, extractor: "supabase", options: (path) => ({ migrationNamespaces: [{ name: "db", dir: path || "supabase/migrations" }] }) },
   { match: /next(\.js)?/i, extractor: "nextjs", options: (path) => ({ appDir: path || "src/app", apiPrefix: "/api" }) },
+  // An EXPLICIT Expo Router entry selects the extractor (at its future app
+  // folder); a bare "Expo" is the Application alone.
+  { match: /expo.?router/i, extractor: "expo-router", options: (path) => ({ appDir: path || "app" }), app: "Mobile (Expo)" },
   { match: /expo|react.?native/i, app: "Mobile (Expo)" },
   // Only an EXPLICIT React Router entry selects the extractor (at its future
   // routes file) — "React web", "Vite", "web" could be Vue, Svelte or another

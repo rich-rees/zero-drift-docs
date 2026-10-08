@@ -108,7 +108,8 @@ test("detect: Next.js App Router + middleware + migrations (the engine's Next.js
   const repo = fresh("detect-next", join(ENGINE_FIXTURES, "fixture"));
   rmSync(join(repo, "zdd"), { recursive: true });
   const json = JSON.parse(bootstrap(repo, ["detect", "--json"]));
-  assert.deepEqual(json.proposals.map((p) => p.name), ["supabase", "nextjs"]);
+  assert.deepEqual(json.proposals.map((p) => p.name), ["supabase", "nextjs", "components"], "ZDD 2.1: the .tsx files under src propose the components extractor too");
+  assert.deepEqual(json.proposals[2].options, { roots: ["src"] });
   assert.deepEqual(json.proposals[0].options.migrationNamespaces, [{ name: "db", dir: "migrations" }]);
   assert.deepEqual(json.proposals[1].options, { appDir: "src/app", apiPrefix: "/api", middlewarePath: "src/middleware.ts" });
   assert.ok(json.proposals[1].evidence.some((e) => e.includes("App Router tree at `src/app`")));
@@ -123,7 +124,7 @@ test("detect: Next.js App Router + middleware + migrations (the engine's Next.js
   assert.deepEqual(j2.proposals[1].options, { routesFile: "src/routes.tsx" });
   assert.deepEqual(j2.apps.map((a) => a.name), ["Mobile (Expo)", "Web (React)"]);
   assert.match(j2.apps[1].extractor, /proposed above/);
-  assert.match(j2.apps[0].extractor, /not yet shipped/);
+  assert.match(j2.apps[0].extractor, /switched on by an `app\/` folder with a `_layout` file/);
 });
 
 test("detect: a React Router route tree in a workspace package (the engine's react-router fixture) — routes file as evidence, FastAPI beside it", () => {
@@ -133,8 +134,9 @@ test("detect: a React Router route tree in a workspace package (the engine's rea
   assert.match(text, /route tree declared in `apps\/web\/src\/routes\.tsx`/);
   assert.match(text, /`react-router` in `apps\/web\/package\.json` dependencies/, "the nested apps/web/package.json counts, and is named");
   const json = JSON.parse(bootstrap(repo, ["detect", "--json"]));
-  assert.deepEqual(json.proposals.map((p) => p.name), ["fastapi", "react-router"]);
+  assert.deepEqual(json.proposals.map((p) => p.name), ["fastapi", "react-router", "components"]);
   assert.deepEqual(json.proposals[1].options, { routesFile: "apps/web/src/routes.tsx" });
+  assert.deepEqual(json.proposals[2].options, { roots: ["apps/web/src"] });
   assert.deepEqual(json.apps.map((a) => a.name), ["Web (React)"]);
   // apply with the defaults: the config drives the engine, and the surfaces land.
   bootstrap(repo, ["apply", `--answers=${answersFile("rr", { name: "RR" })}`]);

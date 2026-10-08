@@ -50,7 +50,17 @@ installed (used in step 4):
      configured *ahead* of the code (an extractor at its future path, or an
      Application concept in the map when no extractor exists yet — a React
      Router web app gets the `react-router` extractor at its routes file plus
-     its Application; Expo is map-only today).
+     its Application; an Expo app gets `expo-router` at its `app/` folder —
+     early, built against a fixture — or stays map-only until that folder
+     exists). Four more proposals carry their own evidence (ZDD 2.1):
+     `components` (the `.tsx`/`.jsx` roots), `expo-router` (an `app/` folder
+     with a `_layout` file), `jobs` (package scripts, a Procfile or a Railway
+     file that run a process) and `services` (environment names read in
+     source — `RESEND_API_KEY` — grouped by prefix into a service each, with
+     any import whose package matches). **Services are guessed by name:**
+     show each and ask the user to confirm or rename it, and to say which
+     prefixes are not a service (they go in `ignore`). Never add a vendor
+     the evidence did not show.
 - **GREENFIELD** — no source to read. Grill for the intended stack: what
   serves the API, what holds the data, what the apps are (web, mobile), and
   where each will live. Every part maps to an extractor at its stated future
