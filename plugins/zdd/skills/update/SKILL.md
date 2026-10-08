@@ -38,12 +38,12 @@ Run this as the definition of done for every unit of work — the spoken form is
    pattern or a copied precedent worth a blessing.
 3. **Run the deriver.** Regenerates the codebase metadata from source:
    ```
-   npx -y @rich-rees/zdd-engine@1.3.1 derive
+   npx -y @rich-rees/zdd-engine@2.0.0 derive
    ```
 4. **Run the renderer.** Rebuilds the graph artifact (`zdd/graph.json`), the
    agent index, the ADR index, the blessing index, and the human index:
    ```
-   npx -y @rich-rees/zdd-engine@1.3.1 render
+   npx -y @rich-rees/zdd-engine@2.0.0 render
    ```
 5. **Lint the stores.** Supersession symmetry, blessing citations and every
    blessing's trigger question (blocking); a blessing with no reason or over
@@ -60,7 +60,7 @@ Run this as the definition of done for every unit of work — the spoken form is
      record from one slice, move a double claim to one owner, or allow-list
      genuine plumbing.
    ```
-   npx -y @rich-rees/zdd-engine@1.3.1 lint
+   npx -y @rich-rees/zdd-engine@2.0.0 lint
    ```
 6. **Commit all of it in the PR.** Code and docs merge atomically; the doc delta
    is reviewed alongside the code delta. **This commit carries the plan file's
