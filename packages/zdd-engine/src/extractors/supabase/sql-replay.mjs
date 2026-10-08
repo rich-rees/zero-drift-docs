@@ -279,8 +279,11 @@ export function replayMigrations(files) {
 
       let m;
       // CREATE TABLE
-      if ((m = /^create\s+table\s+(?:if\s+not\s+exists\s+)?([\w".]+)/i.exec(sql))) {
-        const name = foldIdent(m[1]);
+      if ((m = /^create\s+table\s+(if\s+not\s+exists\s+)?([\w".]+)/i.exec(sql))) {
+        const name = foldIdent(m[2]);
+        // IF NOT EXISTS over a table that exists, in either spelling, is a
+        // no-op in Postgres: the first table and its name stay (CR-001).
+        if (m[1] && tables.has(tableKey(name))) continue;
         const paren = parenBody(sql, m[0].length);
         if (!paren) {
           skipped.push({ file: file.name, statement: head });
