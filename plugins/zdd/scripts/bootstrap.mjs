@@ -1461,8 +1461,13 @@ const ZDD_MENTION = /\bZDD\b|zero[- ]drift|\bzdd\/|zdd-engine|agent-index|blessi
 const talksZdd = (heading, own) => new RegExp(ZDD_MENTION.source, "i").test(heading) || ZDD_VERB.test(own) || (own.match(ZDD_MENTION) ?? []).length >= 2;
 export function findDuplicates(text) {
   const lines = text.split(/\r?\n/);
+  // Only beside exactly one well-formed block (CR-002): with no block nothing
+  // covers the section, and with a lone, doubled or reversed marker the
+  // refresh is refused, so the block cannot be said to carry anything.
+  if (text.split(SNIPPET_BEGIN).length !== 2 || text.split(SNIPPET_END).length !== 2) return [];
   const b = lines.findIndex((l) => l.trimEnd() === SNIPPET_BEGIN);
   const e = lines.findIndex((l) => l.trimEnd() === SNIPPET_END);
+  if (b === -1 || e === -1 || b > e) return [];
   let fence = false;
   const heads = [];
   lines.forEach((l, i) => {
@@ -1493,11 +1498,19 @@ export function findDuplicates(text) {
   }
   return out;
 }
+// A duplicate's id is a hash of its file and its exact text (CR-014): the
+// user approves a section as the plan showed it, and a section edited since —
+// or a different one now at that position — no longer answers to the id.
 function findAllDuplicates(ledger) {
   const all = [];
   for (const file of ["CLAUDE.md", "AGENTS.md"]) {
     if (!ledger.exists(file)) continue;
-    for (const d of findDuplicates(ledger.read(file))) all.push({ id: all.length + 1, file, ...d });
+    const text = ledger.read(file);
+    const lines = text.split(/\r?\n/);
+    for (const d of findDuplicates(text)) {
+      const id = createHash("sha256").update(`${file}\0${lines.slice(d.from - 1, d.to).join("\n")}`).digest("hex").slice(0, 8);
+      all.push({ id, file, ...d });
+    }
   }
   return all;
 }
@@ -1514,9 +1527,9 @@ function dropSections(ledger, chosen) {
 }
 function parseDrop(drop) {
   if (drop === null || drop === undefined || drop === false) return [];
-  const ids = String(drop).split(",").map((s) => s.trim());
-  if (!ids.every((s) => /^[1-9]\d{0,3}$/.test(s))) throw new Error("--drop takes duplicate ids from upgrade --plan, comma-separated (e.g. --drop=1,3)");
-  return [...new Set(ids.map(Number))];
+  const ids = String(drop).split(",").map((s) => s.trim().toLowerCase());
+  if (!ids.every((s) => /^[0-9a-f]{8}$/.test(s))) throw new Error("--drop takes the ids upgrade --plan printed (8 hex characters each, comma-separated)");
+  return [...new Set(ids)];
 }
 
 // ---------------------------------------------------------------------------

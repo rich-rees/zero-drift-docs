@@ -82,8 +82,10 @@ The step is complete when the user has answered all three.
 node "$PLUGIN/scripts/bootstrap.mjs" upgrade [--lock] [--drop=<ids>]
 ```
 
-`--lock` only on a yes to question 2; `--drop=1,3` only with the ids the user
-chose. Relay the ledger verbatim. Its notes match the plan's.
+`--lock` only on a yes to question 2; `--drop=<id>,<id>` only with the ids
+the plan printed for the sections the user chose (each id is a hash of the
+section's text: if the section changed since the plan, the run refuses — show
+the plan again). Relay the ledger verbatim. Its notes match the plan's.
 
 ## Step 4 — the questions the notes raise
 
