@@ -4,7 +4,7 @@ A documentation architecture for repos built by **human + agent pairs**. ZDD kee
 seven documentation artifacts *at most one unit of work behind the code* — and, with
 CI, makes drift in the machine-generated ones **un-mergeable**.
 
-> **Status: 1.3.1.** The plugin installs in Claude Code
+> **Status: 2.0.0.** The plugin installs in Claude Code
 > and in Codex from this one repo; `bootstrap` detects your stack (or grills
 > for it on a greenfield repo), proposes extractors with evidence, and *writes*
 > the opt-ins; the engine (`packages/zdd-engine`, npm `@rich-rees/zdd-engine`)
@@ -18,7 +18,9 @@ coding agent — read the glossary and decisions before you build, curate and
 regenerate the docs before you finish. It is only truly *zero*-drift on the
 runbook's defaults, which include a CI check that refuses to merge stale
 generated artifacts. Everything else in this repo exists to make those two
-things cheap and the defaults the easy path.
+things cheap and the defaults the easy path. Between them sits one short step,
+**choose patterns**: once the design is settled and before any code, decide
+which blessed pattern each piece of work copies, and write the choice down.
 
 ### A knowing tool, not a quality tool
 
@@ -44,10 +46,11 @@ each what it needs, off **seven artifacts** — the design test for every fact:
 Four are **curated** (they can rot, so a per-PR ritual + CI watch them) and three are
 **generated** (rot-proof by construction, never hand-edited). The count is by
 *role*, not by file: the generated half also lands on disk as `zdd/adr-index.md`
-(the ADRs' index, rendered) and `zdd/graph.json` (the machine form of the whole
-generated half — schema `zdd-graph/1` — from which the human index is rendered).
-Both are mandatory outputs of `render` and both are fenced, but they are forms
-of artifacts 5–7, not an eighth and ninth.
+(the ADRs' index, rendered), `zdd/blessing-index.md` (the map's blessings, one
+line each, by trigger question) and `zdd/graph.json` (the machine form of the
+whole generated half — schema `zdd-graph/1` — from which the human index is
+rendered). All are mandatory outputs of `render` and all are fenced, but they
+are forms of artifacts 5–7, not an eighth, ninth and tenth.
 
 | # | Artifact | Kind | Home |
 |---|----------|------|------|
@@ -70,11 +73,23 @@ blessing is the curated answer; the engine's lint refuses a blessing whose ADR
 has since been superseded, so a stale blessing cannot sit quietly (the format is
 in [`skills/authoring.md`](plugins/zdd/skills/authoring.md)).
 
-Two spoken verbs carry it, and both work with any coding agent: **"load ZDD"**
-before you work (the `load` skill, plus an auto-injected index) and **"update
+A blessing helps only if it is read before the code is written, so it has a
+moment of its own. **"Choose patterns"** runs once the design is settled: it
+reads the generated **blessing index** (every blessing's trigger question, one
+line each) whole, opens the blessings that match the work, checks the inventory
+for logic that already exists, and commits a **pattern plan** — per piece:
+follow a blessing, depart from one and why, none applies, or a new pattern to
+bless. **"Update ZDD"** then decides against the code as it merges: it mints
+the blessings that survived, records the rest in the commit message and
+deletes the plan; CI refuses a merge while the plan exists. The whole system,
+with examples, is in [docs/patterns.md](docs/patterns.md).
+
+Three spoken verbs carry it, and all work with any coding agent: **"load ZDD"**
+before you work (the `load` skill, plus an auto-injected index), **"choose
+patterns"** between the design and the code (the `patterns` skill) and **"update
 ZDD"** before you finish (the `update` skill). With the CI check in place the unit
 of work is the PR and stale generated artifacts cannot merge; without it, ZDD is
-the two verbs and the guarantee is a habit. A third hook guards the moment the
+the verbs and the guarantee is a habit. A third hook guards the moment the
 habit slips: when the agent declares done with code changed and nothing in
 `zdd/` moved, the **Stop prompt** asks once — run the ritual, or say that nothing
 met the ADR test ([decision 0008](docs/decisions/0008-stop-hook-prompts-the-curated-half.md)).
@@ -103,7 +118,7 @@ generated artifacts are the engine's: `derive` and `render` write them on every
 "update ZDD". Beyond those, only the `extractor` skill's scaffold writes to
 your repo, and only when you run it.)
 
-Contents: five skills (`bootstrap`, `load`, `update`, `grill`, `extractor`), a
+Contents: six skills (`bootstrap`, `load`, `patterns`, `update`, `grill`, `extractor`), a
 shared authoring guide, three hooks (auto-load, fence, Stop prompt), the runbook
 and scaffold scripts, the engine + composed
 extractors + viewers (`packages/zdd-engine`, also the npm package
@@ -178,8 +193,8 @@ codex plugin add zdd@zero-drift-docs
 
 Both hosts read the same marketplace file and the same plugin body — two
 manifests (`.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`) pointing at
-one set of skills and one `hooks.json`. After install the five skills are
-`bootstrap`, `load`, `update`, `grill` and `extractor` (Claude Code lists them as
+one set of skills and one `hooks.json`. After install the six skills are
+`bootstrap`, `load`, `patterns`, `update`, `grill` and `extractor` (Claude Code lists them as
 `/zdd:load` etc.); the SessionStart auto-load fires on the next session start
 in a repo that opted in. Install works from a private fork too — it uses your
 git credentials.
@@ -204,7 +219,7 @@ the curated artifacts stay one unit of work behind on the ritual (no script can
 judge "should this have been an ADR?"). The Stop prompt makes sure that judgment
 is *made and said* before the agent finishes; it cannot check the answer.
 
-### …without CI — the two verbs
+### …without CI — the verbs
 
 CI is a strong recommendation, not a hard dependency. Decline it and ZDD still
 runs: the agent loads before it works and updates before it finishes. You lose
@@ -220,7 +235,9 @@ falls behind the plugin; run **`bootstrap --upgrade`** to migrate config
 (`adapter` → `extractors`), rewrite the engine pins, the hook and the instruction
 block, write `docs/agents/domain.md` and the four plugin lines in
 `.claude/settings.json` when they are missing — every changed file named, curated
-artifacts untouched.
+artifacts untouched. Upgrading to 2.0: render and commit the new
+`zdd/blessing-index.md`, and give every blessing `lint` names a trigger question
+([docs/patterns.md](docs/patterns.md#adopting-it-in-an-existing-repo)).
 
 ## Repo layout
 
@@ -235,7 +252,7 @@ plugins/zdd/
     bootstrap.mjs                   # the runbook's writer: detect / apply / upgrade
     scaffold-extractor.mjs          # the extractor skill's writer: a local extractor's skeleton + config wiring
     inject-agent-index.mjs  fence.mjs  stop-check.mjs  check-skew.mjs  check-pocock.mjs
-  skills/{bootstrap,load,update,grill,extractor}/SKILL.md
+  skills/{bootstrap,load,patterns,update,grill,extractor}/SKILL.md
   skills/extractor/upstream.md      # the registry and fork tiers
   skills/authoring.md               # shared curated-docs authoring discipline
   templates/
@@ -250,6 +267,8 @@ packages/zdd-engine/                # deriver / renderer / checks + extractors +
   src/extractors/{supabase,nextjs,fastapi,react-router,generic}/   # input end: one per convention
   src/viewers/{cytoscape,minimal}/  # output end: human-index viewers over graph.json
   test/fixture*/                    # the miniature proving repos
+docs/patterns.md                    # blessings and "choose patterns", the whole system
+docs/decisions/                     # this repo's own decision record (ADR format)
 LICENSE   CONTRIBUTING.md   README.md
 ```
 
@@ -273,6 +292,7 @@ saying no to a row is a visible choice, not a fork.
 | Agent index, auto-injected | Skip; `CLAUDE.md` is already loaded. | Measure first, then decide. |
 | Human index / graph viewer | Skip. | Earns its place when someone must understand a system they didn't build. |
 | `update` finish ritual + Stop prompt | Keep the idea; the Stop prompt is the enforcement that matters. | Same. |
+| "choose patterns" + blessing index *(added in 2.0)* | Once you keep blessings: it is the step that reads them. | Comes with the blessings. |
 | `load` skill / auto-load hook | Redundant without the index. | Comes with the index. |
 | `bootstrap` runbook | Only if installing the rest. | Yes — it's what makes adoption survivable. |
 | `grill` | Optional; plan mode with a good prompt gets most of it. | Useful for greenfield design sessions. |
@@ -352,6 +372,19 @@ saying no to a row is a visible choice, not a fork.
       Also fixes the ADR index cutting a markdown link at the length cap
       *(engine + plugin 1.3.1, CAS-93;
       [decision 0014](docs/decisions/0014-a-zdd-release-pins-and-brings-in-one-pocock-release.md))*.
+- [x] **2.0.0** — "choose patterns": blessings are read before building.
+      A third verb and skill (`patterns`) between the design and the code; a
+      generated blessing index (one line per blessing, by trigger question,
+      app-level first); a committed pattern plan that `update` reconciles
+      against the final diff, minting the blessings that survived and
+      recording the rest in the commit message; CI's `lint --merge` refuses
+      a merge while the plan exists. Lint now fails a blessing with no
+      trigger question, and warns on one with no reason or over 300
+      characters; an ADR is encouraged, no longer required. Also fixes map
+      links to a bracketed path (a Next.js route-grouped layout such as
+      `(app)--_layout.json`), which were dropped silently *(engine + plugin
+      2.0.0, CAS-96, with CAS-94's fix;
+      [decision 0015](docs/decisions/0015-choose-patterns-blessings-are-read-before-building.md))*.
 - [ ] Next: an `expo-router` extractor on its first real adoption; a second
       viewer.
 
@@ -408,6 +441,18 @@ warning can say "behind".
   declares. An adopter's `render` bytes change only where an index line was
   cut inside a link. From here the Pocock tag in `pocock.json` moves only
   with a ZDD release.
+- **`2.0.0` — choose patterns.** A major, for two reasons decision 0002 names:
+  a new *mandatory* generated file (`zdd/blessing-index.md` — `render --check`
+  fails until it is rendered and committed), and a new hard failure in `lint`
+  (a blessing that does not open with its trigger question). The CI template's
+  lint step becomes `lint --merge`, and `--upgrade` migrates an owned
+  workflow. New config keys `paths.blessingIndex` and `paths.patternsPlan`
+  are additive. The agent index's reading-path footer changes, so every
+  adopter's agent index gains two lines on the pin bump. **Maps that already
+  link a bracketed path** (`[x](../../metadata/surface/(app)--_layout.json)`,
+  or the `<…>` spelling) **gain an edge** — and the record becomes claimed,
+  watched by freshness and a pointer candidate — where 1.x dropped the link
+  without a word.
 
 ## Contributing
 

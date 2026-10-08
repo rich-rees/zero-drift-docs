@@ -74,7 +74,9 @@ skill) reads the generated **blessing index** — one line per blessing, its
 trigger question and its reason — before any code is written, and opens in
 full only the blessings whose question matches the work. Blessings are
 proposed there and **minted at "update ZDD"**, against the code as it merges.
-So the shape below is what makes a blessing findable, not just tidy.
+So the shape below is what makes a blessing findable, not just tidy. The
+whole lifecycle, with examples, is in
+[docs/patterns.md](https://github.com/rich-rees/zero-drift-docs/blob/main/docs/patterns.md).
 
 Format (one list item per blessing, under the heading):
 
