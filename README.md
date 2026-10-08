@@ -125,6 +125,23 @@ extractors + viewers (`packages/zdd-engine`, also the npm package
 `@rich-rees/zdd-engine`), and templates (instruction block, CI workflow, pre-push
 hook, config schema + example, the seed ADR-0001, and the extractor scaffold).
 
+### What ZDD reads, per stack
+
+| Layer | Extractor | Reads |
+|---|---|---|
+| Database | `supabase` | SQL migrations: tables, functions, triggers, buckets |
+| API | `fastapi` | FastAPI decorators: routes, handlers, the tables a handler names |
+| API + pages | `nextjs` | the App Router tree: route handlers, pages, layouts, middleware auth, `fetch('/api/…')` and `.from('x')` refs |
+| Pages | `react-router` | a route tree declared in code: one surface per screen, its guards, the API calls one hop away |
+| Native screens | `expo-router` *(early)* | the Expo Router folder tree: screens, layouts, `[id]` segments, platform pairs — namespaced so a native `/jobs` and a web `/jobs` are two surfaces |
+| Components | `components` | React and React Native: exported, capitalised, returning JSX; props as written; **used by** / **uses** / **calls**; shared vs page-private |
+| Background work | `jobs` | package scripts, a Procfile and Railway files that run a process; `reads` / `writes` from the tables a module names; the mode never guessed |
+| External services | `services` | declared markers — a package import, an env-name prefix (names only, never values); **depends on** from the files that use them; undeclared candidates warned about on every derive |
+| Realtime | *(in `react-router` / `nextjs`)* | a page's Supabase Realtime subscription — `.on('postgres_changes', { table })` or a helper you name — as a **subscribes** edge |
+
+Vue, Svelte and Angular are not read: write a local extractor with the
+`extractor` skill (below) and, once it is proven on a real repo, lift it in.
+
 ### Your stack isn't read yet — add your own extractor
 
 The built-in extractors read Supabase/Postgres migrations, the Next.js App
@@ -264,7 +281,7 @@ plugins/zdd/
   test/                             # seam 2: the runbook and hooks observed as files + processes
 packages/zdd-engine/                # deriver / renderer / checks + extractors + viewers
   bin/zdd-engine.mjs                # the CLI (derive / render / lint / freshness)
-  src/extractors/{supabase,nextjs,fastapi,react-router,generic}/   # input end: one per convention
+  src/extractors/{supabase,nextjs,fastapi,react-router,components,expo-router,jobs,services,generic}/   # input end: one per convention
   src/viewers/{cytoscape,minimal}/  # output end: human-index viewers over graph.json
   test/fixture*/                    # the miniature proving repos
 docs/patterns.md                    # blessings and "choose patterns", the whole system
@@ -385,8 +402,20 @@ saying no to a row is a visible choice, not a fork.
       `(app)--_layout.json`), which were dropped silently *(engine + plugin
       2.0.0, CAS-96, with CAS-94's fix;
       [decision 0015](docs/decisions/0015-choose-patterns-blessings-are-read-before-building.md))*.
-- [ ] Next: an `expo-router` extractor on its first real adoption; a second
-      viewer.
+- [x] **2.1.0** — the front end mapped truthfully, and the back end's
+      background work: a variable path segment matches a route parameter and
+      never a fixed word (the `/${plural}` → `/health` bug), with literal
+      unions expanded; typed edges (`facts.edges`, a `verb` on graph edges);
+      four opt-in extractors — `components` (React and React Native),
+      `expo-router` (early), `jobs` (workers and scheduled jobs from
+      manifests), `services` (declared markers, env names only); realtime
+      `subscribes` edges; app membership from the map's Application pages,
+      a UI Components band, component fan-in thresholding and an app filter
+      in the viewer; `claims.strictKinds`; the plugin's session-start
+      release check *(engine + plugin 2.1.0, CAS-97; decisions
+      [0016](docs/decisions/0016-typed-edges-are-additive.md)–[0020](docs/decisions/0020-jobs-from-manifests-services-from-declared-markers.md))*.
+- [ ] Next: a second viewer; Vue / Svelte / Angular extractors on their first
+      real adoption.
 
 ## Versioning
 
@@ -453,6 +482,20 @@ warning can say "behind".
   or the `<…>` spelling) **gain an edge** — and the record becomes claimed,
   watched by freshness and a pointer candidate — where 1.x dropped the link
   without a word.
+
+- **`2.1.0` — the front end, jobs and services.** A minor: everything is
+  additive and opt-in, with one correction every adopter gets — a `*` in a
+  scanned url no longer matches a fixed route segment
+  ([decision 0019](docs/decisions/0019-a-variable-segment-matches-a-parameter-never-a-fixed-word.md)),
+  so refs drop wherever a wildcard had reached `/health`; a `derive --check`
+  diff on the pin bump, and lint now names the calls it could not place.
+  Records gain `facts.edges` and graph edges gain `verb` only where an
+  extractor emits one; the viewer bundle gains `app` and `layer` on every
+  node and a `belongsTo` edge per record under an Application page, so the
+  human index re-renders on the bump. New config keys (`claims.strictKinds`,
+  the four extractors' options, `react-router.subscribeCalls`,
+  `nextjs.refs.subscribeCalls`, `viewer.componentFanIn`) are additive. The
+  extractor contract gains an optional `warnings` channel.
 
 ## Contributing
 
