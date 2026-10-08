@@ -141,7 +141,7 @@ test("upgrade moves our lock's ref to this release, keeps its other fields and e
   assert.deepEqual(Object.keys(after.extraKnownMarketplaces), ["other", "zero-drift-docs"]);
   assert.equal(after.extraKnownMarketplaces["zero-drift-docs"].source.ref, `v${PLUGIN_VERSION}`);
   assert.equal(after.extraKnownMarketplaces["zero-drift-docs"].autoUpdate, false);
-  assert.ok(json.notes.some((n) => new RegExp(`lock moved v1\.3\.1 → v${PLUGIN_VERSION.replace(/\./g, "\.")}`).test(n)), json.notes.join("\n"));
+  assert.ok(json.notes.some((n) => n.includes(`lock moved v1.3.1 → v${PLUGIN_VERSION}.`)), json.notes.join("\n"));
   assert.ok(json.notes.some((n) => /after this PR merges.*next session/i.test(n)), json.notes.join("\n"));
   const again = JSON.parse(bootstrap(repo, ["upgrade", "--json"]));
   assert.ok(!again.wrote.includes(".claude/settings.json"), "idempotent");
@@ -182,5 +182,5 @@ test("writer binds to reader: a freshly bootstrapped repo's lock is what the rel
   machine(`v${PLUGIN_VERSION}`, PLUGIN_VERSION);
   assert.equal(check(), "", "silent at the release bootstrap locked");
   machine("v1.3.1", "1.3.1");
-  assert.match(check(), new RegExp(`^ZDD release mismatch: the catalogue on this machine is at v1\.3\.1, this repo locks v${PLUGIN_VERSION.replace(/\./g, "\.")}`), "loud at a stale machine");
+  assert.ok(check().startsWith(`ZDD release mismatch: the catalogue on this machine is at v1.3.1, this repo locks v${PLUGIN_VERSION};`), "loud at a stale machine");
 });
