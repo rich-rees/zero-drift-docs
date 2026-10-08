@@ -315,11 +315,22 @@ export function isUnder(child, parent) {
 // present — it is the writer. HOME is overridable so tests can stage a fake
 // install; the walk is bounded so a huge plugin cache cannot stall a session.
 // ---------------------------------------------------------------------------
-export function pocockLocations(root, home = process.env.ZDD_HOME || homedir()) {
+// Claude Code's config folder (2.2.1, CAS-101 smoke): an explicit home (the
+// --home flag or ZDD_HOME, for tests) wins; else CLAUDE_CONFIG_DIR when set —
+// Claude Code keeps its plugins and user settings there — else ~/.claude.
+export function claudeDir(home) {
+  const explicit = home || process.env.ZDD_HOME;
+  if (explicit) return join(explicit, ".claude");
+  if (process.env.CLAUDE_CONFIG_DIR) return resolve(process.env.CLAUDE_CONFIG_DIR);
+  return join(homedir(), ".claude");
+}
+
+export function pocockLocations(root, home) {
+  const claude = claudeDir(home);
   return {
-    pluginCache: join(home, ".claude", "plugins", "cache"),
-    userSkill: join(home, ".claude", "skills", "domain-modeling", "SKILL.md"),
-    codexSkill: join(home, ".codex", "skills", "domain-modeling", "SKILL.md"),
+    pluginCache: join(claude, "plugins", "cache"),
+    userSkill: join(claude, "skills", "domain-modeling", "SKILL.md"),
+    codexSkill: join(home || process.env.ZDD_HOME || homedir(), ".codex", "skills", "domain-modeling", "SKILL.md"),
     projectSkill: join(root, ".claude", "skills", "domain-modeling", "SKILL.md"),
   };
 }
@@ -391,7 +402,7 @@ export function pluginSettings() {
 }
 
 const settingsSources = (root, home) => [
-  { source: "user", label: "~/.claude/settings.json, user settings", path: join(home, ".claude", "settings.json") },
+  { source: "user", label: "~/.claude/settings.json, user settings", path: join(claudeDir(home), "settings.json") },
   { source: "project", label: ".claude/settings.json, project settings", path: join(root, ".claude", "settings.json") },
   { source: "local", label: ".claude/settings.local.json, local settings", path: join(root, ".claude", "settings.local.json") },
 ];
@@ -409,7 +420,7 @@ function readJsonObject(path) {
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}@[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 function installedVersions(home) {
   const out = new Map();
-  const j = readJsonObject(join(home, ".claude", "plugins", "installed_plugins.json"));
+  const j = readJsonObject(join(claudeDir(home), "plugins", "installed_plugins.json"));
   if (!j || !isObject(j.plugins)) return out;
   for (const [id, rows] of Object.entries(j.plugins)) {
     if (!SAFE_ID.test(id) || !Array.isArray(rows)) continue;
@@ -418,7 +429,7 @@ function installedVersions(home) {
   }
   return out;
 }
-export function pocockCopies(root, home = process.env.ZDD_HOME || homedir()) {
+export function pocockCopies(root, home) {
   const pin = pocockPin();
   const ours = `${pin.plugin}@${pin.marketplace}`;
   const effective = new Map(); // id -> { value, source, label } from the highest-precedence file that names it

@@ -127,3 +127,19 @@ test("--json lists every other copy with id, version and source, and whether our
   assert.equal(j.pinned.enabled, true, "absent from every file means on (defaultEnabled)");
   assert.deepEqual(j.others, [{ id: "mattpocock-skills@claude-plugins-official", version: "1.2.3", source: "user" }]);
 });
+
+test("the Pocock check reads user settings and installs from CLAUDE_CONFIG_DIR when it is set (2.2.1, CAS-101 smoke)", () => {
+  reset();
+  settings("user", { enabledPlugins: { "mattpocock-skills@claude-plugins-official": true } });
+  // A version only this profile holds, so the line proves which folder was read.
+  installed({ version: 2, plugins: { "mattpocock-skills@claude-plugins-official": [{ scope: "user", version: "7.7.7" }], [OURS]: [{ scope: "user", version: POCOCK.version }] } });
+  try {
+    const env = { ...process.env, CLAUDE_CONFIG_DIR: join(home, ".claude") };
+    delete env.ZDD_HOME;
+    const r = spawnSync(process.execPath, [CHECK, `--root=${repo}`], { encoding: "utf8", env });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /mattpocock-skills@claude-plugins-official 7\.7\.7 \(enabled in ~\/\.claude\/settings\.json, user settings\)/, r.stdout);
+  } finally {
+    reset();
+  }
+});

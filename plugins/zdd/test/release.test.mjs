@@ -256,3 +256,32 @@ test("a local declaration with no ref is still stray; an oversized user settings
     userDecl(null);
   }
 });
+
+// 2.2.1 (CAS-101 smoke): Claude Code keeps its plugins and user settings in
+// CLAUDE_CONFIG_DIR when that is set; both checks read the folder Claude Code
+// reads, so a custom profile never shows a false mismatch.
+const runBare = (script, extraEnv) => {
+  const env = { ...process.env, CLAUDECODE: "1", ...extraEnv };
+  delete env.ZDD_HOME;
+  const r = spawnSync(process.execPath, [script, `--root=${repo}`], { encoding: "utf8", env });
+  assert.equal(r.status, 0, r.stderr);
+  return r.stdout;
+};
+
+test("CLAUDE_CONFIG_DIR is where the check reads the catalogue, the installs and the user settings (2.2.1)", () => {
+  lock("v2.1.0");
+  catalogue("v2.1.0", "1.3.1");
+  installed("2.1.0", "1.3.1");
+  const profile = join(home, ".claude");
+  assert.equal(runBare(CHECK, { CLAUDE_CONFIG_DIR: profile }), "", "silent: the profile matches the lock");
+  installed("2.0.0", "1.3.1");
+  assert.match(runBare(CHECK, { CLAUDE_CONFIG_DIR: profile }), /zdd@zero-drift-docs expected 2\.1\.0, found 2\.0\.0/);
+  // A stray declaration in the profile's own settings.json is found there too.
+  catalogue("v1.3.1", "1.3.1");
+  userDecl("v1.3.1");
+  try {
+    assert.match(runBare(CHECK, { CLAUDE_CONFIG_DIR: profile }), /claude plugin marketplace remove zero-drift-docs --scope user/);
+  } finally {
+    userDecl(null);
+  }
+});

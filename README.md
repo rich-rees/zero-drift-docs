@@ -4,7 +4,7 @@ A documentation architecture for repos built by **human + agent pairs**. ZDD kee
 seven documentation artifacts *at most one unit of work behind the code* — and, with
 CI, makes drift in the machine-generated ones **un-mergeable**.
 
-> **Status: 2.2.0.** The plugin installs in Claude Code
+> **Status: 2.2.1.** The plugin installs in Claude Code
 > and in Codex from this one repo; `bootstrap` detects your stack (or grills
 > for it on a greenfield repo), proposes extractors with evidence, and *writes*
 > the opt-ins; the engine (`packages/zdd-engine`, npm `@rich-rees/zdd-engine`)
@@ -208,7 +208,7 @@ same in PowerShell, bash and zsh.
 from [the releases page](https://github.com/rich-rees/zero-drift-docs/releases)):
 
 ```
-claude plugin marketplace add rich-rees/zero-drift-docs@v2.2.0 --scope project
+claude plugin marketplace add rich-rees/zero-drift-docs@v2.2.1 --scope project
 claude plugin install zdd@zero-drift-docs --scope project
 ```
 
@@ -310,8 +310,8 @@ by hand once:
 
 1. In `.claude/settings.json`, set
    `extraKnownMarketplaces["zero-drift-docs"].source.ref` to the new tag
-   (`"v2.2.0"`). No lock there? Add the marketplace from the repo's folder with
-   `claude plugin marketplace add rich-rees/zero-drift-docs@v2.2.0 --scope project`.
+   (`"v2.2.1"`). No lock there? Add the marketplace from the repo's folder with
+   `claude plugin marketplace add rich-rees/zero-drift-docs@v2.2.1 --scope project`.
 2. Restart Claude Code. The session's first line names the commands that move
    your machine (on a machine where the marketplace was ever added without a
    scope, that includes `claude plugin marketplace remove zero-drift-docs
@@ -504,6 +504,8 @@ saying no to a row is a visible choice, not a fork.
       checklist backed by tests binding writers to readers *(plugin 2.2.0,
       CAS-101; decisions
       [0021](docs/decisions/0021-bootstrap-locks-the-release-by-default.md)–[0022](docs/decisions/0022-the-pin-move-route-removes-a-stray-declaration-first.md))*.
+- [x] **2.2.1** — the release and Pocock checks honour `CLAUDE_CONFIG_DIR`,
+      found by 2.2.0's live smoke *(plugin 2.2.1, CAS-101)*.
 - [ ] Next: a second viewer; Vue / Svelte / Angular extractors on their first
       real adoption.
 
@@ -605,6 +607,12 @@ warning can say "behind".
   about a dozen lines, rewritten between its markers on upgrade (a managed
   pre-push hook is re-pinned too, like the workflow). A repo before 2.2
   moves its lock by hand once (see [Upgrading](#upgrading)).
+
+- **`2.2.1` — the checks read the profile Claude Code reads.** A patch: the
+  session-start release check and the Pocock-copy check read Claude Code's
+  config folder from `CLAUDE_CONFIG_DIR` when it is set, instead of always
+  `~/.claude` — under a custom profile they reported a false mismatch every
+  session. No config, contract or artifact change; only the engine pin moves.
 
 ## Contributing
 
