@@ -1,6 +1,6 @@
 {
   "name": "zdd",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "displayName": "Zero-Drift Docs",
   "description": "Zero-Drift Docs: keep a repo's seven documentation artifacts at most one unit of work behind the code — glossary, ADRs, comments, semantic map, and generated metadata + indexes. Spoken verbs: \"load ZDD\" before you work, \"choose patterns\" before you code, \"update ZDD\" before you finish, \"upgrade ZDD\" to take a new release.",
   "author": {

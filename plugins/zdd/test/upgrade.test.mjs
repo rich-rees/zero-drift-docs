@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync, rmSync, mkdtempSync, cpSync, mkdirSync, readdirSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
-import { tmpdir } from "node:os";
+import { tmpdir, homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { UPGRADE_NOTES, newestTag } from "../scripts/bootstrap.mjs";
 
@@ -354,4 +354,32 @@ test("a planned id is bound to the section's text AND place: when an identical c
   // Another copy of A lands above everything: the planned place now holds a different section.
   writeFileSync(join(repo, "CLAUDE.md"), [...doc.slice(0, 2), "## Loading ZDD", "", 'Say "load ZDD".', "", ...doc.slice(2)].join("\n"));
   assert.match(fails(repo, ["upgrade", `--drop=${second.id}`]), new RegExp(`--drop: no duplicate ${second.id}`));
+});
+
+test("Claude Code's folders resolve in order: explicit home, ZDD_HOME, CLAUDE_CONFIG_DIR / CLAUDE_CODE_PLUGIN_CACHE_DIR, then ~/.claude (CR-205)", async () => {
+  const { claudeDir, pluginsDir } = await import("../scripts/lib/repo.mjs");
+  const keys = ["ZDD_HOME", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_PLUGIN_CACHE_DIR", "HOME", "USERPROFILE"];
+  const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+  const set = (vars) => {
+    for (const k of keys) delete process.env[k];
+    Object.assign(process.env, { HOME: join(scratch, "h"), USERPROFILE: join(scratch, "h") }, vars);
+  };
+  try {
+    const all = { ZDD_HOME: join(scratch, "z"), CLAUDE_CONFIG_DIR: join(scratch, "c"), CLAUDE_CODE_PLUGIN_CACHE_DIR: join(scratch, "p") };
+    set(all);
+    assert.equal(claudeDir(join(scratch, "e")), join(scratch, "e", ".claude"), "explicit home wins");
+    assert.equal(pluginsDir(join(scratch, "e")), join(scratch, "e", ".claude", "plugins"));
+    assert.equal(claudeDir(), join(scratch, "z", ".claude"), "then ZDD_HOME");
+    set({ CLAUDE_CONFIG_DIR: join(scratch, "c"), CLAUDE_CODE_PLUGIN_CACHE_DIR: join(scratch, "p") });
+    assert.equal(claudeDir(), resolve(join(scratch, "c")), "then CLAUDE_CONFIG_DIR");
+    assert.equal(pluginsDir(), resolve(join(scratch, "p")), "the plugins folder may move on its own");
+    set({ CLAUDE_CONFIG_DIR: join(scratch, "c") });
+    assert.equal(pluginsDir(), join(resolve(join(scratch, "c")), "plugins"), "else under the profile");
+    set({});
+    assert.equal(claudeDir(), join(homedir(), ".claude"), "else the home folder's .claude");
+    assert.equal(pluginsDir(), join(homedir(), ".claude", "plugins"));
+  } finally {
+    for (const k of keys) if (saved[k] === undefined) delete process.env[k];
+    else process.env[k] = saved[k];
+  }
 });

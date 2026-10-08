@@ -35,45 +35,21 @@
 // delimited so a quoted (non-ASCII) name cannot be misclassified (CR-005).
 
 import { execFileSync } from "node:child_process";
-import { readSync, openSync, closeSync } from "node:fs";
+import { openSync, closeSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join, resolve, relative, isAbsolute } from "node:path";
-import { readConfig, artifactPaths, adopterRoot, posixify, isUnder, samePath } from "./lib/repo.mjs";
+import { readConfig, artifactPaths, adopterRoot, posixify, isUnder, samePath, readHookInput, MAX_STDIN_BYTES } from "./lib/repo.mjs";
 
-export const MAX_STDIN_BYTES = 256 * 1024; // a Stop payload is a few hundred bytes; over this is not a payload
+export { MAX_STDIN_BYTES };
 export const DEADLINE_MS = 10_000; // hooks.json gives 15 s; leave the host a margin
 const MAX_SESSION_ID = 256;
 
 // The host's Stop payload, or null when there is none to read: a hook that
 // cannot see `stop_hook_active` or the session id has no way to promise it
 // will not trap the agent, so it stays silent rather than guess. Read up to
-// the cap and no further (CR-003).
-function readStdin() {
-  try {
-    const chunks = [];
-    let total = 0;
-    const buf = Buffer.alloc(16 * 1024);
-    for (;;) {
-      let n;
-      try {
-        n = readSync(0, buf, 0, buf.length, null);
-      } catch (e) {
-        if (e.code === "EAGAIN") continue;
-        if (e.code === "EOF") break;
-        throw e;
-      }
-      if (n === 0) break;
-      total += n;
-      if (total > MAX_STDIN_BYTES) return null;
-      chunks.push(Buffer.from(buf.subarray(0, n)));
-    }
-    const parsed = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
-}
+// the cap and no further (CR-003) — the reader the SessionStart hook shares.
+const readStdin = readHookInput;
 
 // One deadline for the whole run; each git call gets the remainder.
 export function gitRunner(deadlineAt = Date.now() + DEADLINE_MS) {
