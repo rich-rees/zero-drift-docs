@@ -1,6 +1,6 @@
 # Authoring the curated artifacts
 
-Shared reference for `update`, `bootstrap`, and `grill`. The *generated*
+Shared reference for `update`, `patterns`, `bootstrap`, and `grill`. The *generated*
 artifacts (metadata, the graph, the indexes) are the engine's job and CI-enforced. The *curated*
 ones — glossary, ADRs, comments, map — are judgment, and no script can gate them.
 This is the discipline for writing them well.
@@ -64,10 +64,19 @@ into a new truth. History doesn't lie; it accretes.
 The map says *where, what-connects, what-to-copy*; never what the code does.
 Groupings and non-textual edges are the first two. The third is the
 **blessing**: a one-line entry under a `# Blessings` heading in a concept,
-naming the **exemplar to copy** and the **pattern to refuse**, always citing the
-ADR that blessed it. Pattern frequency in code is never a verdict — the most
-common pattern is often the deprecated one — so a blessing is how the map
-outranks "copy the nearest example".
+naming the **exemplar to copy** and the **pattern to refuse**, with the reason.
+Pattern frequency in code is never a verdict — the most common pattern is
+often the deprecated one — so a blessing is how the map outranks "copy the
+nearest example".
+
+A blessing is read at a known moment: **"choose patterns"** (the `patterns`
+skill) reads the generated **blessing index** — one line per blessing, its
+trigger question and its reason — before any code is written, and opens in
+full only the blessings whose question matches the work. Blessings are
+proposed there and **minted at "update ZDD"**, against the code as it merges.
+So the shape below is what makes a blessing findable, not just tidy. The
+whole lifecycle, with examples, is in
+[docs/patterns.md](https://github.com/rich-rees/zero-drift-docs/blob/main/docs/patterns.md).
 
 Format (one list item per blessing, under the heading):
 
@@ -76,20 +85,39 @@ Format (one list item per blessing, under the heading):
 - Adding an endpoint here? Copy [POST /api/things](/metadata/route/things.json),
   per ADR-0012 — never inline the auth check.
 - Saving a graph? Go through the RPC, per ADR-0005 — never client-side diffing.
+- Naming a migration? Prefix it with the ticket id, because two branches
+  minting the same number merge without a conflict — never a bare sequence.
 ```
 
-- **Always cite the ADR.** A blessing with no decision behind it is an opinion;
-  `zdd-engine lint` warns on it. A blessing citing an ADR that has been
-  **fully superseded** (or that does not exist) **fails** the lint; one citing
-  an ADR superseded *in part* gets a warning to check the blessed pattern — a stale blessing
-  is worse than none, because it sends the agent to copy the refused pattern
-  with a citation attached. When an ADR is superseded, re-bless under the new
-  decision or drop the line, in the same unit of work.
+- **Open with the trigger question.** The first sentence is the question the
+  blessing answers, ending in `?` — "Adding an endpoint here?", "A status that
+  ends a record for good?". It is what the blessing index lists, so a
+  blessing without one is invisible to a session choosing patterns, and
+  `zdd-engine lint` **fails** it. Phrase it as the moment someone would reach
+  for the pattern, not as the pattern's name.
+- **Give the reason.** Cite the ADR that blessed it ("per ADR-0012"), or say
+  why inline ("because …"). Neither is a lint **warning**: a blessing with no
+  reason is an opinion. **An ADR is encouraged, not required** — cite one when
+  the pattern passes the three-part test above; a house convention often does
+  not, and forcing one breeds throwaway ADRs. A blessing citing an ADR that
+  has been **fully superseded** (or that does not exist) **fails** the lint;
+  one citing an ADR superseded *in part* gets a warning to check the blessed
+  pattern — a stale blessing is worse than none, because it sends the agent
+  to copy the refused pattern with a citation attached. When an ADR is
+  superseded, re-bless under the new decision or drop the line, in the same
+  unit of work.
+- **Keep it short.** Over 300 characters of visible text (link text counts,
+  link targets do not) is a lint **warning**. The question, the exemplar, the
+  refusal and the reason fit; the detail belongs in the ADR.
 - **Link the exemplar.** A metadata link (`/metadata/route/….json`) is what
   lets the freshness nudge notice when the blessed code changes; a bare path
   in backticks is fine for something the extractors do not inventory.
 - **Name the refusal.** "Copy X" alone is a pointer; "copy X, never Y" is the
   judgment the reader needs.
+- **App or feature.** A blessing that applies across an app (auth, data
+  access, styling) goes in the app's concept under `map/apps/`; the index
+  lists those first and a session reads all of them for an app it touches. A
+  blessing for one feature's shape goes in that feature's slice.
 
 ## Code comments
 

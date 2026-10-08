@@ -120,7 +120,11 @@ export function makeExtractorIo(repoRoot, label = "extractor", { maxEntries = IO
     }
     try {
       const opened = fstatSync(fd);
-      if (!opened.isFile() || opened.dev !== st.dev || opened.ino !== st.ino) return refuse("not-regular", "changed while being read — not read");
+      // A path stat on Windows can answer dev 0 where the handle reports the
+      // volume serial (seen when the volume query is denied), so dev is
+      // compared only when the path stat knows it; the file id always is.
+      const sameDev = st.dev === 0 || opened.dev === st.dev;
+      if (!opened.isFile() || !sameDev || opened.ino !== st.ino) return refuse("not-regular", "changed while being read — not read");
       if (opened.size > cap) return refuse("too-large", `is over ${cap} bytes — not read`);
       const buf = Buffer.alloc(cap + 1);
       let n = 0;
