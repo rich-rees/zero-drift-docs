@@ -32,7 +32,8 @@
 //
 // Known limit: this sees what is INSTALLED, not what the running session
 // loaded — after the commands it still says restart, and clears next
-// session. Silent when the repo locks nothing, or everything matches. Exit
+// session. Silent when the repo locks nothing, everything matches, or the
+// host is not Claude Code (Codex has no catalogue or installs). Exit
 // 0 always; every file is untrusted text, printed through `printable`.
 
 import { readFileSync, lstatSync } from "node:fs";
@@ -85,9 +86,15 @@ export function strayDeclarations(root, home) {
   });
 }
 
+// The lock, the catalogue and the installs are all Claude Code's. Codex shares
+// this hook file but has none of them, so there the check is silent
+// (CAS-101 CR-001). Claude Code sets CLAUDECODE in every hook and shell it
+// starts (verified on 2.1.295, even when the parent shell lacked it).
+const underClaudeCode = () => Boolean(process.env.CLAUDECODE);
+
 export function inspect(root, home = process.env.ZDD_HOME || homedir()) {
   const lock = lockedRef(root);
-  if (!lock) return { lock: null, mismatches: [] };
+  if (!lock || !underClaudeCode()) return { lock, mismatches: [] };
   const expectedZdd = lock.slice(1);
   const plugins = join(home, ".claude", "plugins");
 

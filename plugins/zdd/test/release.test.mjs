@@ -37,8 +37,13 @@ const installed = (zdd, pocock, projectPath = repo) => {
   const row = (v) => (v === null ? [] : [{ scope: "project", projectPath, version: v }]);
   writeFileSync(join(home, ".claude", "plugins", "installed_plugins.json"), JSON.stringify({ version: 2, plugins: { "zdd@zero-drift-docs": row(zdd), "mattpocock-skills@zero-drift-docs": row(pocock) } }));
 };
+// The check speaks only under Claude Code, which sets CLAUDECODE in its hooks
+// and shells (CAS-101 CR-001); `host` lets a test stand in for Codex.
 const run = (script = CHECK, ...args) => {
-  const r = spawnSync(process.execPath, [script, `--root=${repo}`, `--home=${home}`, ...args], { encoding: "utf8", env: { ...process.env, ZDD_HOME: home, CLAUDE_PROJECT_DIR: repo } });
+  const host = args[0] === "@codex" ? (args.shift(), {}) : { CLAUDECODE: "1" };
+  const env = { ...process.env, ZDD_HOME: home, CLAUDE_PROJECT_DIR: repo, ...host };
+  if (!host.CLAUDECODE) delete env.CLAUDECODE;
+  const r = spawnSync(process.execPath, [script, `--root=${repo}`, `--home=${home}`, ...args], { encoding: "utf8", env });
   assert.equal(r.status, 0, `exit ${r.status}: ${r.stderr}`);
   assert.equal(r.stderr, "");
   return r.stdout;
@@ -205,4 +210,13 @@ test("a malformed or oversized user settings file is no declaration", () => {
   } finally {
     userDecl(null);
   }
+});
+
+test("under Codex (no CLAUDECODE) the check is silent — Codex has no Claude catalogue or installs to compare, and the lock is Claude Code's (CR-001)", () => {
+  lock("v2.1.0");
+  catalogue(null);
+  rmSync(join(home, ".claude", "plugins", "installed_plugins.json"), { force: true });
+  assert.match(run(), /^ZDD release mismatch:/, "Claude Code: loud");
+  assert.equal(run(CHECK, "@codex"), "", "Codex: silent");
+  assert.equal(run(INJECT, "@codex").includes("ZDD release mismatch"), false, "the SessionStart hook under Codex: silent");
 });
