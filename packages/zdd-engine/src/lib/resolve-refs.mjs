@@ -23,6 +23,10 @@
 //                     catch-all), never a fixed word (decision 0019). A url
 //                     with a `*` that matches nothing is recorded on the
 //                     record as `facts.unplaced`, so lint can name it
+//   ?at:<file>        every record of any kind whose resource list holds
+//                     <file> — how a service names the routes, surfaces and
+//                     jobs in the files that use it (CAS-97); a file that is
+//                     nobody's resource is a plain drop
 //   ?surface:<file>   every surface whose resource list holds <file> — how
 //                     a component names the screens that import it (CAS-97);
 //                     a file that is the element of several routes is all
@@ -131,9 +135,16 @@ export function resolveRefs(records) {
     if (full !== short) add(map, full, r.id);
   }
   const surfacesByFile = new Map();
+  const recordsByFile = new Map();
   for (const r of records) {
-    if (r.kind !== "surface") continue;
     for (const f of r.resource) {
+      // A service's resource is the file that declares it, not a file that
+      // "uses" it: a service never resolves as another service's dependant.
+      if (r.kind !== "service") {
+        if (!recordsByFile.has(f)) recordsByFile.set(f, []);
+        recordsByFile.get(f).push(r.id);
+      }
+      if (r.kind !== "surface") continue;
       if (!surfacesByFile.has(f)) surfacesByFile.set(f, []);
       surfacesByFile.get(f).push(r.id);
     }
@@ -174,6 +185,10 @@ export function resolveRefs(records) {
       case "surface": {
         const hits = surfacesByFile.get(target);
         return hits ? [...hits].sort() : drop(`surface at '${target}' matches no known surface`);
+      }
+      case "at": {
+        const hits = (recordsByFile.get(target) ?? []).filter((id) => id !== record.id);
+        return hits.length ? [...hits].sort() : drop(`'${target}' is no record's resource`);
       }
       case "route": {
         // Every route tied for the best fit is kept (CAS-65): with a `*` on
