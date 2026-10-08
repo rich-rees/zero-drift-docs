@@ -56,7 +56,8 @@ export function render({ graph, bundleName, repoBase }) {
   }
   lines.push("<h2>Edges</h2>", "<ul>");
   for (const e of graph.edges) {
-    lines.push(`<li><a href="#${esc(e.source)}">${esc(titleOf.get(e.source))}</a> → <a href="#${esc(e.target)}">${esc(titleOf.get(e.target))}</a></li>`);
+    const verb = e.verb ? ` <span class="muted">${esc(e.verb)}</span> ` : " ";
+    lines.push(`<li><a href="#${esc(e.source)}">${esc(titleOf.get(e.source))}</a>${verb}→ <a href="#${esc(e.target)}">${esc(titleOf.get(e.target))}</a></li>`);
   }
   lines.push("</ul>", "</body></html>", "");
   return lines.join("\n");
