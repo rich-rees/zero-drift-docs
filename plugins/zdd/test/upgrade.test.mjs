@@ -75,11 +75,18 @@ test("upgrade --plan writes nothing and names exactly what the real upgrade then
   assert.match(text, /would change zdd\/config\.json/, text);
   const real = runJson(repo, ["upgrade"]);
   assert.deepEqual(real.wrote, plan.wrote);
+  assert.deepEqual(real.notes, plan.notes, "the user approves the plan's notes; the run says the same (CR-018)");
+  assert.deepEqual(real.kept, plan.kept);
 });
 
-test("every minor from 1.1 to this plugin's has an upgrade note — a release without one fails here (the checklist, backed)", () => {
+test("every release from 1.1 on (the README's Versioning list) has an upgrade note, and this minor an Upgrading section — a release without one fails here (the checklist, backed)", () => {
   assert.ok(UPGRADE_NOTES[`${MINOR}.0`], `no upgrade note for ${MINOR}: add one to UPGRADE_NOTES in scripts/bootstrap.mjs and an "Upgrading to ${MINOR}" section to skills/upgrade/SKILL.md`);
-  for (const m of ["1.1.0", "1.3.0", "2.0.0", "2.1.0"]) assert.ok(UPGRADE_NOTES[m], m);
+  // Every release the README's Versioning lists from 1.1 on — patches too — has a note (CR-017):
+  // the list comes from the README, so a release cannot be added there and forgotten here.
+  const readme = readFileSync(join(PLUGIN, "..", "..", "README.md"), "utf8");
+  const released = [...readme.matchAll(/^- \*\*`(\d+\.\d+\.\d+)` —/gm)].map((m) => m[1]).filter((v) => v !== "1.0.0");
+  assert.ok(released.includes("1.2.0") && released.includes("1.3.1") && released.includes(VERSION), released.join(", "));
+  for (const v of released) assert.ok(UPGRADE_NOTES[v], `UPGRADE_NOTES has no entry for ${v}`);
   const skill = readFileSync(join(PLUGIN, "skills", "upgrade", "SKILL.md"), "utf8");
   assert.match(skill, new RegExp(`^#+ Upgrading to ${MINOR.replace(".", "\\.")}\\b`, "m"), `skills/upgrade/SKILL.md needs an "Upgrading to ${MINOR}" section`);
 });

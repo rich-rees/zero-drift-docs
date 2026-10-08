@@ -197,3 +197,13 @@ test("a lock that points here with auto-update on is turned off and said so, by 
   applyJson(fresh, "auto-on-apply", { name: "X" });
   assert.deepEqual(readSettings(fresh).extraKnownMarketplaces, LOCK);
 });
+
+test("apply keeps our own lock at another tag, and names it (CR-020: the case the earlier test's name claimed)", () => {
+  const repo = fastapiRepo("lock-ours-older");
+  mkdirSync(join(repo, ".claude"));
+  const older = { "zero-drift-docs": { source: { source: "github", repo: "rich-rees/zero-drift-docs", ref: "v1.3.1" }, autoUpdate: false } };
+  writeFileSync(settingsPath(repo), JSON.stringify({ enabledPlugins: PLUGIN_SETTINGS, extraKnownMarketplaces: older }, null, 2) + "\n");
+  const json = applyJson(repo, "lock-ours-older", { name: "X" });
+  assert.deepEqual(readSettings(repo).extraKnownMarketplaces, older);
+  assert.ok(json.notes.some((n) => /locked to v1\.3\.1 — kept; moving the lock is upgrade's job/.test(n)), json.notes.join("\n"));
+});
