@@ -11,7 +11,8 @@
 // a machine that has one, by removing a stray declaration (below). Advisory,
 // never blocking.
 //
-// Three records are compared against the lock, all under ~/.claude/plugins:
+// Three records are compared against the lock, all under Claude Code's
+// plugins folder (~/.claude/plugins, or CLAUDE_CONFIG_DIR's — 2.2.1):
 //   - the catalogue: known_marketplaces.json → zero-drift-docs.source.ref.
 //     One downloaded catalogue per machine, shared by every repo. It follows
 //     the repo's declared ref on a restart — unless the user's settings (or
@@ -38,8 +39,7 @@
 
 import { readFileSync, lstatSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { homedir } from "node:os";
-import { parseArgs, adopterRoot, pocockPin, ZDD_PLUGIN_ID, MAX_CONFIG_BYTES, MARKETPLACE, MARKETPLACE_REPO, isOurDeclaration } from "./lib/repo.mjs";
+import { parseArgs, adopterRoot, pocockPin, ZDD_PLUGIN_ID, MAX_CONFIG_BYTES, MARKETPLACE, MARKETPLACE_REPO, isOurDeclaration, claudeDir, pluginsDir, userSettingsLabel } from "./lib/repo.mjs";
 
 export { MARKETPLACE };
 const POCOCK_ID = `mattpocock-skills@${MARKETPLACE}`;
@@ -74,7 +74,7 @@ export function lockedRef(root) {
 // user's (what a plain `marketplace add` writes) and this repo's local file.
 // Any ref, or none — each one can hold the catalogue.
 const STRAY = [
-  { scope: "user", file: (root, home) => join(home, ".claude", "settings.json") },
+  { scope: "user", file: (root, home) => join(claudeDir(home), "settings.json") },
   { scope: "local", file: (root) => join(root, ".claude", "settings.local.json") },
 ];
 export function strayDeclarations(root, home) {
@@ -95,11 +95,11 @@ export function strayDeclarations(root, home) {
 // starts (verified on 2.1.295, even when the parent shell lacked it).
 const underClaudeCode = () => Boolean(process.env.CLAUDECODE);
 
-export function inspect(root, home = process.env.ZDD_HOME || homedir()) {
+export function inspect(root, home) {
   const lock = lockedRef(root);
   if (!lock || !underClaudeCode()) return { lock, mismatches: [] };
   const expectedZdd = lock.slice(1);
-  const plugins = join(home, ".claude", "plugins");
+  const plugins = pluginsDir(home);
 
   const known = readJsonObject(join(plugins, "known_marketplaces.json"));
   const catalogueRef = known?.[MARKETPLACE]?.source?.ref;
@@ -130,7 +130,7 @@ export function inspect(root, home = process.env.ZDD_HOME || homedir()) {
   if (foundZdd !== expectedZdd) mismatches.push({ what: ZDD_PLUGIN_ID, expected: expectedZdd, found: foundZdd });
   if (foundPocock !== expectedPocock) mismatches.push({ what: POCOCK_ID, expected: expectedPocock, found: foundPocock });
   const strays = catalogue !== lock ? strayDeclarations(root, home) : [];
-  return { lock, catalogue, expected: { zdd: expectedZdd, pocock: expectedPocock }, found: { zdd: foundZdd, pocock: foundPocock }, strayDeclarations: strays, mismatches };
+  return { lock, catalogue, expected: { zdd: expectedZdd, pocock: expectedPocock }, found: { zdd: foundZdd, pocock: foundPocock }, strayDeclarations: strays, userSettings: userSettingsLabel(home), mismatches };
 }
 
 export function narrate(r) {
@@ -142,7 +142,7 @@ export function narrate(r) {
       return m.what === "catalogue" ? `the catalogue on this machine is at ${m.found === null ? "no recorded ref" : printable(m.found)}, this repo locks ${lock}` : `${m.what} expected ${printable(m.expected)}, ${found}`;
     })
     .join("; ");
-  const where = { user: "your user settings (~/.claude/settings.json)", local: "this repo's local settings (.claude/settings.local.json)" };
+  const where = { user: `your user settings (${printable(r.userSettings ?? "~/.claude/settings.json")})`, local: "this repo's local settings (.claude/settings.local.json)" };
   const strays = Array.isArray(r.strayDeclarations) ? r.strayDeclarations.filter((d) => where[d.scope]) : [];
   const strayText = strays
     .map((d) =>

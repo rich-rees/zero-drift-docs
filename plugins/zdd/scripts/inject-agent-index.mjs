@@ -17,11 +17,20 @@
 // as data: the closing delimiter cannot appear inside it, and the trailer says
 // so. Never fails a session: any error is exit 0, no output.
 
-import { readConfig, artifactPaths, readInside, MAX_INDEX_BYTES, adopterRoot, pocockCopies } from "./lib/repo.mjs";
+import { readConfig, artifactPaths, readInside, MAX_INDEX_BYTES, adopterRoot, pocockCopies, readHookInput, configDirFromTranscript } from "./lib/repo.mjs";
 import { narrate as narratePocockCopies } from "./check-pocock.mjs";
 import { inspect as inspectRelease, narrate as narrateRelease } from "./check-release.mjs";
 
 try {
+  // Which Claude Code profile this session runs on (2.2.1, CR-202): with
+  // CLAUDE_CODE_SUBPROCESS_ENV_SCRUB on, CLAUDE_CONFIG_DIR is removed from the
+  // hook's environment, but the payload's transcript_path lives inside the
+  // profile. Both checks below read the profile through claudeDir().
+  const input = readHookInput();
+  if (process.env.CLAUDECODE && !process.env.CLAUDE_CONFIG_DIR) {
+    const dir = configDirFromTranscript(input);
+    if (dir) process.env.CLAUDE_CONFIG_DIR = dir;
+  }
   const root = adopterRoot();
   // The release check first (CAS-97, from CAS-37): a repo that locks a ZDD
   // release this machine does not have is told so where the session starts,
