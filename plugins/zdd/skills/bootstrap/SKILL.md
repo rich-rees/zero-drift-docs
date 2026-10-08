@@ -69,7 +69,7 @@ omission:
 
 1. **Auto-load hook** — inject `zdd/agent-index.md` at session start.
 2. **Generated-artifact fence** — refuse hand edits to the generated artifacts
-   (metadata, graph, both indexes, human index) with a reason that names
+   (metadata, graph, the agent, ADR and blessing indexes, human index) with a reason that names
    `update`.
 3. **Stop prompt** — when the agent ends a turn with code changed on the
    branch and nothing in `zdd/` moved, block once per session with one line:
@@ -159,11 +159,11 @@ nothing lands unannounced.
    route by kind, per [authoring.md](../authoring.md): verdicts → ADRs,
    vocabulary → glossary, pure connective fact → the map.
 3. **Render** — `npx -y @rich-rees/zdd-engine@1.3.1 render`. Commit the
-   generated artifacts (`zdd/graph.json`, both indexes, the human index);
+   generated artifacts (`zdd/graph.json`, the agent, ADR and blessing indexes, the human index);
    never edit them.
 4. **Lint** — `npx -y @rich-rees/zdd-engine@1.3.1 lint`. The same blocking
    lint CI runs: ADR numbering, supersession symmetry, and every blessing's
-   citation. A failure here is fixed now, in the mapping session, not
+   citation and trigger question. A failure here is fixed now, in the mapping session, not
    discovered on the first PR. It also prints the **unclaimed records** — on
    day one that is the whole inventory, and it is the mapping session's
    worklist: each feature slice written claims the records it links, and
@@ -235,6 +235,20 @@ run `lint`: 1.1 adds the blessing-citation check to the blocking tier, so a
 map that carries a blessing citing a superseded or missing ADR goes red on
 the first push after upgrading — the lint doing its job; re-bless or drop the
 line in the upgrade PR, and say so.
+
+**Upgrading to 2.0 ("choose patterns").** Three things change, and the ledger
+names each:
+
+- `render` writes a fifth artifact, `zdd/blessing-index.md`. Commit it in the
+  upgrade PR, or `render --check` fails.
+- The workflow's lint step becomes `lint --merge` (an owned workflow is
+  migrated in place; another shape is named for you to change by hand), so
+  CI fails while a branch's `zdd/patterns-plan.md` exists.
+- A blessing that does not open with its **trigger question** now **fails**
+  `lint`. Run `lint` and show the developer every blessing it names. **Never
+  rewrite one yourself:** propose the question each one answers, and change
+  the map only on the developer's word, in the upgrade PR. Over-long and
+  reasonless blessings are warnings — worth a pass, not a blocker.
 
 ## Boundary reminder
 

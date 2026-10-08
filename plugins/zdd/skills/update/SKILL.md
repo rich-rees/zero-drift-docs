@@ -1,6 +1,6 @@
 ---
 name: update
-description: "\"update ZDD\" — the Zero-Drift Docs finish ritual. Curate the changed artifacts (glossary, ADRs, code comments, semantic map), regenerate the codebase metadata and both indexes, and commit everything in the PR so docs and code merge atomically. Use before finishing any unit of work (a PR is one instantiation) in a repo that uses ZDD; triggers on \"update ZDD\"."
+description: "\"update ZDD\" — the Zero-Drift Docs finish ritual. Curate the changed artifacts (glossary, ADRs, code comments, semantic map), reconcile the branch's pattern plan (mint the blessings that survived, record the rest in the commit message, delete the plan), regenerate the codebase metadata and the indexes, and commit everything in the PR so docs and code merge atomically. Use before finishing any unit of work (a PR is one instantiation) in a repo that uses ZDD; triggers on \"update ZDD\"."
 ---
 
 # zdd:update — the finish ritual
@@ -26,17 +26,28 @@ Run this as the definition of done for every unit of work — the spoken form is
      is one no slice has placed yet. A blessing names the exemplar to copy
      and cites its ADR; if a decision was fully superseded in this unit of
      work, re-bless or drop every blessing that cited it (the lint fails
-     otherwise; a partial supersession only warns).
-2. **Run the deriver.** Regenerates the codebase metadata from source:
+     otherwise; a partial supersession only warns). Blessings this unit of
+     work proposed are decided in step 2.
+2. **Reconcile the pattern plan** — see [below](#reconciling-the-pattern-plan).
+   The plan file (`paths.patternsPlan`, default `zdd/patterns-plan.md`) was
+   written by "choose patterns" before the build. Judge it against the code
+   *as it will merge*, mint the blessings that survived, and write the
+   **pattern record** you will put in the commit message (step 6); then
+   `git rm` the plan, so lint in step 5 runs without it. No plan
+   on the branch: say so in one line, and still read the diff for a new
+   pattern or a copied precedent worth a blessing.
+3. **Run the deriver.** Regenerates the codebase metadata from source:
    ```
    npx -y @rich-rees/zdd-engine@1.3.1 derive
    ```
-3. **Run the renderer.** Rebuilds the graph artifact (`zdd/graph.json`), the
-   agent index, the ADR index, and the human index:
+4. **Run the renderer.** Rebuilds the graph artifact (`zdd/graph.json`), the
+   agent index, the ADR index, the blessing index, and the human index:
    ```
    npx -y @rich-rees/zdd-engine@1.3.1 render
    ```
-4. **Lint the stores.** Supersession symmetry and blessing citations (blocking),
+5. **Lint the stores.** Supersession symmetry, blessing citations and every
+   blessing's trigger question (blocking); a blessing with no reason or over
+   the length budget (warnings — shorten it, the detail belongs in the ADR);
    and the **claims**: every route, table, function and surface no feature
    slice links, and any record two slices claim. Read the list against the
    diff — a record this unit of work added or changed belongs in exactly one
@@ -51,18 +62,73 @@ Run this as the definition of done for every unit of work — the spoken form is
    ```
    npx -y @rich-rees/zdd-engine@1.3.1 lint
    ```
-5. **Commit all of it in the PR.** Code and docs merge atomically; the doc delta
-   is reviewed alongside the code delta.
+6. **Commit all of it in the PR.** Code and docs merge atomically; the doc delta
+   is reviewed alongside the code delta. **This commit carries the plan file's
+   deletion** (staged in step 2) **and the pattern record in its message.**
+   CI's `lint --merge` fails while the plan exists.
+
+## Reconciling the pattern plan
+
+The plan proposed; update decides, against the final diff — the campaign can
+kill a pattern, change it, or create one the plan never saw.
+
+1. **Read the plan and the diff** (against the base branch). For each piece:
+   - **follow** — confirm the code does follow the blessing. If it does not,
+     it is a departure: ask why, or record the reason the build found.
+   - **depart from** — confirm the reason still holds. If the departure shows
+     the blessing itself is wrong or stale, re-bless or drop it now (with an
+     ADR if the change passes the three-part test).
+   - **new pattern, candidate blessing** — did it survive, and is its
+     exemplar in the diff? Then **mint it**: one list item under
+     `# Blessings` in the slice it belongs to (an app's concept when it is
+     cross-cutting), in the shape [authoring.md](../authoring.md) gives —
+     trigger question first, exemplar linked, refusal named, reason given (an
+     ADR, or "because …"). Otherwise **drop it**, and record why.
+   - **no blessing applies** — nothing to do, unless the build ended up
+     copying something; then treat that as precedent.
+2. **Offer unblessed precedent.** Every precedent the plan declared, and any
+   the diff shows the build copied without declaring, is offered to the
+   developer as a candidate blessing. **Mint it only on their word** — a
+   precedent the session merely copied is not yet a decision.
+3. **Write the record** into the update commit's message, under a
+   `Pattern record:` heading, one line per piece:
+
+   ```
+   Pattern record:
+   - followed: <slice>: <trigger question> — <piece>
+   - departed: <slice>: <trigger question> — <piece> — because …
+   - minted: <slice>: <trigger question> — exemplar <path>
+   - dropped candidate: <question> — because …
+   - precedent: <path> — minted as <slice>: <question> | declined — because …
+   - no blessing applied: <piece>
+   ```
+
+4. **Delete the plan file** (`git rm <plan path>`), so the deletion lands in
+   the update commit with the record. Never leave it for the merge: a merge
+   runs no code, and a plan that reached the base branch would describe work
+   that is already done.
+
+**A later update on the same branch** (a fix after update ran): read the plan
+and the first record from git history — the plan is in the parent of the
+commit that deleted it (`git log --diff-filter=D -1 --format=%H -- <plan path>`,
+then `git show <that>^:<plan path>` and `git log -1 --format=%B <that>`).
+Reconcile the new diff against them and write an **amended record**
+(`Pattern record (amended):`, only what changed) into the new update commit.
+
+A host harness may carry the plan and the record further — a build manifest
+that states the plan, a build summary that reports followed, departed and
+minted. The record in the commit message is the one ZDD relies on.
 
 ## Notes
 
 - The ritual is **diff-anchored, not memory-anchored** — a fresh session can run
   it from the PR diff, the touched code, and the artifacts checkpointed en route.
 - **Never hand-edit the generated artifacts** (`zdd/metadata/`, `zdd/graph.json`,
-  both indexes, the human index) — regenerate. The fence hook (if opted in)
+  the agent, ADR and blessing indexes, the human index) — regenerate. The fence hook (if opted in)
   refuses the edit; the CI check (if wired) fails otherwise.
 - Read back any working file (`TEMPSTATE.md`) and delete it before merge —
-  durable residue moves to an artifact first.
+  durable residue moves to an artifact first. The pattern plan is one such
+  file, with its own step (2) above.
 - The curated half is judgment CI can't gate — [authoring.md](../authoring.md) is
   the discipline that stands in for a gate. The Stop hook (if opted in) asks
   once per session when code changed and nothing in `zdd/` moved: run this
