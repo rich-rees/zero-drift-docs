@@ -188,3 +188,16 @@ test("CAS-65 CR-035: requireRefs pruning is linear — a long chain whose tail d
 test("unknown unresolved kind is an error", () => {
   assert.throws(() => resolveRefs([rec("module", "module:m", ["?widget:x"])]), /unknown unresolved ref kind 'widget'/);
 });
+
+test("a table or function minted with its schema answers to its bare name too; two schemas sharing a bare name are ambiguous, never a guess (CAS-99)", () => {
+  const { records, diagnostics } = resolveRefs([
+    rec("table", "table:db/public.audit_events"),
+    rec("table", "table:db/public.things"),
+    rec("table", "table:db/archive.things"),
+    rec("function", "function:db/public.save"),
+    rec("module", "module:a.ts", ["?table:audit_events", "?from:audit_events", "?table:public.audit_events", "?function:save", "?table:things", "?table:archive.things"]),
+  ]);
+  assert.deepEqual(records.find((r) => r.id === "module:a.ts").refs, ["function:db/public.save", "table:db/archive.things", "table:db/public.audit_events"]);
+  assert.equal(diagnostics.length, 1);
+  assert.match(diagnostics[0], /table 'things' is ambiguous \(table:db\/archive\.things, table:db\/public\.things\)/);
+});
