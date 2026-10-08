@@ -1008,6 +1008,14 @@ function ensureOwned(ledger, rel, content, opts) {
 // ---------------------------------------------------------------------------
 // apply
 // ---------------------------------------------------------------------------
+// Options merge (repair apply): objects deep, anything else replaced.
+function mergeOptions(base, next) {
+  if (!isPlainObject(base) || !isPlainObject(next)) return next;
+  const out = { ...base };
+  for (const [k, v] of Object.entries(next)) out[k] = mergeOptions(base[k], v);
+  return out;
+}
+
 export function apply(root, rawAnswers, { date = today(), home } = {}) {
   const answers = validateAnswers(rawAnswers);
   const ledger = new Ledger(root);
@@ -1065,21 +1073,54 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
     };
     if (!hasGit(root)) config.render = { storeChanges: false };
     ledger.create("zdd/config.json", JSON.stringify(config, null, 2) + "\n");
-  } else if (
-    optIns.autoLoad !== current.autoLoad ||
-    optIns.fence !== current.fence ||
-    optIns.stop !== current.stop ||
-    // An explicit answer to a question the config has never recorded is a
-    // change even when the effective value stays the same: a 1.0 config with
-    // no `hooks.stop` answered "no" must say so, or --upgrade asks again
-    // forever (CR-008).
-    (answers.optIns && Object.hasOwn(answers.optIns, "stop") && typeof existingConfig.hooks?.stop !== "boolean")
-  ) {
-    // Repair with an explicit new answer: the hooks block is plugin-owned.
-    existingConfig.hooks = { autoLoad: optIns.autoLoad, fence: optIns.fence, stop: optIns.stop };
-    ledger.overwrite("zdd/config.json", JSON.stringify(existingConfig, null, 2) + "\n");
-    ledger.notes.push("zdd/config.json: hooks block updated to the new answers");
-  } else ledger.kept.push("zdd/config.json");
+  } else {
+    // Repair: only an explicit answer changes the config.
+    const before = JSON.stringify(existingConfig);
+    const repairNotes = [];
+    if (
+      optIns.autoLoad !== current.autoLoad ||
+      optIns.fence !== current.fence ||
+      optIns.stop !== current.stop ||
+      // An explicit answer to a question the config has never recorded is a
+      // change even when the effective value stays the same: a 1.0 config with
+      // no `hooks.stop` answered "no" must say so, or --upgrade asks again
+      // forever (CR-008).
+      (answers.optIns && Object.hasOwn(answers.optIns, "stop") && typeof existingConfig.hooks?.stop !== "boolean")
+    ) {
+      // The hooks block is plugin-owned.
+      existingConfig.hooks = { autoLoad: optIns.autoLoad, fence: optIns.fence, stop: optIns.stop };
+      repairNotes.push("zdd/config.json: hooks block updated to the new answers");
+    }
+    // An opt-in extractor or a Realtime wrapper the upgrade confirmed with the
+    // user (CAS-101): an explicit `extractors` answer is the list; explicit
+    // `extractorOptions` merge into each extractor's options.
+    if (answers.extractors?.length) {
+      const was = Array.isArray(existingConfig.extractors) ? existingConfig.extractors : [];
+      if (JSON.stringify(was) !== JSON.stringify(answers.extractors)) {
+        existingConfig.extractors = answers.extractors;
+        repairNotes.push(`zdd/config.json: extractors ${was.join(", ") || "(none)"} → ${answers.extractors.join(", ")}`);
+      }
+    }
+    if (answers.extractorOptions) {
+      const opts = isPlainObject(existingConfig.extractorOptions) ? existingConfig.extractorOptions : {};
+      const moved = [];
+      for (const [name, value] of Object.entries(answers.extractorOptions)) {
+        const merged = mergeOptions(opts[name], value);
+        if (JSON.stringify(merged) !== JSON.stringify(opts[name])) {
+          opts[name] = merged;
+          moved.push(name);
+        }
+      }
+      if (moved.length) {
+        existingConfig.extractorOptions = opts;
+        repairNotes.push(`zdd/config.json: extractorOptions updated for ${moved.join(", ")}`);
+      }
+    }
+    if (JSON.stringify(existingConfig) !== before) {
+      ledger.overwrite("zdd/config.json", JSON.stringify(existingConfig, null, 2) + "\n");
+      ledger.notes.push(...repairNotes);
+    } else ledger.kept.push("zdd/config.json");
+  }
 
   // --- curated skeleton (empty templates; never overwritten) ---------------
   ledger.create(paths.glossary, "# Glossary\n\n<!-- One paragraph per term: **Term**: definition. Canonical, not descriptive. -->\n");
