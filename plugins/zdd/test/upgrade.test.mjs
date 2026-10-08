@@ -141,14 +141,34 @@ test("text outside the managed block that the block now covers is named with its
   const repo = adopted("dupes", { claude: CLAUDE_WITH_DUPES });
   const plan = runJson(repo, ["upgrade", "--plan"]);
   assert.deepEqual(
-    plan.duplicates.map((d) => [d.id, d.file, d.heading, d.from, d.to]),
+    plan.duplicates.map((d) => [d.file, d.heading, d.from, d.to]),
     [
-      [1, "CLAUDE.md", "## Loading ZDD", 5, 8],
-      [2, "CLAUDE.md", "### Docs", 13, 16],
+      ["CLAUDE.md", "## Loading ZDD", 5, 8],
+      ["CLAUDE.md", "### Docs", 13, 16],
     ],
   );
+  // The id is the section's content hash (CR-014): stable across runs, distinct per section.
+  for (const d of plan.duplicates) assert.match(d.id, /^[0-9a-f]{8}$/);
+  assert.notEqual(plan.duplicates[0].id, plan.duplicates[1].id);
+  assert.deepEqual(runJson(repo, ["upgrade", "--plan"]).duplicates.map((d) => d.id), plan.duplicates.map((d) => d.id));
   const text = run(repo, ["upgrade", "--plan"]);
-  assert.match(text, /outside the ZDD block: \[1\] CLAUDE\.md lines 5–8 "## Loading ZDD"/, text);
+  assert.ok(text.includes(`outside the ZDD block: [${plan.duplicates[0].id}] CLAUDE.md lines 5–8 "## Loading ZDD"`), text);
+});
+
+test("no well-formed block, no duplicates: a lone, doubled or reversed marker (the refresh is refused) or no block at all names nothing, and --drop cannot reach in (CR-002)", async () => {
+  const { findDuplicates } = await import("../scripts/bootstrap.mjs");
+  const body = ["## Loading ZDD", "", 'Say "load ZDD" first.', ""];
+  const shapes = {
+    none: body,
+    lone: ["<!-- zdd:begin -->", ...body],
+    reversed: ["<!-- zdd:end -->", ...body, "<!-- zdd:begin -->"],
+    doubled: ["<!-- zdd:begin -->", "<!-- zdd:end -->", ...body, "<!-- zdd:begin -->", "<!-- zdd:end -->"],
+  };
+  for (const [name, lines] of Object.entries(shapes)) assert.deepEqual(findDuplicates(lines.join("\n")), [], name);
+  const repo = adopted("drop-malformed", { claude: shapes.reversed.join("\n") });
+  assert.deepEqual(runJson(repo, ["upgrade", "--plan"]).duplicates, []);
+  assert.match(fails(repo, ["upgrade", "--drop=0123abcd"]), /--drop: no duplicate 0123abcd/);
+  assert.equal(readFileSync(join(repo, "CLAUDE.md"), "utf8"), shapes.reversed.join("\n"));
 });
 
 test("a passing mention is not a duplicate: the document's title, and a section that names ZDD once, are never named (CAS-101 smoke: `# Bookmarks … smoke-test the ZDD plugin`)", async () => {
@@ -174,11 +194,17 @@ test("a passing mention is not a duplicate: the document's title, and a section 
   assert.deepEqual(findDuplicates(text).map((d) => d.heading), ["## Documentation"]);
 });
 
-test("--drop removes only the named sections, after the block is refreshed; ids out of range are refused before any write", () => {
+test("--drop removes only the named sections, after the block is refreshed; an id the plan did not name — or a section edited since the plan — is refused before any write (CR-014)", () => {
   const repo = adopted("drop", { claude: CLAUDE_WITH_DUPES });
-  assert.match(fails(repo, ["upgrade", "--drop=3"]), /--drop: no duplicate 3/);
+  const [loading] = runJson(repo, ["upgrade", "--plan"]).duplicates;
+  assert.match(fails(repo, ["upgrade", "--drop=0123abcd"]), /--drop: no duplicate 0123abcd/);
+  assert.match(fails(repo, ["upgrade", "--drop=1"]), /--drop takes the ids upgrade --plan printed/);
   assert.equal(readFileSync(join(repo, "CLAUDE.md"), "utf8"), CLAUDE_WITH_DUPES, "refused before writing");
-  const json = runJson(repo, ["upgrade", "--drop=1"]);
+  // The user approved the section as planned; it changes before the write: refused.
+  writeFileSync(join(repo, "CLAUDE.md"), CLAUDE_WITH_DUPES.replace('Say "load ZDD" before work.', 'Say "load ZDD" before any work.'));
+  assert.match(fails(repo, ["upgrade", `--drop=${loading.id}`]), new RegExp(`--drop: no duplicate ${loading.id}`));
+  writeFileSync(join(repo, "CLAUDE.md"), CLAUDE_WITH_DUPES);
+  const json = runJson(repo, ["upgrade", `--drop=${loading.id}`]);
   const after = readFileSync(join(repo, "CLAUDE.md"), "utf8");
   assert.doesNotMatch(after, /## Loading ZDD/);
   assert.match(after, /### Docs/, "not dropped: not named");
