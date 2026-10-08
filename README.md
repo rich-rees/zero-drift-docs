@@ -4,7 +4,7 @@ A documentation architecture for repos built by **human + agent pairs**. ZDD kee
 seven documentation artifacts *at most one unit of work behind the code* — and, with
 CI, makes drift in the machine-generated ones **un-mergeable**.
 
-> **Status: 2.1.0.** The plugin installs in Claude Code
+> **Status: 2.1.1.** The plugin installs in Claude Code
 > and in Codex from this one repo; `bootstrap` detects your stack (or grills
 > for it on a greenfield repo), proposes extractors with evidence, and *writes*
 > the opt-ins; the engine (`packages/zdd-engine`, npm `@rich-rees/zdd-engine`)
@@ -414,6 +414,12 @@ saying no to a row is a visible choice, not a fork.
       in the viewer; `claims.strictKinds`; the plugin's session-start
       release check *(engine + plugin 2.1.0, CAS-97; decisions
       [0016](docs/decisions/0016-typed-edges-are-additive.md)–[0020](docs/decisions/0020-jobs-from-manifests-services-from-declared-markers.md))*.
+- [x] **2.1.1** — fixes from the first real adoption of 2.1 (Cascade): a
+      subscribes or `.from()` ref reaches a table the migrations named with
+      its schema (`public.audit_events`); the agent index links a service
+      record as `.json`; a component's description is its own JSDoc alone;
+      the release check prints the route that moves a machine — restart,
+      `claude plugin update`, restart *(engine + plugin 2.1.1, CAS-99)*.
 - [ ] Next: a second viewer; Vue / Svelte / Angular extractors on their first
       real adoption.
 
@@ -496,6 +502,12 @@ warning can say "behind".
   the four extractors' options, `react-router.subscribeCalls`,
   `nextjs.refs.subscribeCalls`, `viewer.componentFanIn`) are additive. The
   extractor contract gains an optional `warnings` channel.
+
+- **`2.1.1` — fixes.** A patch; no config or contract change, but bytes move
+  on the pin bump wherever a fix applies, so re-derive and re-render: a
+  table minted with its schema gains the edges that named it bare; a
+  component whose JSDoc sat after an exported type or constant gets its own
+  description; an agent index with an External services list links `.json`.
 
 ## Contributing
 
