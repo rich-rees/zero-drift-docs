@@ -142,7 +142,7 @@ test("CLI: derive and render are byte-stable on the fixture; the graph types a c
   const run = (args) => spawnSync(process.execPath, [BIN, ...args], { cwd: repo, encoding: "utf8" });
   const d = run(["derive"]);
   assert.equal(d.status, 0, d.stderr);
-  assert.match(d.stdout, /Wrote 10 records \(4 components, 4 routes, 2 surfaces\)/);
+  assert.match(d.stdout, /Wrote 16 records \(4 components, 4 routes, 8 surfaces\)/, "web pages and native screens are all surfaces");
   assert.equal(run(["derive", "--check"]).status, 0);
   const r = run(["render"]);
   assert.equal(r.status, 0, r.stderr);
@@ -151,6 +151,9 @@ test("CLI: derive and render are byte-stable on the fixture; the graph types a c
   const panel = graph.nodes.find((n) => n.title === "RouteSearchPanel");
   assert.equal(panel.type, "UI Component");
   assert.equal(panel.resource, "apps/web/src/components/RouteSearchPanel.tsx");
+  // The shared button is used by the web page and the native screen alike (CLI roots include apps/mobile).
+  const button = graph.nodes.find((n) => n.title === "Button");
+  assert.deepEqual(graph.edges.filter((e) => e.source === button.id && e.verb === "usedBy").map((e) => e.target).sort(), ["metadata/surface/jobs", "metadata/surface/native--jobs"]);
   const verbs = graph.edges.filter((e) => e.source === panel.id).map((e) => [e.target, e.verb]).sort();
   assert.deepEqual(verbs, [
     ["metadata/component/apps--web--src--components--Badge--Badge", "uses"],

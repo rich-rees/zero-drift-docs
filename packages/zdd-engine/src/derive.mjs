@@ -32,6 +32,7 @@ const EXTRACTORS = {
   fastapi: "./extractors/fastapi/index.mjs",
   "react-router": "./extractors/react-router/index.mjs",
   components: "./extractors/components/index.mjs",
+  "expo-router": "./extractors/expo-router/index.mjs",
   generic: "./extractors/generic/index.mjs",
 };
 const NAME_RE = /^[a-z][a-z0-9-]*$/;

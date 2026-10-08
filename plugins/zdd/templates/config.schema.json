@@ -16,7 +16,7 @@
       "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
       "minItems": 1,
       "uniqueItems": true,
-      "description": "Extractors to run, composed: one per convention in the stack (built-in: supabase, nextjs, fastapi, react-router, components, generic). Selected by NAME from the engine's registry or from localExtractorDir — never by path. Records from every extractor are merged and cross-extractor refs resolved after the merge.",
+      "description": "Extractors to run, composed: one per convention in the stack (built-in: supabase, nextjs, fastapi, react-router, components, expo-router, generic). Selected by NAME from the engine's registry or from localExtractorDir — never by path. Records from every extractor are merged and cross-extractor refs resolved after the merge.",
       "examples": [["supabase", "nextjs"], ["supabase", "fastapi"], ["fastapi", "react-router"], ["generic"]]
     },
     "extractorOptions": {
@@ -90,6 +90,15 @@
             "pageDirs": { "type": "array", "items": { "type": "string" }, "default": ["pages", "screens", "app"], "description": "Folder names whose files are surfaces (pages, screens), not components." },
             "sharedDirs": { "type": "array", "items": { "type": "string" }, "default": ["components", "ui"], "description": "Folder names that mark every component under them shared, whatever its import count." },
             "srcAliasRoot": { "type": "string", "description": "Where the tsconfig @/ alias points; default the first root." }
+          }
+        },
+        "expo-router": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Native screens from an Expo Router file tree (ZDD 2.1, opt-in, early): one surface per screen file under appDir, namespaced `surface:native:/path` so a native screen and a web page may share a URL; _layout files are layouts; (group) folders are stripped; [id] is dynamic.",
+          "properties": {
+            "appDir": { "type": "string", "default": "app" },
+            "srcAliasRoot": { "type": "string", "description": "Where the tsconfig @/ alias points; default appDir's parent." }
           }
         },
         "generic": { "type": "object", "additionalProperties": false }

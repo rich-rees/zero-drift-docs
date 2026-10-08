@@ -417,6 +417,8 @@ function validateExtractorOptions(all) {
       }
     } else if (name === "react-router") {
       for (const k of ["routesFile", "srcAliasRoot"]) if (opts[k] !== undefined) enginePath(opts[k], `react-router.${k}`);
+    } else if (name === "expo-router") {
+      for (const k of ["appDir", "srcAliasRoot"]) if (opts[k] !== undefined) enginePath(opts[k], `expo-router.${k}`);
     } else if (name === "components") {
       if (opts.roots !== undefined) list(opts.roots, "components.roots");
       if (opts.srcAliasRoot !== undefined) enginePath(opts.srcAliasRoot, "components.srcAliasRoot");
