@@ -178,7 +178,7 @@ test("writer binds to reader: a freshly bootstrapped repo's lock is what the rel
     const row = (version) => [{ scope: "project", projectPath: repo, version }];
     writeFileSync(join(plugins, "installed_plugins.json"), JSON.stringify({ version: 2, plugins: { "zdd@zero-drift-docs": row(zdd), "mattpocock-skills@zero-drift-docs": row(pocock) } }));
   };
-  const check = () => execFileSync(process.execPath, [CHECK_RELEASE, `--root=${repo}`, `--home=${home}`], { encoding: "utf8" });
+  const check = () => execFileSync(process.execPath, [CHECK_RELEASE, `--root=${repo}`, `--home=${home}`], { encoding: "utf8", env: { ...process.env, CLAUDECODE: "1" } });
   machine(`v${PLUGIN_VERSION}`, PLUGIN_VERSION);
   assert.equal(check(), "", "silent at the release bootstrap locked");
   machine("v1.3.1", "1.3.1");
