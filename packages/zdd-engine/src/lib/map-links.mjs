@@ -195,6 +195,32 @@ export function extractBlessings(body) {
   return out;
 }
 
+// The shape of one blessing (CAS-96), shared by lint and the blessing index:
+//
+//   - visible   the text a reader sees: links reduced to their text, so a
+//               long URL does not count against the length budget.
+//   - question  the trigger question the blessing opens with ("Adding an
+//               endpoint?"): a first sentence that ends in `?`, at most
+//               QUESTION_MAX characters. null when the blessing opens with
+//               anything else; such a blessing cannot be indexed, so lint
+//               fails it.
+//   - because   the inline reason, "because …" up to the end of its clause,
+//               or null. A reason is an ADR citation or this.
+export const BLESSING_LENGTH_BUDGET = 300;
+const QUESTION_MAX = 200;
+
+export function blessingShape(text) {
+  const visible = text
+    .replace(/!?\[([^\]]*)\]\((?:<[^>\n]*>|[^)\s]*(?:\([^)\s]*\)[^)\s]*)*)(?:\s+"[^"]*")?\)/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+  const q = /^(.+?\?)(?=\s|$)/.exec(visible);
+  const question = q && q[1].length <= QUESTION_MAX && !/[.!]\s+[A-Z]/.test(q[1]) ? q[1] : null;
+  const b = /\bbecause\b[^.;—]*/i.exec(visible);
+  const because = b ? b[0].trim().replace(/[,\s]+$/, "") : null;
+  return { visible, question, because, length: visible.length };
+}
+
 // The forward stamps an ADR body carries: a LINE that opens with
 // "Superseded [in part] by ADR-NNNN" — optionally as a blockquote and/or in
 // bold, linked or bare — which is how every stamp in the corpus is written

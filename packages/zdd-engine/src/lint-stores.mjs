@@ -2,8 +2,9 @@
 // Deterministic lints over the curated stores (blocking CI tier).
 //
 //   zdd-engine lint               # ADR-number, supersession-symmetry and
-//                                 # blessing-citation lints
+//                                 # blessing lints
 //   zdd-engine lint --tempstate   # + TEMPSTATE.md must not exist
+//   zdd-engine lint --merge       # + the pattern plan must not exist (CI)
 //
 // 1. Supersession symmetry: an ADR that claims to supersede another fails
 //    unless the target carries the matching forward stamp ("Superseded [in
@@ -14,11 +15,23 @@
 //    blessed it — fails when the ADR it cites carries a full "Superseded by"
 //    stamp, or does not exist. A stale blessing is worse than none: it sends
 //    the agent to copy the pattern a later decision refused. The map's first
-//    hard check. A citation of an ADR superseded IN PART, or a blessing with
-//    no citation at all, is a WARNING line on stderr, never a failure.
+//    hard check. A citation of an ADR superseded IN PART is a WARNING line on
+//    stderr, never a failure.
+//    Blessing shape (CAS-96, decision 0015): a blessing that does not open
+//    with its trigger question ("Adding an endpoint? …") FAILS — the blessing
+//    index lists blessings by that question, so one without it is invisible
+//    to a session choosing patterns. A blessing with no reason (neither an
+//    ADR citation nor an inline "because …") is a WARNING, and so is one over
+//    the length budget: the detail belongs in the ADR.
 // 3. TEMPSTATE lint (--tempstate, PRs only — tautological on the base
 //    branch): the branch working file must be deleted before merge.
 //    Enforced by construction, not ritual.
+// 3b. Pattern plan (CAS-96, decision 0015): paths.patternsPlan is the
+//    branch's working file from "choose patterns" until "update ZDD"
+//    reconciles it and deletes it in the update commit. With --merge (the CI
+//    workflow, which gates the merge) its presence FAILS; without it (local
+//    runs, the pre-push hook — the branch must stay pushable while the build
+//    runs) it is a WARNING.
 // 4. Unclaimed records (CAS-63): every route, table, function and surface
 //    that no feature slice links is listed as a WARNING, never a failure — a
 //    repo adopting ZDD starts with everything unclaimed, and the list is the
@@ -33,11 +46,11 @@
 //    failure.
 
 import { execFileSync } from "node:child_process";
-import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync, lstatSync } from "node:fs";
 import { join, resolve, relative } from "node:path";
 import { loadConfig, absentStoreNotes } from "./lib/config.mjs";
 import { parseFrontmatter } from "./lib/frontmatter.mjs";
-import { extractBlessings, forwardStamps } from "./lib/map-links.mjs";
+import { extractBlessings, forwardStamps, blessingShape, BLESSING_LENGTH_BUDGET } from "./lib/map-links.mjs";
 import { walkMarkdown, readBounded, MAX_STORE_FILE_BYTES } from "./lib/walk-markdown.mjs";
 import { unclaimedRecords } from "./lib/claims.mjs";
 
@@ -153,8 +166,18 @@ for (const path of walkMarkdown(MAP_DIR)) {
   for (const b of extractBlessings(body)) {
     const excerpt = printable(b.text.length > 60 ? b.text.slice(0, 59) + "…" : b.text);
     const where = `${rel}:${b.line + offset} (blessing: "${excerpt}")`;
+    const shape = blessingShape(b.text);
+    if (!shape.question) {
+      problems.push(
+        `${where}: opens with no trigger question — start it with the question it answers ("Adding an endpoint? Copy …"); ` +
+          `the blessing index lists blessings by that question, so this one is invisible to a session choosing patterns`,
+      );
+    }
+    if (shape.length > BLESSING_LENGTH_BUDGET) {
+      console.error(`WARNING: ${where} is ${shape.length} characters (budget ${BLESSING_LENGTH_BUDGET}) — keep the question, the exemplar, the refusal and the reason; the detail belongs in the ADR`);
+    }
     if (!b.adrs.length) {
-      console.error(`WARNING: ${where} cites no ADR — a blessing always names the decision that blessed it`);
+      if (!shape.because) console.error(`WARNING: ${where} gives no reason — cite the ADR that blessed it, or say why inline ("because …")`);
       continue;
     }
     for (const num of b.adrs) {
@@ -187,6 +210,25 @@ if (args.includes("--tempstate")) {
         `(everything lands in a store or dies with it), then git rm it.`,
     );
   }
+}
+
+// ---- 3b. Pattern plan ----
+// lstat, not existsSync: a plan that is a dangling symlink is still a file
+// someone committed.
+let planPresent = false;
+try {
+  lstatSync(resolve(REPO, paths.patternsPlan));
+  planPresent = true;
+} catch {
+  planPresent = false;
+}
+if (planPresent && args.includes("--merge")) {
+  problems.push(
+    `${paths.patternsPlan}: the pattern plan must be reconciled before merge — say "update ZDD": it mints the blessings that ` +
+      `survived, records the rest in the update commit's message, and deletes this file in that commit`,
+  );
+} else if (planPresent) {
+  console.error(`WARNING: ${paths.patternsPlan} is on this branch — "update ZDD" reconciles and deletes it; CI (lint --merge) fails while it exists`);
 }
 
 // ---- 4. Claims: unclaimed and double-claimed records ----
