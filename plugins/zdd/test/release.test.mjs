@@ -285,3 +285,49 @@ test("CLAUDE_CONFIG_DIR is where the check reads the catalogue, the installs and
     userDecl(null);
   }
 });
+
+// 2.2.1 review (CR-201, CR-202, CR-204): every run below has an EMPTY default
+// home, so a silent or correct line proves the profile was found elsewhere.
+const runProfile = (script, extraEnv, input) => {
+  const empty = join(scratch, "empty-home");
+  mkdirSync(empty, { recursive: true });
+  const env = { ...process.env, CLAUDECODE: "1", HOME: empty, USERPROFILE: empty, CLAUDE_PROJECT_DIR: repo, ...extraEnv };
+  for (const k of ["ZDD_HOME", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_PLUGIN_CACHE_DIR"]) if (!(k in extraEnv)) delete env[k];
+  const r = spawnSync(process.execPath, [script, `--root=${repo}`], { encoding: "utf8", env, input: input ?? "" });
+  assert.equal(r.status, 0, r.stderr);
+  return r.stdout;
+};
+
+test("CLAUDE_CODE_PLUGIN_CACHE_DIR moves the plugins folder on its own; the check reads it there (CR-201)", () => {
+  lock("v2.1.0");
+  catalogue("v2.1.0", "1.3.1");
+  installed("2.1.0", "1.3.1");
+  const profile = join(scratch, "bare-profile");
+  mkdirSync(profile, { recursive: true });
+  assert.match(runProfile(CHECK, { CLAUDE_CONFIG_DIR: profile }), /no recorded ref/, "plugins not under the profile: loud");
+  assert.equal(runProfile(CHECK, { CLAUDE_CONFIG_DIR: profile, CLAUDE_CODE_PLUGIN_CACHE_DIR: join(home, ".claude", "plugins") }), "", "pointed at them: silent");
+});
+
+test("with CLAUDE_CONFIG_DIR scrubbed from the hook, the session-start hook finds the profile from its transcript_path (CR-202)", () => {
+  lock("v2.1.0");
+  catalogue("v2.1.0", "1.3.1");
+  installed("2.1.0", "1.3.1");
+  const transcript = join(home, ".claude", "projects", "C--repo", "0000-session.jsonl");
+  assert.match(runProfile(INJECT, {}, ""), /ZDD release mismatch/, "no hint: the empty default is read, loud");
+  assert.equal(runProfile(INJECT, {}, JSON.stringify({ hook_event_name: "SessionStart", transcript_path: transcript })).includes("ZDD release mismatch"), false, "transcript_path names the profile: silent");
+  assert.equal(runProfile(INJECT, {}, "{ not json").includes("<zdd"), false, "a malformed payload is no payload");
+});
+
+test("under a custom profile the stray declaration is named by the file actually read (CR-204)", () => {
+  lock("v2.1.0");
+  catalogue("v1.3.1", "1.3.1");
+  installed("1.3.1", "1.3.1");
+  userDecl("v1.3.1");
+  try {
+    const profile = join(home, ".claude");
+    const out = runProfile(CHECK, { CLAUDE_CONFIG_DIR: profile });
+    assert.ok(out.includes(`your user settings (${join(profile, "settings.json")}) also declare zero-drift-docs at v1.3.1`), out);
+  } finally {
+    userDecl(null);
+  }
+});

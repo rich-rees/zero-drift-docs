@@ -17,14 +17,18 @@ Confirm they're installed before anything else. Claude Code loads skills from mo
 than one place, so **check all of them — a hit in any one is enough** (the
 `domain-modeling` skill is the one that must be present; it's the writer):
 
+`<claude>` below is Claude Code's config folder: `$CLAUDE_CONFIG_DIR` when that
+is set, else `~/.claude`. `<plugins>` is `$CLAUDE_CODE_PLUGIN_CACHE_DIR` when
+that is set, else `<claude>/plugins`.
+
 ```
-# 1. Plugin install (the usual route). Cached in your HOME dir regardless of
-#    whether the plugin is enabled globally or per-project — so global-vs-local
-#    enablement doesn't change this path.
-~/.claude/plugins/cache/*/mattpocock-skills/*/skills/*/domain-modeling/SKILL.md
+# 1. Plugin install (the usual route). Cached in the plugins folder regardless
+#    of whether the plugin is enabled globally or per-project — so
+#    global-vs-local enablement doesn't change this path.
+<plugins>/cache/*/mattpocock-skills/*/skills/*/domain-modeling/SKILL.md
 
 # 2. User-scoped skill (pre-plugin / manual install).
-~/.claude/skills/domain-modeling/SKILL.md
+<claude>/skills/domain-modeling/SKILL.md
 
 # 3. Project-scoped skill (vendored into this repo — note this one is
 #    whatever the repo's last commit put there; say so when it is the hit).
