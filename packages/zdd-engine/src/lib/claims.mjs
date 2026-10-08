@@ -24,6 +24,14 @@ import { extractLinks } from "./map-links.mjs";
 import { walkMarkdown, readBounded, MAX_STORE_FILE_BYTES } from "./walk-markdown.mjs";
 
 export const CLAIMABLE_KINDS = ["route", "table", "function", "surface"];
+// The kinds ZDD 2.1 added (decision 0017): claimable, warned about when
+// unclaimed, but under `claims.strict` a FAILURE only when
+// `claims.strictKinds` names the kind — switching an extractor on never
+// turns a green lint red by itself. A component is claimable only when it
+// is shared (two importers or a shared folder); a page-private one folds
+// into its page.
+export const OPT_IN_CLAIMABLE_KINDS = ["component", "job", "service"];
+const claimable = (record) => CLAIMABLE_KINDS.includes(record.kind) || (OPT_IN_CLAIMABLE_KINDS.includes(record.kind) && (record.kind !== "component" || record.facts?.shared === true));
 const MAX_DEPTH = 4; // metadataDir/<kind>/<file>.json — anything deeper is not derive's
 const MAX_ENTRIES = 20_000;
 
@@ -116,8 +124,8 @@ export function claimableRecords(metadataDir, bundleDir, skipped, unplaced, unkn
     // A job whose mode the manifests do not state (decision 0020): lint asks
     // for a committed Railway file or a `modes` entry rather than guessing.
     if (unknownJobs && record.kind === "job" && record.facts?.mode === "unknown") unknownJobs.push({ id: String(record.id ?? nodeId), file, manifest: String(record.facts.manifest ?? "") });
-    if (!CLAIMABLE_KINDS.includes(record.kind)) continue;
-    out.push({ kind: record.kind, id: String(record.id ?? nodeId), title: String(record.title ?? record.id ?? nodeId), nodeId, file });
+    if (!claimable(record)) continue;
+    out.push({ kind: record.kind, id: String(record.id ?? nodeId), title: String(record.title ?? record.id ?? nodeId), nodeId, file, optIn: OPT_IN_CLAIMABLE_KINDS.includes(record.kind) });
   }
   return out.sort((a, b) => (a.nodeId < b.nodeId ? -1 : 1));
 }
