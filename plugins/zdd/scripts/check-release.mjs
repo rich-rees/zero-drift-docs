@@ -113,11 +113,14 @@ export function narrate(r) {
   // moves the catalogue to the lock, `plugin update` moves this project's
   // install to the release the catalogue holds, a second restart loads it.
   // A plugin with no install for this project has nothing to update, so it
-  // is installed. When only the catalogue is behind, one restart suffices.
+  // is installed. While the catalogue is behind, the expected Pocock version
+  // is the running plugin's guess — the locked release may move it — so
+  // every installed plugin is updated, a no-op where it is current (CR-006).
   const catalogueMoved = r.mismatches.some((m) => m.what === "catalogue");
-  const plugins = r.mismatches
-    .filter((m) => m.what !== "catalogue")
-    .map((m) => (m.found === null ? `claude plugin install ${m.what} --scope project` : `claude plugin update ${m.what}`));
+  const found = { [ZDD_PLUGIN_ID]: r.found?.zdd ?? null, [POCOCK_ID]: r.found?.pocock ?? null };
+  const plugins = [ZDD_PLUGIN_ID, POCOCK_ID]
+    .filter((id) => r.mismatches.some((m) => m.what === id) || (catalogueMoved && found[id] !== null))
+    .map((id) => (found[id] === null ? `claude plugin install ${id} --scope project` : `claude plugin update ${id}`));
   const steps = [];
   if (catalogueMoved) steps.push(`restart Claude Code (the catalogue follows this repo's lock on restart)`);
   if (plugins.length) steps.push(...plugins, catalogueMoved ? "then restart Claude Code again" : "then restart Claude Code");

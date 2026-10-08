@@ -69,20 +69,20 @@ test("the catalogue is at another tag: the pin-move route — restart (the catal
   installed("1.3.1", "1.3.1");
   const out = run();
   assert.match(out, /the catalogue on this machine is at v1\.3\.1, this repo locks v2\.1\.0/, out);
-  assert.match(out, /Fix, from this repo's folder: restart Claude Code \(the catalogue follows this repo's lock on restart\); claude plugin update zdd@zero-drift-docs; then restart Claude Code again\./, out);
+  assert.match(out, /Fix, from this repo's folder: restart Claude Code \(the catalogue follows this repo's lock on restart\); claude plugin update zdd@zero-drift-docs; claude plugin update mattpocock-skills@zero-drift-docs; then restart Claude Code again\./, out);
   assert.doesNotMatch(out, /marketplace|plugin install/, out);
   // The Pocock expectation falls back to the running plugin's pin when the catalogue is not at the lock.
   const j = JSON.parse(run(CHECK, "--json"));
   assert.equal(j.expected.pocock, POCOCK.version);
 });
 
-test("only the catalogue is behind (the installs already match the lock): one restart is the whole route", () => {
+test("only the catalogue is behind: restart, then update every installed plugin, then restart — the locked release may move Pocock, which a stale catalogue cannot show (CAS-99 CR-006, replacing the one-restart route)", () => {
   lock("v2.1.0");
   catalogue("v1.3.1", POCOCK.version);
   installed("2.1.0", POCOCK.version);
   const out = run();
-  assert.match(out, /Fix, from this repo's folder: restart Claude Code \(the catalogue follows this repo's lock on restart\)\. \(Installed/, out);
-  assert.doesNotMatch(out, /plugin update|plugin install|again/, out);
+  assert.match(out, /Fix, from this repo's folder: restart Claude Code \(the catalogue follows this repo's lock on restart\); claude plugin update zdd@zero-drift-docs; claude plugin update mattpocock-skills@zero-drift-docs; then restart Claude Code again\./, out);
+  assert.doesNotMatch(out, /plugin install|marketplace/, out);
 });
 
 test("neither plugin installed for this project (another project's install does not count): both named as not installed", () => {

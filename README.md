@@ -419,7 +419,7 @@ saying no to a row is a visible choice, not a fork.
       its schema (`public.audit_events`), and the migration replay treats
       `things` and `public.things` as one table, so a trigger or ALTER in
       the other spelling lands; the agent index links a service
-      record as `.json`; a component's description is its own JSDoc alone;
+      record as `.json`; a component's description is the comment attached to it, never an earlier JSDoc;
       the release check prints the route that moves a machine — restart,
       `claude plugin update`, restart *(engine + plugin 2.1.1, CAS-99)*.
 - [ ] Next: a second viewer; Vue / Svelte / Angular extractors on their first
