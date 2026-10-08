@@ -56,8 +56,10 @@ until the catalogue and the install are refreshed. This prints one line when
 the catalogue, `zdd@zero-drift-docs` or `mattpocock-skills@zero-drift-docs`
 installed for this project differs from the lock, naming expected and found
 and the route that moves the machine: restart Claude Code, `claude plugin
-update`, restart again. **Relay it verbatim as the
-next line of your reply.** Silent when they match or the repo locks nothing;
+update`, restart again — preceded, only where one exists, by removing a stray
+declaration of the marketplace from the user's or local settings, which a
+plain `marketplace add` leaves and which holds the catalogue back (decision
+0022). **Relay it verbatim as the next line of your reply.** Silent when they match or the repo locks nothing;
 do not mention it then. (The session-start hook prints the same line.)
 
 ## Steps

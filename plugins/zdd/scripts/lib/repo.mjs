@@ -368,6 +368,18 @@ function findUnder(dir, tail, depth) {
 // merges, lowest precedence first: user, project, local. Managed settings
 // and the --settings flag are not files in the repo or home and are not read.
 // ---------------------------------------------------------------------------
+// The marketplace this plugin ships from, and whether a settings declaration
+// of it points here (decision 0021): a GitHub source naming this repository,
+// or its URL. Anything else — a fork, a mirror, a path — is the adopter's.
+export const MARKETPLACE = "zero-drift-docs";
+export const MARKETPLACE_REPO = "rich-rees/zero-drift-docs";
+const OUR_URL = /^(?:https:\/\/|git@)github\.com[/:]rich-rees\/zero-drift-docs(?:\.git)?\/?$/i;
+export function isOurDeclaration(decl) {
+  const src = decl !== null && typeof decl === "object" && !Array.isArray(decl) ? decl.source : null;
+  if (src === null || typeof src !== "object" || Array.isArray(src)) return false;
+  if (src.source === "github") return typeof src.repo === "string" && src.repo.toLowerCase() === MARKETPLACE_REPO;
+  return typeof src.url === "string" && OUR_URL.test(src.url);
+}
 export const ZDD_PLUGIN_ID = "zdd@zero-drift-docs";
 export function pocockPin() {
   return JSON.parse(readFileSync(join(PLUGIN_ROOT, "pocock.json"), "utf8"));

@@ -490,7 +490,7 @@ test("manifests: Claude and Codex reference the same skills and hooks; hooks.jso
   // The plugin and the engine share one version line (README "Versioning"; decision 0003).
   const enginePkg = JSON.parse(readFileSync(resolve(PLUGIN, "..", "..", "packages", "zdd-engine", "package.json"), "utf8"));
   assert.equal(enginePkg.version, claude.version, "engine package.json version equals the plugin version");
-  for (const s of ["bootstrap", "load", "update", "grill"]) assert.ok(existsSync(join(PLUGIN, "skills", s, "SKILL.md")), s);
+  for (const s of ["bootstrap", "load", "update", "grill", "upgrade"]) assert.ok(existsSync(join(PLUGIN, "skills", s, "SKILL.md")), s);
   assert.ok(!existsSync(join(PLUGIN, "skills", "orient")));
 });
 
