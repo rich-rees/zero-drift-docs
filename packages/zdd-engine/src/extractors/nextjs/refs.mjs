@@ -11,6 +11,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { walkDir } from "../../lib/walk.mjs";
 import { expandTemplatePath } from "../../lib/template-paths.mjs";
+import { scanSubscriptions } from "../react-router/index.mjs";
 
 const posixify = (p) => p.split(/[\\/]/).join("/");
 
@@ -67,7 +68,7 @@ export function normalizeFetchUrl(raw) {
 // Scan one file's text. Returns raw candidate names; the deriver resolves them
 // against every extractor's records after the merge (name-set membership is
 // the whole disambiguation strategy — receivers vary too much to be a signal).
-export function scanFileText(text) {
+export function scanFileText(text, subscribeCalls = []) {
   const fromNames = new Set();
   const rpcNames = new Set();
   const fetchUrls = new Set();
@@ -94,14 +95,17 @@ export function scanFileText(text) {
     for (const url of expandTemplatePath(m[2], text)) fetchUrls.add(normalizeFetchUrl(url));
   }
 
-  return { fromNames, rpcNames, fetchUrls, unresolvedFromIdents };
+  // Realtime subscriptions (CAS-97 item 5): the client's own
+  // `.on("postgres_changes", { table })` and the adopter's named helpers.
+  const subscriptions = scanSubscriptions(text, subscribeCalls);
+  return { fromNames, rpcNames, fetchUrls, unresolvedFromIdents, subscriptions };
 }
 
-export function scanFiles(repoRoot, files) {
+export function scanFiles(repoRoot, files, subscribeCalls = []) {
   const results = new Map();
   for (const rel of files) {
     const text = readFileSync(join(repoRoot, rel), "utf8");
-    results.set(rel, scanFileText(text));
+    results.set(rel, scanFileText(text, subscribeCalls));
   }
   return results;
 }

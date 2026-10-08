@@ -56,7 +56,8 @@
                 "roots": { "type": "array", "items": { "type": "string" } },
                 "extensions": { "type": "array", "items": { "type": "string" }, "default": [".ts", ".tsx", ".js", ".jsx"] },
                 "excludeDirs": { "type": "array", "items": { "type": "string" }, "default": ["node_modules"] },
-                "excludeSuffixes": { "type": "array", "items": { "type": "string" }, "default": [".test.ts", ".test.tsx", ".test.js", ".test.jsx", ".d.ts"] }
+                "excludeSuffixes": { "type": "array", "items": { "type": "string" }, "default": [".test.ts", ".test.tsx", ".test.js", ".test.jsx", ".d.ts"] },
+                "subscribeCalls": { "type": "array", "items": { "type": "string" }, "default": [], "description": "Call names whose first string argument is a table a page subscribes to over Supabase Realtime, beside .on(\"postgres_changes\", { table }) — a `subscribes` edge (ZDD 2.1)." }
               }
             }
           }
@@ -75,7 +76,8 @@
           "additionalProperties": false,
           "properties": {
             "routesFile": { "type": "string", "default": "src/routes.tsx", "description": "The file declaring the route tree in code: a RouteObject[] / createBrowserRouter([...]) array, or <Route> elements. One surface per route with a path; layout ancestors become facts.guards." },
-            "srcAliasRoot": { "type": "string", "description": "Where the tsconfig @/ alias points; default the routes file's directory." }
+            "srcAliasRoot": { "type": "string", "description": "Where the tsconfig @/ alias points; default the routes file's directory." },
+            "subscribeCalls": { "type": "array", "items": { "type": "string" }, "default": [], "description": "Call names whose first string argument is a table the screen subscribes to over Supabase Realtime (e.g. \"live.onInsert\"), beside the client's own .on(\"postgres_changes\", { table }) — a `subscribes` edge (ZDD 2.1)." }
           }
         },
         "components": {
