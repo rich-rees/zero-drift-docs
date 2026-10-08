@@ -13,7 +13,7 @@
 
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { replayMigrations, sortMigrations } from "./sql-replay.mjs";
+import { replayMigrations, sortMigrations, tableKey } from "./sql-replay.mjs";
 import { repoRelative } from "../../lib/paths.mjs";
 
 const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -72,30 +72,36 @@ export function derive({ repoRoot, options }) {
 
   // Name -> namespace lookups. A name in two namespaces (or in both a table
   // set and a bucket set) would make `.from('name')` unattributable —
-  // hard-error rather than guess.
+  // hard-error rather than guess. Keyed by tableKey (`public.x` and `x` are
+  // one table, CAS-99); a record's id uses the table's name as written.
   const tableNs = new Map();
   const bucketNs = new Map();
   for (const [ns, { tables, buckets }] of schemas) {
-    for (const name of tables.keys()) {
-      if (tableNs.has(name)) throw new Error(`Table '${name}' exists in namespaces '${tableNs.get(name)}' and '${ns}' — cannot attribute .from() calls`);
-      tableNs.set(name, ns);
+    for (const [key, t] of tables) {
+      if (tableNs.has(key)) throw new Error(`Table '${t.name}' exists in namespaces '${tableNs.get(key)}' and '${ns}' — cannot attribute .from() calls`);
+      tableNs.set(key, ns);
     }
     for (const name of buckets.keys()) bucketNs.set(name, ns);
   }
   for (const { name, namespace } of externalBuckets) bucketNs.set(name, namespace);
   for (const [name] of bucketNs) {
-    if (tableNs.has(name)) throw new Error(`Name '${name}' is both a table and a bucket — add config disambiguation`);
+    if (tableNs.has(tableKey(name))) throw new Error(`Name '${name}' is both a table and a bucket — add config disambiguation`);
   }
 
   const records = [];
   for (const [ns, { tables, functions, buckets, triggers }] of schemas) {
-    for (const name of [...tables.keys()].sort()) {
-      const t = tables.get(name);
+    // A table's id, by any spelling of its name, in this namespace.
+    const tableId = (n) => {
+      const key = tableKey(n);
+      return tableNs.get(key) === ns ? `table:${ns}/${tables.get(key).name}` : null;
+    };
+    for (const t of [...tables.values()].sort((a, b) => (a.name < b.name ? -1 : 1))) {
+      const name = t.name;
       const refs = new Set();
       for (const col of t.columns) {
         if (col.references) {
-          const target = col.references.split("(")[0];
-          if (tableNs.get(target) === ns && target !== name) refs.add(`table:${ns}/${target}`);
+          const target = tableId(col.references.split("(")[0]);
+          if (target && target !== `table:${ns}/${name}`) refs.add(target);
         }
       }
       const facts = { namespace: ns, columns: t.columns, createdIn: t.createdIn.split("/").pop() };
@@ -117,14 +123,16 @@ export function derive({ repoRoot, options }) {
       // the (last) definition body. Textual, therefore honest. Trigger
       // functions never name their tables (`NEW.updated_at = now()`), so
       // CREATE TRIGGER attachments contribute edges + facts.triggers too.
+      // A public table's key is its bare name, so `things` and
+      // `public.things` in a body both match it (CAS-99).
       const refs = new Set();
-      for (const [tName, tNs] of tableNs) {
-        if (tNs === ns && new RegExp(`\\b${escapeRegex(tName)}\\b`).test(f.body)) refs.add(`table:${ns}/${tName}`);
+      for (const [key, tNs] of tableNs) {
+        if (tNs === ns && new RegExp(`\\b${escapeRegex(key)}\\b`).test(f.body)) refs.add(tableId(key));
       }
-      const attached = triggers.filter((t) => t.fn === name && tables.has(t.table));
+      const attached = triggers.filter((t) => t.fn === name && tableId(t.table));
       const facts = { namespace: ns, signature: f.signature, returns: f.returns, language: f.language };
       if (attached.length) {
-        for (const t of attached) refs.add(`table:${ns}/${t.table}`);
+        for (const t of attached) refs.add(tableId(t.table));
         facts.triggers = attached
           .map((t) => `${(t.timing + " " + t.events.join(" or ")).toUpperCase()} ON ${t.table}`)
           .sort();

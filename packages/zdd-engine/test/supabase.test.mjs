@@ -32,3 +32,22 @@ test("CR-064: two migrationNamespaces with one name is an error naming both dirs
   assert.deepEqual(ok.records.map((r) => r.id).sort(), ["table:a/jobs", "table:b/offers"]);
   rmSync(root, { recursive: true, force: true });
 });
+
+test("a table created as `public.things` keeps that id when later migrations say `things`; its FK, trigger and function edges are drawn either way (CAS-99)", () => {
+  const root = scratch({
+    "migrations/0001.sql": "create table public.things (id uuid primary key);\ncreate table public.kids (id uuid, thing_id uuid references things(id));\ncreate or replace function touch() returns trigger language plpgsql as $$ begin return new; end; $$;\ncreate trigger trg_touch before update on things for each row execute function touch();\ncreate or replace function count_things() returns int language sql as $$ select count(*) from things $$;\n",
+    "migrations/0002.sql": "alter table things add column name text;\n",
+  });
+  try {
+    const { records } = derive({ repoRoot: root, options: { migrationNamespaces: [{ name: "db", dir: "migrations" }] } });
+    const things = records.find((r) => r.id === "table:db/public.things");
+    assert.ok(things, records.map((r) => r.id).join(", "));
+    assert.equal(things.filename, "db--public.things.json");
+    assert.deepEqual(things.facts.columns.map((c) => c.name), ["id", "name"]);
+    assert.deepEqual(records.find((r) => r.id === "table:db/public.kids").refs, ["table:db/public.things"]);
+    assert.deepEqual(records.find((r) => r.id === "function:db/touch").refs, ["table:db/public.things"]);
+    assert.deepEqual(records.find((r) => r.id === "function:db/count_things").refs, ["table:db/public.things"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
