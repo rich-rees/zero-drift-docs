@@ -417,6 +417,8 @@ function validateExtractorOptions(all) {
       }
     } else if (name === "react-router") {
       for (const k of ["routesFile", "srcAliasRoot"]) if (opts[k] !== undefined) enginePath(opts[k], `react-router.${k}`);
+    } else if (name === "services") {
+      if (opts.roots !== undefined) list(opts.roots, "services.roots");
     } else if (name === "jobs") {
       if (opts.roots !== undefined) list(opts.roots, "jobs.roots");
     } else if (name === "expo-router") {

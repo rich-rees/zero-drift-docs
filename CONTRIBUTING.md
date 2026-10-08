@@ -99,6 +99,10 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
   cannot write into a surface's refs); any letters-only verb is
   accepted and drawn plain. The graph's edge gains `verb`; a record with no
   `facts.edges` renders exactly as before.
+- **A third channel, `warnings`, is optional** and prints on every derive,
+  not only under `--verbose`: for what the branch that caused it should
+  hear (the `services` extractor's "this env name matches no declared
+  service"). Diagnostics stay the quiet channel. Neither ever fails derive.
 - **Missing source is "nothing to inventory."** A configured root that does not
   exist yields no records and a diagnostic, never an error — greenfield repos
   adopt ZDD before any code exists. The one exception is a single named file
