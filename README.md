@@ -416,7 +416,9 @@ saying no to a row is a visible choice, not a fork.
       [0016](docs/decisions/0016-typed-edges-are-additive.md)–[0020](docs/decisions/0020-jobs-from-manifests-services-from-declared-markers.md))*.
 - [x] **2.1.1** — fixes from the first real adoption of 2.1 (Cascade): a
       subscribes or `.from()` ref reaches a table the migrations named with
-      its schema (`public.audit_events`); the agent index links a service
+      its schema (`public.audit_events`), and the migration replay treats
+      `things` and `public.things` as one table, so a trigger or ALTER in
+      the other spelling lands; the agent index links a service
       record as `.json`; a component's description is its own JSDoc alone;
       the release check prints the route that moves a machine — restart,
       `claude plugin update`, restart *(engine + plugin 2.1.1, CAS-99)*.
@@ -506,6 +508,8 @@ warning can say "behind".
 - **`2.1.1` — fixes.** A patch; no config or contract change, but bytes move
   on the pin bump wherever a fix applies, so re-derive and re-render: a
   table minted with its schema gains the edges that named it bare; a
+  trigger function whose `create trigger … on public.x` targets a table
+  created as `x` (or the reverse) gains its trigger facts and table edge; a
   component whose JSDoc sat after an exported type or constant gets its own
   description; an agent index with an External services list links `.json`.
 
