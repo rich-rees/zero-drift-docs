@@ -82,7 +82,7 @@ function walkJson(dir, out = [], state = { depth: 0, entries: 0 }) {
 
 // The claimable records under metadataDir, each with the node id a map link
 // resolves to (bundle-relative path minus extension), sorted by id.
-export function claimableRecords(metadataDir, bundleDir, skipped, unplaced) {
+export function claimableRecords(metadataDir, bundleDir, skipped, unplaced, unknownJobs) {
   const out = [];
   const why = (p) => {
     try {
@@ -113,6 +113,9 @@ export function claimableRecords(metadataDir, bundleDir, skipped, unplaced) {
     if (unplaced && Array.isArray(record.facts?.unplaced) && record.facts.unplaced.length) {
       unplaced.push({ id: String(record.id ?? nodeId), file, calls: record.facts.unplaced.map(String) });
     }
+    // A job whose mode the manifests do not state (decision 0020): lint asks
+    // for a committed Railway file or a `modes` entry rather than guessing.
+    if (unknownJobs && record.kind === "job" && record.facts?.mode === "unknown") unknownJobs.push({ id: String(record.id ?? nodeId), file, manifest: String(record.facts.manifest ?? "") });
     if (!CLAIMABLE_KINDS.includes(record.kind)) continue;
     out.push({ kind: record.kind, id: String(record.id ?? nodeId), title: String(record.title ?? record.id ?? nodeId), nodeId, file });
   }
@@ -159,8 +162,10 @@ export function unclaimedRecords({ metadataDir, mapDir, bundleDir }) {
   const raw = [];
   const claimed = featureClaims(mapDir, bundleDir, raw);
   const unplaced = [];
-  const records = claimableRecords(metadataDir, bundleDir, raw, unplaced);
+  const unknownJobs = [];
+  const records = claimableRecords(metadataDir, bundleDir, raw, unplaced, unknownJobs);
   unplaced.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  unknownJobs.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   const skipped = raw
     .map((s) => {
       const inMetadata = !relative(metadataDir, s.path).startsWith("..");
@@ -170,6 +175,7 @@ export function unclaimedRecords({ metadataDir, mapDir, bundleDir }) {
   return {
     skipped,
     unplaced,
+    unknownJobs,
     total: records.length,
     records,
     unclaimed: records.filter((r) => !claimed.has(r.nodeId)),

@@ -235,7 +235,7 @@ if (planPresent && args.includes("--merge")) {
 // Read after the blocking lints so a failure above is not buried under the
 // list. Absent metadata (greenfield, or derive not yet run) is an empty
 // inventory: nothing to claim, no line printed.
-const { total, records, unclaimed, doubleClaimed, skipped, unplaced } = unclaimedRecords({ metadataDir: METADATA_DIR, mapDir: MAP_DIR, bundleDir });
+const { total, records, unclaimed, doubleClaimed, skipped, unplaced, unknownJobs } = unclaimedRecords({ metadataDir: METADATA_DIR, mapDir: MAP_DIR, bundleDir });
 // Every adopter-controlled path is printable before it reaches the log — a
 // control character in a filename cannot forge a line (CAS-65 CR-032).
 const files = (list) => list.map(printable).join(", ");
@@ -282,6 +282,12 @@ if (unplaced.length) {
   const n = unplaced.reduce((sum, r) => sum + r.calls.length, 0);
   console.error(`WARNING: ${n} API call${n === 1 ? "" : "s"} could not be placed on a route — a variable segment (\`*\`) matches only a route parameter, never a fixed word; type the variable as a union of string literals so the call expands, or the edge stays missing:`);
   for (const r of unplaced) for (const c of r.calls) console.error(`  ${printable(r.id)}  ${printable(c)}  (${printable(r.file)})`);
+}
+
+// ---- 4c. Jobs whose mode is unknown (decision 0020) ----
+if (unknownJobs.length) {
+  console.error(`WARNING: ${unknownJobs.length} job${unknownJobs.length === 1 ? "" : "s"} with no stated mode — a worker or a scheduled job? The manifests do not say: commit a railway.toml/json with its startCommand (and cronSchedule for a scheduled one), or set extractorOptions.jobs.modes["<name>"] to "worker" or "scheduled":`);
+  for (const j of unknownJobs) console.error(`  ${printable(j.id)}  (from ${printable(j.manifest)}; ${printable(j.file)})`);
 }
 
 // ---- 5. Stray root glossary (CAS-93) ----
