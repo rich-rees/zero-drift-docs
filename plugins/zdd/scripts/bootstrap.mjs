@@ -2489,7 +2489,12 @@ export function narrateUpgrade(r) {
   const out = [r.plan ? `${r.to ? `Lock move plan to ${r.to}` : `Upgrade plan for plugin ${r.version}`} — nothing written yet` : title];
   const verb = r.plan ? "would change" : "changed";
   if (!r.wrote.length) out.push("  nothing to change — every plugin-owned file is already at this version");
-  for (const f of r.wrote) out.push(`  ${verb} ${f}`);
+  // The plain-words card under each file (pick 2), as the apply ledger has.
+  for (const f of r.wrote) {
+    out.push(`  ${verb} ${f}`);
+    const e = explain(f.replace(/ \(.*\)$/, ""));
+    if (e) out.push(`          what: ${e.what}`, `          why: ${e.why}`, `          who: ${e.who}`, `          hand-edited: ${e.handEdited}`);
+  }
   for (const f of r.kept) out.push(`  kept    ${f}`);
   for (const n of r.notes) out.push(`  note    ${n}`);
   for (const d of r.duplicates ?? []) {
