@@ -1,0 +1,77 @@
+# Zero-Drift Docs — the release in one step (CAS-103, the process scope).
+#
+# Push a tag `vX.Y.Z` on main and this job publishes the engine to npm and
+# creates the GitHub release, so a release is: merge, tag, push the tag.
+# Before anything is published it proves the tag is the version every pin
+# names (the repo's own tests hold the pins together), runs both suites
+# once more on the tagged commit, and refuses a tag whose version is already
+# on npm.
+#
+# One secret: NPM_TOKEN, an npm automation token for @rich-rees with publish
+# rights to @rich-rees/zdd-engine (Settings → Secrets → Actions). The GitHub
+# release uses the job's own GITHUB_TOKEN. No other credential anywhere.
+#
+# The release notes are the README's Versioning entry for the tag, lifted
+# verbatim, so the notes and the README cannot disagree.
+
+name: release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: The tag names the version every pin names
+        run: node scripts/release-check.mjs "${GITHUB_REF_NAME}"
+
+      - name: Engine tests
+        run: cd packages/zdd-engine && node --test "test/*.test.mjs"
+
+      - name: Plugin tests
+        run: node --test "plugins/zdd/test/*.test.mjs"
+
+      - name: Not already on npm
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          if npm view "@rich-rees/zdd-engine@${V}" version >/dev/null 2>&1; then
+            echo "@rich-rees/zdd-engine@${V} is already published — a tag is immutable; bump the version instead"; exit 1
+          fi
+
+      - name: Publish the engine
+        run: cd packages/zdd-engine && npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Published and fetchable from outside the repo
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          cd "$(mktemp -d)"
+          for i in 1 2 3 4 5 6; do
+            if npx -y "@rich-rees/zdd-engine@${V}" 2>&1 | grep -q "derive"; then exit 0; fi
+            sleep 20
+          done
+          echo "@rich-rees/zdd-engine@${V} did not become fetchable in two minutes"; exit 1
+
+      - name: GitHub release, notes from the README's Versioning entry
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/release-notes.mjs "${GITHUB_REF_NAME}" > /tmp/notes.md
+          gh release create "${GITHUB_REF_NAME}" --title "${GITHUB_REF_NAME}" --notes-file /tmp/notes.md --latest

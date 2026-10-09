@@ -287,6 +287,7 @@ test("CR-410: the map-link rewrite touches only destinations that resolve under 
     "- [P](//cdn.example.com/service/x.json)",
     "- [D](../../../docs/service/notes.json)",
     "- [R](/zdd/metadata/service/resend.json)",
+    "- [X](/service/loose.json)",
     "",
   ].join("\n");
   writeFileSync(join(repo, "zdd", "map", "features", "a.md"), page);

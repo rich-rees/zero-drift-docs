@@ -250,29 +250,44 @@ export function detect(root) {
       const app = segs.lastIndexOf("app");
       if (app !== -1) expoAppDirs.add(segs.slice(0, app + 1).join("/"));
     }
-    // jobs: a manifest naming a process — a package script that runs a
-    // module (`python -m x`, `node x.mjs`), a Procfile line, a Railway file.
-    if (name === "package.json" || name === "Procfile" || name === "railway.toml" || name === "railway.json") {
+    // jobs — background work (2.3): a manifest that RUNS a process (a
+    // Procfile line, a Railway file, a Compose service), a schedule (Vercel
+    // crons, a Cloudflare `[triggers]`, a pg_cron line in a migration), or a
+    // queue in source. A package.json script on its own is a hand-run tool,
+    // not background work, and is no longer evidence (CAS-103 pick 6).
+    if (name === "Procfile" || name === "railway.toml" || name === "railway.json" || name === "vercel.json" || name === "wrangler.toml" || /^(docker-)?compose\.ya?ml$/.test(name) || (name.endsWith(".sql") && /(^|\/)migrations\//.test(rel))) {
       let text = "";
       try {
         text = readFileSync(abs, "utf8");
       } catch {
         return;
       }
-      const jobShaped = (cmd) => /(?:^|\s)python[0-9.]*\s+-m\s+[\w.]+/.test(cmd) || /(?:^|\s)(?:node|tsx|ts-node|bun|deno)\s+(?:-[^\s]+\s+)*[\w./-]+\.(?:m?[jt]s|cjs)\b/.test(cmd);
-      const notAJob = (n) => /^(dev|start|test|lint|build|typecheck|format|prepare|postinstall)$/.test(n) || /^(test|lint|build|check|typecheck|format)[:.-]/.test(n);
-      if (name === "package.json") {
-        try {
-          const scripts = JSON.parse(text).scripts ?? {};
-          const hits = Object.entries(scripts).filter(([n, c]) => !notAJob(n) && typeof c === "string" && jobShaped(c)).map(([n]) => n).sort();
-          if (hits.length) jobManifests.push({ manifest: rel, scripts: hits });
-        } catch {
-          /* not JSON: not a manifest */
-        }
-      } else if (name === "Procfile") {
+      const jobShaped = (cmd) => /(?:^|\s)python[0-9.]*\s+-m\s+[\w.]+/.test(cmd) || /(?:^|\s)(?:node|tsx|ts-node|bun|deno)\s+(?:-[^\s]+\s+)*[\w./-]+\.(?:m?[jt]s|cjs)\b/.test(cmd) || /(?:^|\s)(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?[\w:.-]+/.test(cmd);
+      if (name === "Procfile") {
         const hits = text.split("\n").map((l) => /^\s*([A-Za-z_][\w-]*)\s*:\s*(.+)$/.exec(l)).filter((m) => m && m[1] !== "web" && jobShaped(m[2])).map((m) => m[1]);
-        if (hits.length) jobManifests.push({ manifest: rel, scripts: hits });
-      } else if (/startCommand/.test(text)) jobManifests.push({ manifest: rel, scripts: ["startCommand"] });
+        if (hits.length) jobManifests.push({ manifest: rel, scripts: hits, what: "runs a process" });
+      } else if (name === "vercel.json") {
+        const paths = [...text.matchAll(/"path"\s*:\s*"([^"]+)"/g)].map((m) => m[1]);
+        if (/"crons"/.test(text) && paths.length) jobManifests.push({ manifest: rel, scripts: paths, what: "schedules a cron for" });
+      } else if (name === "wrangler.toml") {
+        if (/^\s*crons\s*=/m.test(text)) jobManifests.push({ manifest: rel, scripts: ["triggers.crons"], what: "schedules" });
+      } else if (/^(docker-)?compose\.ya?ml$/.test(name)) {
+        const svcs = [...text.matchAll(/^\s{2}([A-Za-z0-9_.-]+):\s*$/gm)].map((m) => m[1]).filter((n) => n !== "web");
+        if (/^\s+command:/m.test(text) && svcs.length) jobManifests.push({ manifest: rel, scripts: svcs, what: "runs a service" });
+      } else if (name.endsWith(".sql")) {
+        const crons = [...text.matchAll(/cron\.schedule\s*\(\s*'([^']+)'/gi)].map((m) => m[1]);
+        if (crons.length) jobManifests.push({ manifest: rel, scripts: crons, what: "schedules (pg_cron)" });
+      } else if (/startCommand/.test(text)) jobManifests.push({ manifest: rel, scripts: ["startCommand"], what: "runs a process" });
+    }
+    if (/\.(ts|tsx|js|jsx|mjs|cjs)$/.test(name) && !/\.(test|spec|stories)\.[cm]?[jt]sx?$|\.d\.ts$/.test(name)) {
+      let text = "";
+      try {
+        text = readFileSync(abs, "utf8");
+      } catch {
+        return;
+      }
+      const queues = [...text.matchAll(/new\s+(?:Queue|Worker)\s*\(\s*['"`]([^'"`]+)['"`]/g)].map((m) => m[1]);
+      if (queues.length) jobManifests.push({ manifest: rel, scripts: [...new Set(queues)], what: "names a queue" });
     }
     // external-services: environment variable NAMES read in source whose
     // suffix says "a credential or an address", grouped by prefix — a mirror
@@ -457,7 +472,7 @@ export function detect(root) {
     jobManifests.sort((a, b) => (a.manifest < b.manifest ? -1 : 1));
     proposals.push({
       name: "jobs",
-      evidence: jobManifests.map((m) => `\`${m.manifest}\` runs a process: ${m.scripts.map((s) => `\`${s}\``).join(", ")}`).concat(["the mode (worker or scheduled) is never guessed: a committed railway.toml/json states it, else set extractorOptions.jobs.modes after bootstrap — lint names the ones left unknown"]),
+      evidence: jobManifests.map((m) => `\`${m.manifest}\` ${m.what ?? "runs a process"}: ${m.scripts.map((s) => `\`${s}\``).join(", ")}`).concat(["the map will show this background work with its trigger and what it hits (a cron → a route, a queue → its worker); the mode (worker or scheduled) is never guessed: a schedule or a Railway file states it, else set extractorOptions.jobs.modes after bootstrap — lint names the ones left unknown; a package.json script counts only when a manifest runs it"]),
       options: {},
     });
   }
@@ -1759,6 +1774,10 @@ function migrateMapLinks(ledger, mapDir, metadataDir = "zdd/metadata") {
         skipped.push(`${posixify(relative(ledger.root, p))} (unreadable)`);
         continue;
       }
+      if (++entries > MAP_WALK_ENTRIES) {
+        if (entries === MAP_WALK_ENTRIES + 1) skipped.push(`${mapDir}/ (more than ${MAP_WALK_ENTRIES} entries — the rest was not read)`);
+        return;
+      }
       if (st.isSymbolicLink()) skipped.push(`${posixify(relative(ledger.root, p))} (a symlink — never followed)`);
       else if (st.isDirectory()) rec(p, depth + 1);
       else if (st.isFile() && /\.md$/i.test(name)) files.push(p);
@@ -1789,8 +1808,10 @@ function migrateMapLinks(ledger, mapDir, metadataDir = "zdd/metadata") {
       // is the adopter's prose and stays.
       next = next.replace(new RegExp(`\\]\\((<?)([^)<>\\s]*/${old}/[^)<>/\\s#]+\\.json)((?:#[^)<>\\s]*)?)(>?)\\)`, "g"), (whole, lt, dest, frag, gt) => {
         if (/^[a-z][a-z0-9+.-]*:/i.test(dest) || dest.startsWith("//")) return whole;
-        const resolved = dest.startsWith("/") ? dest.replace(/^\/+/, "") : posix.normalize(posix.join(pageDir, dest));
-        if (!(resolved === `${metaPrefix}/${old}` || resolved.startsWith(`${metaPrefix}/${old}/`)) && !(dest.startsWith("/") && (resolved.startsWith(`${metaPrefix.split("/").pop()}/${old}/`) || resolved.startsWith(`${old}/`)))) return whole;
+        // Root-relative is repo-root-relative (`/zdd/metadata/service/x.json`),
+        // and nothing looser (verify CR-428): `/service/x.json` is prose.
+        const resolved = dest.startsWith("/") ? posix.normalize(dest.replace(/^\/+/, "")) : posix.normalize(posix.join(pageDir, dest));
+        if (!(resolved === `${metaPrefix}/${old}` || resolved.startsWith(`${metaPrefix}/${old}/`))) return whole;
         const moved = dest.replace(new RegExp(`/${old}/([^/]+\\.json)$`), `/${now}/$1`);
         return `](${lt}${moved}${frag}${gt})`;
       });

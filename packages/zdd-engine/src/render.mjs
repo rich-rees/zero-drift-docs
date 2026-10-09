@@ -40,6 +40,7 @@ import { loadViewer, DEFAULT_VIEWER } from "./viewers/index.mjs";
 // display name, the GitHub base URL for source links, and the base branch.
 let REPO, CONFIG, PATHS, BUNDLE, SEMANTIC, DERIVED, OUT_HTML, OUT_INDEX, OUT_ADR_INDEX, OUT_BLESSING_INDEX, OUT_GRAPH;
 let BUNDLE_NAME, REPO_BASE, BASE_BRANCH, VIEWER, NON_AREA_TAGS, AGENT_INDEX;
+const RECORDS_BY_NODE = new Map(); // node id -> the derived record behind a metadata concept
 
 // Record kind -> the graph's display type. These names are the graph
 // vocabulary viewers key on (lanes, palettes, legends); map concepts bring
@@ -420,7 +421,7 @@ function buildConcepts() {
   // Modules only ref routes/tables/functions/buckets, never other modules, so
   // pass order is enough.
   const tagOfNode = new Map();
-  const derivedConcept = ({ record, nodeId }, tags) => ({
+  const derivedConcept = ({ record, nodeId }, tags) => (RECORDS_BY_NODE.set(nodeId, record), {
     id: nodeId,
     layer: "metadata",
     recordId: record.id,
@@ -554,7 +555,7 @@ function buildGraph(concepts) {
 // within budget and every feature is one hop away. An area is a feature's
 // first tag that is not a nonAreaTag; an untagged feature is "Other". The
 // bytes at one level are exactly the pre-2.3 bytes.
-function buildAgentIndex(concepts, features, adrs, { levels = 1, areaDir = "" } = {}) {
+function buildAgentIndex(concepts, features, adrs, { levels = 1, areaDir = "", recordOf = null } = {}) {
   const byId = new Map(concepts.map((c) => [c.id, c]));
   const NON_AREA = new Set(NON_AREA_TAGS);
   const areaOf = (f) => (Array.isArray(f.tags) ? f.tags.find((t) => !NON_AREA.has(t)) : undefined) ?? "Other";
@@ -645,6 +646,26 @@ function buildAgentIndex(concepts, features, adrs, { levels = 1, areaDir = "" } 
     lines.push("");
   };
   tail("External services", ["External Service"]);
+  // Background work (CAS-103 pick 6): everything that runs without a user
+  // clicking — each with its trigger and what it hits. Repo housekeeping
+  // (GitHub Actions schedules, an opt-in) is listed apart: it is the repo's
+  // upkeep, not the app.
+  const jobs = concepts.filter((c) => c.type === "Job").sort((a, b) => (a.title < b.title ? -1 : 1));
+  const jobRecords = new Map(jobs.map((c) => [c.id, (recordOf ? recordOf(c) : null) ?? {}]));
+  const describeJob = (c) => {
+    const f = jobRecords.get(c.id)?.facts ?? {};
+    const trigger = f.schedule ? `cron \`${f.schedule}\`` : f.queue ? `queue \`${f.queue}\`` : f.trigger ?? f.mode ?? "";
+    const hits = f.target ?? (f.queue ? (f.consumers?.[0] ?? "") : c.resource ?? "");
+    return `${trigger}${hits ? ` → ${hits}` : ""}`;
+  };
+  const housekeeping = jobs.filter((c) => jobRecords.get(c.id)?.facts?.housekeeping === true);
+  const app = jobs.filter((c) => !housekeeping.includes(c));
+  for (const [title, list] of [["Background work", app], ["Repo housekeeping", housekeeping]]) {
+    if (!list.length) continue;
+    lines.push(`## ${title}`, "");
+    for (const c of list) lines.push(`- [${c.title}](${hrefOf(c.id)}) — ${describeJob(c)}`);
+    lines.push("");
+  }
   tail("Apps & packages", ["Application", "Package"]);
 
   lines.push("---");
@@ -695,7 +716,7 @@ async function render() {
     process.exit(1);
   }
   const graphJson = JSON.stringify(graph, null, 2) + "\n";
-  const built = buildAgentIndex(concepts, features, docs.adrs, { levels: AGENT_INDEX.levels, areaDir: agentIndexAreaDir(PATHS.agentIndex).split("/").pop() });
+  const built = buildAgentIndex(concepts, features, docs.adrs, { levels: AGENT_INDEX.levels, areaDir: agentIndexAreaDir(PATHS.agentIndex).split("/").pop(), recordOf: (c) => RECORDS_BY_NODE.get(c.id) ?? null });
   const agentIndex = typeof built === "string" ? built : built.text;
   const areaFiles = typeof built === "string" ? new Map() : built.areaFiles;
   // ADR index (DIO-180, ADR-0035): the always-load-whole orientation summary of
