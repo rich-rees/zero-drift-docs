@@ -111,3 +111,12 @@ test("CR-511: a scheduled task named like the process that consumes it joins tha
   assert.equal(d.facts.mode, "scheduled");
   assert.equal(d.facts.queue, "daily");
 });
+
+test("verify CR-506/CR-507: a Python source's `#` comment is not a declaration; a schedule nested deeper than on's direct children is not a trigger", (t) => {
+  assert.deepEqual(scanQueues('# new Worker("retired")\nq = Queue("live")\n', { python: true }), []);
+  assert.deepEqual(scanQueues('# new Worker("retired")\n', { python: false }), [{ queue: "retired", role: "consumer", lib: "bullmq" }], "in JS a # line is code");
+  const root = scratch(t, { "w.py": '# new Worker("retired")\n', "w.ts": 'new Worker("live");\n' });
+  assert.deepEqual(jobs(root).records.map((r) => r.id), ["job:live"]);
+  const wf = ["name: X", "on:", "  workflow_dispatch:", "    inputs:", "      schedule:", "        - cron: '1 1 * * *'", "  schedule:", "    - cron: '2 2 * * *'", ""].join("\n");
+  assert.deepEqual(scanWorkflow(wf), { crons: ["2 2 * * *"], name: "X" });
+});

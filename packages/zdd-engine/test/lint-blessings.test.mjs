@@ -214,3 +214,8 @@ test("CR-521: a link to an ADR or a URL is a reason, not an exemplar; a metadata
   assert.equal(blessingShape("Adding a route? Start from [GET /me](/metadata/route/me.json) — never inline auth.").exemplar, true);
   assert.equal(blessingShape("Adding a route? Start from [the client](../../src/lib/client.ts) — never a second one.").exemplar, true);
 });
+
+test("verify CR-521: a link whose destination is no path (`](foo)`) is not an exemplar", () => {
+  assert.equal(blessingShape("Adding a route? Start from [GET /me](foo) — never inline auth.").exemplar, false);
+  assert.equal(blessingShape("Adding a route? Start from [GET /me](foo.ts) — never inline auth.").exemplar, true);
+});

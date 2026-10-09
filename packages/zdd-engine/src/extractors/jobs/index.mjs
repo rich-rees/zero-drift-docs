@@ -251,9 +251,10 @@ export function scanPgCron(text) {
 }
 
 // Queue declarations and uses in one source file's text.
-export function scanQueues(text) {
+export function scanQueues(text, { python = false } = {}) {
   const out = [];
-  text = maskComments(text);
+  // A Python source comments with `#` (verify CR-506); JS with `//` and `/* */`.
+  text = maskComments(text, python ? { line: ["#"], block: false } : undefined);
   for (const m of text.matchAll(/new\s+Queue\s*\(\s*(['"`])([^'"`]+)\1/g)) out.push({ queue: m[2], role: "producer", lib: "bullmq" });
   for (const m of text.matchAll(/new\s+Worker\s*\(\s*(['"`])([^'"`]+)\1/g)) out.push({ queue: m[2], role: "consumer", lib: "bullmq" });
   for (const m of text.matchAll(/createFunction\s*\(\s*\{[^}]*\bid\s*:\s*(['"`])([^'"`]+)\1[^}]*\}\s*,\s*\{[^}]*\b(?:event|cron)\s*:\s*(['"`])([^'"`]+)\3/g)) out.push({ queue: m[2], role: "consumer", lib: "inngest", trigger: m[4] });
@@ -276,7 +277,7 @@ export function scanWorkflow(text) {
   const lines = maskComments(text, { line: ["#"], block: false }).split(/\r?\n/);
   let inOn = false;
   let inSchedule = false;
-  let onIndent = -1;
+  let childIndent = -1; // the indent of `on:`'s direct children
   let scheduleIndent = -1;
   for (const raw of lines) {
     if (!raw.trim()) continue;
@@ -285,12 +286,15 @@ export function scanWorkflow(text) {
     if (indent === 0) {
       inOn = /^(on|"on"|'on'|true):/.test(line);
       inSchedule = false;
-      onIndent = 0;
+      childIndent = -1;
       continue;
     }
     if (!inOn) continue;
+    if (childIndent === -1) childIndent = indent;
     if (inSchedule && indent <= scheduleIndent) inSchedule = false;
-    if (!inSchedule && indent > onIndent && /^schedule:/.test(line)) {
+    // `schedule:` is a direct child of `on:` (verify CR-507): one nested
+    // deeper (an input's default) is not a trigger.
+    if (!inSchedule && indent === childIndent && /^schedule:/.test(line)) {
       inSchedule = true;
       scheduleIndent = indent;
       continue;
@@ -544,7 +548,7 @@ export function derive({ repoRoot, options, io }) {
   for (const rel of sources) {
     const text = read(rel);
     if (text === null) continue;
-    for (const q of scanQueues(text)) {
+    for (const q of scanQueues(text, { python: rel.endsWith(".py") })) {
       const entry = queues.get(q.queue) ?? { producers: new Set(), consumers: new Set(), lib: q.lib };
       (q.role === "producer" ? entry.producers : entry.consumers).add(rel);
       if (q.trigger) entry.trigger = q.trigger;

@@ -144,3 +144,22 @@ test("CR-505: an area file's ADR links climb to paths.adrDir wherever it is", (t
   const area = readFileSync(join(repo, "zdd", "agent-index", "billing.md"), "utf8");
   assert.match(area, /\[ADR-0002\]\(\.\.\/\.\.\/docs\/decisions\/0002-things-replace-widgets\.md\)/, area);
 });
+
+test("verify CR-501: at two levels an adopter's file whose name an area would take is foreign too — refused, never overwritten; the success line names the configured index", (t) => {
+  const repo = mkRepo(t);
+  const dir = join(repo, "zdd", "agent-index");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "billing.md"), "# Billing, by hand\n");
+  feature(repo, "billing", "billing");
+  config(repo, { agentIndex: { levels: 2 } });
+  assert.equal(run(repo, ["derive"]).status, 0);
+  const r = run(repo, ["render"]);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /holds a file that ZDD did not write \(billing\.md\)/, r.stderr);
+  assert.equal(readFileSync(join(dir, "billing.md"), "utf8"), "# Billing, by hand\n");
+  rmSync(join(dir, "billing.md"));
+  config(repo, { paths: { agentIndex: "zdd/INDEX.md" } });
+  const ok = run(repo, ["render"]);
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.match(ok.stdout, /area files under INDEX\/ \(areas listed in INDEX\.md\)/, ok.stdout);
+});

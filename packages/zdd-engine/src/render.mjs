@@ -843,14 +843,18 @@ export async function run(args) {
     const stale = [];
     const foreign = [];
     for (const f of readdirSync(areaDirAbs).sort()) {
-      if (!f.endsWith(".md") || produced.has(f)) continue;
+      if (!f.endsWith(".md")) continue;
       let head = "";
       try {
         head = readFileSync(join(areaDirAbs, f), "utf8").slice(0, 600);
       } catch {
         /* unreadable: not ours to touch */
       }
-      (head.includes(AREA_FILE_MARK) ? stale : foreign).push(f);
+      const ours = head.includes(AREA_FILE_MARK);
+      // A file this render would overwrite is judged too (verify CR-501):
+      // an adopter's `billing.md` under an area called billing is foreign.
+      if (!ours) foreign.push(f);
+      else if (!produced.has(f)) stale.push(f);
     }
     return { stale, foreign, missing: false };
   };
@@ -924,7 +928,8 @@ export async function run(args) {
       console.error(e.message);
       process.exit(1);
     }
-    const sections = areaFiles.size ? `${counts.features} feature sections -> ${areaFiles.size} area files under ${areaLabel} (areas listed in agent-index.md)` : `${counts.features} feature sections -> agent-index.md`;
+    const indexName = PATHS.agentIndex.split("/").pop();
+    const sections = areaFiles.size ? `${counts.features} feature sections -> ${areaFiles.size} area files under ${areaLabel} (areas listed in ${indexName})` : `${counts.features} feature sections -> ${indexName}`;
     console.log(`Wrote ${counts.concepts} concepts, ${counts.edges} edges -> graph.json + human-index.html (viewer ${VIEWER.name}); ${sections}; ${counts.adrs} ADRs -> adr-index.md; ${counts.blessings} blessings -> blessing-index.md`);
   }
 }
