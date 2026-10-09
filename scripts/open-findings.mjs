@@ -20,7 +20,7 @@ function issues(label) {
   const out = execFileSync("gh", ["issue", "list", "--repo", REPO, "--label", label, "--state", "open", "--limit", "200", "--json", "number,createdAt,title"], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "ignore"],
-    timeout: 8000,
+    timeout: 6000, // two calls under the hook's 15 s (CR-528)
   });
   return JSON.parse(out);
 }

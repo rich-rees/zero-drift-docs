@@ -139,8 +139,11 @@ Format (one list item per blessing, under the heading):
   for the pattern, not as the pattern's name.
 - **Point at the code.** A metadata link (`/metadata/route/….json`) is what
   lets the freshness nudge notice when the blessed code changes; a path or a
-  function in backticks is fine for something the extractors do not
-  inventory. `lint` **warns** on a blessing with neither.
+  file in backticks (`lib/graph-rpc.ts`, with the function beside it) is fine
+  for something the extractors do not inventory — a bare function name is
+  not a pointer, name its file. An ADR link or a URL is the reason, not the
+  exemplar. `lint` **warns** on a blessing with no pointer; a naming rule
+  earns that warning and is fine.
 - **Give the reason.** Cite the ADR that blessed it ("per ADR-0012"), or say
   why inline ("because …"). Neither is a lint **warning**: a blessing with no
   reason is an opinion. **An ADR is encouraged, not required** — cite one when

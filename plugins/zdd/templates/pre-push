@@ -1,7 +1,7 @@
 #!/bin/sh
 # Managed by Zero-Drift Docs (zdd) — written by `zdd:bootstrap` when CI was
-# declined; `zdd:bootstrap --upgrade` rewrites this file, so edits here are
-# overwritten (remove this header line to take ownership of it).
+# declined; "upgrade ZDD" rewrites this file, so edits here are overwritten
+# (remove this header line to take ownership of it).
 #
 # The local stand-in for the CI check: the same deterministic engine checks the
 # CI workflow would run — metadata matches source, indexes match their inputs,

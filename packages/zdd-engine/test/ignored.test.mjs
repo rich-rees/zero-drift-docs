@@ -2,10 +2,10 @@
 // default roots `["."]` read a gitignored `.claude/worktrees/` (another
 // checkout of the same repo, created by the Claude desktop app) into DiO's
 // and Cascade's service records: local `derive --check` passed, CI failed.
-// Every walk now vetoes what git ignores — `.gitignore`, `.git/info/exclude`
-// and the global excludes alike, since the worktree folder is excluded
-// through `info/exclude`, not `.gitignore` — and the worktree folder is
-// vetoed even where git is absent. Run: node --test "test/*.test.mjs"
+// Every walk now vetoes what the repository's own `.gitignore` rules ignore
+// (never `.git/info/exclude` nor the global excludes: machine state, CR-406
+// and decision 0026), and the worktree folder is vetoed by name even where
+// git is absent. Run: node --test "test/*.test.mjs"
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -268,4 +268,13 @@ test("CR-408: a Next.js wrapper page does not take an ignored component as its r
   const text = JSON.stringify(rr.records);
   assert.ok(text.includes("tracked_table"), "the tracked .js candidate is the one resolved");
   assert.ok(!text.includes("ignored_table"), "the ignored .tsx never shadows it");
+});
+
+test("CR-525: the built-in worktree veto folds case — `.CLAUDE/Worktrees` is the same folder on a case-insensitive disk", (t) => {
+  const root = scratch({ "src/a.ts": "a" });
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const isIgnored = gitIgnoredPredicate(root);
+  assert.equal(isIgnored(".CLAUDE/Worktrees/x/src/a.ts"), true);
+  assert.equal(isIgnored(".claude/worktrees"), true);
+  assert.equal(isIgnored(".claude/worktree/x.ts"), false);
 });

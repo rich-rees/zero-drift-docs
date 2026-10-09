@@ -193,9 +193,53 @@ export function parseCompose(text) {
   return services;
 }
 
+// Comments blanked, string literals kept (CR-506): a commented-out
+// `new Worker("x")` or `cron.schedule(...)` is not a declaration, while the
+// names the scanners read live inside strings. Line comments `//` and `#`
+// (JS, Python, TOML, YAML) or `--` (SQL); block comments `/* */`. The
+// blanks keep the text's length and line count.
+export function maskComments(text, { line = ["//"], block = true } = {}) {
+  let out = "";
+  let i = 0;
+  const n = text.length;
+  while (i < n) {
+    const c = text[i];
+    if (c === '"' || c === "'" || c === "`") {
+      let j = i + 1;
+      while (j < n && text[j] !== c) {
+        if (text[j] === "\\") j++;
+        if (c !== "`" && text[j] === "\n") break;
+        j++;
+      }
+      out += text.slice(i, j + 1);
+      i = j + 1;
+      continue;
+    }
+    if (block && c === "/" && text[i + 1] === "*") {
+      const end = text.indexOf("*/", i + 2);
+      const stop = end === -1 ? n : end + 2;
+      out += text.slice(i, stop).replace(/[^\n]/g, " ");
+      i = stop;
+      continue;
+    }
+    const opener = line.find((l) => text.startsWith(l, i));
+    if (opener) {
+      let end = text.indexOf("\n", i);
+      if (end === -1) end = n;
+      out += " ".repeat(end - i);
+      i = end;
+      continue;
+    }
+    out += c;
+    i++;
+  }
+  return out;
+}
+
 // pg_cron schedules in a migration: cron.schedule('name', 'schedule', $$body$$ | 'body').
 export function scanPgCron(text) {
   const out = [];
+  text = maskComments(text, { line: ["--"], block: true });
   for (const m of text.matchAll(/cron\.schedule\s*\(\s*'([^']+)'\s*,\s*'([^']+)'\s*,\s*(?:\$\$([\s\S]*?)\$\$|'((?:[^'\\]|\\.|'')*)')/gi)) {
     const body = (m[3] ?? m[4] ?? "").trim();
     const fn = /\b(?:select|call|perform)\s+(?:([a-z_][\w]*)\.)?([a-z_][\w]*)\s*\(/i.exec(body);
@@ -209,6 +253,7 @@ export function scanPgCron(text) {
 // Queue declarations and uses in one source file's text.
 export function scanQueues(text) {
   const out = [];
+  text = maskComments(text);
   for (const m of text.matchAll(/new\s+Queue\s*\(\s*(['"`])([^'"`]+)\1/g)) out.push({ queue: m[2], role: "producer", lib: "bullmq" });
   for (const m of text.matchAll(/new\s+Worker\s*\(\s*(['"`])([^'"`]+)\1/g)) out.push({ queue: m[2], role: "consumer", lib: "bullmq" });
   for (const m of text.matchAll(/createFunction\s*\(\s*\{[^}]*\bid\s*:\s*(['"`])([^'"`]+)\1[^}]*\}\s*,\s*\{[^}]*\b(?:event|cron)\s*:\s*(['"`])([^'"`]+)\3/g)) out.push({ queue: m[2], role: "consumer", lib: "inngest", trigger: m[4] });
@@ -222,9 +267,39 @@ export function scanQueues(text) {
   return out;
 }
 
-// GitHub Actions: `on: schedule: - cron: '…'` and the workflow's name.
+// GitHub Actions: the `cron:` items under the top-level `on:` block's
+// `schedule:` key, and the workflow's name. A `- cron:` anywhere else (an
+// action's input, a matrix) is not a schedule (CR-507): the YAML is walked
+// by indentation — top-level key, its child `schedule`, its list items.
 export function scanWorkflow(text) {
-  const crons = [...text.matchAll(/^\s*-\s*cron:\s*['"]?([^'"\n]+?)['"]?\s*$/gm)].map((m) => m[1].trim());
+  const crons = [];
+  const lines = maskComments(text, { line: ["#"], block: false }).split(/\r?\n/);
+  let inOn = false;
+  let inSchedule = false;
+  let onIndent = -1;
+  let scheduleIndent = -1;
+  for (const raw of lines) {
+    if (!raw.trim()) continue;
+    const indent = raw.length - raw.trimStart().length;
+    const line = raw.trim();
+    if (indent === 0) {
+      inOn = /^(on|"on"|'on'|true):/.test(line);
+      inSchedule = false;
+      onIndent = 0;
+      continue;
+    }
+    if (!inOn) continue;
+    if (inSchedule && indent <= scheduleIndent) inSchedule = false;
+    if (!inSchedule && indent > onIndent && /^schedule:/.test(line)) {
+      inSchedule = true;
+      scheduleIndent = indent;
+      continue;
+    }
+    if (inSchedule) {
+      const m = /^-\s*cron:\s*['"]?([^'"]+?)['"]?\s*$/.exec(line);
+      if (m) crons.push(m[1].trim());
+    }
+  }
   const name = /^name:\s*['"]?([^'"\n]+?)['"]?\s*$/m.exec(text);
   return { crons, name: name ? name[1].trim() : null };
 }
@@ -281,10 +356,13 @@ export function derive({ repoRoot, options, io }) {
     }
     return r.text;
   };
-  // An ignored target is absent too: a clean clone has no such file (pick 1).
+  // A target exists when it is a readable regular file, or one too large to
+  // read (still a file): a folder, a symlink or an unreadable path is not a
+  // module a process can run (CR-508). An ignored target is absent too: a
+  // clean clone has no such file (pick 1).
   const exists = (rel) => {
-    const code = io.read(rel, { maxBytes: 1 }).code;
-    return code !== "missing" && code !== "ignored";
+    const r = io.read(rel, { maxBytes: 1 });
+    return r.ok || r.code === "too-large";
   };
 
   // A command's module file: relative to the manifest's folder, then each
@@ -387,11 +465,20 @@ export function derive({ repoRoot, options, io }) {
         diagnostics.push(`${rel}: not JSON — skipped`);
         continue;
       }
-      const crons = Array.isArray(j?.crons) ? j.crons : [];
+      const crons = (Array.isArray(j?.crons) ? j.crons : []).filter((c) => c && typeof c.path === "string" && typeof c.schedule === "string");
+      // A cron is named by its route's last segment; two routes that end
+      // alike (`/api/a/run`, `/api/b/run`) are named by the whole route, so
+      // neither is dropped (CR-510).
+      const last = (route) => route.split("/").filter(Boolean).pop() ?? "cron";
+      const counts = new Map();
       for (const c of crons) {
-        if (!c || typeof c.path !== "string" || typeof c.schedule !== "string") continue;
+        const l = last(c.path.split("?")[0]);
+        counts.set(l, (counts.get(l) ?? 0) + 1);
+      }
+      for (const c of crons) {
         const route = c.path.split("?")[0];
-        candidates.push({ name: slug(route.split("/").filter(Boolean).pop() ?? "cron"), command: `GET ${route}`, manifest: rel, dir, parsed: null, schedule: c.schedule, trigger: "cron", target: route, source: "vercel", routeRef: route });
+        const name = counts.get(last(route)) > 1 ? slug(route.split("/").filter(Boolean).join("-")) : slug(last(route));
+        candidates.push({ name, command: `GET ${route}`, manifest: rel, dir, parsed: null, schedule: c.schedule, trigger: "cron", target: route, source: "vercel", routeRef: route });
       }
     } else if (name === "wrangler.toml") {
       const cfg = parseToml(text);
@@ -479,7 +566,11 @@ export function derive({ repoRoot, options, io }) {
   const merged = [];
   for (const c of candidates) {
     if (c.source === "railway") {
-      const twin = candidates.find((o) => o !== c && o.source !== "railway" && typeof o.command === "string" && (norm(o.command) === norm(c.command) || (o.scriptCommand && norm(o.scriptCommand) === norm(c.command))));
+      // The twin runs the same command FROM THE SAME FOLDER (a Railway file
+      // beside its service's Procfile), or resolves to the same file: two
+      // apps that both say `node worker.mjs` are two jobs (CR-509).
+      const sameJob = (o) => o.dir === c.dir || (o.parsed && c.parsed && resolveTarget(o.dir, o.parsed) === resolveTarget(c.dir, c.parsed) && resolveTarget(c.dir, c.parsed) !== null);
+      const twin = candidates.find((o) => o !== c && o.source !== "railway" && typeof o.command === "string" && sameJob(o) && (norm(o.command) === norm(c.command) || (o.scriptCommand && norm(o.scriptCommand) === norm(c.command))));
       if (twin) {
         if (c.schedule && !twin.schedule) twin.schedule = c.schedule;
         (twin.extraResources ??= []).push(c.manifest);
@@ -501,7 +592,11 @@ export function derive({ repoRoot, options, io }) {
       const existing = c.queue ? records.find((r) => r.id === `job:${c.name}`) : null;
       if (existing && c.consumers?.includes(existing.resource[0])) {
         Object.assign(existing.facts, { queue: c.queue, producers: c.producers, consumers: c.consumers, trigger: c.trigger });
-        if (existing.facts.mode === "unknown") existing.facts.mode = "queue";
+        // A scheduled task's schedule joins too, and decides the mode the
+        // way a record's own schedule does (CR-511).
+        if (c.schedule && !existing.facts.schedule) existing.facts.schedule = c.schedule;
+        if (existing.facts.schedule) existing.facts.mode = "scheduled";
+        else if (existing.facts.mode === "unknown") existing.facts.mode = "queue";
         if (c.producers?.length) {
           existing.facts.edges = { ...(existing.facts.edges ?? {}), usedBy: c.producers.map((f) => `?at:${f}`) };
           existing.refs = [...new Set([...existing.refs, ...c.producers.map((f) => `?at:${f}`)])].sort();

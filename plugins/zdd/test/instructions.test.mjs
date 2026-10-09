@@ -340,3 +340,52 @@ test("CR-416/417: the sweep reports the old strict kind and old record ids, scan
   assert.doesNotMatch(notes, /build\/out\.md/, "an ignored folder is not swept when git lists the files");
   assert.ok(!json.notes.some((n) => /sweep for retired names was cut short/.test(n)));
 });
+
+test("CR-518: the map-link rewrite leaves a fenced code block as written — a real fence this time", () => {
+  const repo = adopted("links-fenced", { engine: "2.2.1" });
+  writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify({ extractors: ["services"], engine: "2.2.1" }) + "\n");
+  mkdirSync(join(repo, "zdd", "map", "features"), { recursive: true });
+  const page = ["- [S](../../metadata/service/sentry.json)", "", "```markdown", "- [S](../../metadata/service/sentry.json)", "```", "", "~~~", "[R](/zdd/metadata/service/resend.json)", "~~~", "- [R](/zdd/metadata/service/resend.json)", ""].join("\n");
+  writeFileSync(join(repo, "zdd", "map", "features", "a.md"), page);
+  runJson(repo, ["upgrade"]);
+  const lines = read(repo, "zdd/map/features/a.md").split("\n");
+  assert.equal(lines[0], "- [S](../../metadata/service/external-service/sentry.json)".replace("service/external-service", "external-service"));
+  assert.equal(lines[3], "- [S](../../metadata/service/sentry.json)", "inside the fence: untouched");
+  assert.equal(lines[7], "[R](/zdd/metadata/service/resend.json)", "inside a ~~~ fence: untouched");
+  assert.equal(lines[9], "- [R](/zdd/metadata/external-service/resend.json)");
+});
+
+test("CR-519: an adopter rooted below the git root is swept by names relative to the adopter, so its files are found", () => {
+  const top = fresh("nested-top");
+  const repo = join(top, "packages", "app");
+  mkdirSync(join(repo, "zdd"), { recursive: true });
+  mkdirSync(join(repo, ".claude"), { recursive: true });
+  mkdirSync(join(repo, "docs"), { recursive: true });
+  writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], engine: "2.2.1" }, null, 2) + "\n");
+  writeFileSync(join(repo, ".claude", "settings.json"), JSON.stringify({ extraKnownMarketplaces: LOCK("v2.2.1") }, null, 2) + "\n");
+  writeFileSync(join(repo, "CLAUDE.md"), `${IMPORT_COMMENT}\n${LINE}\n`);
+  writeFileSync(join(repo, "docs", "setup.md"), "Run zdd:bootstrap --upgrade after a release.\n");
+  writeFileSync(join(top, "README.md"), "zdd:bootstrap --upgrade is also here, outside the adopter\n");
+  execFileSync("git", ["init", "-q"], { cwd: top });
+  execFileSync("git", ["add", "-A"], { cwd: top });
+  const json = runJson(repo, ["upgrade"]);
+  const notes = json.notes.filter((n) => / still says /.test(n)).join("\n");
+  assert.match(notes, /docs\/setup\.md:1 still says `zdd:bootstrap --upgrade`/, json.notes.join("\n"));
+  assert.doesNotMatch(notes, /README\.md/, "a file outside the adopter's root is not the adopter's");
+});
+
+test("CR-520: a `$` in a configured path reaches the instructions as a `$`", () => {
+  const body = instructionsBody({ glossary: "docs/$&/glossary.md", agentIndex: "zdd/$'index.md" });
+  assert.ok(body.includes("docs/$&/glossary.md"), body.slice(0, 400));
+  assert.ok(body.includes("zdd/$'index.md"));
+  assert.ok(!body.includes("<GLOSSARY>") && !body.includes("<AGENT_INDEX>"));
+});
+
+test("CR-529: without git, a sweep cut short by depth says so", () => {
+  const repo = adopted("sweep-deep", { engine: "2.2.1", claude: `${IMPORT_COMMENT}\n${LINE}\n` });
+  const deep = join(repo, "a", "b", "c", "d", "e", "f", "g", "h");
+  mkdirSync(deep, { recursive: true });
+  writeFileSync(join(deep, "note.md"), "zdd:bootstrap --upgrade\n");
+  const json = runJson(repo, ["upgrade"]);
+  assert.ok(json.notes.some((n) => /the sweep for retired names was cut short \(more than 3000 files, or deeper than 6 folders\) — grep for the retired names yourself/.test(n)), json.notes.join("\n"));
+});

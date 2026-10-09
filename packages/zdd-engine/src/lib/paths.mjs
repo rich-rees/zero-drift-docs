@@ -47,6 +47,16 @@ export function overlaps(a, b) {
   return x === y || x.startsWith(`${y}/`) || y.startsWith(`${x}/`);
 }
 
+// The agent index's area folder (agentIndex.levels 2, CAS-103 pick 5): the
+// index file's name without its extension, as a sibling folder
+// (`zdd/agent-index.md` -> `zdd/agent-index`). An index named without an
+// extension gets `-areas` appended, so the folder can never be the file
+// itself (CR-503). The layout check treats the folder as one more output.
+export const agentIndexAreaDir = (agentIndexRel) => {
+  const stripped = agentIndexRel.replace(/\.[^./\\]+$/, "");
+  return stripped === agentIndexRel ? `${agentIndexRel}-areas` : stripped;
+};
+
 // Resolve <repoRoot>/<rel> and prove the result stays inside repoRoot — the
 // belt behind repoRelative's braces, for paths assembled from several parts.
 // Compared segment-wise through path.relative (so `repo2` is not inside

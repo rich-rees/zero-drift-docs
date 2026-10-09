@@ -207,3 +207,10 @@ test("2.3 (CAS-103 pick 4): a blessing that points at no code warns — a blessi
   assert.equal(r2.status, 0, r2.stderr);
   assert.doesNotMatch(r2.stderr, /points at no code/);
 });
+
+test("CR-521: a link to an ADR or a URL is a reason, not an exemplar; a metadata record or a repo file is one", () => {
+  assert.equal(blessingShape("Naming a migration? Prefix it with the ticket id, per [ADR-0001](../adr/0001-things.md) — never a sequence.").exemplar, false);
+  assert.equal(blessingShape("Naming a migration? Prefix it, see [the guide](https://example.com/guide) — never a sequence.").exemplar, false);
+  assert.equal(blessingShape("Adding a route? Start from [GET /me](/metadata/route/me.json) — never inline auth.").exemplar, true);
+  assert.equal(blessingShape("Adding a route? Start from [the client](../../src/lib/client.ts) — never a second one.").exemplar, true);
+});

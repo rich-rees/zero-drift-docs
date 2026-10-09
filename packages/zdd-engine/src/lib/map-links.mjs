@@ -223,9 +223,12 @@ export function blessingShape(text) {
   const b = /\bbecause\b[^.;—]*/i.exec(visible);
   const because = b ? b[0].trim().replace(/[,\s]+$/, "") : null;
   // A blessing is a pointer to existing code to start from (CAS-103 pick 4):
-  // a markdown link (a metadata record, a file) or a code span naming a path
-  // or a file. A rule with nothing to point at is not one.
-  const exemplar = /\]\(/.test(text) || /`[^`\n]*[\/.][^`\n]*`/.test(text);
+  // a markdown link whose destination is a metadata record or a file in the
+  // repo (not a URL, not an ADR — those are the reason, not the exemplar:
+  // CR-521), or a code span naming a path or a file. A rule with nothing to
+  // point at is not one.
+  const codeLink = [...text.matchAll(/\]\((<?)([^)\s>]+)/g)].some(([, , dest]) => !/^[a-z][a-z0-9+.-]*:/i.test(dest) && !dest.startsWith("//") && !/(^|\/)\d{4}-[^/]*\.md(#|$)/i.test(dest) && !/(^|\/)adr\//i.test(dest));
+  const exemplar = codeLink || /`[^`\n]*[\/.][^`\n]*`/.test(text);
   return { visible, question, because, exemplar, length: visible.length };
 }
 

@@ -810,17 +810,19 @@ const yamlScalar = (s) => JSON.stringify(s); // a JSON string is a valid YAML do
 // glossary is told where its glossary is. No argument: the defaults.
 export function instructionsBody(paths = artifactPaths({})) {
   const p = { ...artifactPaths({}), ...paths };
+  // Replacement functions, so a `$` in a configured path is a `$` (CR-520).
+  const lit = (s) => () => s;
   return readFileSync(join(TEMPLATES, "instructions.md"), "utf8")
-    .replaceAll("<GLOSSARY>", p.glossary)
-    .replaceAll("<ADR_INDEX>", p.adrIndex)
-    .replaceAll("<BLESSING_INDEX>", p.blessingIndex)
-    .replaceAll("<PATTERNS_PLAN>", p.patternsPlan)
-    .replaceAll("<METADATA_DIR>", p.metadataDir)
-    .replaceAll("<GRAPH>", p.graph)
-    .replaceAll("<AGENT_INDEX>", p.agentIndex)
-    .replaceAll("<HUMAN_INDEX>", p.humanIndex)
-    .replaceAll("<BUNDLE_DIR>", p.bundleDir === "." ? "." : p.bundleDir)
-    .replaceAll("<INSTRUCTIONS>", instructionsRel(p.bundleDir));
+    .replaceAll("<GLOSSARY>", lit(p.glossary))
+    .replaceAll("<ADR_INDEX>", lit(p.adrIndex))
+    .replaceAll("<BLESSING_INDEX>", lit(p.blessingIndex))
+    .replaceAll("<PATTERNS_PLAN>", lit(p.patternsPlan))
+    .replaceAll("<METADATA_DIR>", lit(p.metadataDir))
+    .replaceAll("<GRAPH>", lit(p.graph))
+    .replaceAll("<AGENT_INDEX>", lit(p.agentIndex))
+    .replaceAll("<HUMAN_INDEX>", lit(p.humanIndex))
+    .replaceAll("<BUNDLE_DIR>", lit(p.bundleDir === "." ? "." : p.bundleDir))
+    .replaceAll("<INSTRUCTIONS>", lit(instructionsRel(p.bundleDir)));
 }
 export function instructionsFileText(paths) {
   return `<!-- ${OWNER_MARK}: "upgrade ZDD" rewrites this whole file. Never hand-edit it; your own rules belong in CLAUDE.md, which ZDD never edits after install. -->\n` + instructionsBody(paths);
@@ -1753,6 +1755,36 @@ function migrateRenames(config, changes) {
 // resolve blocks it.
 const MAP_WALK_DEPTH = 16; // the render's own bound (lib/walk-markdown.mjs)
 const MAP_WALK_ENTRIES = 20_000; // and its entry budget
+// Apply `fn` to the text outside fenced code blocks (``` or ~~~, the
+// CommonMark shape), leaving the fences and their contents byte for byte.
+export function outsideFences(text, fn) {
+  const lines = text.split("\n");
+  const out = [];
+  let run = [];
+  let fence = null;
+  const flush = () => {
+    if (run.length) out.push(fn(run.join("\n")));
+    run = [];
+  };
+  for (const line of lines) {
+    const m = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+    if (fence) {
+      out.push(line);
+      if (m && m[1][0] === fence[0] && m[1].length >= fence.length && !line.slice(m[0].length).trim()) fence = null;
+      continue;
+    }
+    if (m) {
+      flush();
+      fence = m[1];
+      out.push(line);
+      continue;
+    }
+    run.push(line);
+  }
+  flush();
+  return out.join("\n");
+}
+
 function migrateMapLinks(ledger, mapDir, metadataDir = "zdd/metadata") {
   const abs = ledger.abs(mapDir);
   if (!existsSync(abs)) return { touched: [], skipped: [] };
@@ -1810,7 +1842,9 @@ function migrateMapLinks(ledger, mapDir, metadataDir = "zdd/metadata") {
     }
     const text = ledger.read(rel);
     const pageDir = posix.dirname(rel);
-    let next = text;
+    // A fenced code block is an example, not a pointer: left as written (CR-518).
+    const rewrite = (chunk) => {
+    let next = chunk;
     for (const [old, now] of Object.entries(RENAMED_KINDS)) {
       // A link destination as the render reads it: `](dest)` or `](<dest>)`,
       // with an optional `#fragment`. Rewritten only when the destination,
@@ -1827,6 +1861,9 @@ function migrateMapLinks(ledger, mapDir, metadataDir = "zdd/metadata") {
         return `](${lt}${moved}${frag}${gt})`;
       });
     }
+    return next;
+    };
+    const next = outsideFences(text, rewrite);
     if (next !== text) {
       ledger.overwrite(rel, next);
       touched.push(rel);
@@ -2144,7 +2181,10 @@ function sweepList(ledger, metadataRel) {
   let truncated = false;
   if (hasGit(ledger.root)) {
     try {
-      const listed = execFileSync("git", ["ls-files", "-z", "--full-name"], { cwd: ledger.root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 30_000, maxBuffer: 64 * 1024 * 1024 }).split("\0").filter(Boolean);
+      // Relative to the adopter's root, which may sit below the git root
+      // (a package in a monorepo): git lists that folder only, by names the
+      // ledger resolves from it (CR-519).
+      const listed = execFileSync("git", ["ls-files", "-z"], { cwd: ledger.root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 30_000, maxBuffer: 64 * 1024 * 1024 }).split("\0").filter(Boolean);
       for (const rel of listed) {
         if (!RETIRED_SCAN_EXT.test(rel) || RETIRED_SKIP_FILES.test(rel) || rel === metadataRel || rel.startsWith(`${metadataRel}/`)) continue;
         if (rel.split("/").some((seg) => RETIRED_SKIP_DIRS.has(seg))) continue;

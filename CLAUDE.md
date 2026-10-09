@@ -67,20 +67,25 @@ already holds, so a red suite names what was forgotten.
       `derive --check` / `render --check` on the bump.
 - [ ] Both suites green on CI (ubuntu + windows × Node 20/22).
 
-**Release order** (held since 1.3.1)
+**Release order** (since 2.3.0 the tag does the publishing —
+`.github/workflows/release.yml`; before it, the engine was published by hand
+first, which that workflow now refuses)
 
 1. Merge the PR (merge commit).
-2. `npm whoami` prints the publisher — an expired token makes `npm publish`
-   fail **404 with no OTP prompt**; `npm login` first.
-3. Publish the engine from `main` (`packages/zdd-engine`).
-4. Tag the merge commit `vX.Y.Z` and push the tag.
-5. GitHub release for the tag, marked **Latest**, notes from the Versioning
-   entry.
-6. Check from **outside** this repo: `npx -y @rich-rees/zdd-engine@X.Y.Z`
+2. On `main` at the merge commit, `node scripts/pre-tag.mjs vX.Y.Z [adopter
+   checkouts…]`: the pins, both suites, and a dry run of the upgrade on each
+   real adopter given (a throwaway copy; never pushed).
+3. Tag the merge commit `vX.Y.Z` and push the tag. The workflow refuses a tag
+   that is not on `main`, proves the pins, runs both suites, publishes the
+   engine (secret `NPM_TOKEN`), waits until the version is fetchable, and
+   creates the GitHub release marked **Latest** with the Versioning entry as
+   its notes. A failed run after the publish is rerun as it is: a version
+   already on npm from this commit is resumed, not refused.
+4. Check from **outside** this repo: `npx -y @rich-rees/zdd-engine@X.Y.Z`
    prints the engine's usage, and `npm view @rich-rees/zdd-engine version`
    names X.Y.Z (inside the repo, npm finds the workspace copy and installs
    nothing).
-7. Move this machine's install: the route the release check prints.
+5. Move this machine's install: the route the release check prints.
 
 **After**
 

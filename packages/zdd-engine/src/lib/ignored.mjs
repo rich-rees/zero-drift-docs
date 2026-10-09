@@ -81,7 +81,9 @@ export function gitIgnoredPredicate(repoRoot) {
     let prefix = "";
     for (let i = 0; i < segs.length; i++) {
       prefix = i ? `${prefix}/${segs[i]}` : segs[i];
-      if (dirs.has(prefix) || ALWAYS_IGNORED.includes(prefix)) return true;
+      // The built-in veto folds case (CR-525): `.CLAUDE/worktrees` reaches
+      // the same folder on a case-insensitive disk and is nothing on others.
+      if (dirs.has(prefix) || ALWAYS_IGNORED.includes(prefix.toLowerCase())) return true;
     }
     return false;
   };
