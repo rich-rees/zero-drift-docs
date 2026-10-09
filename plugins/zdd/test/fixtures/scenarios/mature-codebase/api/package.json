@@ -1,0 +1,5 @@
+{
+  "name": "api",
+  "scripts": { "dev": "tsx watch src/index.ts", "worker:emails": "tsx src/emails.ts" },
+  "dependencies": { "express": "4.21.0", "bullmq": "5.0.0", "@sentry/node": "8.0.0" }
+}

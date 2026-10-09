@@ -283,14 +283,14 @@ is written into the host's settings.
 
 ## Step 5 — the engine, then the one mapping session
 
-1. **Derive** — `npx -y @rich-rees/zdd-engine@2.2.1 derive`. "This reads the
+1. **Derive** — `npx -y @rich-rees/zdd-engine@2.3.0 derive`. "This reads the
    code and writes the inventory." On a greenfield repo it writes nothing and
    passes; that is correct.
-2. **Render** — `npx -y @rich-rees/zdd-engine@2.2.1 render`. "This writes the
+2. **Render** — `npx -y @rich-rees/zdd-engine@2.3.0 render`. "This writes the
    indexes from the inventory and the map." Commit the generated artifacts
    (`zdd/graph.json`, the agent, ADR and blessing indexes, the human index);
    never edit them.
-3. **Lint** — `npx -y @rich-rees/zdd-engine@2.2.1 lint`. The same blocking
+3. **Lint** — `npx -y @rich-rees/zdd-engine@2.3.0 lint`. The same blocking
    check CI runs: ADR numbering, supersession symmetry, and every blessing's
    citation and trigger question. A failure here is fixed now, not discovered
    on the first PR. It also prints the **unclaimed records** — on day one
