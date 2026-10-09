@@ -278,7 +278,7 @@ export async function deriveRecords({ repoRoot, config }) {
   // What git ignores is never source (pick 1): asked once, shared by every
   // extractor's io.
   const ignored = gitIgnoredPredicate(repoRoot);
-  if (ignored.error) warnings.push(`WARNING: ${ignored.error}`);
+  if (ignored.error) fail(ignored.error); // fail closed (CR-403): never read ignored files as source
   for (const { name, options, legacyName } of selection.extractors) {
     const extractor = await loadExtractor(name, repoRoot, config);
     if (typeof extractor.derive !== "function") fail(`Extractor '${name}' exports no derive()`);

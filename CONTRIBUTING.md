@@ -64,11 +64,15 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
   extractor on each run (engine 1.3.0+). `io.read(rel, { maxBytes })` returns
   `{ ok: true, text }` for a regular file physically inside the repo under a
   1 MiB cap (`maxBytes` may lower it). Otherwise it returns
-  `{ ok: false, code, reason }`, where `code` is `missing`, `not-regular` or
-  `too-large`. `io.walk(relDir, onFile, { enter })` hands `onFile` every regular
-  file as a sorted, repo-relative POSIX path. It never follows a symlink, caps
-  depth, skips `.git` by default and shares one entry budget across every walk,
-  and returns `{ exists, truncated, skipped }`. A path that is not
+  `{ ok: false, code, reason }`, where `code` is `missing`, `not-regular`,
+  `too-large`, `over-budget`, `unreadable` or (2.3) `ignored` — the path is
+  gitignored, so it is not source and a clean clone has no such file; treat
+  it as `missing`. `io.walk(relDir, onFile, { enter })` hands `onFile` every
+  regular file as a sorted, repo-relative POSIX path, never one git ignores.
+  It never follows a symlink, caps depth, skips `.git` by default and shares
+  one entry budget across every walk, and returns `{ exists, truncated,
+  skipped }`. `io.isIgnored(rel)` (2.3) answers the same veto for an extractor
+  that walks on its own; `.claude/worktrees/` counts as ignored everywhere. A path that is not
   repo-relative throws. A local extractor cannot import the engine under
   `npx`, which is why `io` is handed in. Decide structure on text with its
   comments and strings masked, so a commented-out declaration never becomes a

@@ -572,7 +572,8 @@ test("pre-push: an existing hook manager's core.hooksPath is left alone; a free 
   assert.ok(j2.notes.some((n) => n.includes("core.hooksPath .githooks")));
 });
 
-test("Codex user: AGENTS.md carries the instructions as a marked block (Codex has no import), CLAUDE.md the one import line; CRLF files keep CRLF", () => {
+test("Codex user: AGENTS.md carries the instructions as a marked block (Codex has no import), CLAUDE.md the one import line; CRLF files keep CRLF", async () => {
+  const { instructionsBody } = await import("../scripts/bootstrap.mjs");
   const repo = fresh("codex");
   writeFileSync(join(repo, "CLAUDE.md"), "# My repo\r\n\r\nSome rules.\r\n");
   bootstrap(repo, ["apply", `--answers=${answersFile("codex", { codex: true })}`]);
@@ -581,7 +582,7 @@ test("Codex user: AGENTS.md carries the instructions as a marked block (Codex ha
   assert.ok(claude.startsWith("# My repo\r\n\r\nSome rules.\r\n"), "existing CLAUDE.md content kept, the line appended");
   assert.ok(!/[^\r]\n/.test(claude), "no bare LF introduced into a CRLF file");
   assert.ok(claude.trimEnd().endsWith("@zdd/instructions.md"));
-  const body = readFileSync(join(PLUGIN, "templates", "instructions.md"), "utf8").trimEnd();
+  const body = instructionsBody().trimEnd();
   assert.ok(agents.startsWith("<!-- zdd:begin -->\n") && agents.includes(body) && agents.trimEnd().endsWith("<!-- zdd:end -->"), "the block is the instructions");
   const verbs = agents.indexOf('"load ZDD"');
   assert.ok(verbs !== -1 && verbs < agents.indexOf("Never hand-edit"), "verbs lead the block");

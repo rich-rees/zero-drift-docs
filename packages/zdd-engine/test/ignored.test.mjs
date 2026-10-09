@@ -10,6 +10,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, cpSync, readFileSync, existsSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -50,7 +51,7 @@ test("without git: the worktree folder is vetoed by name, nothing else is", (t) 
   assert.deepEqual(walked(makeExtractorIo(root), "."), ["dist/b.ts", "src/a.ts"]);
 });
 
-test("with git: .gitignore, .git/info/exclude and ignored files are all vetoed; tracked and plain untracked files are not", (t) => {
+test("with git: .gitignore rules and ignored files are vetoed; .git/info/exclude is machine state and is NOT consulted (CR-406) — only .claude/worktrees is vetoed by name; tracked and plain untracked files are not", (t) => {
   const root = scratch({
     "src/a.ts": "a",
     "src/generated.ts": "g",
@@ -68,11 +69,11 @@ test("with git: .gitignore, .git/info/exclude and ignored files are all vetoed; 
   assert.equal(isIgnored("secrets"), true, "an ignored directory");
   assert.equal(isIgnored("secrets/key.ts"), true, "a file under an ignored directory");
   assert.equal(isIgnored("src/generated.ts"), true, "an ignored file");
-  assert.equal(isIgnored("worktree-like"), true, "info/exclude counts");
-  assert.equal(isIgnored("worktree-like/src/a.ts"), true);
+  assert.equal(isIgnored("worktree-like"), false, "info/exclude is one machine's rule, not the repository's");
+  assert.equal(isIgnored(".claude/worktrees/x"), true, "the worktree folder is vetoed by name instead");
   assert.equal(isIgnored("untracked/new.ts"), false, "untracked is still source — a new file on the branch");
   assert.equal(isIgnored("src/a.ts"), false);
-  assert.deepEqual(walked(makeExtractorIo(root), "."), [".gitignore", "src/a.ts", "untracked/new.ts"]);
+  assert.deepEqual(walked(makeExtractorIo(root), "."), [".gitignore", "src/a.ts", "untracked/new.ts", "worktree-like/src/a.ts"]);
 });
 
 test("a repo root inside a larger git repo asks git relative to the root it was given", (t) => {
@@ -192,7 +193,7 @@ test("CR-307/CR-320: supabase migrations, a react-router routes module, a FastAP
   assert.ok(sb.diagnostics.some((d) => /vendored\/migrations is gitignored — not source/.test(d)), sb.diagnostics.join("\n"));
   const rr = reactRouter({ repoRoot: root, options: { routesFile: "web/src/routes.tsx" }, io: io() });
   assert.ok(!JSON.stringify(rr.records).includes("secret_table"), "an ignored module's refs never reach a record");
-  assert.ok(rr.diagnostics.some((d) => /web\/src\/gen\/Gen\.tsx is gitignored — not source/.test(d)), rr.diagnostics.join("\n"));
+  assert.ok(!JSON.stringify(rr.records).includes("web/src/gen/Gen.tsx"), "an ignored candidate is as absent as it is in a clean clone (CR-408)");
   const py = fastapi({ repoRoot: root, options: { roots: ["api/main.py", "api/generated.py"] }, io: io() });
   assert.deepEqual(py.records.map((r) => r.id), ["route:/a"]);
   assert.ok(py.diagnostics.some((d) => /api\/generated\.py is gitignored — not source, not read/.test(d)));
@@ -203,17 +204,68 @@ test("CR-307/CR-320: supabase migrations, a react-router routes module, a FastAP
   assert.ok(next.diagnostics.some((d) => /src\/middleware\.ts is gitignored — not source, no middleware auth derived/.test(d)), next.diagnostics.join("\n"));
 });
 
-test("CR-309: when git is present but cannot answer, the predicate carries the reason and derive prints it as a WARNING; a non-repository stays silent", (t) => {
-  const root = scratch({ "src/a.ts": "a" });
+test("CR-403: a repository whose ignored set git cannot list stops derive (fail closed, with the reason); a folder that is no repository stays silent", (t) => {
+  const plain = scratch({ "src/a.ts": "a", "zdd/config.json": JSON.stringify({ extractors: ["generic"] }) });
+  t.after(() => rmSync(plain, { recursive: true, force: true }));
+  assert.equal(gitIgnoredPredicate(plain).error, null, "not a repository: no error, no warning");
+  const ok = execFileSync(process.execPath, [BIN, "derive"], { cwd: plain, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  assert.match(ok, /Wrote 0 records|nothing to inventory/);
+  const root = scratch({ "src/a.ts": "a", "zdd/config.json": JSON.stringify({ extractors: ["generic"] }) });
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  assert.equal(gitIgnoredPredicate(root).error, null, "not a repository: no warning");
   git(root, "init", "-q");
+  git(root, "add", "src/a.ts");
   // A corrupt index is the simplest failure to stage: `git ls-files` reads
   // the index and refuses, and that is not "not a repository".
-  git(root, "add", "src/a.ts");
   writeFileSync(join(root, ".git", "index"), "garbage");
   const p = gitIgnoredPredicate(root);
   assert.equal(p.source, "none");
-  assert.match(p.error ?? "", /git ls-files could not list the ignored paths/, "a failure that is not 'not a repository' is said");
+  assert.match(p.error ?? "", /this folder is a git repository but its ignored paths could not be listed .* derive stops rather than read gitignored files as source/, "the reason is said");
   assert.equal(p(".claude/worktrees/x"), true, "the built-in veto still holds");
+  const r = spawnSync(process.execPath, [BIN, "derive"], { cwd: root, encoding: "utf8" });
+  assert.equal(r.status, 1, "derive fails closed");
+  assert.match(r.stderr, /could not be listed/);
+  assert.ok(!existsSync(join(root, "zdd", "metadata")), "nothing was written");
+});
+
+test("CR-423: an ignored import target does not exist for the components extractor, nor an ignored command target for the jobs extractor", async (t) => {
+  const { derive: components } = await import("../src/extractors/components/index.mjs");
+  const { derive: jobs } = await import("../src/extractors/jobs/index.mjs");
+  const root = scratch({
+    "web/src/App.tsx": 'import { Gen } from "./gen/Gen";\nexport function App() { return <Gen /> }\n',
+    "web/src/gen/Gen.tsx": "export function Gen() { return null }\n",
+    "Procfile": "worker: node dist/worker.mjs\n",
+    "dist/worker.mjs": "// built\n",
+    ".gitignore": "web/src/gen/\ndist/\n",
+  });
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  git(root, "init", "-q");
+  const c = components({ repoRoot: root, options: { roots: ["web/src"] }, io: makeExtractorIo(root, "components") });
+  assert.ok(!c.records.some((r) => /gen/i.test(r.id)), "no record for the ignored component");
+  assert.ok(!JSON.stringify(c.records).includes("web/src/gen/Gen.tsx"), "no edge into it either");
+  const j = jobs({ repoRoot: root, options: {}, io: makeExtractorIo(root, "jobs") });
+  assert.deepEqual(j.records, [], "a job whose file exists only as ignored build output resolves to no file");
+  assert.ok(j.diagnostics.some((d) => /'worker' runs dist\/worker\.mjs, which resolves to no file/.test(d)), j.diagnostics.join("\n"));
+});
+
+test("CR-408: a Next.js wrapper page does not take an ignored component as its resource; a React Router import never resolves to an ignored candidate that would shadow a tracked one", async (t) => {
+  const { derive: reactRouter } = await import("../src/extractors/react-router/index.mjs");
+  const root = scratch({
+    "src/app/page.tsx": 'import Screen from "@/components/Screen";\nexport default function Page() { return <Screen /> }\n',
+    "src/components/Screen.tsx": "export default function Screen() { return null }\n",
+    "web/src/routes.tsx": 'import { Widget } from "./Widget";\nexport const routes = [{ path: "/", element: <Widget /> }];\n',
+    "web/src/Widget.js": 'export function Widget() { supabase.from("tracked_table"); return null }\n',
+    "web/src/Widget.tsx": 'export function Widget() { supabase.from("ignored_table"); return null }\n',
+    ".gitignore": "src/components/\nweb/src/Widget.tsx\n",
+  });
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  git(root, "init", "-q");
+  const io = () => makeExtractorIo(root, "t");
+  const next = nextjs({ repoRoot: root, options: { appDir: "src/app" }, io: io() });
+  const page = next.records.find((r) => r.kind === "surface");
+  assert.ok(page, "the page is a surface");
+  assert.deepEqual(page.resource, ["src/app/page.tsx"], "the ignored component is not its resource");
+  const rr = reactRouter({ repoRoot: root, options: { routesFile: "web/src/routes.tsx" }, io: io() });
+  const text = JSON.stringify(rr.records);
+  assert.ok(text.includes("tracked_table"), "the tracked .js candidate is the one resolved");
+  assert.ok(!text.includes("ignored_table"), "the ignored .tsx never shadows it");
 });

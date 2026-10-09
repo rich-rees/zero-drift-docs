@@ -17,7 +17,8 @@
       "minItems": 1,
       "uniqueItems": true,
       "description": "Extractors to run, composed: one per convention in the stack (built-in: supabase, nextjs, fastapi, react-router, components, expo-router, jobs, external-services, generic; `services` is the pre-2.3 name of external-services). Selected by NAME from the engine's registry or from localExtractorDir — never by path. Records from every extractor are merged and cross-extractor refs resolved after the merge.",
-      "examples": [["supabase", "nextjs"], ["supabase", "fastapi"], ["fastapi", "react-router"], ["generic"]]
+      "examples": [["supabase", "nextjs"], ["supabase", "fastapi"], ["fastapi", "react-router"], ["generic"]],
+      "not": { "allOf": [{ "contains": { "const": "services" } }, { "contains": { "const": "external-services" } }] }
     },
     "extractorOptions": {
       "type": "object",
@@ -119,7 +120,7 @@
           "additionalProperties": false,
           "description": "External services — the third-party systems a module depends on (ZDD 2.1, opt-in, decision 0020; named `services` until 2.3): declared with the markers that reveal them — imports of a package and/or environment variable NAME prefixes read in source (names only, never values). One record per declared service; usedBy edges to the records in the files that hit a marker. An env name with a credential-shaped suffix no service covers is a warning on every derive.",
           "properties": {
-            "services": { "type": "array", "items": { "type": "object", "required": ["name"], "additionalProperties": false, "anyOf": [{ "required": ["imports"] }, { "required": ["env"] }], "properties": { "name": { "type": "string", "pattern": "\\S" }, "imports": { "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "\\S" } }, "env": { "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "\\S" }, "description": "Env name prefixes, e.g. \"SENTRY_\"." } } }, "description": "Each declared with at least one marker: a package import or an env-name prefix." },
+            "services": { "type": "array", "items": { "type": "object", "required": ["name"], "additionalProperties": false, "anyOf": [{ "required": ["imports"] }, { "required": ["env"] }], "properties": { "name": { "type": "string" }, "imports": { "type": "array", "items": { "type": "string" } }, "env": { "type": "array", "items": { "type": "string" }, "description": "Env name prefixes, e.g. \"SENTRY_\"." } } }, "description": "Each declared with at least one marker: a package import or an env-name prefix (a blank marker is ignored by the engine with a diagnostic)." },
             "ignore": { "type": "array", "items": { "type": "string" }, "description": "Env name prefixes that are not services (beside the built-in database and platform prefixes)." },
             "roots": { "type": "array", "items": { "type": "string" }, "default": ["."] },
             "extensions": { "type": "array", "items": { "type": "string" }, "default": [".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"] }
@@ -128,10 +129,10 @@
         "services": {
           "type": "object",
           "deprecated": true,
-          "description": "The 2.1–2.2 name of `external-services`, accepted for one release (ZDD 2.3) and never beside it (the engine refuses both names at once); \"upgrade ZDD\" renames it. Under this name the records keep the pre-2.3 kind `service`. Same shape.",
+          "description": "The 2.1–2.2 name of `external-services`, accepted for one release (ZDD 2.3) and never beside it (both names, or both option keys, are refused); \"upgrade ZDD\" renames it. Under this name the records keep the pre-2.3 kind `service`. Same shape.",
           "additionalProperties": false,
           "properties": {
-            "services": { "type": "array", "items": { "type": "object", "required": ["name"], "additionalProperties": false, "anyOf": [{ "required": ["imports"] }, { "required": ["env"] }], "properties": { "name": { "type": "string", "pattern": "\\S" }, "imports": { "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "\\S" } }, "env": { "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "\\S" } } } } },
+            "services": { "type": "array", "items": { "type": "object", "required": ["name"], "additionalProperties": false, "anyOf": [{ "required": ["imports"] }, { "required": ["env"] }], "properties": { "name": { "type": "string" }, "imports": { "type": "array", "items": { "type": "string" } }, "env": { "type": "array", "items": { "type": "string" } } } } },
             "ignore": { "type": "array", "items": { "type": "string" } },
             "roots": { "type": "array", "items": { "type": "string" } },
             "extensions": { "type": "array", "items": { "type": "string" } }
@@ -139,7 +140,8 @@
         },
         "generic": { "type": "object", "additionalProperties": false }
       },
-      "additionalProperties": { "type": "object" }
+      "additionalProperties": { "type": "object" },
+      "not": { "required": ["services", "external-services"] }
     },
     "localExtractorDir": {
       "type": "string",
@@ -261,7 +263,9 @@
       "description": "Renderer options for the agent index (e.g. the blockquote summary line).",
       "additionalProperties": true,
       "properties": {
-        "summary": { "type": "string" }
+        "summary": { "type": "string" },
+        "budgetTokens": { "type": "integer", "default": 2000, "description": "The agent index's size budget in approximate tokens (ZDD 2.3). Over it, render warns and names the fix; it never fails." },
+        "levels": { "type": "integer", "enum": [1, 2], "default": 1, "description": "1: every feature's section in zdd/agent-index.md. 2 (ZDD 2.3, for a large repo): the index lists the areas first — one line each with a link to zdd/agent-index/<area>.md holding that area's features — so every feature is one hop away. An explicit choice, never automatic: the index's shape moves only when this does." }
       }
     },
     "viewer": {

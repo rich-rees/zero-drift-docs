@@ -17,7 +17,7 @@ const PLUGIN = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const ENGINE_BIN = resolve(PLUGIN, "..", "..", "packages", "zdd-engine", "bin", "zdd-engine.mjs");
 const SCHEMA = JSON.parse(readFileSync(join(PLUGIN, "templates", "config.schema.json"), "utf8"));
 
-const KNOWN = new Set(["$schema", "$id", "$comment", "title", "description", "default", "examples", "deprecated", "type", "properties", "additionalProperties", "required", "items", "minItems", "uniqueItems", "pattern", "enum", "anyOf", "oneOf", "not"]);
+const KNOWN = new Set(["$schema", "$id", "$comment", "title", "description", "default", "examples", "deprecated", "type", "properties", "additionalProperties", "required", "items", "minItems", "uniqueItems", "pattern", "enum", "anyOf", "oneOf", "allOf", "not", "contains", "const"]);
 const typeOf = (v) => (v === null ? "null" : Array.isArray(v) ? "array" : typeof v);
 
 // Returns the list of violations (empty = valid).
@@ -51,6 +51,9 @@ function validate(schema, value, path = "$") {
     const n = schema.oneOf.filter((s) => validate(s, value, path).length === 0).length;
     if (n !== 1) errs.push(`${path}: matches ${n} of oneOf (need exactly 1)`);
   }
+  if (schema.allOf) for (const s of schema.allOf) errs.push(...validate(s, value, path));
+  if (schema.const !== undefined && JSON.stringify(schema.const) !== JSON.stringify(value)) errs.push(`${path}: not ${JSON.stringify(schema.const)}`);
+  if (schema.contains && Array.isArray(value) && !value.some((v) => validate(schema.contains, v, path).length === 0)) errs.push(`${path}: contains no matching item`);
   if (schema.not && validate(schema.not, value, path).length === 0) errs.push(`${path}: matches the forbidden shape`);
   return errs;
 }

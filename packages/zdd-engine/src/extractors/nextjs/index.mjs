@@ -350,7 +350,7 @@ export function derive({ repoRoot, options, io }) {
         const base = posixify(join(srcAliasRoot, target.slice(2)));
         const hit = [".tsx", ".ts", ".jsx", ".js", "/index.tsx", "/index.ts", "/index.jsx", "/index.js"]
           .map((ext) => base + ext)
-          .find((p) => existsSync(join(repoRoot, p)));
+          .find((p) => !isIgnored(p) && existsSync(join(repoRoot, p))); // an ignored component is not source (CR-408)
         if (hit) resource.unshift(hit);
         else diagnostics.push(`${s.rel}: wrapper import '${target}' resolves to no file — page kept as primary resource`);
       }

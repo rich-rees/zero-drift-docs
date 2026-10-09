@@ -270,9 +270,14 @@ apply"):
    (the note that points Matt Pocock's skills at `zdd/`; theirs from the
    first byte).
 
-Every plugin-written file carries a "Managed by Zero-Drift Docs" header: only
-files with that header are ever rewritten later, and a same-named file
-without it is kept and called out. Hook registrations live in the plugin's
+Ownership, file by file: the CI workflow, the pre-push hook and
+`zdd/instructions.md` carry a "Managed by Zero-Drift Docs" header, and only a
+file with that header is ever rewritten later — a same-named file without it
+is kept and called out; `zdd/config.json` and `.claude/settings.json` are
+JSON (no header) and ZDD rewrites only its own keys in them; `.gitattributes`
+and `CLAUDE.md` get one line each, appended, and the rest is never touched;
+everything under `zdd/` besides the instructions and the generated files is
+the adopter's from the first byte. Hook registrations live in the plugin's
 own `hooks.json`, which reads the opt-ins from `zdd/config.json`, so nothing
 is written into the host's settings.
 

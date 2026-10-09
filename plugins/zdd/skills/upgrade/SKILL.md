@@ -126,14 +126,17 @@ It writes nothing. Walk the person through it in plain words, in this order:
 4. **Their own text that speaks to a ZDD rule.** The plan lists every
    paragraph or bullet in `CLAUDE.md` / `AGENTS.md`, outside ZDD's line or
    block, that speaks to one of ZDD's rules — never a whole section — and
-   prints **what ZDD now says** beside it. For each one, read the two
-   together and tell the person, in plain words: **same** (their sentence
+   prints **what ZDD now says** beside it. The unit is the whole paragraph
+   or bullet, shown in full: that is what `--drop` removes. For each one,
+   read the two together and tell the person, in plain words: **same** (it
    says what ZDD's instructions already say — safe to remove, their call),
    **different** (it says something ZDD's rules do not cover — keep it), or
    **contradicting** (it tells the AI to do something ZDD's rules forbid —
-   recommend removing or changing it, and say why). A sentence is theirs;
-   it is removed only on their word, and the heading goes with it only when
-   the sentence was all the section held.
+   recommend removing or changing it, and say why). When a paragraph mixes
+   a ZDD rule with a rule of their own, recommend editing it by hand rather
+   than dropping it. The text is theirs; it is removed only on their word,
+   and the heading goes with it only when the paragraph was all the section
+   held.
 5. **Retired names.** The plan lists every file in the repo that still uses
    a name a release retired (an old command, an old extractor key, the old
    release tag held somewhere ZDD does not write — a lock test, a setup
@@ -148,9 +151,9 @@ Then ask, **one question at a time** (questions 2 to 4 of about 5):
   — recommended yes (decision 0021): every developer then runs the same
   release and the next upgrade starts at step 1; saying no leaves the repo
   floating on whatever each machine last fetched.
-- If their own text was named: **"Which of these sentences shall I
-  remove?"** — list them with your same / different / contradicting reading
-  and a recommendation for each; they answer with the ones to drop.
+- If their own text was named: **"Which of these paragraphs or bullets
+  shall I remove?"** — list them with your same / different / contradicting
+  reading and a recommendation for each; they answer with the ones to drop.
 
 Read the answers back, then go on.
 
