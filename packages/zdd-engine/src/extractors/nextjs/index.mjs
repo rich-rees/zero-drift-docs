@@ -305,7 +305,8 @@ export function derive({ repoRoot, options, io }) {
   const records = [];
   let matchers = [];
   if (middlewarePath) {
-    if (existsSync(join(repoRoot, middlewarePath))) matchers = loadMiddlewareMatchers(repoRoot, middlewarePath);
+    if (isIgnored(middlewarePath)) diagnostics.push(`${middlewarePath} is gitignored — not source, no middleware auth derived`);
+    else if (existsSync(join(repoRoot, middlewarePath))) matchers = loadMiddlewareMatchers(repoRoot, middlewarePath);
     else diagnostics.push(`${middlewarePath} not found — no middleware auth derived`);
   }
 

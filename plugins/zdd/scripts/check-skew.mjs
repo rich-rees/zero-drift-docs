@@ -75,7 +75,7 @@ function main() {
   const invalid = pins.filter((p) => p.version === null && !p.unpinned);
   const behind = pins.filter((p) => p.version !== null && p.version !== plugin && compareSemver(p.version, plugin) <= 0);
   const ahead = pins.filter((p) => p.version !== null && p.version !== plugin && compareSemver(p.version, plugin) > 0);
-  const upgrade = "Run `bootstrap --upgrade` (the bootstrap skill with --upgrade) to rewrite every pin, then run `render` and commit the result in the same PR.";
+  const upgrade = 'Say "upgrade ZDD" (the upgrade skill) to rewrite every pin, then run `render` and commit the result in the same PR.';
 
   if (flags.json) {
     process.stdout.write(JSON.stringify({ plugin, pins, skew: behind.length + ahead.length + invalid.length + unpinned.length > 0, behind, ahead, invalid, unpinned }) + "\n");

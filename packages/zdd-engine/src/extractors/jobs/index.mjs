@@ -147,7 +147,11 @@ export function derive({ repoRoot, options, io }) {
     }
     return r.text;
   };
-  const exists = (rel) => io.read(rel, { maxBytes: 1 }).code !== "missing";
+  // An ignored target is absent too: a clean clone has no such file (pick 1).
+  const exists = (rel) => {
+    const code = io.read(rel, { maxBytes: 1 }).code;
+    return code !== "missing" && code !== "ignored";
+  };
 
   // A command's module file, relative to the manifest's folder.
   const resolveTarget = (dir, parsed) => {

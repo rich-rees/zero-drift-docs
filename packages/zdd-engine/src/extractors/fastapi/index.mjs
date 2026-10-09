@@ -48,7 +48,8 @@ function walkPython(repoRoot, roots, excludeDirs, diagnostics, isIgnored) {
       continue;
     }
     if (statSync(abs).isFile()) {
-      if (abs.endsWith(".py")) out.push(posixify(abs.slice(repoRoot.length + 1)));
+      if (isIgnored(root)) diagnostics.push(`${root} is gitignored — not source, not read`);
+      else if (abs.endsWith(".py")) out.push(posixify(abs.slice(repoRoot.length + 1)));
       continue;
     }
     walkDir(

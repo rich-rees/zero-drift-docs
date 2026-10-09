@@ -402,27 +402,74 @@ export function findPocock(root, home) {
   const loc = pocockLocations(root, home);
   const pin = pocockPin();
   const ours = `${pin.plugin}@${pin.marketplace}`;
-  const enabled = effectiveEnabled(root, home);
+  const { enabled, unreadable } = effectiveEnabled(root, home);
   const hits = [];
-  for (const key of ["userSkill", "codexSkill", "projectSkill"]) if (existsSync(loc[key])) hits.push({ where: key, path: loc[key], id: null, version: null, enabled: null });
-  for (const path of findAllUnder(loc.pluginCache, ["domain-modeling", "SKILL.md"], 8)) {
+  const plainFile = (p) => {
+    try {
+      return lstatSync(p).isFile();
+    } catch {
+      return false;
+    }
+  };
+  for (const key of ["userSkill", "codexSkill", "projectSkill"]) if (plainFile(loc[key])) hits.push({ where: key, path: loc[key], id: null, version: null, enabled: null });
+  // The pinned copy's own place first (CR-318): cache/<marketplace>/<plugin>/
+  // <version>/…, so a bounded walk of a large cache can never miss it.
+  const found = new Set();
+  const pinnedDir = join(loc.pluginCache, pin.marketplace, pin.plugin);
+  for (const p of findAllUnder(pinnedDir, ["domain-modeling", "SKILL.md"], 6)) found.add(p);
+  for (const p of findAllUnder(loc.pluginCache, ["domain-modeling", "SKILL.md"], 8)) found.add(p);
+  for (const path of [...found].sort()) {
+    // A cache entry is a plugin only in the cache's own layout, reached
+    // through real directories, ending at a regular file (CR-315).
+    if (!plainFile(path) || !realDirs(loc.pluginCache, path)) continue;
     const [marketplace, plugin, version] = relative(loc.pluginCache, path).split(sep);
     const id = marketplace && plugin && SAFE_ID.test(`${plugin}@${marketplace}`) ? `${plugin}@${marketplace}` : null;
-    hits.push({ where: "pluginCache", path, id, version: id && typeof version === "string" ? version : null, enabled: id ? enabled.get(id) ?? true : null });
+    if (!id) continue;
+    // Unknown when a settings file could not be read: never "on" by default then.
+    const on = unreadable ? (enabled.has(id) ? enabled.get(id) : null) : (enabled.get(id) ?? true);
+    hits.push({ where: "pluginCache", path, id, version: typeof version === "string" ? version : null, enabled: on });
   }
-  const usable = hits.filter((h) => h.enabled !== false);
-  return { installed: usable.length > 0, pinned: usable.some((h) => h.id === ours), hits, searched: Object.values(loc) };
+  const usable = hits.filter((h) => h.enabled !== false && !(h.where === "pluginCache" && h.enabled === null));
+  return { installed: usable.length > 0, pinned: usable.some((h) => h.id === ours), hits, unreadableSettings: unreadable, searched: Object.values(loc) };
+}
+// Every directory from `root` down to `path` (exclusive) is a real directory,
+// no symlink on the way.
+function realDirs(root, path) {
+  let cur = root;
+  for (const seg of relative(root, dirname(path)).split(sep)) {
+    if (!seg) continue;
+    cur = join(cur, seg);
+    try {
+      if (lstatSync(cur).isSymbolicLink()) return false;
+    } catch {
+      return false;
+    }
+  }
+  return true;
 }
 // enabledPlugins, merged across the three settings files Claude Code reads
-// (lowest precedence first). A plugin no file names is on.
+// (lowest precedence first). A plugin no file names is on — unless a file
+// could not be read at all, which `unreadable` names (CR-315).
 function effectiveEnabled(root, home) {
   const out = new Map();
+  let unreadable = null;
   for (const s of settingsSources(root, home)) {
+    let st = null;
+    try {
+      st = lstatSync(s.path);
+    } catch {
+      continue;
+    }
+    if (!st.isFile()) continue;
     const j = readJsonObject(s.path);
-    if (!j || !isObject(j.enabledPlugins)) continue;
+    if (!j) {
+      unreadable = s.label;
+      continue;
+    }
+    if (!isObject(j.enabledPlugins)) continue;
     for (const [id, v] of Object.entries(j.enabledPlugins)) if (typeof v === "boolean" && SAFE_ID.test(id)) out.set(id, v);
   }
-  return out;
+  return { enabled: out, unreadable };
 }
 // Every `<dir>/…/<tail>` under dir, sorted, bounded by depth and by the
 // number of directories visited (a plugin cache holds every version of every
@@ -449,7 +496,7 @@ function findAllUnder(dir, tail, depth) {
       const p = join(d, name);
       let isDir = false;
       try {
-        isDir = statSync(p).isDirectory();
+        isDir = lstatSync(p).isDirectory(); // lstat: a symlinked directory is never entered (CR-315)
       } catch {
         continue;
       }

@@ -25,7 +25,7 @@ POSIX `PLUGIN="$(cd "<skill-dir>/../.." && pwd)"`, PowerShell
 It compares the plugin's version with every engine pin in the repo
 (`zdd/config.json` `engine`, the CI workflow, the pre-push hook). If a pin is
 behind, **its one line is the first line of your reply** — it names
-`bootstrap --upgrade`, which rewrites every pin. Silent when they match; do not
+"upgrade ZDD", which rewrites every pin. Silent when they match; do not
 mention it then.
 
 Then, the same way:

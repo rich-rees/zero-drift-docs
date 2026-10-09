@@ -142,9 +142,17 @@ hand). Then it narrates every file as **wrote / kept / skipped** and writes:
   step printed). Both files carry a "Managed by Zero-Drift Docs" header: only
   files with that header are ever rewritten later, and a same-named file
   without it is kept and called out.
-- The instruction block into `CLAUDE.md` and, for Codex users, `AGENTS.md` —
-  one tool-neutral block between `<!-- zdd:begin -->` / `<!-- zdd:end -->`
-  markers, leading with the spoken verbs. Existing content is kept.
+- `zdd/instructions.md` — ZDD's own instructions for every session (the
+  spoken verbs and the rules every adopter needs), rewritten on each
+  upgrade, never hand-edited — and **one line** in `CLAUDE.md`,
+  `@zdd/instructions.md`, which Claude Code inlines at session start.
+  Everything else in `CLAUDE.md` is the adopter's, and ZDD never edits it
+  again. For Codex users the same text goes into `AGENTS.md` between
+  `<!-- zdd:begin -->` / `<!-- zdd:end -->` markers (Codex has no file
+  import). Existing content is kept.
+- `.gitattributes` — one line, `zdd/** text eol=lf`, appended to an existing
+  file: the engine writes LF, and without it a Windows checkout shows every
+  generated file as modified.
 - Hook registrations: the plugin's own `hooks.json` carries all three hooks
   and reads the opt-ins from `zdd/config.json`, so nothing is written into the
   host's settings.
