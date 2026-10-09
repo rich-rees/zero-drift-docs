@@ -205,9 +205,9 @@ node "$PLUGIN/scripts/bootstrap.mjs" preflight
 Then, with the engine this plugin pins:
 
 ```
-npx -y @rich-rees/zdd-engine@2.2.1 derive
-npx -y @rich-rees/zdd-engine@2.2.1 render
-npx -y @rich-rees/zdd-engine@2.2.1 lint
+npx -y @rich-rees/zdd-engine@2.3.0 derive
+npx -y @rich-rees/zdd-engine@2.3.0 render
+npx -y @rich-rees/zdd-engine@2.3.0 lint
 ```
 
 Show what moved in the generated artifacts and say why, from the notes (a

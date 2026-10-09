@@ -1318,6 +1318,10 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
       hooks: { autoLoad: optIns.autoLoad, fence: optIns.fence, stop: optIns.stop },
     };
     if (!hasGit(root)) config.render = { storeChanges: false };
+    // A fresh install never writes a retired name (the alias is for configs
+    // that already exist): an answer or a stack spelt the old way is written
+    // the current way, options key and all.
+    migrateRenames(config, []);
     ledger.create("zdd/config.json", JSON.stringify(config, null, 2) + "\n");
   } else {
     // Repair: only an explicit answer changes the config. A pre-1.0 config's
@@ -1654,10 +1658,17 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
   }
   writeGitattributes(ledger, config);
   writeDomainDoc(ledger, artifactPaths(config, { lenient: true }));
+  const lockBefore = ourLockRef(ledger);
   writePluginSettings(ledger, version, { mode: "upgrade", lock });
   // Names a release retired, still in the adopter's own text (CAS-103 7, C9):
-  // the plan greps for each and lists every hit with its replacement.
-  const retired = findRetiredNames(ledger, { oldEngine: fromEngine && fromEngine !== version ? fromEngine : null, metadataRel: artifactPaths(config, { lenient: true }).metadataDir });
+  // the plan greps for each and lists every hit with its replacement — the
+  // old engine pin and the lock's old tag included (DiO keeps the tag in a
+  // lock test of its own).
+  const retired = findRetiredNames(ledger, {
+    oldEngine: fromEngine && fromEngine !== version ? fromEngine : null,
+    oldLock: lockBefore && lockBefore !== `v${version}` ? lockBefore : null,
+    metadataRel: artifactPaths(config, { lenient: true }).metadataDir,
+  });
   for (const r of retired) ledger.notes.push(r);
   if (stopUnset) ledger.notes.push('hooks.stop is not set (new in 1.1: the Stop hook prompts for the curated half once per session) — it stays OFF until answered: run bootstrap apply with {"optIns":{"stop":true}} (repair mode, keeps every other choice), or add "stop": true inside the existing "hooks" object by hand');
   const ctx = { root, config, version, paths: artifactPaths(config, { lenient: true }) };
@@ -1885,6 +1896,23 @@ export const UPGRADE_NOTES = {
     "2.2 next step for the team: after this PR merges, each developer's next session start prints one line naming the exact commands that move their machine to this release — run them, then restart",
   ],
   "2.2.1": () => ["2.2.1 makes the session-start checks read Claude Code's own profile (CLAUDE_CONFIG_DIR when set, CLAUDE_CODE_PLUGIN_CACHE_DIR for the plugins folder, and the transcript path when a hook's environment is scrubbed) — in the repo only the engine pins and the lock move"],
+  "2.3.0": ({ config, paths }) => {
+    const notes = [
+      `2.3 moves ZDD's rules out of the marked block in CLAUDE.md into ${paths.bundleDir === "." ? "instructions.md" : `${paths.bundleDir}/instructions.md`}, loaded by one line (\`@${paths.bundleDir === "." ? "" : paths.bundleDir + "/"}instructions.md\`) — this run replaces the block with the line once and never edits CLAUDE.md again; AGENTS.md keeps a block (Codex has no import). The rules gained: both install commands in order, the three cases a release line can mean, the merge-conflict steps, reuse-first in "choose patterns", and where a ZDD defect is filed (decision 0024)`,
+      "2.3 reads your own CLAUDE.md / AGENTS.md text against ZDD's rules per paragraph or bullet, with what ZDD now says beside each (the plan lists them), and sweeps your files for names a release retired — each hit above names its replacement",
+      "2.3: what git ignores is never source — derive skips every gitignored path and .claude/worktrees/ (decision 0026); a record that named one changes on the bump, and derive now stops when git cannot list the ignored set",
+    ];
+    const names = Array.isArray(config.extractors) ? config.extractors : [];
+    if (names.includes("services") || names.includes("external-services")) {
+      notes.push("2.3 renames the `services` extractor to `external-services` and its records from `service` to `external-service` (decision 0023): the config keys, claims.strictKinds, the allow-list ids and the map's links were rewritten above; the next derive moves zdd/metadata/service/ to zdd/metadata/external-service/ — commit both; a hand-written map/services/ folder is yours to rename or keep");
+    }
+    if (names.includes("jobs")) {
+      notes.push("2.3 widens the jobs extractor into background work (decision 0025): Vercel crons, Railway and Cloudflare schedules, pg_cron, Compose workers and BullMQ / Inngest / Trigger.dev / SQS queues, each with its trigger and what it hits, in a Background work section of the agent index — and a package.json script counts only when a manifest runs it, so a hand-run script's job record leaves on the bump; GitHub Actions schedules are listed only with extractorOptions.jobs.includeGithubActions: true");
+    }
+    notes.push("2.3 adds agentIndex.budgetTokens (default 2000) and agentIndex.levels (1 or 2) — set levels to 2 when the index warns it is over budget: areas first, one file per area under zdd/agent-index/, each feature one hop away; and `lint` warns on a blessing that points at no code (a blessing is a pointer to reusable code to start from — authoring.md has the test)");
+    notes.push("2.3 writes .gitattributes (zdd/ pinned to LF) and runs a preflight (Node 20+, npx, git, github.com, the npm registry, the pinned engine) before an install or an upgrade; the CI workflow is offered only on GitHub — elsewhere the merge gate is three commands for your own pipeline");
+    return notes;
+  },
 };
 
 export function compareVersions(a, b) {
@@ -2167,8 +2195,11 @@ function sweepList(ledger, metadataRel) {
   rec(ledger.root, 0);
   return { files: out, truncated, source: "walk" };
 }
-export function findRetiredNames(ledger, { oldEngine = null, metadataRel = "zdd/metadata" } = {}) {
+export function findRetiredNames(ledger, { oldEngine = null, oldLock = null, metadataRel = "zdd/metadata" } = {}) {
   const rules = [...RETIRED_NAMES];
+  if (oldLock && /^v\d+\.\d+\.\d+$/.test(oldLock) && oldLock !== `v${oldEngine}`) {
+    rules.push({ since: "this upgrade", find: new RegExp(`\\b${oldLock.replace(/\./g, "\\.")}\\b`, "g"), now: `the new release's tag (v${pluginVersion()}) — the lock moved; your repo may hold the old tag somewhere ZDD does not write (a lock test, a setup guide)`, skip: [".claude/settings.json", "zdd/config.json", ".github/workflows/zdd.yml", ".githooks/pre-push"] });
+  }
   if (oldEngine && /^\d+\.\d+\.\d+$/.test(oldEngine)) {
     rules.push({ since: "this upgrade", find: new RegExp(`\\bv?${oldEngine.replace(/\./g, "\\.")}\\b`, "g"), now: `the new release (${pluginVersion()}) — your repo may hold the version somewhere ZDD does not write (a lock test, a setup guide)`, skip: [".claude/settings.json", "zdd/config.json", ".github/workflows/zdd.yml", ".githooks/pre-push"] });
   }

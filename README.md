@@ -4,7 +4,7 @@ A documentation architecture for repos built by **human + agent pairs**. ZDD kee
 seven documentation artifacts *at most one unit of work behind the code* — and, with
 CI, makes drift in the machine-generated ones **un-mergeable**.
 
-> **Status: 2.2.1.** The plugin installs in Claude Code
+> **Status: 2.3.0.** The plugin installs in Claude Code
 > and in Codex from this one repo; `bootstrap` detects your stack (or grills
 > for it on a greenfield repo), proposes extractors with evidence, and *writes*
 > the opt-ins; the engine (`packages/zdd-engine`, npm `@rich-rees/zdd-engine`)
@@ -198,10 +198,41 @@ anyway. Taking a new Pocock release is a ZDD release.
 
 ## Install
 
+### Before you start
+
+Everything ZDD needs, and why — the install checks each of these before it
+asks a question, and an upgrade checks them again:
+
+- **Node.js 20 or newer** ([nodejs.org](https://nodejs.org)). ZDD's own
+  scripts run on it, and so does the engine. A Claude Code installed on its
+  own does not bring it.
+- **`npx`**, which comes with Node.js. ZDD's plugin carries no engine: the
+  first time a skill does real work, `npx` downloads
+  `@rich-rees/zdd-engine` at the release's pinned version from the public
+  npm registry, and again on each engine pin bump. No npm account is needed;
+  the package is public.
+- **git**, and a git repository. The release lock is a git tag, the
+  freshness check reads the history, and "what git ignores is never source"
+  asks git which files those are.
+- **Access to github.com and registry.npmjs.org.** The plugin and Matt
+  Pocock's skills are installed from public GitHub repositories; the engine
+  from npm. A proxy or a firewall that blocks either is named in plain
+  words by the check, not as a raw `npx` error mid-install.
+- **No account anywhere.** Nothing in ZDD reads a secret or needs one.
+
 Two paths: **adopting** ZDD in a repo (once, by whoever sets it up), and
 **joining** a repo that already uses it (every other developer — the path most
 people take). Each is a short, copy-pasteable sequence; the commands are the
-same in PowerShell, bash and zsh.
+same in PowerShell, bash and zsh. The install talks in plain words — it
+assumes the person has never heard of ZDD and may not be a developer — and
+asks one question at a time, with a recommendation, what it costs and what
+saying no gives up. It works the same on a **greenfield** folder (an empty
+`zdd/` that every task's "update ZDD" fills), a **young app** (the
+inventory complete on day one, one mapping session, an optional backfill
+offered once with an honest estimate of your review time) and a **mature
+codebase** (the same, with the unclaimed list as a to-do list and decisions
+never reconstructed from old code). Anything bulk is approved as one
+reviewable file, never one question per item.
 
 ### Adopting ZDD in a repo
 
@@ -295,6 +326,20 @@ runs: the agent loads before it works and updates before it finishes. You lose
 running the engine's `--check`, which makes a forgotten update **loud** without a
 merge gate.
 
+### Known issues
+
+- Vercel Queues are not read yet (the API was not stable enough to pin a
+  shape to); BullMQ, Inngest, Trigger.dev and SQS are. Filed as a finding.
+- A Supabase Realtime subscription written as a direct
+  `.on('postgres_changes')` inside a hook yields no `subscribes` edge; name
+  the wrapper in `subscribeCalls`. Filed as a finding.
+- Findings — things ZDD got wrong, as opposed to things wrong in your repo —
+  live as [GitHub Issues labelled `finding`](https://github.com/rich-rees/zero-drift-docs/issues?q=is%3Aopen+label%3Afinding);
+  a `blocker` is one a new user following this README can hit. A finding
+  with a workaround on your side is logged, not released; findings ship
+  together in a release train, and you move only when a release carries
+  something you need.
+
 ### Upgrading
 
 Updating the plugin never touches your repo; moving the repo to a newer release
@@ -387,6 +432,11 @@ saying no to a row is a visible choice, not a fork.
 | Engine, extractors, viewers, fence, CI check, pins, skew | Skip. | Only with the generated half. |
 
 ## Roadmap
+
+- [x] **2.3.0** — the plain-words install and upgrade, ZDD's instructions in
+      a file of their own, external services, work-shaped blessings,
+      background work, the two-level index, and the first-run findings from
+      DiO's and Cascade's moves to 2.2.1 *(2026-10-09, CAS-103)*.
 
 - [x] Extract the engine (`derive` / `render` / checks + `nextjs-supabase` adapter)
       from the PressPlay proving instance into `packages/zdd-engine` *(v0.2)*.
@@ -619,6 +669,47 @@ warning can say "behind".
   session (also `CLAUDE_CODE_PLUGIN_CACHE_DIR`, and a hook whose environment
   was scrubbed finds the profile from its transcript). No config, contract or
   artifact change; the bump moves the engine pins and the release lock.
+
+- **`2.3.0` — the plain-words install and upgrade.** A minor: every change
+  below is additive, opt-in, or migrated for you by "upgrade ZDD". **What
+  moves on the bump**, so you know what to expect in `derive --check` and
+  `render --check`:
+  - *ZDD's instructions* leave the marked block in `CLAUDE.md` for
+    `zdd/instructions.md`, loaded by one line; the upgrade makes that change
+    once and never edits `CLAUDE.md` again (`AGENTS.md` keeps a block;
+    [decision 0024](docs/decisions/0024-zdd-instructions-in-a-file-of-their-own.md)).
+    The text is rendered with your configured paths and names both install
+    commands, the three cases a release line can mean, the merge-conflict
+    steps, reuse-first, and where a finding is filed.
+  - *What git ignores is never source* ([decision 0026](docs/decisions/0026-what-git-ignores-is-never-source.md)):
+    a record that named a gitignored file (DiO's `.claude/worktrees/`
+    copies) changes; `derive` stops when git cannot list the ignored set.
+  - *External services*: the `services` extractor is `external-services`
+    and its records `external-service` ([decision 0023](docs/decisions/0023-external-services-not-services-a-rename-that-moves-nothing-until-the-key-moves.md)).
+    Under the old config key nothing moves; "upgrade ZDD" renames the keys,
+    the strict kinds, the allow-list ids and the map's links, and the next
+    `derive` moves `zdd/metadata/service/` to `zdd/metadata/external-service/`.
+  - *Background work* ([decision 0025](docs/decisions/0025-background-work-is-what-runs-without-a-click.md)):
+    the jobs extractor reads Vercel, Railway, Cloudflare and `pg_cron`
+    schedules, Compose workers and BullMQ / Inngest / Trigger.dev / SQS
+    queues, with a *Background work* section in the agent index; a
+    package.json script counts only when a manifest runs it, so a hand-run
+    script's job record leaves; GitHub Actions schedules are an opt-in.
+  - *Blessings* are work-shaped pointers to reusable code; `lint` gains a
+    *warning* for one that points at no code (never a failure).
+  - *The agent index* gains `agentIndex.budgetTokens` and
+    `agentIndex.levels` (two levels write `zdd/agent-index/<area>.md`; an
+    explicit setting, so nothing moves unless you set it).
+  - *New files*: `.gitattributes` gains one line; `zdd/instructions.md` is
+    written. *New checks*: a preflight before any question, the CI offer
+    only on GitHub (elsewhere the three commands), the Stop check silent on
+    a question-ending turn and on ZDD's own files, the fence judging the
+    write's target. The schema gains `jobs.includeGithubActions`,
+    `agentIndex.budgetTokens`, `agentIndex.levels` and the
+    `external-services` key (the old key accepted for this release).
+  - *Release process*: a pushed tag publishes the engine and creates the
+    GitHub release; the dry run proves the release on three scenario repos
+    that are not DiO's or Cascade's.
 
 ## Contributing
 
