@@ -602,7 +602,8 @@ test("Pocock recommendation: names the plugin, the install route, and the conseq
   mkdirSync(skill, { recursive: true });
   writeFileSync(join(skill, "SKILL.md"), "---\nname: domain-modeling\n---\n");
   const out2 = execFileSync(process.execPath, [SCRIPT, "detect", `--root=${repo}`, `--home=${home}`], { encoding: "utf8" });
-  assert.match(out2, /mattpocock-skills: installed \(pluginCache:/);
+  // 2.3: a copy that is not ZDD's pinned one is said as such — bootstrap switches it off in this repo (Sadies dry run).
+  assert.match(out2, /mattpocock-skills: a copy is on here \(pluginCache: .*mattpocock-skills@skills 1\.0\.0, switched on here\), but it is not ZDD's pinned one .* install it: `claude plugin install zdd@zero-drift-docs --scope project`/, out2);
   const codexHome = join(scratch, "home-codex");
   mkdirSync(join(codexHome, ".codex", "skills", "domain-modeling"), { recursive: true });
   writeFileSync(join(codexHome, ".codex", "skills", "domain-modeling", "SKILL.md"), "");

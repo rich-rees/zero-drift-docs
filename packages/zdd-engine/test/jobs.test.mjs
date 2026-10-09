@@ -31,6 +31,8 @@ test("parseCommand: python -m through uv/poetry/pipenv, node/tsx/ts-node files, 
   assert.deepEqual(parseCommand("npm run worker"), { kind: "script", target: "worker" });
   assert.deepEqual(parseCommand("yarn worker"), { kind: "script", target: "worker" });
   assert.deepEqual(parseCommand("pnpm worker:video"), { kind: "script", target: "worker:video" });
+  assert.deepEqual(parseCommand("pnpm --filter api run worker:emails"), { kind: "script", target: "worker:emails", package: "api" });
+  assert.deepEqual(parseCommand("yarn workspace api run worker"), { kind: "script", target: "worker", package: "api" });
   assert.equal(parseCommand("npm install"), null);
   assert.equal(parseCommand("pnpm dev"), null, "a dev server by name is not a job");
   assert.equal(parseCommand("uv run fastapi dev app/main.py"), null);

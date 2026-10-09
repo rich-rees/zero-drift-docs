@@ -63,14 +63,31 @@ const TEST_FILE = /\.(test|spec|stories)\.[cm]?[jt]sx?$|(^|\/)(test_[^/]*\.py|[^
 // `pnpm run worker` / `npm run worker` / `yarn worker` -> { kind: "script", target: "worker" }; else null.
 export function parseCommand(command) {
   if (typeof command !== "string") return null;
-  const words = command.trim().split(/\s+/);
+  let words = command.trim().split(/\s+/);
   const pm = /^(npm|pnpm|yarn|bun)$/.exec(words[0] ?? "");
   if (pm) {
+    // `pnpm --filter api run worker` / `pnpm -F api worker` / `yarn workspace api run worker`:
+    // the script lives in that workspace package.
+    let filter = null;
+    const rest = [words[0]];
+    for (let k = 1; k < words.length; k++) {
+      if ((words[k] === "--filter" || words[k] === "-F" || words[k] === "workspace") && words[k + 1]) {
+        filter = words[++k];
+        continue;
+      }
+      const eq = /^--filter=(.+)$/.exec(words[k]);
+      if (eq) {
+        filter = eq[1];
+        continue;
+      }
+      rest.push(words[k]);
+    }
+    words = rest;
     const run = words[1] === "run" || words[1] === "run-script";
     const name = run ? words[2] : pm[1] === "npm" ? null : words[1];
     // `pnpm tsx x.ts` runs a runner, not a script: fall through to the runner shapes.
     const runner = /^(tsx|ts-node|node|bun|deno|npx|python[0-9.]*|uv|poetry|pipenv)$/.test(name ?? "");
-    if (name && !runner && /^[\w:.-]+$/.test(name) && !/^(install|i|add|exec|dlx|x|test|build|dev|start)$/.test(name)) return { kind: "script", target: name };
+    if (name && !runner && /^[\w:.-]+$/.test(name) && !/^(install|i|add|exec|dlx|x|test|build|dev|start)$/.test(name)) return { kind: "script", target: name, ...(filter ? { package: filter } : {}) };
     if (!run && pm[1] !== "npm" && !runner) return null;
   }
   let i = 0;
@@ -309,6 +326,20 @@ export function derive({ repoRoot, options, io }) {
   // `pnpm run worker` in a manifest resolves through the nearest package.json
   // (the manifest's folder, then up to the repo root) to the command it runs.
   const resolveScript = (dir, parsed) => {
+    if (parsed.package) {
+      for (const base of [dir, "."]) {
+        for (const sub of [parsed.package, `apps/${parsed.package}`, `packages/${parsed.package}`, `services/${parsed.package}`, `workers/${parsed.package}`]) {
+          const d = posix.normalize(posix.join(base, sub));
+          if (d.startsWith("../")) continue;
+          const scripts = scriptsIn(d);
+          if (typeof scripts[parsed.target] === "string") {
+            const inner = parseCommand(scripts[parsed.target]);
+            return inner && inner.kind !== "script" ? { dir: d, parsed: inner, command: scripts[parsed.target] } : null;
+          }
+        }
+      }
+      return null;
+    }
     for (let d = dir; ; d = posix.dirname(d)) {
       const scripts = scriptsIn(d);
       if (typeof scripts[parsed.target] === "string") {
@@ -464,6 +495,19 @@ export function derive({ repoRoot, options, io }) {
   const byName = new Map();
   for (const c of merged) {
     if (byName.has(c.name)) {
+      // A queue named like the process that consumes it (a Procfile's
+      // `emails` running the file that holds `new Worker("emails")`) is that
+      // process's queue, not a second job: the queue facts join the record.
+      const existing = c.queue ? records.find((r) => r.id === `job:${c.name}`) : null;
+      if (existing && c.consumers?.includes(existing.resource[0])) {
+        Object.assign(existing.facts, { queue: c.queue, producers: c.producers, consumers: c.consumers, trigger: c.trigger });
+        if (existing.facts.mode === "unknown") existing.facts.mode = "queue";
+        if (c.producers?.length) {
+          existing.facts.edges = { ...(existing.facts.edges ?? {}), usedBy: c.producers.map((f) => `?at:${f}`) };
+          existing.refs = [...new Set([...existing.refs, ...c.producers.map((f) => `?at:${f}`)])].sort();
+        }
+        continue;
+      }
       diagnostics.push(`job '${c.name}' is declared in ${byName.get(c.name)} and again in ${c.manifest} — the second is skipped`);
       continue;
     }

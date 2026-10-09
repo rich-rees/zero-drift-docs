@@ -1,3 +1,2 @@
 web: pnpm --filter api dev
 emails: pnpm --filter api run worker:emails
-archive: python -m app.archive

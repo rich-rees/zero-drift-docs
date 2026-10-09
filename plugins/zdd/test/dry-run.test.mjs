@@ -137,7 +137,7 @@ test("mature codebase: an Express API, a React Router web app, a Python archiver
   assert.ok(d.proposals.some((p) => p.name === "external-services"), "Sentry");
   assert.equal(bootstrapJson(repo, ["estimate"]).scenario, "mature");
   // A pre-2.3 adopter: an old block in CLAUDE.md, the old extractor key, the old pin.
-  bootstrapJson(repo, ["apply", `--answers=${answers("m", { name: "Fleet", extractors: ["react-router", "jobs", "services"], extractorOptions: { "react-router": { routesFile: "web/src/routes.tsx" }, jobs: { modes: { emails: "worker" } }, services: { services: [{ name: "Sentry", imports: ["@sentry/node"], env: ["SENTRY_"] }] } } })}`]);
+  bootstrapJson(repo, ["apply", `--answers=${answers("m", { name: "Fleet", extractors: ["react-router", "jobs", "services"], extractorOptions: { "react-router": { routesFile: "web/src/routes.tsx" }, jobs: { modes: { emails: "worker", archive: "worker" } }, services: { services: [{ name: "Sentry", imports: ["@sentry/node"], env: ["SENTRY_"] }] } } })}`]);
   const cfgPath = join(repo, "zdd", "config.json");
   const cfg = JSON.parse(readFileSync(cfgPath, "utf8"));
   assert.deepEqual(cfg.extractors, ["react-router", "jobs", "external-services"], "a fresh apply writes the current name even when answered with the old one");
@@ -204,8 +204,11 @@ test("hosted off GitHub: no workflow is written, the three commands are printed,
   writeFileSync(join(repo, "zdd", "map", "features", "menu.md"), "---\ntype: Feature\ntitle: Menu\ndescription: The menu.\ntags: [menu]\n---\n\n- [Menu page](../../metadata/surface/menu.json)\n");
   assert.equal(engine(repo, ["render"]).status, 0);
   commit(repo, "b: menu feature");
-  const merge = spawnSync("git", ["merge", "a"], { cwd: repo, encoding: "utf8" });
+  // An identity on the command: CI runners have none configured, and a merge
+  // that fails for lack of one is not a conflict.
+  const merge = spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "merge", "--no-edit", "a"], { cwd: repo, encoding: "utf8" });
   assert.notEqual(merge.status, 0, "the generated index conflicts");
+  assert.match(merge.stdout + merge.stderr, /CONFLICT/, merge.stdout + merge.stderr);
   const conflicted = git(repo, "diff", "--name-only", "--diff-filter=U").split("\n").filter(Boolean);
   assert.ok(conflicted.includes("zdd/agent-index.md"), conflicted.join(","));
   // The instructions' recipe: take either side of a generated file, finish the merge, regenerate.
