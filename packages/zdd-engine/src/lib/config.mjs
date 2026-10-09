@@ -289,10 +289,14 @@ export function resolveExtractors(config) {
     // also sit under the current name. Both at once is a conflict, and the
     // value validated is exactly the value handed over (CR-306).
     const canonical = (name) => (Object.hasOwn(EXTRACTOR_NAME_ALIASES, name) ? EXTRACTOR_NAME_ALIASES[name] : name); // hasOwn: an extractor named `constructor` (CR-022)
+    // The retired name's options key is read for the current name too (a
+    // half-migrated config, verify CR-322), and the current name's for the
+    // retired one: one extractor, one options object, never two.
+    const retiredOf = (now) => Object.entries(EXTRACTOR_NAME_ALIASES).filter(([, v]) => v === now).map(([k]) => k);
     const optionsFor = (name) => {
       const now = canonical(name);
-      const keys = [...new Set([name, now])].filter((k) => Object.hasOwn(options, k));
-      if (keys.length === 2) return { error: `extractorOptions has both '${name}' and '${now}' — they are one extractor; keep '${now}'` };
+      const keys = [...new Set([name, now, ...retiredOf(now)])].filter((k) => Object.hasOwn(options, k));
+      if (keys.length > 1) return { error: `extractorOptions has both '${keys[0]}' and '${keys[1]}' — they are one extractor; keep '${now}'` };
       const key = keys[0];
       const value = key === undefined ? {} : options[key];
       if (!isPlainObject(value)) return { error: `'extractorOptions.${key}' must be an object, got ${JSON.stringify(value)}` };
