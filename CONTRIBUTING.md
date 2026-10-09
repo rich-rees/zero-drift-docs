@@ -101,7 +101,7 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
   `facts.edges` renders exactly as before.
 - **A third channel, `warnings`, is optional** and prints on every derive,
   not only under `--verbose`: for what the branch that caused it should
-  hear (the `services` extractor's "this env name matches no declared
+  hear (the `external-services` extractor's "this env name matches no declared
   service"). Diagnostics stay the quiet channel. Neither ever fails derive.
 - **Missing source is "nothing to inventory."** A configured root that does not
   exist yields no records and a diagnostic, never an error — greenfield repos

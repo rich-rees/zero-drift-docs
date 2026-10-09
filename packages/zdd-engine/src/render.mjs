@@ -52,7 +52,7 @@ const KIND_DISPLAY = {
   module: "Module",
   job: "Job",
   component: "UI Component",
-  service: "External Service",
+  "external-service": "External Service",
 };
 
 // Edge verbs (decision 0016) -> how a body and the agent index say them.

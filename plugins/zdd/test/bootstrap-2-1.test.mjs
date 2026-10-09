@@ -29,7 +29,7 @@ const detect = (repo) => JSON.parse(execFileSync(process.execPath, [BOOTSTRAP, "
 const named = (json, name) => json.proposals.find((p) => p.name === name);
 
 test("the services mirror equals the engine's lists", async () => {
-  const engine = await import(new URL("file:///" + join(ENGINE, "src", "extractors", "services", "index.mjs").split("\\").join("/")));
+  const engine = await import(new URL("file:///" + join(ENGINE, "src", "extractors", "external-services", "index.mjs").split("\\").join("/")));
   assert.deepEqual(SERVICE_SUFFIXES, engine.CANDIDATE_SUFFIXES);
   assert.deepEqual(SERVICE_IGNORE, engine.BUILT_IN_IGNORE);
 });
@@ -60,8 +60,8 @@ test("jobs fixture: jobs from the package scripts, the Procfile and the Railway 
 
 test("services fixture: one service per env prefix with its matching imports, names guessed and said so; the database, the platform and test files are never candidates", (t) => {
   const json = detect(fresh(t, "fixture-services"));
-  assert.deepEqual(json.proposals.map((p) => p.name), ["fastapi", "services"]);
-  const svc = named(json, "services");
+  assert.deepEqual(json.proposals.map((p) => p.name), ["fastapi", "external-services"]);
+  const svc = named(json, "external-services");
   assert.deepEqual(svc.options.services, [
     { name: "Mapbox", env: ["MAPBOX_"] },
     { name: "Resend", env: ["RESEND_"] },

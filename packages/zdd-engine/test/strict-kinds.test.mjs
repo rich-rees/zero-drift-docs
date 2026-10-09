@@ -80,7 +80,7 @@ test("config: strictKinds must be an array of opt-in kinds — an original kind 
     assert.equal(r.status, 1, r.stderr);
     assert.match(r.stderr, re);
   };
-  expect({ strict: true, strictKinds: "job" }, /'claims\.strictKinds' must be an array of kinds \(component, job, service\)/);
+  expect({ strict: true, strictKinds: "job" }, /'claims\.strictKinds' must be an array of kinds \(component, job, external-service\)/);
   expect({ strict: true, strictKinds: ["route"] }, /'claims\.strictKinds' lists 'route', which 'claims\.strict' already governs — remove it/);
   expect({ strict: true, strictKinds: ["jobz"] }, /'claims\.strictKinds' lists 'jobz', which is no opt-in claimable kind/);
   expect({ strict: true, strictKind: ["job"] }, /'claims' has an unknown key 'strictKind'/);

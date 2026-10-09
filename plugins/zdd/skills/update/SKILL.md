@@ -57,7 +57,8 @@ Run this as the definition of done for every unit of work — the spoken form is
    stays missing); **jobs with no stated mode** (commit a Railway file or
    set `extractorOptions.jobs.modes`); and, from `derive`, **an environment
    name no declared service covers** (add the service to
-   `extractorOptions.services.services`, or its prefix to `ignore`). Each
+   `extractorOptions["external-services"].services`, or its prefix to
+   `ignore`). Each
    names the file; fix it in this unit of work where the diff caused it.
    - `claims.strict` off (the default): the lists are warnings, and the rest
      is the backlog a repo carries from adoption.

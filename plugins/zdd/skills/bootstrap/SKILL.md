@@ -57,9 +57,10 @@ installed (used in step 4):
      exists). Four more proposals carry their own evidence (ZDD 2.1):
      `components` (the `.tsx`/`.jsx` roots), `expo-router` (an `app/` folder
      with a `_layout` file), `jobs` (package scripts, a Procfile or a Railway
-     file that run a process) and `services` (environment names read in
-     source — `RESEND_API_KEY` — grouped by prefix into a service each, with
-     any import whose package matches). **Services are guessed by name:**
+     file that run a process) and `external-services` (environment names read
+     in source — `RESEND_API_KEY` — grouped by prefix into one third-party
+     system each, with any import whose package matches). **Services are
+     guessed by name:**
      show each and ask the user to confirm or rename it, and to say which
      prefixes are not a service (they go in `ignore`). Never add a vendor
      the evidence did not show. Say the limit as the evidence does: a
@@ -129,7 +130,7 @@ be read (it never replaces a config it cannot parse — fix or remove it by
 hand). Then it narrates every file as **wrote / kept / skipped** and writes:
 
 - `zdd/config.json` (extractors + options, `engine` pin, `hooks` opt-ins),
-  `zdd/glossary.md` (a header, no terms), `zdd/map/{features,apps,services}/`
+  `zdd/glossary.md` (a header, no terms), `zdd/map/{features,apps,external-services}/`
   (one Application per declared app, and **one example feature slice** —
   `features/example-feature.md`, drawn from the configured stack, showing
   how a slice claims records; the adopter renames it to a real feature or

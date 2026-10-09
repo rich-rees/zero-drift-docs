@@ -8,4 +8,4 @@ tags: [monitoring]
 
 Catches every crash in the API and the web app.
 
-- [Sentry (code)](../../metadata/service/sentry.json)
+- [Sentry (code)](../../metadata/external-service/sentry.json)

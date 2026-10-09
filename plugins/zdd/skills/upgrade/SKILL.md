@@ -147,7 +147,7 @@ their machine — they run them and restart.
 ## Upgrading to 2.1 (the front end, jobs and services)
 
 - Four **opt-in** extractors — `components`, `expo-router`, `jobs`,
-  `services` — are offered by the plan with the detection evidence for this
+  `services` (called `external-services` from 2.3) — are offered by the plan with the detection evidence for this
   repo (step 4). Services are guessed by name: confirm or rename each, and
   ask which prefixes are not a service. Say the limit plainly: a service's
   `usedBy` is the files carrying its marker, never those reaching the

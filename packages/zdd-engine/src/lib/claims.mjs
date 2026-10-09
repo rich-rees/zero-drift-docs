@@ -30,7 +30,7 @@ export const CLAIMABLE_KINDS = ["route", "table", "function", "surface"];
 // turns a green lint red by itself. A component is claimable only when it
 // is shared (two importers or a shared folder); a page-private one folds
 // into its page.
-export const OPT_IN_CLAIMABLE_KINDS = ["component", "job", "service"];
+export const OPT_IN_CLAIMABLE_KINDS = ["component", "job", "external-service"];
 const claimable = (record) => CLAIMABLE_KINDS.includes(record.kind) || (OPT_IN_CLAIMABLE_KINDS.includes(record.kind) && (record.kind !== "component" || record.facts?.shared === true));
 const MAX_DEPTH = 4; // metadataDir/<kind>/<file>.json — anything deeper is not derive's
 const MAX_ENTRIES = 20_000;
