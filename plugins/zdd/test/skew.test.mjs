@@ -38,13 +38,13 @@ const run = (...args) => {
 const config = (c) => writeFileSync(join(repo, "zdd", "config.json"), typeof c === "string" ? c : JSON.stringify(c));
 const workflow = (v) => writeFileSync(join(repo, ".github", "workflows", "zdd.yml"), `env:\n  ZDD_ENGINE: "@rich-rees/zdd-engine@${v}"\n`);
 
-test("engine pinned one minor behind: first line warns and names bootstrap --upgrade", () => {
+test("engine pinned one minor behind: first line warns and names \"upgrade ZDD\"", () => {
   config({ extractors: ["generic"], engine: prev(VERSION) });
   workflow(prev(VERSION));
   const first = run().split("\n")[0];
   assert.match(first, /^ZDD engine skew/);
   assert.match(first, /behind plugin/);
-  assert.match(first, /bootstrap --upgrade/);
+  assert.match(first, /"upgrade ZDD"/);
   assert.match(first, /zdd\/config\.json/);
   assert.match(first, /\.github\/workflows\/zdd\.yml/);
 });
@@ -66,7 +66,7 @@ test("a prerelease of the same number is skew (exact alignment)", () => {
   workflow(VERSION);
   const out = run();
   assert.match(out, /^ZDD engine skew/);
-  assert.match(out, /bootstrap --upgrade/);
+  assert.match(out, /"upgrade ZDD"/);
 });
 
 test("a malformed pin is reported in one fixed line, never echoed", () => {
@@ -104,7 +104,7 @@ test("an unversioned engine invocation is reported as unpinned (floating), with 
   assert.match(out, /^ZDD engine skew/);
   assert.match(out, /\.github\/workflows\/zdd\.yml/);
   assert.match(out, /unpinned \(floating\)/);
-  assert.match(out, /bootstrap --upgrade/);
+  assert.match(out, /"upgrade ZDD"/);
   const j = JSON.parse(run("--json"));
   assert.equal(j.skew, true);
   assert.deepEqual(j.unpinned.map((p) => p.where), [".github/workflows/zdd.yml"]);

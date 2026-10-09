@@ -29,7 +29,7 @@ const detect = (repo) => JSON.parse(execFileSync(process.execPath, [BOOTSTRAP, "
 const named = (json, name) => json.proposals.find((p) => p.name === name);
 
 test("the services mirror equals the engine's lists", async () => {
-  const engine = await import(new URL("file:///" + join(ENGINE, "src", "extractors", "services", "index.mjs").split("\\").join("/")));
+  const engine = await import(new URL("file:///" + join(ENGINE, "src", "extractors", "external-services", "index.mjs").split("\\").join("/")));
   assert.deepEqual(SERVICE_SUFFIXES, engine.CANDIDATE_SUFFIXES);
   assert.deepEqual(SERVICE_IGNORE, engine.BUILT_IN_IGNORE);
 });
@@ -46,22 +46,29 @@ test("components fixture: components at the two .tsx roots and the mobile app, e
   assert.deepEqual(json.apps.map((a) => [a.name, a.extractor]), [["Mobile (Expo)", "expo-router (proposed above)"], ["Web (React)", "react-router (proposed above)"]]);
 });
 
-test("jobs fixture: jobs from the package scripts, the Procfile and the Railway file, with the mode caveat; supabase beside it", (t) => {
+test("jobs fixture: jobs from the Procfile and the Railway file (a package script only where one of them runs it), with the mode caveat; supabase beside it", (t) => {
   const json = detect(fresh(t, "fixture-jobs"));
   assert.deepEqual(json.proposals.map((p) => p.name), ["supabase", "jobs"]);
   const jobs = named(json, "jobs");
   assert.deepEqual(jobs.options, {});
   // `missing` is job-shaped too; the engine skips it with a diagnostic when its module resolves to nothing.
-  assert.ok(jobs.evidence.some((e) => e === "`apps/api/package.json` runs a process: `housekeeping`, `missing`, `replay`, `worker`"), jobs.evidence.join("|"));
+  // 2.3: a package.json script on its own is a hand-run tool, never evidence; the manifests that run or schedule a process are.
+  assert.ok(!jobs.evidence.some((e) => /apps\/api\/package\.json/.test(e)), jobs.evidence.join("|"));
   assert.ok(jobs.evidence.some((e) => e === "`Procfile` runs a process: `nightly`"), jobs.evidence.join("|"));
+  assert.ok(jobs.evidence.some((e) => e === "`apps/api/Procfile` runs a process: `worker`"), jobs.evidence.join("|"));
+  assert.ok(jobs.evidence.some((e) => e === "`apps/web/vercel.json` schedules a cron for: `/api/cron/sweep-stalled`"), jobs.evidence.join("|"));
+  assert.ok(jobs.evidence.some((e) => e === "`workers/edge/wrangler.toml` schedules: `triggers.crons`"), jobs.evidence.join("|"));
+  assert.ok(jobs.evidence.some((e) => e === "`docker-compose.yml` runs a service: `transcoder`"), jobs.evidence.join("|"));
+  assert.ok(jobs.evidence.some((e) => e === "`supabase/migrations/0002_cron.sql` schedules (pg_cron): `nightly-digest`"), jobs.evidence.join("|"));
+  assert.ok(jobs.evidence.some((e) => e === "`scripts/transcode.mjs` names a queue: `video-transcode`"), jobs.evidence.join("|"));
   assert.ok(jobs.evidence.some((e) => /`apps\/api\/services\/housekeeping\/railway\.toml` runs a process: `startCommand`/.test(e)));
   assert.ok(jobs.evidence.some((e) => /never guessed/.test(e)));
 });
 
 test("services fixture: one service per env prefix with its matching imports, names guessed and said so; the database, the platform and test files are never candidates", (t) => {
   const json = detect(fresh(t, "fixture-services"));
-  assert.deepEqual(json.proposals.map((p) => p.name), ["fastapi", "services"]);
-  const svc = named(json, "services");
+  assert.deepEqual(json.proposals.map((p) => p.name), ["fastapi", "external-services"]);
+  const svc = named(json, "external-services");
   assert.deepEqual(svc.options.services, [
     { name: "Mapbox", env: ["MAPBOX_"] },
     { name: "Resend", env: ["RESEND_"] },

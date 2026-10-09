@@ -390,13 +390,129 @@ export function pocockLocations(root, home) {
   };
 }
 
+// A hit in the plugin cache is one installed COPY of the plugin —
+// `cache/<marketplace>/<plugin>/<version>/…` — and a copy that this repo's
+// settings switch off is not what grill will run (CAS-103 finding 9: the
+// switched-off official copy was reported "installed"). Every cache copy is
+// named with its id, version and whether it is switched on here; a plain
+// skill copy (a user, Codex or project skill) has no id and is simply there.
+// `installed` means a copy grill can use is present; `pinned` that it is
+// ZDD's own pinned copy.
 export function findPocock(root, home) {
   const loc = pocockLocations(root, home);
+  const pin = pocockPin();
+  const ours = `${pin.plugin}@${pin.marketplace}`;
+  const { enabled, unreadable } = effectiveEnabled(root, home);
   const hits = [];
-  for (const key of ["userSkill", "codexSkill", "projectSkill"]) if (existsSync(loc[key])) hits.push({ where: key, path: loc[key] });
-  const found = findUnder(loc.pluginCache, ["domain-modeling", "SKILL.md"], 8);
-  if (found) hits.push({ where: "pluginCache", path: found });
-  return { installed: hits.length > 0, hits, searched: Object.values(loc) };
+  const plainFile = (p) => {
+    try {
+      return lstatSync(p).isFile();
+    } catch {
+      return false;
+    }
+  };
+  for (const key of ["userSkill", "codexSkill", "projectSkill"]) if (plainFile(loc[key])) hits.push({ where: key, path: loc[key], id: null, version: null, enabled: null });
+  // The pinned copy's own place first (CR-318): cache/<marketplace>/<plugin>/
+  // <version>/…, so a bounded walk of a large cache can never miss it.
+  const found = new Set();
+  const pinnedDir = join(loc.pluginCache, pin.marketplace, pin.plugin);
+  let versions = [];
+  try {
+    versions = readdirSync(pinnedDir).sort();
+  } catch {
+    versions = [];
+  }
+  // Each cached version on its own, so no number of versions hides one (verify CR-318).
+  for (const v of versions) for (const p of findAllUnder(join(pinnedDir, v), ["domain-modeling", "SKILL.md"], 4)) found.add(p);
+  for (const p of findAllUnder(loc.pluginCache, ["domain-modeling", "SKILL.md"], 8)) found.add(p);
+  for (const path of [...found].sort()) {
+    // A cache entry is a plugin only in the cache's own layout, reached
+    // through real directories, ending at a regular file (CR-315).
+    if (!plainFile(path) || !realDirs(loc.pluginCache, path)) continue;
+    const [marketplace, plugin, version] = relative(loc.pluginCache, path).split(sep);
+    const id = marketplace && plugin && SAFE_ID.test(`${plugin}@${marketplace}`) ? `${plugin}@${marketplace}` : null;
+    if (!id) continue;
+    // Unknown whenever a settings file could not be read (CR-413): a file
+    // that takes precedence may say anything, so no lower one decides.
+    const on = unreadable ? null : (enabled.get(id) ?? true);
+    hits.push({ where: "pluginCache", path, id, version: typeof version === "string" ? version : null, enabled: on });
+  }
+  const usable = hits.filter((h) => h.enabled !== false && !(h.where === "pluginCache" && h.enabled === null));
+  return { installed: usable.length > 0, pinned: usable.some((h) => h.id === ours), hits, unreadableSettings: unreadable, searched: Object.values(loc) };
+}
+// Every directory from `root` down to `path` (exclusive) is a real directory,
+// no symlink on the way.
+function realDirs(root, path) {
+  let cur = root;
+  for (const seg of relative(root, dirname(path)).split(sep)) {
+    if (!seg) continue;
+    cur = join(cur, seg);
+    try {
+      if (lstatSync(cur).isSymbolicLink()) return false;
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+// enabledPlugins, merged across the three settings files Claude Code reads
+// (lowest precedence first). A plugin no file names is on — unless a file
+// could not be read at all, which `unreadable` names (CR-315).
+function effectiveEnabled(root, home) {
+  const out = new Map();
+  let unreadable = null;
+  for (const s of settingsSources(root, home)) {
+    let st = null;
+    try {
+      st = lstatSync(s.path);
+    } catch {
+      continue;
+    }
+    if (!st.isFile()) continue;
+    const j = readJsonObject(s.path);
+    if (!j) {
+      unreadable = s.label;
+      continue;
+    }
+    if (!isObject(j.enabledPlugins)) continue;
+    for (const [id, v] of Object.entries(j.enabledPlugins)) if (typeof v === "boolean" && SAFE_ID.test(id)) out.set(id, v);
+  }
+  return { enabled: out, unreadable };
+}
+// Every `<dir>/…/<tail>` under dir, sorted, bounded by depth and by the
+// number of directories visited (a plugin cache holds every version of every
+// plugin; a session start must not stall in it).
+const MAX_CACHE_DIRS = 2000;
+function findAllUnder(dir, tail, depth) {
+  const out = [];
+  let visited = 0;
+  const rec = (d, left) => {
+    if (left < 0 || ++visited > MAX_CACHE_DIRS) return;
+    const direct = join(d, ...tail);
+    if (existsSync(direct)) {
+      out.push(direct);
+      return;
+    }
+    let entries;
+    try {
+      entries = readdirSync(d).sort();
+    } catch {
+      return;
+    }
+    for (const name of entries) {
+      if (name === "node_modules") continue;
+      const p = join(d, name);
+      let isDir = false;
+      try {
+        isDir = lstatSync(p).isDirectory(); // lstat: a symlinked directory is never entered (CR-315)
+      } catch {
+        continue;
+      }
+      if (isDir) rec(p, left - 1);
+    }
+  };
+  if (existsSync(dir)) rec(dir, depth);
+  return out;
 }
 
 function findUnder(dir, tail, depth) {

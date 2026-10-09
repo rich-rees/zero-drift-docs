@@ -15,7 +15,7 @@ import { existsSync, openSync, readSync, closeSync } from "node:fs";
 
 const MAX_CONFIG_BYTES = 1024 * 1024; // the plugin's cap too (plugins/zdd/scripts/lib/repo.mjs)
 import { dirname, join, resolve, relative } from "node:path";
-import { repoRelative, overlaps } from "./paths.mjs";
+import { repoRelative, overlaps, agentIndexAreaDir } from "./paths.mjs";
 
 export const DEFAULT_PATHS = {
   glossary: "zdd/glossary.md",
@@ -123,6 +123,14 @@ export function validatePathLayout(paths, configRel) {
       if (overlaps(paths[OUTPUT_KEYS[i]], value(key))) return clash(OUTPUT_KEYS[i], key, outputWhy);
     }
   }
+  // The agent index's area folder is pruned like metadataDir (agentIndex.levels
+  // 2), so it is a dedicated folder too: never a store, the config, or another
+  // output (CR-501). It follows the index's name, so the error names the index.
+  const areaDir = agentIndexAreaDir(paths.agentIndex);
+  const areaWhy = `the agent index's area folder '${areaDir}/' (its name, as a folder — agentIndex.levels 2 writes there and prunes it) must be a dedicated folder`;
+  for (const key of [...INPUT_KEYS, ...OUTPUT_KEYS.filter((k) => k !== "agentIndex"), "config"]) {
+    if (overlaps(areaDir, value(key))) return `paths.agentIndex '${paths.agentIndex}' overlaps ${label(key)} '${value(key)}' — ${areaWhy}`;
+  }
   return null;
 }
 
@@ -229,6 +237,10 @@ export function loadConfig(args, cwd = process.cwd()) {
 // does (plugins/zdd/scripts/bootstrap.mjs mirrors LEGACY_ADAPTERS for that),
 // and the deprecation note says how to do it by hand.
 // ---------------------------------------------------------------------------
+// Mirror of derive's EXTRACTOR_ALIASES (config is resolved before the
+// registry is consulted): old extractor name -> current name.
+export const EXTRACTOR_NAME_ALIASES = { services: "external-services" };
+
 export const LEGACY_ADAPTERS = {
   "nextjs-supabase": {
     extractors: ["supabase", "nextjs"],
@@ -266,6 +278,14 @@ export function resolveExtractors(config) {
     if (list.some((n) => typeof n !== "string")) return { error: `'extractors' entries must be strings (names)` };
     const dup = list.find((n, i) => list.indexOf(n) !== i);
     if (dup) return { error: `extractor '${dup}' is listed twice` };
+    // A retired name (2.3: `services` → `external-services`, CAS-103 pick 3)
+    // still works for one release and is said once per derive; both names
+    // at once is the same extractor twice.
+    for (const [old, now] of Object.entries(EXTRACTOR_NAME_ALIASES)) {
+      if (!list.includes(old)) continue;
+      if (list.includes(now)) return { error: `extractors lists both '${old}' and '${now}' — they are one extractor; keep '${now}'` };
+      diagnostics.push(`[config] extractor '${old}' is now '${now}' (ZDD 2.3) — "upgrade ZDD" renames it in zdd/config.json (extractors and extractorOptions); the old name works for this release only`);
+    }
     // `extractorOptions: null` / `[]` / a string, or a per-extractor entry
     // that is not an object, reached the extractor's destructuring as-is
     // (CR-107). Refuse with the key named.
@@ -273,16 +293,31 @@ export function resolveExtractors(config) {
     if (!isPlainObject(options)) return { error: `'extractorOptions' must be an object keyed by extractor name, got ${JSON.stringify(options)}` };
     // hasOwn: an extractor named `constructor` must read its own options,
     // not Object.prototype's (CR-022).
-    const own = (name) => (Object.hasOwn(options, name) ? options[name] : undefined);
-    for (const name of list) {
-      if (own(name) !== undefined && !isPlainObject(own(name))) {
-        return { error: `'extractorOptions.${name}' must be an object, got ${JSON.stringify(own(name))}` };
-      }
-    }
-    return {
-      extractors: list.map((name) => ({ name, options: own(name) ?? {} })),
-      diagnostics,
+    // The options key is the name as listed; a retired name's options may
+    // also sit under the current name. Both at once is a conflict, and the
+    // value validated is exactly the value handed over (CR-306).
+    const canonical = (name) => (Object.hasOwn(EXTRACTOR_NAME_ALIASES, name) ? EXTRACTOR_NAME_ALIASES[name] : name); // hasOwn: an extractor named `constructor` (CR-022)
+    // The retired name's options key is read for the current name too (a
+    // half-migrated config, verify CR-322), and the current name's for the
+    // retired one: one extractor, one options object, never two.
+    const retiredOf = (now) => Object.entries(EXTRACTOR_NAME_ALIASES).filter(([, v]) => v === now).map(([k]) => k);
+    const optionsFor = (name) => {
+      const now = canonical(name);
+      const keys = [...new Set([name, now, ...retiredOf(now)])].filter((k) => Object.hasOwn(options, k));
+      if (keys.length > 1) return { error: `extractorOptions has both '${keys[0]}' and '${keys[1]}' — they are one extractor; keep '${now}'` };
+      const key = keys[0];
+      const value = key === undefined ? {} : options[key];
+      if (!isPlainObject(value)) return { error: `'extractorOptions.${key}' must be an object, got ${JSON.stringify(value)}` };
+      return { value };
     };
+    const extractors = [];
+    for (const name of list) {
+      const picked = optionsFor(name);
+      if (picked.error) return { error: picked.error };
+      const now = canonical(name);
+      extractors.push(now === name ? { name, options: picked.value } : { name: now, options: picked.value, legacyName: name });
+    }
+    return { extractors, diagnostics };
   }
   if (config.adapter !== undefined) {
     const legacy = LEGACY_ADAPTERS[config.adapter];

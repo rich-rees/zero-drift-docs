@@ -17,7 +17,7 @@ const PLUGIN = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const ENGINE_BIN = resolve(PLUGIN, "..", "..", "packages", "zdd-engine", "bin", "zdd-engine.mjs");
 const SCHEMA = JSON.parse(readFileSync(join(PLUGIN, "templates", "config.schema.json"), "utf8"));
 
-const KNOWN = new Set(["$schema", "$id", "$comment", "title", "description", "default", "examples", "deprecated", "type", "properties", "additionalProperties", "required", "items", "minItems", "uniqueItems", "pattern", "enum", "anyOf", "oneOf", "not"]);
+const KNOWN = new Set(["$schema", "$id", "$comment", "title", "description", "default", "examples", "deprecated", "type", "properties", "additionalProperties", "required", "items", "minItems", "uniqueItems", "pattern", "enum", "anyOf", "oneOf", "allOf", "not", "contains", "const", "minimum"]);
 const typeOf = (v) => (v === null ? "null" : Array.isArray(v) ? "array" : typeof v);
 
 // Returns the list of violations (empty = valid).
@@ -31,6 +31,7 @@ function validate(schema, value, path = "$") {
     const t = typeOf(value);
     if (!types.includes(t) && !(t === "number" && types.includes("integer") && Number.isInteger(value))) errs.push(`${path}: expected ${types.join("|")}, got ${t}`);
   }
+  if (schema.minimum !== undefined && typeof value === "number" && value < schema.minimum) errs.push(`${path}: below ${schema.minimum}`);
   if (schema.enum && !schema.enum.some((e) => JSON.stringify(e) === JSON.stringify(value))) errs.push(`${path}: not one of ${JSON.stringify(schema.enum)}`);
   if (schema.pattern && typeof value === "string" && !new RegExp(schema.pattern).test(value)) errs.push(`${path}: does not match ${schema.pattern}`);
   if (typeOf(value) === "object") {
@@ -51,6 +52,9 @@ function validate(schema, value, path = "$") {
     const n = schema.oneOf.filter((s) => validate(s, value, path).length === 0).length;
     if (n !== 1) errs.push(`${path}: matches ${n} of oneOf (need exactly 1)`);
   }
+  if (schema.allOf) for (const s of schema.allOf) errs.push(...validate(s, value, path));
+  if (schema.const !== undefined && JSON.stringify(schema.const) !== JSON.stringify(value)) errs.push(`${path}: not ${JSON.stringify(schema.const)}`);
+  if (schema.contains && Array.isArray(value) && !value.some((v) => validate(schema.contains, v, path).length === 0)) errs.push(`${path}: contains no matching item`);
   if (schema.not && validate(schema.not, value, path).length === 0) errs.push(`${path}: matches the forbidden shape`);
   return errs;
 }
@@ -116,4 +120,21 @@ test("the schema's documented refs defaults are the engine's defaults (CR-116)",
   assert.deepEqual(doc.extensions.default, refs.DEFAULT_REFS.extensions);
   assert.deepEqual(doc.excludeSuffixes.default, refs.DEFAULT_REFS.excludeSuffixes);
   assert.deepEqual(doc.excludeDirs?.default ?? refs.DEFAULT_REFS.excludeDirs, refs.DEFAULT_REFS.excludeDirs);
+});
+
+test("CR-516/CR-517: the schema refuses what the engine refuses — an external service with no nonblank marker or a name with no letter or digit, an agent-index budget under 200 — and accepts what it accepts", () => {
+  const svc = (s) => ({ extractors: ["external-services"], extractorOptions: { "external-services": { services: [s] } } });
+  for (const bad of [{ name: "Sentry", imports: [] }, { name: "Sentry", env: ["   "] }, { name: " ", env: ["SENTRY_"] }, { name: "!!!", env: ["X_"] }, { name: "Sentry" }]) {
+    assert.notDeepEqual(validate(SCHEMA, svc(bad)), [], `schema should refuse ${JSON.stringify(bad)}`);
+    assert.notEqual(engineRejects(svc(bad)), null, `engine should refuse ${JSON.stringify(bad)}`);
+  }
+  for (const ok of [{ name: "Sentry", env: ["SENTRY_"] }, { name: "Resend", imports: ["resend"], env: [] }, { name: "S3", imports: [" ", "@aws-sdk/client-s3"] }]) {
+    assert.deepEqual(validate(SCHEMA, svc(ok)), [], JSON.stringify(ok));
+    assert.equal(engineRejects(svc(ok)), null, JSON.stringify(ok));
+  }
+  const budget = (n) => ({ extractors: ["generic"], agentIndex: { budgetTokens: n } });
+  assert.notDeepEqual(validate(SCHEMA, budget(199)), []);
+  assert.match(engineRejects(budget(199), "render") ?? "", /at least 200/);
+  assert.deepEqual(validate(SCHEMA, budget(200)), []);
+  assert.doesNotMatch(engineRejects(budget(200), "render") ?? "", /budgetTokens/);
 });

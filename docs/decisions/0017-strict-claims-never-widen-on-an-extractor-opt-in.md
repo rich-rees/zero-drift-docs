@@ -1,6 +1,6 @@
 # 0017 — Strict claims never widen on an extractor opt-in: new kinds are strict only when `claims.strictKinds` names them
 
-**Date:** 2026-10-08 · **Status:** accepted · **Origin:** CAS-97 (ZDD 2.1), from the grill on 2026-10-08. **Extends** [0012](0012-strict-claims-are-opt-in.md): strict stays opt-in, and now the set of kinds it covers is too.
+**Date:** 2026-10-08 · **Status:** accepted · **Origin:** CAS-97 (ZDD 2.1), from the grill on 2026-10-08. **Extends** [0012](0012-strict-claims-are-opt-in.md): strict stays opt-in, and now the set of kinds it covers is too. **Superseded, in part, by [0023](0023-external-services-not-services-a-rename-that-moves-nothing-until-the-key-moves.md)** (2026-10-09): the third opt-in kind is `external-service` (spelt `service` here and until 2.3; the old name is read for one release). Everything else stands.
 
 ## Context
 

@@ -48,7 +48,7 @@ test("the services proposal says what usedBy sees: files carrying the marker, ne
   const repo = scratch(t);
   cpSync(join(FIXTURES, "fixture-services"), repo, { recursive: true });
   rmSync(join(repo, "zdd"), { recursive: true });
-  const services = JSON.parse(detect(repo)).proposals.find((p) => p.name === "services");
+  const services = JSON.parse(detect(repo)).proposals.find((p) => p.name === "external-services");
   assert.ok(services);
   assert.ok(services.evidence.some((e) => /usedBy lists the files carrying a service's marker.*never .*settings object/.test(e)), services.evidence.join("\n"));
 });

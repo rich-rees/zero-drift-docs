@@ -27,7 +27,7 @@ export function narrate(r) {
     lines.push(
       `ZDD: another copy of ${r.pinned.name} is switched on in this repo — ${named} — beside the copy ZDD pins, ${r.pinned.id} ${r.pinned.version}. ` +
         `Only one copy's skills load, and it may be the other one. Fix: in this repo's .claude/settings.json set ${fix} under enabledPlugins ` +
-        `(bootstrap --upgrade writes it). Never uninstall it: it still works in your other repos.`,
+        `("upgrade ZDD" writes it). Never uninstall it: it still works in your other repos.`,
     );
   }
   if (!r.pinned.enabled) {

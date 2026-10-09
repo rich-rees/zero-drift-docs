@@ -38,12 +38,12 @@ Run this as the definition of done for every unit of work — the spoken form is
    pattern or a copied precedent worth a blessing.
 3. **Run the deriver.** Regenerates the codebase metadata from source:
    ```
-   npx -y @rich-rees/zdd-engine@2.2.1 derive
+   npx -y @rich-rees/zdd-engine@2.3.0 derive
    ```
 4. **Run the renderer.** Rebuilds the graph artifact (`zdd/graph.json`), the
    agent index, the ADR index, the blessing index, and the human index:
    ```
-   npx -y @rich-rees/zdd-engine@2.2.1 render
+   npx -y @rich-rees/zdd-engine@2.3.0 render
    ```
 5. **Lint the stores.** Supersession symmetry, blessing citations and every
    blessing's trigger question (blocking); a blessing with no reason or over
@@ -57,7 +57,8 @@ Run this as the definition of done for every unit of work — the spoken form is
    stays missing); **jobs with no stated mode** (commit a Railway file or
    set `extractorOptions.jobs.modes`); and, from `derive`, **an environment
    name no declared service covers** (add the service to
-   `extractorOptions.services.services`, or its prefix to `ignore`). Each
+   `extractorOptions["external-services"].services`, or its prefix to
+   `ignore`). Each
    names the file; fix it in this unit of work where the diff caused it.
    - `claims.strict` off (the default): the lists are warnings, and the rest
      is the backlog a repo carries from adoption.
@@ -65,11 +66,12 @@ Run this as the definition of done for every unit of work — the spoken form is
      along with a stale `allowUnclaimed` entry and any claim file lint could
      not read. The unit of work is not finished until lint is green: link the
      record from one slice, move a double claim to one owner, or allow-list
-     genuine plumbing. A component, job or service is a failure only when
-     `claims.strictKinds` names its kind; otherwise it is a warning, so that
+     genuine plumbing. A component, job or external service (kind
+     `external-service`) is a failure only when `claims.strictKinds` names
+     its kind; otherwise it is a warning, so that
      switching an extractor on never turns a green lint red by itself.
    ```
-   npx -y @rich-rees/zdd-engine@2.2.1 lint
+   npx -y @rich-rees/zdd-engine@2.3.0 lint
    ```
 6. **Commit all of it in the PR.** Code and docs merge atomically; the doc delta
    is reviewed alongside the code delta. **This commit carries the plan file's
@@ -90,9 +92,13 @@ kill a pattern, change it, or create one the plan never saw.
    - **new pattern, candidate blessing** — did it survive, and is its
      exemplar in the diff? Then **mint it**: one list item under
      `# Blessings` in the slice it belongs to (an app's concept when it is
-     cross-cutting), in the shape [authoring.md](../authoring.md) gives —
-     trigger question first, exemplar linked, refusal named, reason given (an
-     ADR, or "because …"). Otherwise **drop it**, and record why.
+     cross-cutting), in the shape [authoring.md](../authoring.md) gives and
+     passing its test — trigger question first, naming a *kind* of work;
+     **a pointer to existing, reusable code** (a shared helper or base
+     layer before a pattern to imitate); the one trap it refuses; the
+     reason (an ADR, or "because …"). A candidate whose substance is a
+     rule with no code to point at becomes an ADR and a code comment at the
+     site instead. Otherwise **drop it**, and record why.
    - **no blessing applies** — nothing to do, unless the build ended up
      copying something; then treat that as precedent.
 2. **Offer unblessed precedent.** Every precedent the plan declared, and any

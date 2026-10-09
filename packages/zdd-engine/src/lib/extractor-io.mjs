@@ -1,7 +1,7 @@
 // The `io` an extractor is handed: derive({ repoRoot, options, io }) (CAS-65,
 // decision 0010). A local extractor lives in the adopter's repo and runs under
 // `npx`, so it cannot import the engine's helpers; the engine passes them in.
-// Two operations, both repo-relative and both refusing to leave the repo
+// Three operations, all repo-relative, the reads refusing to leave the repo
 // physically — the rules the built-ins learned the hard way (CAS-63 CR-001,
 // CR-013, CR-026):
 //
@@ -13,11 +13,22 @@
 //          "too-large"    over the per-file cap (1 MiB; maxBytes may lower it)
 //          "over-budget"  this io has already read its total (64 MiB)
 //          "unreadable"   present, but the read failed (permissions, I/O)
-//        Only "missing" means absence; every other refusal is worth a
-//        diagnostic, and an extractor must never treat one as greenfield.
+//          "ignored"      git ignores the path (or it is .claude/worktrees):
+//                         not source, so not read — the same thing a clean
+//                         clone would say (CAS-103 pick 1, CR-307)
+//        Only "missing" and "ignored" mean absence (CI has neither); every
+//        other refusal is worth a diagnostic, and an extractor must never
+//        treat one as greenfield.
+//
+//   io.isIgnored(rel)
+//     -> true when git ignores the path, or it is `.claude/worktrees` (never
+//        source; lib/ignored.mjs) — for an extractor that walks on its own.
 //
 //   io.walk(relDir, onFile, { enter })
 //     -> { exists, truncated, skipped }
+//        Never hands out a path git ignores: build output, dependencies,
+//        secrets and another checkout of the same repo are not source, and
+//        CI has none of them (CAS-103 pick 1).
 //        Calls onFile(rel, name) for every regular file under relDir, with rel
 //        a repo-relative POSIX path, in ONE global order: the full paths
 //        sorted by code unit (so `001.sql` comes before `001/x.sql`, as a
@@ -43,6 +54,7 @@
 import { lstatSync, opendirSync, readSync, openSync, fstatSync, closeSync, realpathSync, constants } from "node:fs";
 import { join } from "node:path";
 import { regularFileInside } from "./walk-markdown.mjs";
+import { gitIgnoredPredicate } from "./ignored.mjs";
 
 export const IO_MAX_READ_BYTES = 1024 * 1024;
 export const IO_MAX_TOTAL_BYTES = 64 * 1024 * 1024;
@@ -83,9 +95,12 @@ function directoryInside(root, rel) {
   return { ok: true, abs: cur };
 }
 
-// The third argument (lower limits) exists for the tests; derive never
-// passes it.
-export function makeExtractorIo(repoRoot, label = "extractor", { maxEntries = IO_MAX_ENTRIES, maxDepth = IO_MAX_DEPTH, maxTotalBytes = IO_MAX_TOTAL_BYTES } = {}) {
+// The third argument: lower limits exist for the tests (derive never passes
+// them); `ignored` is the shared git-ignore predicate derive computes once
+// per run (lib/ignored.mjs) so N extractors do not ask git N times. Absent,
+// the io asks git itself on first use — a local extractor's unit test and
+// the CLI then veto the same paths.
+export function makeExtractorIo(repoRoot, label = "extractor", { maxEntries = IO_MAX_ENTRIES, maxDepth = IO_MAX_DEPTH, maxTotalBytes = IO_MAX_TOTAL_BYTES, ignored } = {}) {
   let realRoot = null;
   try {
     // .native: the Windows runner's RUNNER~1 short name must not survive
@@ -95,12 +110,20 @@ export function makeExtractorIo(repoRoot, label = "extractor", { maxEntries = IO
     /* unreadable root: every read is missing, every walk is empty */
   }
   const state = { entries: 0, bytes: 0 };
+  let ignoredPredicate = ignored;
+  // Repo-relative POSIX path (a file or a directory) that git ignores, or
+  // the worktree folder: never source, never walked, never read as source.
+  const isIgnored = (rel) => {
+    if (!ignoredPredicate) ignoredPredicate = gitIgnoredPredicate(realRoot ?? repoRoot);
+    return ignoredPredicate(rel);
+  };
 
   function read(rel, { maxBytes } = {}) {
     const clean = ioRelative(rel, `${label}: io.read path`);
     const cap = Math.min(Number.isFinite(maxBytes) && maxBytes >= 0 ? maxBytes : IO_MAX_READ_BYTES, IO_MAX_READ_BYTES);
     const refuse = (code, reason) => ({ ok: false, code, reason: `${clean} ${reason}` });
     if (!realRoot) return refuse("missing", "is missing");
+    if (isIgnored(clean)) return refuse("ignored", "is gitignored — not source, not read");
     const abs = join(realRoot, clean);
     let st;
     try {
@@ -200,6 +223,7 @@ export function makeExtractorIo(repoRoot, label = "extractor", { maxEntries = IO
           continue;
         }
         if (st.isSymbolicLink()) result.skipped.push({ path: childRel, reason: "symlink — not followed" });
+        else if (isIgnored(childRel)) continue; // gitignored: never source (CAS-103 pick 1)
         else if (st.isDirectory()) {
           if (enter(childRel, name)) visit(childAbs, childRel, depth + 1);
         } else if (st.isFile()) files.push([childRel, name]);
@@ -214,5 +238,5 @@ export function makeExtractorIo(repoRoot, label = "extractor", { maxEntries = IO
     return result;
   }
 
-  return Object.freeze({ read, walk });
+  return Object.freeze({ read, walk, isIgnored });
 }

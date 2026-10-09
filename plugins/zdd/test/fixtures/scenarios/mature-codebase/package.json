@@ -1,0 +1,6 @@
+{
+  "name": "fleet",
+  "private": true,
+  "workspaces": ["api", "web"],
+  "scripts": { "test": "vitest", "lint": "eslint ." }
+}

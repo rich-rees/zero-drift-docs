@@ -24,8 +24,10 @@ export const FACTS_KEY_ORDER = {
   bucket: ["namespace", "origin", "public", "fileSizeLimit", "allowedMimeTypes"],
 };
 
-export function derive({ repoRoot, options }) {
+export function derive({ repoRoot, options, io }) {
   const diagnostics = [];
+  // A gitignored migration file (or folder) is not source (CAS-103 pick 1).
+  const isIgnored = io?.isIgnored ?? (() => false);
   const { migrationNamespaces = [], externalBuckets = [] } = options;
   if (!Array.isArray(migrationNamespaces)) throw new Error(`supabase: 'migrationNamespaces' must be an array of { name, dir }`);
   if (!Array.isArray(externalBuckets)) throw new Error(`supabase: 'externalBuckets' must be an array of { name, namespace }`);
@@ -49,6 +51,10 @@ export function derive({ repoRoot, options }) {
       diagnostics.push(`${ns}: ${dir} not found — nothing to inventory`);
       continue;
     }
+    if (isIgnored(dir)) {
+      diagnostics.push(`${ns}: ${dir} is gitignored — not source, nothing to inventory`);
+      continue;
+    }
     // A .sql symlink pointing nowhere is skipped with a note, never thrown
     // (CR-062); a valid one is read like any migration.
     const isFile = (f) => {
@@ -59,7 +65,7 @@ export function derive({ repoRoot, options }) {
         return false;
       }
     };
-    const files = sortMigrations(readdirSync(abs).filter((f) => f.endsWith(".sql") && isFile(f))).map((f) => ({
+    const files = sortMigrations(readdirSync(abs).filter((f) => f.endsWith(".sql") && isFile(f) && !isIgnored(`${dir}/${f}`))).map((f) => ({
       name: `${dir}/${f}`,
       text: readFileSync(join(abs, f), "utf8"),
     }));

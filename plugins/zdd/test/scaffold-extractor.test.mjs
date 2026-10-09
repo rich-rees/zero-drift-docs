@@ -118,7 +118,7 @@ test("fail loudly: without io the scaffolded module throws, naming the engine ve
   const repo = adopted(t);
   scaffoldJson(repo, CSHARP);
   const mod = await import(pathToFileURL(join(repo, "zdd", "extractors", "aspnet-routes", "index.mjs")).href);
-  assert.throws(() => mod.derive({ repoRoot: repo, options: {} }), new RegExp(`aspnet-routes needs @rich-rees/zdd-engine ${IO_SINCE.replace(/\./g, "\\.")} or later \\(io was not passed\\) — run \`zdd:bootstrap --upgrade\``));
+  assert.throws(() => mod.derive({ repoRoot: repo, options: {} }), new RegExp(`aspnet-routes needs @rich-rees/zdd-engine ${IO_SINCE.replace(/\./g, "\\.")} or later \\(io was not passed\\) — say "upgrade ZDD"`));
 });
 
 test("the scaffolded test is red until EXPECTED_IDS and a fixture exist, and green once fromSource() is written", (t) => {
@@ -229,7 +229,7 @@ test("refusals from the repo: no config, an unreadable config, a disagreeing loc
   const legacy = adopted(t);
   const { extractors, extractorOptions, ...rest } = config(legacy);
   writeFileSync(join(legacy, "zdd", "config.json"), JSON.stringify({ ...rest, adapter: "nextjs-supabase", adapterOptions: {} }));
-  assert.match(scaffold(legacy, CSHARP).stderr, /pre-1\.0 'adapter' — run zdd:bootstrap --upgrade first/);
+  assert.match(scaffold(legacy, CSHARP).stderr, /pre-1\.0 'adapter' — say "upgrade ZDD" first/);
 });
 
 test("notes: an old engine pin, a leftover generic, a root that does not exist yet", (t) => {
@@ -237,7 +237,7 @@ test("notes: an old engine pin, a leftover generic, a root that does not exist y
   writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify({ ...config(repo), extractors: ["generic"], extractorOptions: {} }));
   const r = scaffoldJson(repo, CSHARP);
   const notes = r.notes.join("\n");
-  assert.match(notes, new RegExp(`pins engine 1\\.2\\.0; this extractor needs ${IO_SINCE.replace(/\./g, "\\.")} or later .* run zdd:bootstrap --upgrade`));
+  assert.match(notes, new RegExp(`pins engine 1\\.2\\.0; this extractor needs ${IO_SINCE.replace(/\./g, "\\.")} or later .* say "upgrade ZDD"`));
   assert.match(notes, /'generic' is still listed/);
   assert.match(notes, /src\/Api does not exist in this repo yet/);
   assert.deepEqual(config(repo).extractors, ["generic", "aspnet-routes"]);

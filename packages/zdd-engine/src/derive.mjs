@@ -25,6 +25,7 @@ import { loadConfig, resolveExtractors } from "./lib/config.mjs";
 import { resolveRefs } from "./lib/resolve-refs.mjs";
 import { insideRepo } from "./lib/paths.mjs";
 import { makeExtractorIo } from "./lib/extractor-io.mjs";
+import { gitIgnoredPredicate } from "./lib/ignored.mjs";
 
 const EXTRACTORS = {
   supabase: "./extractors/supabase/index.mjs",
@@ -34,9 +35,14 @@ const EXTRACTORS = {
   components: "./extractors/components/index.mjs",
   "expo-router": "./extractors/expo-router/index.mjs",
   jobs: "./extractors/jobs/index.mjs",
-  services: "./extractors/services/index.mjs",
+  "external-services": "./extractors/external-services/index.mjs",
   generic: "./extractors/generic/index.mjs",
 };
+// A name a release retired, still accepted for ONE release (the engine
+// prints the new name; "upgrade ZDD" rewrites the config). 2.3: `services`
+// became `external-services` (CAS-103 pick 3) — the records are third-party
+// systems, not a code service layer.
+export const EXTRACTOR_ALIASES = { services: "external-services" };
 const NAME_RE = /^[a-z][a-z0-9-]*$/;
 
 const RECORD_KEYS = ["kind", "id", "title", "description", "resource", "refs", "facts"];
@@ -181,8 +187,9 @@ async function loadExtractor(name, repoRoot, config) {
     if (local.has(name)) fail(`Local extractor '${name}' shadows the built-in of the same name — rename it`);
     return import(EXTRACTORS[name]);
   }
+  if (Object.hasOwn(EXTRACTOR_ALIASES, name)) return import(EXTRACTORS[EXTRACTOR_ALIASES[name]]);
   if (local.has(name)) return import(pathToFileURL(local.get(name)).href);
-  const known = Object.keys(EXTRACTORS).sort().join(", ");
+  const known = [...Object.keys(EXTRACTORS), ...Object.keys(EXTRACTOR_ALIASES)].sort().join(", ");
   const localList = localDir ? `; local ${localDir}: ${[...local.keys()].join(", ") || "(none)"}` : "";
   fail(`Unknown extractor '${name}' (known: ${known}${localList})`);
 }
@@ -268,14 +275,21 @@ export async function deriveRecords({ repoRoot, config }) {
   const configDiagnostics = selection.diagnostics;
   let records = [];
   const factsOrder = {};
-  for (const { name, options } of selection.extractors) {
+  // What git ignores is never source (pick 1): asked once, shared by every
+  // extractor's io.
+  const ignored = gitIgnoredPredicate(repoRoot);
+  if (ignored.error) fail(ignored.error); // fail closed (CR-403): never read ignored files as source
+  for (const { name, options, legacyName } of selection.extractors) {
     const extractor = await loadExtractor(name, repoRoot, config);
     if (typeof extractor.derive !== "function") fail(`Extractor '${name}' exports no derive()`);
     let out;
     try {
       // A fresh io per extractor: one shared walk budget each, so a greedy
       // extractor cannot starve the next one (decision 0010).
-      out = extractor.derive({ repoRoot, options, io: makeExtractorIo(repoRoot, name) });
+      // `legacyName`: the retired name the config used (2.3: `services`), so
+      // the extractor can keep the old record kind until "upgrade ZDD"
+      // renames the key — an engine-only adopter sees nothing move (CR-302).
+      out = extractor.derive({ repoRoot, options, io: makeExtractorIo(repoRoot, name, { ignored }), ...(legacyName ? { legacyName } : {}) });
     } catch (e) {
       fail(`Extractor '${name}' failed: ${e.message}`);
     }

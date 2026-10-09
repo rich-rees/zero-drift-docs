@@ -37,7 +37,8 @@ export const FACTS_KEY_ORDER = {
   route: ["methods", "dynamicSegments", "handlers"],
 };
 
-function walkPython(repoRoot, roots, excludeDirs, diagnostics) {
+// `isIgnored` (io.isIgnored): a gitignored path is never source (pick 1).
+function walkPython(repoRoot, roots, excludeDirs, diagnostics, isIgnored) {
   const out = [];
   const seen = new Set();
   for (const root of roots) {
@@ -47,16 +48,18 @@ function walkPython(repoRoot, roots, excludeDirs, diagnostics) {
       continue;
     }
     if (statSync(abs).isFile()) {
-      if (abs.endsWith(".py")) out.push(posixify(abs.slice(repoRoot.length + 1)));
+      if (isIgnored(root)) diagnostics.push(`${root} is gitignored — not source, not read`);
+      else if (abs.endsWith(".py")) out.push(posixify(abs.slice(repoRoot.length + 1)));
       continue;
     }
     walkDir(
       abs,
       (p, name) => {
-        if (name.endsWith(".py")) out.push(posixify(p.slice(repoRoot.length + 1)));
+        const rel = posixify(p.slice(repoRoot.length + 1));
+        if (name.endsWith(".py") && !isIgnored(rel)) out.push(rel);
       },
       seen,
-      (_p, name) => !excludeDirs.includes(name),
+      (p, name) => !excludeDirs.includes(name) && !isIgnored(posixify(p.slice(repoRoot.length + 1))),
       (p, reason) => diagnostics.push(`${posixify(p.slice(repoRoot.length + 1))}: ${reason} — skipped`),
     );
   }
@@ -135,8 +138,9 @@ export function scanHandlerRefs(body) {
   return refs;
 }
 
-export function derive({ repoRoot, options }) {
+export function derive({ repoRoot, options, io }) {
   const diagnostics = [];
+  const isIgnored = io?.isIgnored ?? (() => false);
   const {
     roots = ["."],
     excludeDirs = ["node_modules", ".venv", "venv", "__pycache__", ".git", "tests", "test"],
@@ -146,7 +150,7 @@ export function derive({ repoRoot, options }) {
   if (!Array.isArray(excludeDirs)) throw new Error(`fastapi: 'excludeDirs' must be an array of directory names`);
   const safeRoots = roots.map((r) => repoRelative(r, "fastapi.roots"));
 
-  const files = walkPython(repoRoot, safeRoots, excludeDirs, diagnostics);
+  const files = walkPython(repoRoot, safeRoots, excludeDirs, diagnostics, isIgnored);
   const parsed = new Map(files.map((rel) => [rel, parseFile(readFileSync(join(repoRoot, rel), "utf8"))]));
 
   // Mount graph: each include is an edge parent -> child router carrying the

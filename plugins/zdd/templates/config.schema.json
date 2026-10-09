@@ -16,8 +16,9 @@
       "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
       "minItems": 1,
       "uniqueItems": true,
-      "description": "Extractors to run, composed: one per convention in the stack (built-in: supabase, nextjs, fastapi, react-router, components, expo-router, jobs, services, generic). Selected by NAME from the engine's registry or from localExtractorDir — never by path. Records from every extractor are merged and cross-extractor refs resolved after the merge.",
-      "examples": [["supabase", "nextjs"], ["supabase", "fastapi"], ["fastapi", "react-router"], ["generic"]]
+      "description": "Extractors to run, composed: one per convention in the stack (built-in: supabase, nextjs, fastapi, react-router, components, expo-router, jobs, external-services, generic; `services` is the pre-2.3 name of external-services). Selected by NAME from the engine's registry or from localExtractorDir — never by path. Records from every extractor are merged and cross-extractor refs resolved after the merge.",
+      "examples": [["supabase", "nextjs"], ["supabase", "fastapi"], ["fastapi", "react-router"], ["generic"]],
+      "not": { "allOf": [{ "contains": { "const": "services" } }, { "contains": { "const": "external-services" } }] }
     },
     "extractorOptions": {
       "type": "object",
@@ -106,28 +107,42 @@
         "jobs": {
           "type": "object",
           "additionalProperties": false,
-          "description": "Workers and scheduled jobs from committed run manifests (ZDD 2.1, opt-in, decision 0020): package.json scripts that run a module as a process (python -m x, node x.mjs), Procfile lines, railway.toml/json startCommand (+ cronSchedule = scheduled). The mode is never guessed: scheduled from a Railway file, worker from `modes`, else unknown with a lint warning.",
+          "description": "Background work — what runs without a click (ZDD 2.1, opt-in; decisions 0020 and 0025): scheduled jobs, workers and queues from where the repo says they run — Procfile lines, Railway startCommand (+ cronSchedule = scheduled), Compose services with a command, Vercel crons, a Cloudflare worker's triggers, pg_cron in a migration, BullMQ/Inngest/Trigger.dev/SQS queues in source. A package.json script counts only when one of those runs it (`pnpm run worker` in a Procfile); on its own it is a hand-run tool. GitHub Actions schedules are an opt-in (`includeGithubActions`), shown apart. The mode is never guessed: scheduled from a schedule, worker from `modes`, else unknown with a lint warning.",
           "properties": {
             "roots": { "type": "array", "items": { "type": "string" }, "default": ["."], "description": "Where manifests are looked for; node_modules and .git are never entered." },
             "exclude": { "type": "array", "items": { "type": "string" }, "description": "Script names that are not jobs. Default: dev, start, test, lint, build, typecheck, format, prepare, postinstall, and anything test:*, lint:*, build:*, check:*." },
             "modes": { "type": "object", "additionalProperties": { "type": "string", "enum": ["worker", "scheduled"] }, "description": "The mode of a job the manifests do not state, by job name." },
+            "includeGithubActions": { "type": "boolean", "default": false, "description": "ZDD 2.3: list `.github/workflows` schedules as background work too, shown apart as repo housekeeping. Off by default: they are the repo's upkeep, not the app." },
             "entries": { "type": "array", "description": "Processes no manifest names.", "items": { "type": "object", "required": ["name"], "additionalProperties": false, "properties": { "name": { "type": "string" }, "module": { "type": "string", "description": "A Python module, dotted (app.housekeeping)." }, "file": { "type": "string", "description": "A JS/TS entry file, relative to cwd." }, "cwd": { "type": "string", "description": "The folder the command runs in (default the repo root)." }, "mode": { "type": "string", "enum": ["worker", "scheduled"] }, "schedule": { "type": "string" }, "command": { "type": "string" }, "description": { "type": "string" } } } }
           }
         },
-        "services": {
+        "external-services": {
           "type": "object",
           "additionalProperties": false,
-          "description": "External services a module depends on (ZDD 2.1, opt-in, decision 0020): declared with the markers that reveal them — imports of a package and/or environment variable NAME prefixes read in source (names only, never values). One record per declared service; usedBy edges to the records in the files that hit a marker. An env name with a credential-shaped suffix no service covers is a warning on every derive.",
+          "description": "External services — the third-party systems a module depends on (ZDD 2.1, opt-in, decision 0020; named `services` until 2.3): declared with the markers that reveal them — imports of a package and/or environment variable NAME prefixes read in source (names only, never values). One record per declared service; usedBy edges to the records in the files that hit a marker. An env name with a credential-shaped suffix no service covers is a warning on every derive.",
           "properties": {
-            "services": { "type": "array", "items": { "type": "object", "required": ["name"], "additionalProperties": false, "properties": { "name": { "type": "string" }, "imports": { "type": "array", "items": { "type": "string" } }, "env": { "type": "array", "items": { "type": "string" }, "description": "Env name prefixes, e.g. \"SENTRY_\"." } } } },
+            "services": { "type": "array", "items": { "type": "object", "required": ["name"], "additionalProperties": false, "anyOf": [{ "required": ["imports"], "properties": { "imports": { "minItems": 1, "contains": { "pattern": "[^ \t\r\n]" } } } }, { "required": ["env"], "properties": { "env": { "minItems": 1, "contains": { "pattern": "[^ \t\r\n]" } } } }], "properties": { "name": { "type": "string", "pattern": "[A-Za-z0-9]" }, "imports": { "type": "array", "items": { "type": "string" } }, "env": { "type": "array", "items": { "type": "string" }, "description": "Env name prefixes, e.g. \"SENTRY_\"." } } }, "description": "Each declared with at least one marker: a package import or an env-name prefix (a blank marker is ignored by the engine with a diagnostic; a declaration with no nonblank marker, or a name with no letter or digit, is refused)." },
             "ignore": { "type": "array", "items": { "type": "string" }, "description": "Env name prefixes that are not services (beside the built-in database and platform prefixes)." },
             "roots": { "type": "array", "items": { "type": "string" }, "default": ["."] },
             "extensions": { "type": "array", "items": { "type": "string" }, "default": [".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"] }
           }
         },
+        "services": {
+          "type": "object",
+          "deprecated": true,
+          "description": "The 2.1–2.2 name of `external-services`, accepted for one release (ZDD 2.3) and never beside it (both names, or both option keys, are refused); \"upgrade ZDD\" renames it. Under this name the records keep the pre-2.3 kind `service`. Same shape.",
+          "additionalProperties": false,
+          "properties": {
+            "services": { "type": "array", "items": { "type": "object", "required": ["name"], "additionalProperties": false, "anyOf": [{ "required": ["imports"], "properties": { "imports": { "minItems": 1, "contains": { "pattern": "[^ \t\r\n]" } } } }, { "required": ["env"], "properties": { "env": { "minItems": 1, "contains": { "pattern": "[^ \t\r\n]" } } } }], "properties": { "name": { "type": "string", "pattern": "[A-Za-z0-9]" }, "imports": { "type": "array", "items": { "type": "string" } }, "env": { "type": "array", "items": { "type": "string" }, "description": "Env name prefixes, e.g. \"SENTRY_\"." } } } },
+            "ignore": { "type": "array", "items": { "type": "string" } },
+            "roots": { "type": "array", "items": { "type": "string" } },
+            "extensions": { "type": "array", "items": { "type": "string" } }
+          }
+        },
         "generic": { "type": "object", "additionalProperties": false }
       },
-      "additionalProperties": { "type": "object" }
+      "additionalProperties": { "type": "object" },
+      "not": { "required": ["services", "external-services"] }
     },
     "localExtractorDir": {
       "type": "string",
@@ -137,7 +152,7 @@
     "adapter": {
       "type": "string",
       "deprecated": true,
-      "description": "DEPRECATED (pre-1.0): the single monolithic adapter. Still honoured — `nextjs-supabase` expands to extractors [supabase, nextjs] with adapterOptions split by key — but prints a deprecation note on every derive; `bootstrap --upgrade` migrates it for you.",
+      "description": "DEPRECATED (pre-1.0): the single monolithic adapter. Still honoured — `nextjs-supabase` expands to extractors [supabase, nextjs] with adapterOptions split by key — but prints a deprecation note on every derive; \"upgrade ZDD\" migrates it for you.",
       "examples": ["nextjs-supabase"]
     },
     "adapterOptions": {
@@ -149,7 +164,7 @@
     "engine": {
       "type": "string",
       "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(\\.(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*))?(\\+([0-9a-zA-Z-]+(\\.[0-9a-zA-Z-]+)*))?$",
-      "description": "The @rich-rees/zdd-engine version this repo was bootstrapped for — written by bootstrap, rewritten by bootstrap --upgrade, compared against the plugin by load (skew warning). Mirrors the pin in the CI workflow / pre-push hook so a repo without CI still has one.",
+      "description": "The @rich-rees/zdd-engine version this repo was bootstrapped for — written by bootstrap, rewritten by \"upgrade ZDD\", compared against the plugin by load (skew warning). Mirrors the pin in the CI workflow / pre-push hook so a repo without CI still has one.",
       "examples": ["2.2.1"]
     },
     "hooks": {
@@ -237,10 +252,10 @@
         },
         "strictKinds": {
           "type": "array",
-          "items": { "type": "string", "enum": ["component", "job", "service"] },
+          "items": { "type": "string", "enum": ["component", "job", "external-service", "service"] },
           "uniqueItems": true,
           "default": [],
-          "description": "The opt-in kinds (ZDD 2.1: component, job, service) that strict also governs. Unlisted, an unclaimed record of such a kind is a warning under strict, never a failure, so switching an extractor on never turns a green lint red by itself (decision 0017). A shared component is claimable; a page-private one is not."
+          "description": "The opt-in kinds (ZDD 2.1: component, job, external-service — spelt `service` until 2.3, still accepted while the config says `services`) that strict also governs. Unlisted, an unclaimed record of such a kind is a warning under strict, never a failure, so switching an extractor on never turns a green lint red by itself (decision 0017). A shared component is claimable; a page-private one is not."
         }
       }
     },
@@ -249,7 +264,9 @@
       "description": "Renderer options for the agent index (e.g. the blockquote summary line).",
       "additionalProperties": true,
       "properties": {
-        "summary": { "type": "string" }
+        "summary": { "type": "string" },
+        "budgetTokens": { "type": "integer", "minimum": 200, "default": 2000, "description": "The agent index's size budget in approximate tokens (ZDD 2.3), at least 200. Over it, render warns and names the fix; it never fails." },
+        "levels": { "type": "integer", "enum": [1, 2], "default": 1, "description": "1: every feature's section in the agent index file. 2 (ZDD 2.3, for a large repo): the index lists the areas first — one line each with a link to <index name>/<area>.md in a sibling folder named after the index (zdd/agent-index/ by default) holding that area's features — so every feature is one hop away. That folder is ZDD's alone. An explicit choice, never automatic: the index's shape moves only when this does." }
       }
     },
     "viewer": {

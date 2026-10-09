@@ -144,14 +144,14 @@ const CLAUDE_WITH_DUPES = [
   "",
 ].join("\n");
 
-test("text outside the managed block that the block now covers is named with its lines — a section with an unrelated child is never named whole", () => {
+test("text outside the managed block that speaks to a rule is named per paragraph or bullet with its lines and the rules — never a whole section (CAS-103 finding 4)", () => {
   const repo = adopted("dupes", { claude: CLAUDE_WITH_DUPES });
   const plan = runJson(repo, ["upgrade", "--plan"]);
   assert.deepEqual(
-    plan.duplicates.map((d) => [d.file, d.heading, d.from, d.to]),
+    plan.duplicates.map((d) => [d.file, d.heading, d.from, d.to, d.rules]),
     [
-      ["CLAUDE.md", "## Loading ZDD", 5, 8],
-      ["CLAUDE.md", "### Docs", 13, 16],
+      ["CLAUDE.md", "## Loading ZDD", 7, 7, ["load", "generated"]],
+      ["CLAUDE.md", "### Docs", 15, 15, ["update"]],
     ],
   );
   // The id is the section's content hash (CR-014): stable across runs, distinct per section.
@@ -159,7 +159,9 @@ test("text outside the managed block that the block now covers is named with its
   assert.notEqual(plan.duplicates[0].id, plan.duplicates[1].id);
   assert.deepEqual(runJson(repo, ["upgrade", "--plan"]).duplicates.map((d) => d.id), plan.duplicates.map((d) => d.id));
   const text = run(repo, ["upgrade", "--plan"]);
-  assert.ok(text.includes(`outside the ZDD block: [${plan.duplicates[0].id}] CLAUDE.md lines 5–8 "## Loading ZDD"`), text);
+  assert.ok(text.includes(`your text, CLAUDE.md line 7 under "## Loading ZDD": Say "load ZDD" before work. Never hand-edit zdd/graph.json.`), text);
+  assert.ok(text.includes(`ZDD now says: "load ZDD" before designing`), text);
+  assert.ok(text.includes(`--drop=${plan.duplicates[0].id}`), text);
 });
 
 test("no well-formed block, no duplicates: a lone, doubled or reversed marker (the refresh is refused) or no block at all names nothing, and --drop cannot reach in (CR-002)", async () => {
@@ -213,11 +215,13 @@ test("--drop removes only the named sections, after the block is refreshed; an i
   writeFileSync(join(repo, "CLAUDE.md"), CLAUDE_WITH_DUPES);
   const json = runJson(repo, ["upgrade", `--drop=${loading.id}`]);
   const after = readFileSync(join(repo, "CLAUDE.md"), "utf8");
-  assert.doesNotMatch(after, /## Loading ZDD/);
+  assert.doesNotMatch(after, /## Loading ZDD/, "the unit was all its section held, so the empty heading went with it");
+  assert.doesNotMatch(after, /Say "load ZDD" before work/);
   assert.match(after, /### Docs/, "not dropped: not named");
-  assert.match(after, /<!-- zdd:begin -->[\s\S]*<!-- zdd:end -->/, "the block is there");
+  assert.match(after, /^@zdd\/instructions\.md$/m, "the block became the import line");
+  assert.doesNotMatch(after, /<!-- zdd:begin -->/);
   assert.match(after, /^Intro\.$/m);
-  assert.ok(json.notes.some((n) => /CLAUDE\.md: removed "## Loading ZDD" \(lines 5–8\), on the user's word/.test(n)), json.notes.join("\n"));
+  assert.ok(json.notes.some((n) => /CLAUDE\.md: removed line 7 under "## Loading ZDD" \(Say "load ZDD" before work\. Never hand-edit zdd\/graph\.json\.\), and the heading it was all of, on the user's word/.test(n)), json.notes.join("\n"));
   assert.deepEqual(runJson(repo, ["upgrade", "--plan"]).duplicates.map((d) => d.heading), ["### Docs"]);
 });
 
@@ -236,9 +240,10 @@ test("release-status reads the lock, the running plugin and the newest tag on th
   for (const t of ["v2.1.1", "v9.0.0", "v9.0.1-rc.1"]) git("tag", t);
   const repo = adopted("status", { settings: { extraKnownMarketplaces: LOCK("v2.1.1") } });
   const s = runJson(repo, ["release-status", `--remote=${remote}`]);
-  assert.deepEqual(s, { lock: "v2.1.1", running: VERSION, newest: "v9.0.0", newer: true });
+  // CAS-103 C3/C4: the catalogue (none in this home) and whether the lock trails the running release.
+  assert.deepEqual(s, { lock: "v2.1.1", running: VERSION, newest: "v9.0.0", catalogue: null, newer: true, lockBehind: true, ready: false });
   const text = run(repo, ["release-status", `--remote=${remote}`]);
-  assert.match(text, /ZDD v9\.0\.0 is out; this repo locks v2\.1\.1 and this session runs \d+\.\d+\.\d+/, text);
+  assert.match(text, /ZDD v9\.0\.0 is out; this repo locks v2\.1\.1 and this session runs \d+\.\d+\.\d+; the catalogue on this machine is at no recorded ref/, text);
 });
 
 // A local repo with release tags stands in for the marketplace's GitHub repo.
@@ -342,7 +347,8 @@ test("adjacent identical copies: whichever copy the id lands on after a shift, t
   runJson(repo, ["upgrade", `--drop=${second.id}`]);
   const intent = ["# T", "", ...a, ...a, ...tail]; // the shifted file with the planned (now third) copy removed
   const out = readFileSync(join(repo, "CLAUDE.md"), "utf8");
-  assert.equal(out.slice(0, out.indexOf("<!-- zdd:begin -->")), intent.join("\n").slice(0, intent.join("\n").indexOf("<!-- zdd:begin -->")));
+  // The block became the import line in the same run; compare what precedes either.
+  assert.equal(out.slice(0, out.indexOf("<!-- Zero-Drift Docs:")), intent.join("\n").slice(0, intent.join("\n").indexOf("<!-- zdd:begin -->")));
 });
 
 test("a planned id is bound to the section's text AND place: when an identical copy inserted above shifts the planned one, the write refuses (CR-023)", () => {
@@ -350,7 +356,7 @@ test("a planned id is bound to the section's text AND place: when an identical c
   const doc = ["# T", "", "## Loading ZDD", "", 'Say "load ZDD".', "", "## Testing", "", "Run the tests.", "", "## Loading ZDD", "", 'Say "load ZDD".', "", "<!-- zdd:begin -->", "x", "<!-- zdd:end -->", ""];
   const repo = adopted("identical-shift", { claude: doc.join("\n") });
   const second = runJson(repo, ["upgrade", "--plan"]).duplicates[1];
-  assert.equal(second.from, 11);
+  assert.equal(second.from, 13, "the unit is the sentence under the second heading");
   // Another copy of A lands above everything: the planned place now holds a different section.
   writeFileSync(join(repo, "CLAUDE.md"), [...doc.slice(0, 2), "## Loading ZDD", "", 'Say "load ZDD".', "", ...doc.slice(2)].join("\n"));
   assert.match(fails(repo, ["upgrade", `--drop=${second.id}`]), new RegExp(`--drop: no duplicate ${second.id}`));

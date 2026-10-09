@@ -48,7 +48,10 @@ const TEMPLATES = join(PLUGIN_ROOT, "templates", "extractor");
 export const IO_SINCE = "1.3.0";
 // Mirror of the engine's registry (packages/zdd-engine/src/derive.mjs
 // EXTRACTORS) — a local name may not shadow one. A test holds the two together.
-export const BUILT_INS = ["supabase", "nextjs", "fastapi", "react-router", "components", "expo-router", "jobs", "services", "generic"];
+export const BUILT_INS = ["supabase", "nextjs", "fastapi", "react-router", "components", "expo-router", "jobs", "external-services", "generic"];
+// Names a release retired but the engine still answers to (2.3: `services`
+// is `external-services`, CAS-103 pick 3) — a local one may not take them.
+export const RETIRED_BUILT_INS = { services: "external-services" };
 const NAME_RE = /^[a-z][a-z0-9-]*$/; // the engine's NAME_RE
 const KIND_RE = /^[a-z][a-z0-9_-]*$/; // the engine's KIND_RE
 const EXT_RE = /^\.[A-Za-z0-9][A-Za-z0-9._-]*$/;
@@ -84,10 +87,12 @@ export function validateAnswers(raw) {
   const a = {};
   if (typeof raw.name !== "string" || !NAME_RE.test(raw.name)) fail("name must match ^[a-z][a-z0-9-]*$ (lowercase, digits, hyphens)");
   if (BUILT_INS.includes(raw.name)) fail(`name '${raw.name}' is a built-in extractor — a local one may not shadow it; pick another name`);
+  if (Object.hasOwn(RETIRED_BUILT_INS, raw.name)) fail(`name '${raw.name}' is the old name of the built-in '${RETIRED_BUILT_INS[raw.name]}' extractor, which the engine still answers to — pick another name`);
   if (WINDOWS_RESERVED.test(raw.name)) fail(`name '${raw.name}' is a device name Windows cannot create as a folder — pick another`);
   a.name = raw.name;
   if (typeof raw.evidence !== "string" || !flat(raw.evidence)) fail("evidence must say what file layout or code shape declares the thing");
   a.evidence = flat(raw.evidence);
+  if (Object.hasOwn(RETIRED_BUILT_INS, raw.shapedLike)) raw = { ...raw, shapedLike: RETIRED_BUILT_INS[raw.shapedLike] };
   if (!BUILT_INS.includes(raw.shapedLike)) fail(`shapedLike must be one of ${BUILT_INS.join(", ")}`);
   a.shapedLike = raw.shapedLike;
   if (!Array.isArray(raw.kinds) || !raw.kinds.length || !raw.kinds.every((k) => typeof k === "string" && KIND_RE.test(k))) fail("kinds must be a non-empty array of lowercase kind names (route, table, surface, …)");
@@ -189,7 +194,7 @@ export function scaffold(root, rawAnswers) {
 
   // The fields this run edits must already have the engine's shape, or be
   // absent — never "normalised" into something else (CAS-65 CR-002).
-  if (config.adapter !== undefined) throw new Error("zdd/config.json still uses the pre-1.0 'adapter' — run zdd:bootstrap --upgrade first");
+  if (config.adapter !== undefined) throw new Error("zdd/config.json still uses the pre-1.0 'adapter' — say \"upgrade ZDD\" first");
   if (config.extractors !== undefined && (!Array.isArray(config.extractors) || !config.extractors.every((x) => typeof x === "string"))) {
     throw new Error("zdd/config.json 'extractors' is not a list of names — fix it first; the scaffold never replaces what it cannot read");
   }
@@ -397,7 +402,7 @@ export function scaffold(root, rawAnswers) {
     ledger.notes.push("'generic' is still listed in extractors — it emits nothing; remove it now that a real extractor runs");
   }
   const older = olderThan(next.engine, IO_SINCE);
-  if (older === true) ledger.notes.push(`zdd/config.json pins engine ${next.engine}; this extractor needs ${IO_SINCE} or later and will stop derive until then — run zdd:bootstrap --upgrade`);
+  if (older === true) ledger.notes.push(`zdd/config.json pins engine ${next.engine}; this extractor needs ${IO_SINCE} or later and will stop derive until then — say "upgrade ZDD"`);
   else if (older === null) ledger.notes.push(`zdd/config.json's engine pin (${printable(String(next.engine))}) is not a version this can compare — this extractor needs ${IO_SINCE} or later`);
   // Every root, judged without following links (CAS-65 CR-042).
   for (const r of a.roots) {

@@ -63,11 +63,51 @@ into a new truth. History doesn't lie; it accretes.
 
 The map says *where, what-connects, what-to-copy*; never what the code does.
 Groupings and non-textual edges are the first two. The third is the
-**blessing**: a one-line entry under a `# Blessings` heading in a concept,
-naming the **exemplar to copy** and the **pattern to refuse**, with the reason.
-Pattern frequency in code is never a verdict — the most common pattern is
-often the deprecated one — so a blessing is how the map outranks "copy the
-nearest example".
+**blessing**: a one-line entry under a `# Blessings` heading in a concept.
+
+**A blessing is a generic, work-shaped pointer to reusable code.** It answers
+a *recurring kind of work* ("Adding an upload?", "Adding an endpoint?") with
+a pointer to **existing code to start from and, where possible, reuse** —
+a shared base layer before a pattern to imitate — plus **the one trap it
+refuses and its reason**. Pattern frequency in code is never a verdict — the
+most common pattern is often the deprecated one — so a blessing is how the
+map outranks "copy the nearest example", and how the AI reuses the helper
+that already exists instead of writing a second one.
+
+The model, from PressPlay (DIO-336):
+
+```markdown
+- Adding an upload? Start from `lib/media-upload-client.ts` (`uploadMedia`)
+  — reuse or extend it before writing new upload code; video's larger flow is
+  `VideoUploadContext` + the `signed-upload` route. Files go straight to
+  Storage, never through a Vercel function (ADR-0098).
+```
+
+Three components already share `uploadMedia`, so a future PDF or audio
+upload reuses it rather than writing new upload code. The old blessing
+pointed only at the video route and hid that shared layer: a narrow pointer
+at one feature's code is the shape to avoid.
+
+**The test, applied wherever ZDD proposes or mints a blessing** — bootstrap's
+mapping session and backfill, "choose patterns"' *new pattern, candidate
+blessing*, and "update ZDD"'s minting step:
+
+1. **Pointer first, and required.** Name the existing code to start from —
+   a shared helper, a base layer, a reference implementation — before any
+   pattern to imitate. A blessing with nothing to point at is not one: a
+   rule whose substance is "decide X this way" ("Deciding where an answer
+   is stored?") belongs in its **ADR and a code comment at the site**, not
+   the map. `lint` warns on a blessing that points at no code.
+2. **One trap, with its reason.** One instruction is allowed, as the thing
+   the blessing refuses ("never through a Vercel function"), with the ADR or
+   a "because".
+3. **Generic, not narrow.** The question names a *kind* of work that recurs
+   ("Adding an upload?"), not one feature's instance ("Adding the video
+   upload?"); a map that drifts to many narrow blessings (PressPlay reached
+   83) is re-cut to the shared layers (DIO-336 cut it to roughly 30–40).
+4. **No exemplar yet: a candidate.** A new kind of work with no reusable code
+   to point at is a *candidate blessing* in the pattern plan, minted at
+   "update ZDD" once the code exists and the pointer is real.
 
 A blessing is read at a known moment: **"choose patterns"** (the `patterns`
 skill) reads the generated **blessing index** — one line per blessing, its
@@ -82,9 +122,11 @@ Format (one list item per blessing, under the heading):
 
 ```markdown
 # Blessings
-- Adding an endpoint here? Copy [POST /api/things](/metadata/route/things.json),
-  per ADR-0012 — never inline the auth check.
-- Saving a graph? Go through the RPC, per ADR-0005 — never client-side diffing.
+- Adding an endpoint here? Start from [POST /api/things](/metadata/route/things.json)
+  — its auth and validation are the shared shape, per ADR-0012 — never inline
+  the auth check.
+- Saving a graph? Go through the RPC in `lib/graph-rpc.ts`, per ADR-0005 — never
+  client-side diffing.
 - Naming a migration? Prefix it with the ticket id, because two branches
   minting the same number merge without a conflict — never a bare sequence.
 ```
@@ -95,6 +137,13 @@ Format (one list item per blessing, under the heading):
   blessing without one is invisible to a session choosing patterns, and
   `zdd-engine lint` **fails** it. Phrase it as the moment someone would reach
   for the pattern, not as the pattern's name.
+- **Point at the code.** A metadata link (`/metadata/route/….json`) is what
+  lets the freshness nudge notice when the blessed code changes; a path or a
+  file in backticks (`lib/graph-rpc.ts`, with the function beside it) is fine
+  for something the extractors do not inventory — a bare function name is
+  not a pointer, name its file. An ADR link or a URL is the reason, not the
+  exemplar. `lint` **warns** on a blessing with no pointer; a naming rule
+  earns that warning and is fine.
 - **Give the reason.** Cite the ADR that blessed it ("per ADR-0012"), or say
   why inline ("because …"). Neither is a lint **warning**: a blessing with no
   reason is an opinion. **An ADR is encouraged, not required** — cite one when
@@ -107,17 +156,14 @@ Format (one list item per blessing, under the heading):
   superseded, re-bless under the new decision or drop the line, in the same
   unit of work.
 - **Keep it short.** Over 300 characters of visible text (link text counts,
-  link targets do not) is a lint **warning**. The question, the exemplar, the
+  link targets do not) is a lint **warning**. The question, the pointer, the
   refusal and the reason fit; the detail belongs in the ADR.
-- **Link the exemplar.** A metadata link (`/metadata/route/….json`) is what
-  lets the freshness nudge notice when the blessed code changes; a bare path
-  in backticks is fine for something the extractors do not inventory.
-- **Name the refusal.** "Copy X" alone is a pointer; "copy X, never Y" is the
-  judgment the reader needs.
+- **Name the refusal.** "Start from X" alone is a pointer; "start from X,
+  never Y" is the judgment the reader needs.
 - **App or feature.** A blessing that applies across an app (auth, data
-  access, styling) goes in the app's concept under `map/apps/`; the index
-  lists those first and a session reads all of them for an app it touches. A
-  blessing for one feature's shape goes in that feature's slice.
+  access, styling, uploads) goes in the app's concept under `map/apps/`; the
+  index lists those first and a session reads all of them for an app it
+  touches. A blessing for one feature's shape goes in that feature's slice.
 
 ## Code comments
 

@@ -1,0 +1,105 @@
+# Zero-Drift Docs — the release in one step (CAS-103, the process scope).
+#
+# Push a tag `vX.Y.Z` on main and this job publishes the engine to npm and
+# creates the GitHub release, so a release is: merge, tag, push the tag.
+# Before anything is published it proves the tag is the version every pin
+# names (the repo's own tests hold the pins together), runs both suites
+# once more on the tagged commit, and refuses a tag whose version is already
+# on npm.
+#
+# No secret anywhere: npm trusts this workflow directly (npm "trusted
+# publishing", OpenID Connect) — on npmjs.com the package names GitHub
+# Actions, rich-rees/zero-drift-docs and release.yml as its publisher, and
+# the job proves its identity with the short-lived token `id-token: write`
+# grants. The GitHub release uses the job's own GITHUB_TOKEN.
+#
+# The release notes are the README's Versioning entry for the tag (its text,
+# plus the two install lines), so the notes and the README cannot disagree.
+#
+# A tag publishes only from main (CR-502): the tagged commit must be reachable
+# from main, or nothing runs. A rerun after a publish that succeeded resumes
+# (CR-514): a version already on npm whose gitHead is this very commit is
+# taken as published, and the release steps carry on.
+
+name: release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: The tagged commit is on main
+        run: |
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" origin/main; then
+            echo "${GITHUB_REF_NAME} points at ${GITHUB_SHA}, which is not on main — a release is tagged on the merge commit; delete the tag and tag main"; exit 1
+          fi
+
+      - name: The tag names the version every pin names
+        run: node scripts/release-check.mjs "${GITHUB_REF_NAME}"
+
+      - name: Engine tests
+        run: cd packages/zdd-engine && node --test "test/*.test.mjs"
+
+      - name: Plugin tests
+        run: node --test "plugins/zdd/test/*.test.mjs"
+
+      - name: Not already on npm — unless by this very commit (a rerun resumes)
+        id: npm
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          if npm view "@rich-rees/zdd-engine@${V}" version >/dev/null 2>&1; then
+            HEAD="$(npm view "@rich-rees/zdd-engine@${V}" gitHead 2>/dev/null || true)"
+            if [ "${HEAD}" = "${GITHUB_SHA}" ]; then
+              echo "@rich-rees/zdd-engine@${V} is already published from this commit — resuming after the publish"
+              echo "published=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "@rich-rees/zdd-engine@${V} is already published from ${HEAD:-an unknown commit} — a version is immutable; bump the version instead"; exit 1
+            fi
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish the engine (trusted publishing: no token)
+        if: steps.npm.outputs.published == 'false'
+        run: |
+          npm install -g npm@latest   # trusted publishing needs npm 11.5+
+          cd packages/zdd-engine && npm publish --access public --provenance
+
+      - name: Published and fetchable from outside the repo
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          cd "$(mktemp -d)"
+          for i in 1 2 3 4 5 6; do
+            if npx -y "@rich-rees/zdd-engine@${V}" 2>&1 | grep -q "derive"; then exit 0; fi
+            sleep 20
+          done
+          echo "@rich-rees/zdd-engine@${V} did not become fetchable in two minutes"; exit 1
+
+      - name: GitHub release, notes from the README's Versioning entry
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/release-notes.mjs "${GITHUB_REF_NAME}" > /tmp/notes.md
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            echo "release ${GITHUB_REF_NAME} already exists — left as it is"
+          else
+            gh release create "${GITHUB_REF_NAME}" --title "${GITHUB_REF_NAME}" --notes-file /tmp/notes.md --latest
+          fi

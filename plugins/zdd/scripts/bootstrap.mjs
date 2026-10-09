@@ -19,6 +19,18 @@
 //       that already has a config (repair), an omitted answer keeps the
 //       current choice; only an explicit answer changes it.
 //
+//   bootstrap.mjs preflight [--registry=<url>] [--github=<url>] [--json]
+//       Every piece of tech ZDD needs, checked before a question is asked
+//       (CAS-103 C7): Node.js 20+, npx, git and a git repository, reachability
+//       of github.com and the npm registry, and that the pinned engine is
+//       there to download. Each failure says what is missing, what ZDD uses
+//       it for, how to get it, and that nothing was written. Exit 1 on any.
+//
+//   bootstrap.mjs estimate [--root=<dir>] [--json]
+//       Sizes the repo for the three install scenarios (greenfield, a young
+//       app, a mature codebase) and the opt-in backfill: source files,
+//       commits, age, and an honest estimate of the user's review time.
+//
 //   bootstrap.mjs upgrade [--lock] [--root=<dir>] [--json]
 //       The only later writer into an adopter's repo. Migrates `adapter` →
 //       `extractors`, moves `viewer.nonAreaTags` to the top level, rewrites
@@ -48,9 +60,11 @@
 //   }
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, lstatSync, chmodSync, openSync, writeSync, closeSync } from "node:fs";
-import { join, dirname, basename, relative } from "node:path";
+import { join, dirname, basename, relative, posix } from "node:path";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
 import {
   PLUGIN_ROOT,
   ENGINE_PACKAGE,
@@ -70,11 +84,25 @@ import {
   MARKETPLACE,
   MARKETPLACE_REPO,
   isOurDeclaration,
+  pluginsDir,
 } from "./lib/repo.mjs";
 
 const TEMPLATES = join(PLUGIN_ROOT, "templates");
 const SNIPPET_BEGIN = "<!-- zdd:begin -->";
 const SNIPPET_END = "<!-- zdd:end -->";
+// ZDD's instructions live in a file of their own (2.3, CAS-103 C10): ZDD owns
+// `<bundleDir>/instructions.md` and rewrites it on every upgrade; the
+// adopter's CLAUDE.md carries ONE line, Claude Code's `@path` import, which
+// inlines the file at session start — so the rules stay always-loaded, and
+// everything else in CLAUDE.md is the adopter's by definition. Codex has no
+// import directive (its AGENTS.md loader concatenates plain Markdown), so
+// AGENTS.md keeps a managed copy between the zdd:begin / zdd:end markers.
+export const INSTRUCTIONS_NAME = "instructions.md";
+// A bundle at the repo root puts the file at the root too (CR-411).
+export const instructionsRel = (bundleDir) => (!bundleDir || bundleDir === "." ? INSTRUCTIONS_NAME : `${bundleDir}/${INSTRUCTIONS_NAME}`);
+export const importLine = (bundleDir) => `@${instructionsRel(bundleDir)}`;
+export const IMPORT_COMMENT = "<!-- Zero-Drift Docs: the line below loads ZDD's instructions into every session. ZDD owns that file and rewrites it on upgrade; everything else in this file is yours. -->";
+const IMPORT_LINE_RE = /^@\S+\/instructions\.md\r?$/m;
 const LEGACY_SNIPPET_HEADING = "## Documentation — Zero-Drift Docs (ZDD)";
 // The v0.3.1 snippet's fingerprint. Replacement needs the whole section to
 // equal the v0.3.1 snippet modulo whitespace (CR-080, isLegacySnippet below);
@@ -84,8 +112,8 @@ const LEGACY_SNIPPET_HEADING = "## Documentation — Zero-Drift Docs (ZDD)";
 const LEGACY_FINGERPRINT = ["/zdd:orient", "/zdd:update"];
 // Ownership line carried by every file the plugin writes besides config.
 export const OWNER_MARK = "Managed by Zero-Drift Docs (zdd)";
-// Mirrors of the engine's services extractor (src/extractors/services/
-// index.mjs: CANDIDATE_SUFFIXES, BUILT_IN_IGNORE) — the plugin cannot import
+// Mirrors of the engine's external-services extractor (src/extractors/
+// external-services/index.mjs: CANDIDATE_SUFFIXES, BUILT_IN_IGNORE) — the plugin cannot import
 // the engine under npx; a test keeps the two pairs equal.
 export const SERVICE_SUFFIXES = ["_API_KEY", "_DSN", "_SECRET", "_TOKEN", "_URL", "_KEY"];
 export const SERVICE_IGNORE = ["DATABASE", "SUPABASE", "PG", "POSTGRES", "NODE", "NEXT", "VITE", "EXPO", "PUBLIC", "CI", "GITHUB", "RAILWAY", "VERCEL", "PORT", "HOST", "BASE", "API", "APP", "WEB", "SERVER", "CLIENT", "AUTH", "JWT", "SESSION", "COOKIE", "TEST", "DEV", "LOG"];
@@ -222,33 +250,48 @@ export function detect(root) {
       const app = segs.lastIndexOf("app");
       if (app !== -1) expoAppDirs.add(segs.slice(0, app + 1).join("/"));
     }
-    // jobs: a manifest naming a process — a package script that runs a
-    // module (`python -m x`, `node x.mjs`), a Procfile line, a Railway file.
-    if (name === "package.json" || name === "Procfile" || name === "railway.toml" || name === "railway.json") {
+    // jobs — background work (2.3): a manifest that RUNS a process (a
+    // Procfile line, a Railway file, a Compose service), a schedule (Vercel
+    // crons, a Cloudflare `[triggers]`, a pg_cron line in a migration), or a
+    // queue in source. A package.json script on its own is a hand-run tool,
+    // not background work, and is no longer evidence (CAS-103 pick 6).
+    if (name === "Procfile" || name === "railway.toml" || name === "railway.json" || name === "vercel.json" || name === "wrangler.toml" || /^(docker-)?compose\.ya?ml$/.test(name) || (name.endsWith(".sql") && /(^|\/)migrations\//.test(rel))) {
       let text = "";
       try {
         text = readFileSync(abs, "utf8");
       } catch {
         return;
       }
-      const jobShaped = (cmd) => /(?:^|\s)python[0-9.]*\s+-m\s+[\w.]+/.test(cmd) || /(?:^|\s)(?:node|tsx|ts-node|bun|deno)\s+(?:-[^\s]+\s+)*[\w./-]+\.(?:m?[jt]s|cjs)\b/.test(cmd);
-      const notAJob = (n) => /^(dev|start|test|lint|build|typecheck|format|prepare|postinstall)$/.test(n) || /^(test|lint|build|check|typecheck|format)[:.-]/.test(n);
-      if (name === "package.json") {
-        try {
-          const scripts = JSON.parse(text).scripts ?? {};
-          const hits = Object.entries(scripts).filter(([n, c]) => !notAJob(n) && typeof c === "string" && jobShaped(c)).map(([n]) => n).sort();
-          if (hits.length) jobManifests.push({ manifest: rel, scripts: hits });
-        } catch {
-          /* not JSON: not a manifest */
-        }
-      } else if (name === "Procfile") {
+      const jobShaped = (cmd) => /(?:^|\s)python[0-9.]*\s+-m\s+[\w.]+/.test(cmd) || /(?:^|\s)(?:node|tsx|ts-node|bun|deno)\s+(?:-[^\s]+\s+)*[\w./-]+\.(?:m?[jt]s|cjs)\b/.test(cmd) || /(?:^|\s)(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?[\w:.-]+/.test(cmd);
+      if (name === "Procfile") {
         const hits = text.split("\n").map((l) => /^\s*([A-Za-z_][\w-]*)\s*:\s*(.+)$/.exec(l)).filter((m) => m && m[1] !== "web" && jobShaped(m[2])).map((m) => m[1]);
-        if (hits.length) jobManifests.push({ manifest: rel, scripts: hits });
-      } else if (/startCommand/.test(text)) jobManifests.push({ manifest: rel, scripts: ["startCommand"] });
+        if (hits.length) jobManifests.push({ manifest: rel, scripts: hits, what: "runs a process" });
+      } else if (name === "vercel.json") {
+        const paths = [...text.matchAll(/"path"\s*:\s*"([^"]+)"/g)].map((m) => m[1]);
+        if (/"crons"/.test(text) && paths.length) jobManifests.push({ manifest: rel, scripts: paths, what: "schedules a cron for" });
+      } else if (name === "wrangler.toml") {
+        if (/^\s*crons\s*=/m.test(text)) jobManifests.push({ manifest: rel, scripts: ["triggers.crons"], what: "schedules" });
+      } else if (/^(docker-)?compose\.ya?ml$/.test(name)) {
+        const svcs = [...text.matchAll(/^\s{2}([A-Za-z0-9_.-]+):\s*$/gm)].map((m) => m[1]).filter((n) => n !== "web");
+        if (/^\s+command:/m.test(text) && svcs.length) jobManifests.push({ manifest: rel, scripts: svcs, what: "runs a service" });
+      } else if (name.endsWith(".sql")) {
+        const crons = [...text.matchAll(/cron\.schedule\s*\(\s*'([^']+)'/gi)].map((m) => m[1]);
+        if (crons.length) jobManifests.push({ manifest: rel, scripts: crons, what: "schedules (pg_cron)" });
+      } else if (/startCommand/.test(text)) jobManifests.push({ manifest: rel, scripts: ["startCommand"], what: "runs a process" });
     }
-    // services: environment variable NAMES read in source whose suffix says
-    // "a credential or an address", grouped by prefix — a mirror of the
-    // engine's services extractor (a test pins the two lists together), so
+    if (/\.(ts|tsx|js|jsx|mjs|cjs)$/.test(name) && !/\.(test|spec|stories)\.[cm]?[jt]sx?$|\.d\.ts$/.test(name)) {
+      let text = "";
+      try {
+        text = readFileSync(abs, "utf8");
+      } catch {
+        return;
+      }
+      const queues = [...text.matchAll(/new\s+(?:Queue|Worker)\s*\(\s*['"`]([^'"`]+)['"`]/g)].map((m) => m[1]);
+      if (queues.length) jobManifests.push({ manifest: rel, scripts: [...new Set(queues)], what: "names a queue" });
+    }
+    // external-services: environment variable NAMES read in source whose
+    // suffix says "a credential or an address", grouped by prefix — a mirror
+    // of the engine's extractor (a test pins the two lists together), so
     // the proposal and the warning agree. Names only, never a value.
     if (/\.(py|ts|tsx|js|jsx|mjs|cjs)$/.test(name) && !/\.(test|spec|stories)\.[cm]?[jt]sx?$|\.d\.ts$/.test(name) && !/(^|\/)(test_[^/]*\.py|[^/]*_test\.py|conftest\.py)$/.test(rel)) {
       let text = "";
@@ -429,7 +472,7 @@ export function detect(root) {
     jobManifests.sort((a, b) => (a.manifest < b.manifest ? -1 : 1));
     proposals.push({
       name: "jobs",
-      evidence: jobManifests.map((m) => `\`${m.manifest}\` runs a process: ${m.scripts.map((s) => `\`${s}\``).join(", ")}`).concat(["the mode (worker or scheduled) is never guessed: a committed railway.toml/json states it, else set extractorOptions.jobs.modes after bootstrap — lint names the ones left unknown"]),
+      evidence: jobManifests.map((m) => `\`${m.manifest}\` ${m.what ?? "runs a process"}: ${m.scripts.map((s) => `\`${s}\``).join(", ")}`).concat(["the map will show this background work with its trigger and what it hits (a cron → a route, a queue → its worker); the mode (worker or scheduled) is never guessed: a schedule or a Railway file states it, else set extractorOptions.jobs.modes after bootstrap — lint names the ones left unknown; a package.json script counts only when a manifest runs it"]),
       options: {},
     });
   }
@@ -445,13 +488,14 @@ export function detect(root) {
     }
     evidence.push("usedBy lists the files carrying a service's marker (its env name or a matching import), never the files that reach the provider through a settings object or a wrapper — say so when proposing");
     evidence.push("names are guessed from the env prefix — confirm or rename each; a prefix that is not a service goes in `ignore`");
-    proposals.push({ name: "services", evidence, options: { services } });
+    proposals.push({ name: "external-services", evidence, options: { services } });
   }
 
   const apps = [];
   if (deps.expo || deps["expo-router"] || nestedDeps.has("expo") || nestedDeps.has("expo-router") || expoDirs.length) apps.push({ name: "Mobile (Expo)", evidence: expoDirs.length ? `Expo Router tree at \`${expoDirs[0]}\`` : "`expo` in package.json", extractor: expoDirs.length ? "expo-router (proposed above)" : "expo-router — switched on by an `app/` folder with a `_layout` file (ZDD 2.1, early); map-only until then" });
   if (routesFiles.length || reactRouterDep || skippedRoutesFiles.length) apps.push({ name: "Web (React)", evidence: routesFiles.length ? `route tree in \`${routesFiles[0]}\`` : reactRouterDep ? "`react-router` in package.json" : `route tree at a refused path (\`${skippedRoutesFiles[0]}\`)`, extractor: "react-router (proposed above)" });
 
+  const host = repoHost(root);
   const mode = sourceFiles === 0 && !pkg ? "greenfield" : "existing";
   if (mode === "existing" && !proposals.length) {
     proposals.push({ name: "generic", evidence: ["source present but no known convention found — map-only ZDD; scaffold an extractor for it with the `extractor` skill once bootstrap is done"], options: {} });
@@ -474,7 +518,30 @@ export function detect(root) {
       });
     }
   }
-  return { mode, proposals, apps, sourceFiles, questions };
+  return { mode, proposals, apps, sourceFiles, questions, host };
+}
+
+// Where the repo is hosted (CAS-103 C6): the shipped CI workflow runs only on
+// GitHub Actions, so the CI offer depends on this. From the origin remote;
+// a repo with no remote yet (greenfield) is "none" and keeps the GitHub
+// default, which the skill then asks about.
+export function hostOf(remote) {
+  if (typeof remote !== "string" || !remote.trim()) return { kind: "none", remote: null };
+  const r = remote.trim();
+  const kind = /(^|[@/.])github\.com([:/]|$)/i.test(r) ? "github"
+    : /(^|[@/.])gitlab\.com([:/]|$)/i.test(r) ? "gitlab"
+    : /dev\.azure\.com|visualstudio\.com/i.test(r) ? "azure"
+    : /(^|[@/.])bitbucket\.org([:/]|$)/i.test(r) ? "bitbucket"
+    : "other";
+  return { kind, remote: r };
+}
+function repoHost(root) {
+  if (!hasGit(root)) return hostOf(null);
+  try {
+    return hostOf(execFileSync("git", ["remote", "get-url", "origin"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 10_000 }));
+  } catch {
+    return hostOf(null);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -588,8 +655,8 @@ function validateExtractorOptions(all) {
     } else if (name === "react-router") {
       for (const k of ["routesFile", "srcAliasRoot"]) if (opts[k] !== undefined) enginePath(opts[k], `react-router.${k}`);
       calls(opts.subscribeCalls, "react-router.subscribeCalls");
-    } else if (name === "services") {
-      if (opts.roots !== undefined) list(opts.roots, "services.roots");
+    } else if (name === "external-services" || name === "services") {
+      if (opts.roots !== undefined) list(opts.roots, `${name}.roots`);
     } else if (name === "jobs") {
       if (opts.roots !== undefined) list(opts.roots, "jobs.roots");
     } else if (name === "expo-router") {
@@ -735,8 +802,33 @@ const slug = (s) =>
 
 const yamlScalar = (s) => JSON.stringify(s); // a JSON string is a valid YAML double-quoted scalar
 
-function snippetText() {
-  return readFileSync(join(TEMPLATES, "claude-md-snippet.md"), "utf8");
+// The instructions body (templates/instructions.md); the two shapes it is
+// written in: the file itself (a header comment, then the body) and the
+// AGENTS.md block (markers around a header and the body).
+// The template names the artifacts by placeholder (`<GLOSSARY>` …), filled
+// from the adopter's configured paths (CR-412): a repo that moved its
+// glossary is told where its glossary is. No argument: the defaults.
+export function instructionsBody(paths = artifactPaths({})) {
+  const p = { ...artifactPaths({}), ...paths };
+  // Replacement functions, so a `$` in a configured path is a `$` (CR-520).
+  const lit = (s) => () => s;
+  return readFileSync(join(TEMPLATES, "instructions.md"), "utf8")
+    .replaceAll("<GLOSSARY>", lit(p.glossary))
+    .replaceAll("<ADR_INDEX>", lit(p.adrIndex))
+    .replaceAll("<BLESSING_INDEX>", lit(p.blessingIndex))
+    .replaceAll("<PATTERNS_PLAN>", lit(p.patternsPlan))
+    .replaceAll("<METADATA_DIR>", lit(p.metadataDir))
+    .replaceAll("<GRAPH>", lit(p.graph))
+    .replaceAll("<AGENT_INDEX>", lit(p.agentIndex))
+    .replaceAll("<HUMAN_INDEX>", lit(p.humanIndex))
+    .replaceAll("<BUNDLE_DIR>", lit(p.bundleDir === "." ? "." : p.bundleDir))
+    .replaceAll("<INSTRUCTIONS>", lit(instructionsRel(p.bundleDir)));
+}
+export function instructionsFileText(paths) {
+  return `<!-- ${OWNER_MARK}: "upgrade ZDD" rewrites this whole file. Never hand-edit it; your own rules belong in CLAUDE.md, which ZDD never edits after install. -->\n` + instructionsBody(paths);
+}
+function snippetText(paths) {
+  return `${SNIPPET_BEGIN}\n<!-- ${OWNER_MARK}: "upgrade ZDD" rewrites everything between the zdd:begin and zdd:end markers. Codex has no file import, so this is a copy of ${instructionsRel((paths ?? artifactPaths({})).bundleDir)}. -->\n` + instructionsBody(paths).trimEnd() + `\n${SNIPPET_END}\n`;
 }
 // Ownership is the HEADER — the mark within the first three lines — not the
 // phrase anywhere in the file (CR-006).
@@ -818,9 +910,9 @@ export function upsertSnippet(existing, snippet) {
   };
 }
 
-function writeSnippet(ledger, file) {
+function writeSnippet(ledger, file, paths) {
   const existing = ledger.exists(file) ? ledger.read(file) : "";
-  const { text, changed, how, note } = upsertSnippet(existing, snippetText());
+  const { text, changed, how, note } = upsertSnippet(existing, snippetText(paths));
   if (!changed) {
     ledger.kept.push(file);
     if (how.startsWith("refused")) ledger.notes.push(`${file}: ${how}`);
@@ -830,6 +922,85 @@ function writeSnippet(ledger, file) {
   else if (!ledger.create(file, text)) return;
   ledger.notes.push(`${file}: ${how} the ZDD instruction block`);
   if (note) ledger.notes.push(`${file}: ${note}`);
+}
+
+// The one line CLAUDE.md carries (2.3). Cases: the line is there (nothing to
+// do); a marked block (the one-time migration: the block becomes the line);
+// the v0.3.1 unmarked snippet (same); nothing (append); malformed markers
+// (refuse, as upsertSnippet does). Line endings follow the file.
+export function upsertImport(existing, line) {
+  const crlf = /\r\n/.test(existing);
+  const norm = (s) => (crlf ? s.replace(/\r?\n/g, "\r\n") : s);
+  const body = norm(`${IMPORT_COMMENT}\n${line}\n`);
+  const present = existing.split(/\r?\n/).some((l) => l === line);
+  if (!existing) return { text: body, changed: true, how: "created" };
+  const nb = count(existing, SNIPPET_BEGIN);
+  const ne = count(existing, SNIPPET_END);
+  if (nb || ne || existing.includes(SNIPPET_BEGIN) || existing.includes(SNIPPET_END)) {
+    // Markers are judged before the import line (CR-409): a block left beside
+    // the line is migrated away, and a malformed one is reported, either way.
+    const b = indexOfMarker(existing, SNIPPET_BEGIN);
+    const e = indexOfMarker(existing, SNIPPET_END);
+    const stray = existing.split(SNIPPET_BEGIN).length - 1 !== 1 || existing.split(SNIPPET_END).length - 1 !== 1;
+    if (nb !== 1 || ne !== 1 || e < b || stray) return { text: existing, changed: false, how: "refused: the zdd:begin / zdd:end markers are not exactly one well-formed pair — fix them by hand" };
+    const replacement = present ? "" : body.trimEnd();
+    let next = existing.slice(0, b) + replacement + existing.slice(e + SNIPPET_END.length);
+    if (present) next = next.replace(/(\r?\n){3,}/g, crlf ? "\r\n\r\n" : "\n\n");
+    return { text: next, changed: true, how: present ? "removed the leftover ZDD block; the import line already loads the instructions" : "replaced the ZDD block with the import line" };
+  }
+  if (present) return { text: existing, changed: false, how: "present" };
+  const h = existing.indexOf(LEGACY_SNIPPET_HEADING);
+  let legacyKept = false;
+  if (h !== -1) {
+    const after = existing.indexOf("\n## ", h + LEGACY_SNIPPET_HEADING.length);
+    const end = after === -1 ? existing.length : after + 1;
+    const section = existing.slice(h, end);
+    if (isLegacySnippet(section)) return { text: existing.slice(0, h) + body + existing.slice(end), changed: true, how: "replaced the pre-0.4 snippet with the import line" };
+    legacyKept = LEGACY_FINGERPRINT.every((f) => section.includes(f));
+  }
+  const sep = existing.endsWith("\n") ? (/\r?\n\r?\n$/.test(existing) ? "" : norm("\n")) : norm("\n\n");
+  return {
+    text: existing + sep + body,
+    changed: true,
+    how: "appended",
+    note: legacyKept ? `legacy section left in place: the "${LEGACY_SNIPPET_HEADING}" section differs from the v0.3.1 snippet, so it is yours — fold what you want into your own text and delete the rest by hand` : undefined,
+  };
+}
+function writeImport(ledger, file, bundleDir) {
+  const existing = ledger.exists(file) ? ledger.read(file) : "";
+  const { text, changed, how, note } = upsertImport(existing, importLine(bundleDir));
+  if (!changed) {
+    ledger.kept.push(how === "present" ? `${file} (loads ${instructionsRel(bundleDir)})` : file);
+    if (how.startsWith("refused")) ledger.notes.push(`${file}: ${how}`);
+    return;
+  }
+  if (existing) ledger.overwrite(file, text);
+  else if (!ledger.create(file, text)) return;
+  ledger.notes.push(`${file}: ${how} — one line, \`${importLine(bundleDir)}\`, loads ZDD's instructions into every session; the rest of ${file} is yours and ZDD never edits it again`);
+  if (note) ledger.notes.push(`${file}: ${note}`);
+}
+// ZDD's own instructions file: written at install, rewritten on every upgrade
+// to this release's text, never hand-edited (the fence refuses).
+function writeInstructions(ledger, config) {
+  const paths = artifactPaths(config, { lenient: true });
+  const rel = instructionsRel(paths.bundleDir);
+  const text = instructionsFileText(paths);
+  if (ledger.exists(rel)) {
+    const cur = ledger.read(rel);
+    if (cur === text) ledger.kept.push(rel);
+    else if (!isOwned(cur)) {
+      // A file of the adopter's at ZDD's name (CR-401): never overwritten.
+      ledger.kept.push(`${rel} (yours — not ZDD's file)`);
+      ledger.notes.push(`${rel}: a file of yours sits where ZDD writes its instructions, and it carries no "${OWNER_MARK}" header, so it was left untouched — move it (and any import line in CLAUDE.md that loads it) and run again, or set paths.bundleDir elsewhere; until then ZDD's instructions are not installed`);
+      return null;
+    } else {
+      ledger.overwrite(rel, text);
+      ledger.notes.push(`${rel}: rewritten to this release's instructions — ZDD's file, never hand-edited; your own rules live in CLAUDE.md`);
+    }
+    return rel;
+  }
+  if (ledger.create(rel, text)) ledger.notes.push(`${rel}: written — ZDD's instructions for every session, loaded by one line in CLAUDE.md (and copied into AGENTS.md for Codex, which has no file import)`);
+  return rel;
 }
 
 // docs/agents/domain.md (CAS-93): Matt Pocock's skills (1.3+) read a root
@@ -987,16 +1158,58 @@ function pinEngine(text, version) {
 // re-pinned by upgrade, never rewritten, so the step is migrated in place: a
 // `run:` line invoking the pinned engine's bare `lint` gains the flag. A
 // workflow whose lint step has another shape is reported, not guessed at.
+// The step is matched by `lint` followed by anything (CAS-103 finding 5):
+// DiO's `lint ${{ … && '--tempstate' || '' }}` was reported "not found".
+// --merge goes right after `lint`, ahead of whatever follows.
 export function mergeGate(text) {
-  const re = /^(\s*(?:-\s+)?run:\s*npx -y "\$ZDD_ENGINE" lint)[ \t]*(\r?)$/m;
+  const re = /^(\s*(?:-\s+)?run:\s*npx -y "\$ZDD_ENGINE" lint)\b([^\r\n]*?)[ \t]*(\r?)$/m;
   if (/\blint --merge\b/.test(text)) return { text, how: "present" };
   if (!re.test(text)) return { text, how: "absent" };
-  return { text: text.replace(re, "$1 --merge$2"), how: "added" };
+  return { text: text.replace(re, (_m, head, rest, cr) => `${head} --merge${rest}${cr}`), how: "added" };
 }
 const workflowText = (version) => pinEngine(readFileSync(join(TEMPLATES, "zdd.yml"), "utf8"), version);
 const prePushText = (version) => pinEngine(readFileSync(join(TEMPLATES, "pre-push"), "utf8"), version);
 
 const hasGit = (root) => existsSync(join(root, ".git"));
+
+// .gitattributes (CAS-103 C15): derive and render write LF, and on a
+// Windows checkout with core.autocrlf=true git showed ~49 generated files
+// "modified" by line ending alone — a frightening diff for a plain user.
+// One rule pins the bundle to LF on checkout and commit, so what the engine
+// writes is what git expects. One line, appended to an existing file (its
+// own line ending kept), never written for a bundle at the repo root.
+export const gitattributesLine = (bundleDir) => `${bundleDir}/** text eol=lf`;
+export const GITATTRIBUTES_LINE = gitattributesLine("zdd");
+function writeGitattributes(ledger, config) {
+  const raw = config?.paths?.bundleDir;
+  const normalised = typeof raw === "string" ? raw.replace(/\\/g, "/").replace(/\/+/g, "/").replace(/^\.\//, "").replace(/\/$/, "") : raw;
+  if (raw !== undefined && (normalised === "." || normalised === "")) {
+    ledger.notes.push(".gitattributes: not written — paths.bundleDir is the repo root, so a `./**` rule would touch every file; add `text eol=lf` rules for the generated artifacts by hand");
+    return;
+  }
+  const bundleDir = artifactPaths(config, { lenient: true }).bundleDir;
+  // A .gitattributes pattern reads `[`, `]`, `*`, `?`, `#`, `!`, `\` and a
+  // space as syntax: a folder holding one would pin something else (CR-313).
+  if (/[\[\]*?#!\\\s]/.test(bundleDir)) {
+    ledger.notes.push(`.gitattributes: not written — paths.bundleDir '${bundleDir}' holds a character .gitattributes reads as pattern syntax; add a \`text eol=lf\` rule for it by hand`);
+    return;
+  }
+  const line = gitattributesLine(bundleDir);
+  const file = ".gitattributes";
+  const note = `${file}: ${bundleDir}/ checked out and committed with LF line endings (${line}) — the engine writes LF; without this a Windows checkout with core.autocrlf shows every generated file as modified`;
+  if (!ledger.exists(file)) {
+    if (ledger.create(file, line + "\n")) ledger.notes.push(note);
+    return;
+  }
+  const text = ledger.read(file);
+  if (text.split(/\r?\n/).some((l) => l.trim() === line)) {
+    ledger.kept.push(file);
+    return;
+  }
+  const eol = /\r\n/.test(text) ? "\r\n" : "\n";
+  ledger.overwrite(file, text + (text === "" || /\r?\n$/.test(text) ? "" : eol) + line + eol);
+  ledger.notes.push(note);
+}
 
 // core.hooksPath: set it only when unset or already ours; an adopter's own
 // hook manager (Husky, pre-commit, …) is never displaced (CR-007).
@@ -1070,6 +1283,13 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
       }
     : { autoLoad: true, fence: true, stop: true, ci: true, prePush: true };
   const optIns = { ...current, ...(answers.optIns ?? {}) };
+  // The shipped workflow is GitHub Actions (C6): on another host it would
+  // never run and the user would believe they had a merge gate. The opt-in
+  // is recorded as off, the three commands are printed for their own
+  // pipeline, and the pre-push hook is offered as the fallback.
+  const host = detection.host ?? hostOf(null);
+  const ciOffHost = optIns.ci && !["github", "none"].includes(host.kind);
+  if (ciOffHost) optIns.ci = false;
 
   // --- config.json -------------------------------------------------------
   let config = existingConfig;
@@ -1100,6 +1320,10 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
       hooks: { autoLoad: optIns.autoLoad, fence: optIns.fence, stop: optIns.stop },
     };
     if (!hasGit(root)) config.render = { storeChanges: false };
+    // A fresh install never writes a retired name (the alias is for configs
+    // that already exist): an answer or a stack spelt the old way is written
+    // the current way, options key and all.
+    migrateRenames(config, []);
     ledger.create("zdd/config.json", JSON.stringify(config, null, 2) + "\n");
   } else {
     // Repair: only an explicit answer changes the config. A pre-1.0 config's
@@ -1157,7 +1381,10 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
 
   // --- curated skeleton (empty templates; never overwritten) ---------------
   ledger.create(paths.glossary, "# Glossary\n\n<!-- One paragraph per term: **Term**: definition. Canonical, not descriptive. -->\n");
-  for (const sub of ["features", "apps", "services"]) {
+  // Fresh skeleton: the hand-written pages for third-party systems live in
+  // `external-services/` (2.3 rename, CAS-103 pick 3). An adopter's existing
+  // `services/` folder is theirs: suggested, never renamed (upgrade's note).
+  for (const sub of ["features", "apps", "external-services"]) {
     const dir = ledger.abs(`${paths.mapDir}/${sub}`);
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true });
@@ -1196,6 +1423,9 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
   // --- opt-ins ------------------------------------------------------------
   ledger.notes.push(`hooks: autoLoad ${optIns.autoLoad ? "on" : "off"}, fence ${optIns.fence ? "on" : "off"}, stop ${optIns.stop ? "on" : "off"} (recorded in zdd/config.json; the plugin's hooks.json reads it)`);
 
+  if (ciOffHost) {
+    ledger.notes.push(`CI workflow not written: this repo's origin is ${host.kind} (${host.remote}), and the workflow ZDD ships runs only on GitHub Actions — a file there would never run. The merge gate for your own pipeline is the three commands the summary prints; the pre-push hook is the local fallback`);
+  }
   if (optIns.ci) {
     ensureOwned(ledger, ".github/workflows/zdd.yml", workflowText(version));
     if (ledger.exists(".githooks/pre-push")) ledger.notes.push(".githooks/pre-push also present — with CI accepted it is redundant; remove it if you no longer want the local check");
@@ -1210,15 +1440,24 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
     } else ledger.skipped.push(".githooks/pre-push (declined)");
   }
 
-  writeSnippet(ledger, "CLAUDE.md");
-  if (answers.codex) writeSnippet(ledger, "AGENTS.md");
-  else ledger.skipped.push("AGENTS.md (not using Codex)");
+  const instructionsWritten = writeInstructions(ledger, config) !== null;
+  if (instructionsWritten) writeImport(ledger, "CLAUDE.md", paths.bundleDir);
+  else ledger.skipped.push("CLAUDE.md (the import line waits until ZDD's instructions file can be written)");
+  // An AGENTS.md that already carries the block is refreshed on a repair
+  // apply with no codex answer (CAS-103 finding 9: the ledger said "not
+  // using Codex" about a file it had just refreshed).
+  const codex = answers.codex ?? Boolean(existingConfig && ledger.exists("AGENTS.md") && ledger.read("AGENTS.md").includes(SNIPPET_BEGIN));
+  if (codex) writeSnippet(ledger, "AGENTS.md", paths);
+  else ledger.skipped.push('AGENTS.md (not using Codex — answer "codex": true to add the block there too)');
+  writeGitattributes(ledger, config);
   writeDomainDoc(ledger, paths);
   writePluginSettings(ledger, version);
 
   const pocock = findPocock(root, home);
-  return { mode, version, date, config, optIns, pocock, detection, ...ledgerOut(ledger) };
+  return { mode, version, date, config, optIns, pocock, detection, host, ciCommands: ciCommands(version), ...ledgerOut(ledger) };
 }
+// The merge gate as three commands, for a pipeline ZDD ships no workflow for.
+export const ciCommands = (version) => [`npx -y ${ENGINE_PACKAGE}@${version} derive --check`, `npx -y ${ENGINE_PACKAGE}@${version} render --check`, `npx -y ${ENGINE_PACKAGE}@${version} lint --merge`];
 
 // The example feature slice's text, from the configured extractors. The
 // example TARGETS are shown as bare paths, never in the `[x](y.json)` shape:
@@ -1285,9 +1524,9 @@ function ledgerOut(l) {
 // change; `drop` (ids from the plan's duplicates) removes adopter sections the
 // block now covers, on the user's word; `to` (a tag newer than this plugin)
 // moves only the lock — the rest waits for that release's own upgrade.
-export function upgrade(root, { lock = false, plan = false, drop = null, to = null, remote } = {}) {
+export function upgrade(root, { lock = false, plan = false, drop = null, to = null, remote, home } = {}) {
   const version = pluginVersion();
-  if (to !== null) return moveLockOnly(root, version, to, { plan, lock, remote });
+  if (to !== null) return moveLockOnly(root, version, to, { plan, lock, remote, home });
   const cfg = readConfig(root);
   if (cfg.state === "absent") throw new Error(`no zdd/config.json under ${root} — nothing to upgrade (run bootstrap without --upgrade to adopt)`);
   if (cfg.state === "invalid") throw new Error(`${cfg.error} — fix it by hand; upgrade never rewrites a config it cannot read`);
@@ -1332,6 +1571,9 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
     Object.assign(config, next);
     changes.push(`adapter "${adapterName}" → extractors ${JSON.stringify(next.extractors)}; adapterOptions split into extractorOptions`);
   }
+  const renamed = [];
+  migrateRenames(config, renamed);
+  changes.push(...renamed);
   if (config.viewer && typeof config.viewer === "object" && Array.isArray(config.viewer.nonAreaTags)) {
     if (config.nonAreaTags === undefined) config.nonAreaTags = config.viewer.nonAreaTags;
     delete config.viewer.nonAreaTags;
@@ -1384,14 +1626,29 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
       if (gate?.how === "added") ledger.notes.push(`${rel}: the lint step now runs \`lint --merge\` (2.0) — the merge gate fails while the branch's pattern plan exists`);
     } else ledger.kept.push(rel);
   }
-  for (const file of ["CLAUDE.md", "AGENTS.md"]) {
-    if (!ledger.exists(file)) continue;
-    const cur = ledger.read(file);
-    if (!cur.includes(SNIPPET_BEGIN) && !cur.includes(SNIPPET_END) && !cur.includes(LEGACY_SNIPPET_HEADING)) {
-      ledger.kept.push(`${file} (no ZDD block to refresh)`);
-      continue;
+  // Links in the map move whenever any still point at a renamed kind's folder
+  // (CR-305): a repo whose config was renamed by hand gets them too.
+  {
+    const mapDir = artifactPaths(config, { lenient: true }).mapDir;
+    const links = migrateMapLinks(ledger, mapDir, artifactPaths(config, { lenient: true }).metadataDir);
+    for (const rel of links.touched) ledger.notes.push(`${rel}: links to metadata/service/ now point at metadata/external-service/ (2.3 rename) — the next derive moves the records there`);
+    for (const what of links.skipped) ledger.notes.push(`${mapDir}: ${what} was not read for old metadata/service/ links — check it by hand`);
+    if (renamed.length && existsSync(ledger.abs(`${mapDir}/services`))) ledger.notes.push(`${mapDir}/services/ is your hand-written folder for third-party systems — ZDD now calls them external services and a fresh install names the folder external-services/; rename it if you like (git mv), it is never renamed for you`);
+  }
+  const upgradePaths = artifactPaths(config, { lenient: true });
+  const instructionsOk = writeInstructions(ledger, config) !== null;
+  if (instructionsOk && ledger.exists("CLAUDE.md")) {
+    const cur = ledger.read("CLAUDE.md");
+    if (IMPORT_LINE_RE.test(cur) || cur.includes(SNIPPET_BEGIN) || cur.includes(SNIPPET_END) || cur.includes(LEGACY_SNIPPET_HEADING)) writeImport(ledger, "CLAUDE.md", upgradePaths.bundleDir);
+    else {
+      ledger.kept.push("CLAUDE.md (no ZDD block or import line to refresh)");
+      ledger.notes.push(`CLAUDE.md does not load ${instructionsRel(upgradePaths.bundleDir)} — add the line \`${importLine(upgradePaths.bundleDir)}\` by hand, or run a repair apply, which adds it`);
     }
-    writeSnippet(ledger, file);
+  }
+  if (ledger.exists("AGENTS.md")) {
+    const cur = ledger.read("AGENTS.md");
+    if (!cur.includes(SNIPPET_BEGIN) && !cur.includes(SNIPPET_END) && !cur.includes(LEGACY_SNIPPET_HEADING)) ledger.kept.push("AGENTS.md (no ZDD block to refresh)");
+    else writeSnippet(ledger, "AGENTS.md", upgradePaths);
   }
   // Adopter text outside the block that the block now covers (CAS-101):
   // named with its lines, removed only by --drop, after the block refresh so
@@ -1401,8 +1658,20 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
     dropSections(ledger, duplicates.filter((d) => dropIds.includes(d.id)));
     duplicates = findAllDuplicates(ledger);
   }
+  writeGitattributes(ledger, config);
   writeDomainDoc(ledger, artifactPaths(config, { lenient: true }));
+  const lockBefore = ourLockRef(ledger);
   writePluginSettings(ledger, version, { mode: "upgrade", lock });
+  // Names a release retired, still in the adopter's own text (CAS-103 7, C9):
+  // the plan greps for each and lists every hit with its replacement — the
+  // old engine pin and the lock's old tag included (DiO keeps the tag in a
+  // lock test of its own).
+  const retired = findRetiredNames(ledger, {
+    oldEngine: fromEngine && fromEngine !== version ? fromEngine : null,
+    oldLock: lockBefore && lockBefore !== `v${version}` ? lockBefore : null,
+    metadataRel: artifactPaths(config, { lenient: true }).metadataDir,
+  });
+  for (const r of retired) ledger.notes.push(r);
   if (stopUnset) ledger.notes.push('hooks.stop is not set (new in 1.1: the Stop hook prompts for the curated half once per session) — it stays OFF until answered: run bootstrap apply with {"optIns":{"stop":true}} (repair mode, keeps every other choice), or add "stop": true inside the existing "hooks" object by hand');
   const ctx = { root, config, version, paths: artifactPaths(config, { lenient: true }) };
   for (const [release, notes] of Object.entries(UPGRADE_NOTES)) {
@@ -1415,7 +1684,7 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
       ledger.notes.push(`${release}: this release's note could not read zdd/config.json's shape — see the upgrade skill's "Upgrading to" section for it`);
     }
   }
-  ledger.notes.push("curated artifacts (glossary, ADRs, map, metadata) untouched — upgrade never writes them");
+  ledger.notes.push("curated artifacts (glossary, ADRs, map pages, metadata) untouched — upgrade never writes them, save one mechanical rewrite named above: a map link to a record whose kind a release renamed");
   ledger.notes.push("if the engine pin moved: run `derive` and `render`, then `lint`, and commit the regenerated artifacts in the same PR");
   return { version, plan, ...ledgerOut(ledger), duplicates };
 }
@@ -1427,7 +1696,181 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
 // `upgrade` skill carries a matching "Upgrading to X.Y" section. Each note
 // opens with its release so the narration reads as a changelog.
 // ---------------------------------------------------------------------------
-const OPT_IN_EXTRACTORS = ["components", "expo-router", "jobs", "services"];
+const OPT_IN_EXTRACTORS = ["components", "expo-router", "jobs", "external-services"];
+// 2.3 (CAS-103 pick 3): the extractor `services` is `external-services`, its
+// record kind `service` is `external-service`. The engine accepts the old
+// names for one release; upgrade rewrites them here, so the alias is never
+// what an upgraded repo relies on.
+const RENAMED_EXTRACTORS = { services: "external-services" };
+const RENAMED_KINDS = { service: "external-service" };
+function migrateRenames(config, changes) {
+  // Each step on its own (CR-305): a half-migrated config — the new extractor
+  // name beside the old options key, or the old strict kind — is finished
+  // whichever part is left.
+  for (const [old, now] of Object.entries(RENAMED_EXTRACTORS)) {
+    if (Array.isArray(config.extractors) && config.extractors.includes(old)) {
+      // Every occurrence (CR-317): a duplicated old name collapses to one new one.
+      const rest = config.extractors.filter((n) => n !== old);
+      const at = config.extractors.indexOf(old);
+      config.extractors = rest.includes(now) ? rest : [...rest.slice(0, at), now, ...rest.slice(at)];
+      changes.push(`extractor "${old}" → "${now}" (2.3: the records are third-party systems, not a code service layer)`);
+    }
+    if (isPlainObject(config.extractorOptions) && Object.hasOwn(config.extractorOptions, old)) {
+      // Both keys with different contents is a conflict the engine refuses;
+      // upgrade must not pick one silently (CR-402).
+      if (Object.hasOwn(config.extractorOptions, now) && JSON.stringify(config.extractorOptions[old]) !== JSON.stringify(config.extractorOptions[now])) {
+        throw new Error(`zdd/config.json has both extractorOptions.${old} and extractorOptions["${now}"] with different contents — merge them by hand into "${now}" (they are one extractor), then run the upgrade again; nothing was written`);
+      }
+      // Keep the adopter's key order: the new key where the old one sat.
+      const next = {};
+      for (const [k, v] of Object.entries(config.extractorOptions)) {
+        if (k === old) {
+          if (!Object.hasOwn(config.extractorOptions, now)) next[now] = v;
+        } else next[k] = v;
+      }
+      config.extractorOptions = next;
+      changes.push(`extractorOptions.${old} → extractorOptions["${now}"]`);
+    }
+  }
+  if (isPlainObject(config.claims)) {
+    for (const [old, now] of Object.entries(RENAMED_KINDS)) {
+      if (Array.isArray(config.claims.strictKinds) && config.claims.strictKinds.includes(old)) {
+        const at = config.claims.strictKinds.indexOf(old);
+        const rest = config.claims.strictKinds.filter((k) => k !== old);
+        config.claims.strictKinds = rest.includes(now) ? rest : [...rest.slice(0, at), now, ...rest.slice(at)];
+        changes.push(`claims.strictKinds "${old}" → "${now}"`);
+      }
+      // The allow-list names records by id; the ids move with the kind (CR-304).
+      if (Array.isArray(config.claims.allowUnclaimed) && config.claims.allowUnclaimed.some((id) => typeof id === "string" && id.startsWith(`${old}:`))) {
+        config.claims.allowUnclaimed = config.claims.allowUnclaimed.map((id) => (typeof id === "string" && id.startsWith(`${old}:`) ? `${now}:${id.slice(old.length + 1)}` : id));
+        changes.push(`claims.allowUnclaimed "${old}:…" ids → "${now}:…"`);
+      }
+    }
+  }
+}
+// The map's links to records of a renamed kind: `…/metadata/service/x.json`
+// → `…/metadata/external-service/x.json`, in every page under mapDir. A
+// mechanical pointer at a generated file, never the adopter's prose — the
+// old folder is gone after the next derive, and a link the render cannot
+// resolve blocks it.
+const MAP_WALK_DEPTH = 16; // the render's own bound (lib/walk-markdown.mjs)
+const MAP_WALK_ENTRIES = 20_000; // and its entry budget
+// Apply `fn` to the text outside fenced code blocks (``` or ~~~, the
+// CommonMark shape), leaving the fences and their contents byte for byte.
+export function outsideFences(text, fn) {
+  const lines = text.split("\n");
+  const out = [];
+  let run = [];
+  let fence = null;
+  const flush = () => {
+    if (run.length) out.push(fn(run.join("\n")));
+    run = [];
+  };
+  for (const line of lines) {
+    const m = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+    if (fence) {
+      out.push(line);
+      if (m && m[1][0] === fence[0] && m[1].length >= fence.length && !line.slice(m[0].length).trim()) fence = null;
+      continue;
+    }
+    if (m) {
+      flush();
+      fence = m[1];
+      out.push(line);
+      continue;
+    }
+    run.push(line);
+  }
+  flush();
+  return out.join("\n");
+}
+
+function migrateMapLinks(ledger, mapDir, metadataDir = "zdd/metadata") {
+  const abs = ledger.abs(mapDir);
+  if (!existsSync(abs)) return { touched: [], skipped: [] };
+  const touched = [];
+  const skipped = [];
+  const files = [];
+  let entries = 0;
+  const rec = (dir, depth) => {
+    if (++entries > MAP_WALK_ENTRIES) {
+      if (entries === MAP_WALK_ENTRIES + 1) skipped.push(`${mapDir}/ (more than ${MAP_WALK_ENTRIES} entries — the rest was not read)`);
+      return;
+    }
+    if (depth > MAP_WALK_DEPTH) {
+      skipped.push(`${posixify(relative(ledger.root, dir))}/ (deeper than ${MAP_WALK_DEPTH} folders)`);
+      return;
+    }
+    let names;
+    try {
+      names = readdirSync(dir).sort();
+    } catch {
+      skipped.push(`${posixify(relative(ledger.root, dir))}/ (unreadable)`);
+      return;
+    }
+    for (const name of names) {
+      const p = join(dir, name);
+      let st;
+      try {
+        st = lstatSync(p);
+      } catch {
+        skipped.push(`${posixify(relative(ledger.root, p))} (unreadable)`);
+        continue;
+      }
+      if (++entries > MAP_WALK_ENTRIES) {
+        if (entries === MAP_WALK_ENTRIES + 1) skipped.push(`${mapDir}/ (more than ${MAP_WALK_ENTRIES} entries — the rest was not read)`);
+        return;
+      }
+      if (st.isSymbolicLink()) skipped.push(`${posixify(relative(ledger.root, p))} (a symlink — never followed)`);
+      else if (st.isDirectory()) rec(p, depth + 1);
+      else if (st.isFile() && /\.md$/i.test(name)) files.push(p);
+    }
+  };
+  rec(abs, 0);
+  const metaPrefix = metadataDir.replace(/\/+$/, "");
+  for (const p of files) {
+    const rel = posixify(relative(ledger.root, p));
+    let st;
+    try {
+      st = lstatSync(p);
+    } catch {
+      continue;
+    }
+    if (st.size > MAX_SCAN_BYTES) {
+      skipped.push(`${rel} (over ${MAX_SCAN_BYTES / 1024} KiB — not read)`);
+      continue;
+    }
+    const text = ledger.read(rel);
+    const pageDir = posix.dirname(rel);
+    // A fenced code block is an example, not a pointer: left as written (CR-518).
+    const rewrite = (chunk) => {
+    let next = chunk;
+    for (const [old, now] of Object.entries(RENAMED_KINDS)) {
+      // A link destination as the render reads it: `](dest)` or `](<dest>)`,
+      // with an optional `#fragment`. Rewritten only when the destination,
+      // resolved from the page, lands under <metadataDir>/<old>/ (CR-410): a
+      // URL, or some other tree that happens to hold a `service/` folder,
+      // is the adopter's prose and stays.
+      next = next.replace(new RegExp(`\\]\\((<?)([^)<>\\s]*/${old}/[^)<>/\\s#]+\\.json)((?:#[^)<>\\s]*)?)(>?)\\)`, "g"), (whole, lt, dest, frag, gt) => {
+        if (/^[a-z][a-z0-9+.-]*:/i.test(dest) || dest.startsWith("//")) return whole;
+        // Root-relative is repo-root-relative (`/zdd/metadata/service/x.json`),
+        // and nothing looser (verify CR-428): `/service/x.json` is prose.
+        const resolved = dest.startsWith("/") ? posix.normalize(dest.replace(/^\/+/, "")) : posix.normalize(posix.join(pageDir, dest));
+        if (!(resolved === `${metaPrefix}/${old}` || resolved.startsWith(`${metaPrefix}/${old}/`))) return whole;
+        const moved = dest.replace(new RegExp(`/${old}/([^/]+\\.json)$`), `/${now}/$1`);
+        return `](${lt}${moved}${frag}${gt})`;
+      });
+    }
+    return next;
+    };
+    const next = outsideFences(text, rewrite);
+    if (next !== text) {
+      ledger.overwrite(rel, next);
+      touched.push(rel);
+    }
+  }
+  return { touched, skipped };
+}
 export const UPGRADE_NOTES = {
   "1.1.0": ({ version }) => [
     "1.1 adds a blocking lint (a blessing citing a superseded or missing ADR fails `lint`) — run `npx -y " + ENGINE_PACKAGE + "@" + version + " lint` before pushing; a red result is the lint doing its job on a stale blessing",
@@ -1450,12 +1893,12 @@ export const UPGRADE_NOTES = {
   ],
   "2.1.0": ({ root, config }) => {
     const notes = [];
-    const have = new Set(Array.isArray(config.extractors) ? config.extractors : []);
+    const have = new Set((Array.isArray(config.extractors) ? config.extractors : []).map((n) => (Object.hasOwn(RENAMED_EXTRACTORS, n) ? RENAMED_EXTRACTORS[n] : n)));
     let proposals = [];
     try {
       proposals = detect(root).proposals ?? [];
     } catch {
-      notes.push("2.1 could not re-run detection here — run `bootstrap.mjs detect` to see whether the opt-in extractors (components, expo-router, jobs, services) apply");
+      notes.push("2.1 could not re-run detection here — run `bootstrap.mjs detect` to see whether the opt-in extractors (components, expo-router, jobs, external-services) apply");
     }
     for (const p of proposals) {
       if (!OPT_IN_EXTRACTORS.includes(p.name) || have.has(p.name)) continue;
@@ -1475,7 +1918,7 @@ export const UPGRADE_NOTES = {
       );
     }
     if (config.claims?.strict === true && config.claims.strictKinds === undefined) {
-      notes.push("2.1 adds claims.strictKinds: strict governs the new kinds (component, job, service) only where listed, so switching an opt-in extractor on never turns lint red by itself (decision 0017)");
+      notes.push("2.1 adds claims.strictKinds: strict governs the new kinds (component, job, external-service — spelt service before 2.3) only where listed, so switching an opt-in extractor on never turns lint red by itself (decision 0017)");
     }
     notes.push(
       "2.1 corrects a `*` in a scanned url: it no longer matches a fixed route segment (`/health`), so refs drop wherever a wildcard had reached one — expect a `derive --check` diff on the pin bump, and lint names the calls it could not place",
@@ -1490,6 +1933,23 @@ export const UPGRADE_NOTES = {
     "2.2 next step for the team: after this PR merges, each developer's next session start prints one line naming the exact commands that move their machine to this release — run them, then restart",
   ],
   "2.2.1": () => ["2.2.1 makes the session-start checks read Claude Code's own profile (CLAUDE_CONFIG_DIR when set, CLAUDE_CODE_PLUGIN_CACHE_DIR for the plugins folder, and the transcript path when a hook's environment is scrubbed) — in the repo only the engine pins and the lock move"],
+  "2.3.0": ({ config, paths }) => {
+    const notes = [
+      `2.3 moves ZDD's rules out of the marked block in CLAUDE.md into ${paths.bundleDir === "." ? "instructions.md" : `${paths.bundleDir}/instructions.md`}, loaded by one line (\`@${paths.bundleDir === "." ? "" : paths.bundleDir + "/"}instructions.md\`) — this run replaces the block with the line once and never edits CLAUDE.md again; AGENTS.md keeps a block (Codex has no import). The rules gained: both install commands in order, the three cases a release line can mean, the merge-conflict steps, reuse-first in "choose patterns", and where a ZDD defect is filed (decision 0024)`,
+      "2.3 reads your own CLAUDE.md / AGENTS.md text against ZDD's rules per paragraph or bullet, with what ZDD now says beside each (the plan lists them), and sweeps your files for names a release retired — each hit above names its replacement",
+      "2.3: what git ignores is never source — derive skips every gitignored path and .claude/worktrees/ (decision 0026); a record that named one changes on the bump, and derive now stops when git cannot list the ignored set",
+    ];
+    const names = Array.isArray(config.extractors) ? config.extractors : [];
+    if (names.includes("services") || names.includes("external-services")) {
+      notes.push("2.3 renames the `services` extractor to `external-services` and its records from `service` to `external-service` (decision 0023): the config keys, claims.strictKinds, the allow-list ids and the map's links were rewritten above; the next derive moves zdd/metadata/service/ to zdd/metadata/external-service/ — commit both; a hand-written map/services/ folder is yours to rename or keep");
+    }
+    if (names.includes("jobs")) {
+      notes.push("2.3 widens the jobs extractor into background work (decision 0025): Vercel crons, Railway and Cloudflare schedules, pg_cron, Compose workers and BullMQ / Inngest / Trigger.dev / SQS queues, each with its trigger and what it hits, in a Background work section of the agent index — and a package.json script counts only when a manifest runs it, so a hand-run script's job record leaves on the bump; GitHub Actions schedules are listed only with extractorOptions.jobs.includeGithubActions: true");
+    }
+    notes.push("2.3 adds agentIndex.budgetTokens (default 2000) and agentIndex.levels (1 or 2) — set levels to 2 when the index warns it is over budget: areas first, one file per area under zdd/agent-index/, each feature one hop away; and `lint` warns on a blessing that points at no code (a blessing is a pointer to reusable code to start from — authoring.md has the test)");
+    notes.push("2.3 writes .gitattributes (zdd/ pinned to LF) and runs a preflight (Node 20+, npx, git, github.com, the npm registry, the pinned engine) before an install or an upgrade; the CI workflow is offered only on GitHub — elsewhere the merge gate is three commands for your own pipeline");
+    return notes;
+  },
 };
 
 export function compareVersions(a, b) {
@@ -1512,10 +1972,99 @@ export function compareVersions(a, b) {
 // check runs in CI", a title's "smoke-test the ZDD plugin") is not a rule the
 // block duplicates (found by the CAS-101 smoke). The document's title (its
 // first heading, at level 1) is never named.
-const ZDD_VERB = /\b(?:load|update|upgrade) ZDD\b|choose patterns/i;
-const ZDD_MENTION = /\bZDD\b|zero[- ]drift|\bzdd\/|zdd-engine|agent-index|blessing-index/gi;
+// The rules ZDD's instructions state (CAS-103 finding 4, C8): the finder
+// reads the adopter's own text — outside the import line or the block — one
+// paragraph or bullet at a time, and names every unit that speaks to one of
+// these rules, with what ZDD now says beside it. The skill then reads the two
+// side by side ("same, different, or contradicting") and the user decides;
+// `--drop` removes that unit, never a whole section. A passing mention of
+// ZDD ("a tiny app used to smoke-test the ZDD plugin") matches no rule. A
+// test keeps every rule's `says` true to templates/instructions.md.
+export const INSTRUCTION_RULES = [
+  { id: "load", match: /\bload ZDD\b/i, says: '"load ZDD" before designing or building in an area: read the glossary whole, the ADR index whole and the ADRs the task cites, say what you loaded, then read the code fresh' },
+  { id: "patterns", match: /\bchoose patterns\b|\bblessing-index\b|\bpatterns-plan\b/i, says: '"choose patterns" once the design is settled, before any code: check for existing code to reuse first, then the blessings that match, and commit zdd/patterns-plan.md' },
+  { id: "update", match: /\bupdate ZDD\b/i, says: '"update ZDD" before finishing a unit of work: curate what the change touched, reconcile the pattern plan, regenerate, commit with the code; never handed to a subagent' },
+  { id: "upgrade", match: /\bupgrade ZDD\b|\bbootstrap\s+--upgrade\b/i, says: '"upgrade ZDD" moves the repo to a newer release and shows every change before writing it' },
+  { id: "skew", match: /\b(?:release|engine[- ]skew|skew|mismatch) line\b|release mismatch|first line of (?:your|the) reply/i, says: "a release or engine-skew line is the first line of the reply, verbatim, and is fixed before the task — the fix depends on the case (machine behind the lock: the commands printed; branch behind main: merge main; repo behind the newest release: upgrade ZDD, by choice)" },
+  { id: "generated", match: /hand-edit|\bzdd\/(?:metadata|graph\.json|agent-index\.md|adr-index\.md|blessing-index\.md|human-index\.html)\b|generated artifacts?\b/i, says: "the generated artifacts (zdd/metadata/, graph.json, the agent, ADR and blessing indexes, the human index) and zdd/instructions.md are never hand-edited" },
+  { id: "merge", match: /(?:merge|rebase)[^.\n]*\b(?:deriv|render|regenerat|generated|conflict)/i, says: "a merge conflict in a generated file: take either side, finish and commit the merge, then regenerate with \"update ZDD\" and commit that; on a rebase the same per replayed commit, regenerating once at the end" },
+  { id: "install", match: /plugin (?:install|update) (?:zdd|mattpocock-skills)|skills are missing|zdd@zero-drift-docs|mattpocock-skills@/i, says: "if ZDD's skills are missing: from the repo's folder, claude plugin install mattpocock-skills@zero-drift-docs --scope project, then claude plugin install zdd@zero-drift-docs --scope project, then restart; this repo switches other copies of Matt Pocock's skills off on purpose" },
+  { id: "grill", match: /\bgrill\b/i, says: "grill is optional: a design interview that writes glossary terms and ADRs as they crystallize; without Matt Pocock's skills, plan mode plus \"update ZDD\"" },
+  { id: "findings", match: /zero-drift-docs\/issues|\bZDD defect\b/i, says: "a ZDD defect goes to ZDD's issues page, labelled finding, proposed to the developer first" },
+];
 const talksZdd = (heading, own) => new RegExp(ZDD_MENTION.source, "i").test(heading) || ZDD_VERB.test(own) || (own.match(ZDD_MENTION) ?? []).length >= 2;
 export function findDuplicates(text) {
+  return findRuleUnits(text);
+}
+// Units of the adopter's own text — a paragraph, or a bullet with its
+// indented continuation — outside the block and the import lines, that
+// speak to a rule. Nothing is reported unless the file carries the import
+// line or exactly one well-formed block: with broken markers the run cannot
+// say where ZDD's text ends and the adopter's begins (CR-002).
+export function findRuleUnits(text) {
+  const lines = text.split(/\r?\n/);
+  const hasImport = IMPORT_LINE_RE.test(text);
+  const nb = count(text, SNIPPET_BEGIN);
+  const ne = count(text, SNIPPET_END);
+  const wellFormed = nb === 1 && ne === 1 && indexOfMarker(text, SNIPPET_BEGIN) < indexOfMarker(text, SNIPPET_END) && text.split(SNIPPET_BEGIN).length === 2 && text.split(SNIPPET_END).length === 2;
+  if (!hasImport && !wellFormed) return [];
+  if (nb || ne || text.includes(SNIPPET_BEGIN) || text.includes(SNIPPET_END)) if (!wellFormed) return [];
+  const out = [];
+  let inBlock = false;
+  let inFence = false;
+  let heading = "(top)";
+  let unit = null; // { from, to, lines }
+  const flush = () => {
+    if (!unit) return;
+    const body = unit.lines.join("\n");
+    const rules = INSTRUCTION_RULES.filter((r) => r.match.test(body)).map((r) => r.id);
+    if (rules.length) out.push({ heading, from: unit.from, to: unit.to, text: body, rules });
+    unit = null;
+  };
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const t = line.trim();
+    if (t === SNIPPET_BEGIN) {
+      flush();
+      inBlock = true;
+      continue;
+    }
+    if (t === SNIPPET_END) {
+      inBlock = false;
+      continue;
+    }
+    if (inBlock) continue;
+    if (/^(`{3,}|~{3,})/.test(t)) {
+      flush();
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
+    if (t === "" || t === IMPORT_COMMENT || /^@\S+\/instructions\.md$/.test(t)) {
+      flush();
+      continue;
+    }
+    if (/^#{1,6}\s/.test(t)) {
+      flush();
+      heading = t;
+      continue;
+    }
+    const bullet = /^(?:[-*+]|\d+[.)])\s/.test(t);
+    const continuation = /^\s/.test(line);
+    if (unit && (bullet || (!continuation && unit.bullet))) flush();
+    if (!unit) unit = { from: i + 1, to: i + 1, lines: [line], bullet };
+    else {
+      unit.to = i + 1;
+      unit.lines.push(line);
+    }
+  }
+  flush();
+  return out;
+}
+// The pre-2.3 section finder, kept for its tests' sake and for nothing else.
+const ZDD_VERB = /\b(?:load|update|upgrade) ZDD\b|choose patterns/i;
+const ZDD_MENTION = /\bZDD\b|zero[- ]drift|\bzdd\/|zdd-engine|agent-index|blessing-index/gi;
+export function findDuplicateSections(text) {
   const lines = text.split(/\r?\n/);
   // Only beside exactly one well-formed block (CR-002): with no block nothing
   // covers the section, and with a lone, doubled or reversed marker the
@@ -1575,15 +2124,157 @@ function findAllDuplicates(ledger) {
   return all;
 }
 function dropSections(ledger, chosen) {
+  const isHeading = (l) => /^#{1,6}\s/.test(l.trim());
+  const isBoundary = (l) => {
+    const t = l.trim();
+    return isHeading(l) || t === SNIPPET_BEGIN || t === IMPORT_COMMENT || /^@\S+\/instructions\.md$/.test(t);
+  };
   for (const file of new Set(chosen.map((d) => d.file))) {
     const text = ledger.read(file);
     const eol = /\r\n/.test(text) ? "\r\n" : "\n";
     const lines = text.split(/\r?\n/);
     const mine = chosen.filter((d) => d.file === file).sort((x, y) => y.from - x.from);
-    for (const d of mine) lines.splice(d.from - 1, d.to - d.from + 1);
+    const notes = [];
+    for (const d of mine) {
+      let start = d.from - 1;
+      let end = d.to;
+      while (end < lines.length && lines[end].trim() === "") end++;
+      // The unit was all its section held: the heading, left empty, goes too.
+      let h = start - 1;
+      while (h >= 0 && lines[h].trim() === "") h--;
+      const headingWent = h >= 0 && isHeading(lines[h]) && (end >= lines.length || isBoundary(lines[end]));
+      if (headingWent) start = h;
+      lines.splice(start, end - start);
+      // Exactly one blank line between what remains.
+      if (start > 0 && start < lines.length && lines[start - 1].trim() === "" && lines[start].trim() === "") lines.splice(start, 1);
+      notes.unshift(`${file}: removed ${lineRange(d)} under "${d.heading}" (${brief(d.text)})${headingWent ? ", and the heading it was all of" : ""}, on the user's word — ZDD's instructions now carry it`);
+    }
     ledger.overwrite(file, lines.join(eol));
-    for (const d of mine.reverse()) ledger.notes.push(`${file}: removed "${d.heading}" (lines ${d.from}–${d.to}), on the user's word — the ZDD block now carries it`);
+    ledger.notes.push(...notes);
   }
+}
+const lineRange = (d) => (d.from === d.to ? `line ${d.from}` : `lines ${d.from}–${d.to}`);
+const brief = (s) => {
+  const one = s.replace(/\s+/g, " ").trim();
+  return one.length > 90 ? one.slice(0, 87) + "…" : one;
+};
+// Names a release retired (CAS-103 7, C9). Every upgrade greps the adopter's
+// instruction files and docs for each one and lists the hits with the
+// replacement; the old engine pin, when it moved this run, is looked for too
+// (DiO keeps its own lock test). Advisory, bounded, never a failure.
+export const RETIRED_NAMES = [
+  { since: "2.2.0", find: /\bzdd:bootstrap --upgrade\b|\bbootstrap --upgrade\b/g, now: '"upgrade ZDD" (the upgrade skill)' },
+  { since: "2.3.0", find: /\bextractorOptions\.services\b|\bmetadata\/service\/|"services"(?=\s*[,\]])/g, now: "the `external-services` extractor and `metadata/external-service/` (the 2.3 rename)" },
+  { since: "2.3.0", find: /\bstrictKinds\b[^\n\]]*"service"|\bservice:[a-z0-9][a-z0-9-]*\b/g, now: "the strict kind `external-service` and `external-service:<id>` ids (the 2.3 rename)" },
+  { since: "2.3.0", find: /<!-- zdd:begin -->/g, now: "one import line, `@zdd/instructions.md`, in CLAUDE.md (AGENTS.md keeps the block for Codex)", skip: ["AGENTS.md"] },
+];
+const RETIRED_SCAN_EXT = /\.(md|ya?ml|json|mjs|cjs|js|ts|sh|ps1|toml|txt)$/i;
+const RETIRED_SKIP_FILES = /(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|CHANGELOG\.md)$/i;
+const MAX_RETIRED_FILES = 3000;
+const MAX_RETIRED_NOTES = 20;
+const RETIRED_SKIP_DIRS = new Set(["node_modules", ".git", ".next", "dist", "build", "coverage", ".venv", "venv", "__pycache__", ".expo"]);
+// The files swept: git's tracked list where git can answer (deterministic,
+// honours the repo's ignores, never starved by build output — CR-417), else
+// a bounded walk that says when it was cut short.
+function sweepList(ledger, metadataRel) {
+  const out = [];
+  let truncated = false;
+  if (hasGit(ledger.root)) {
+    try {
+      // Relative to the adopter's root, which may sit below the git root
+      // (a package in a monorepo): git lists that folder only, by names the
+      // ledger resolves from it (CR-519).
+      const listed = execFileSync("git", ["ls-files", "-z"], { cwd: ledger.root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 30_000, maxBuffer: 64 * 1024 * 1024 }).split("\0").filter(Boolean);
+      for (const rel of listed) {
+        if (!RETIRED_SCAN_EXT.test(rel) || RETIRED_SKIP_FILES.test(rel) || rel === metadataRel || rel.startsWith(`${metadataRel}/`)) continue;
+        if (rel.split("/").some((seg) => RETIRED_SKIP_DIRS.has(seg))) continue;
+        out.push(rel);
+        if (out.length > MAX_RETIRED_FILES) {
+          truncated = true;
+          break;
+        }
+      }
+      return { files: out, truncated, source: "git" };
+    } catch {
+      /* fall through to the walk */
+    }
+  }
+  let seen = 0;
+  const rec = (dir, depth) => {
+    if (depth > 6 || truncated) {
+      if (depth > 6) truncated = true;
+      return;
+    }
+    let names;
+    try {
+      names = readdirSync(dir).sort();
+    } catch {
+      return;
+    }
+    for (const name of names) {
+      if (++seen > MAX_RETIRED_FILES) {
+        truncated = true;
+        return;
+      }
+      const p = join(dir, name);
+      let st;
+      try {
+        st = lstatSync(p);
+      } catch {
+        continue;
+      }
+      const rel = posixify(relative(ledger.root, p));
+      if (st.isDirectory()) {
+        const dotOk = [".claude", ".github", ".githooks"].includes(name);
+        if (!(RETIRED_SKIP_DIRS.has(name) || (name.startsWith(".") && !dotOk) || rel === metadataRel)) rec(p, depth + 1);
+        continue;
+      }
+      if (st.isFile() && RETIRED_SCAN_EXT.test(name) && !RETIRED_SKIP_FILES.test(rel)) out.push(rel);
+    }
+  };
+  rec(ledger.root, 0);
+  return { files: out, truncated, source: "walk" };
+}
+export function findRetiredNames(ledger, { oldEngine = null, oldLock = null, metadataRel = "zdd/metadata" } = {}) {
+  const rules = [...RETIRED_NAMES];
+  if (oldLock && /^v\d+\.\d+\.\d+$/.test(oldLock) && oldLock !== `v${oldEngine}`) {
+    rules.push({ since: "this upgrade", find: new RegExp(`\\b${oldLock.replace(/\./g, "\\.")}\\b`, "g"), now: `the new release's tag (v${pluginVersion()}) — the lock moved; your repo may hold the old tag somewhere ZDD does not write (a lock test, a setup guide)`, skip: [".claude/settings.json", "zdd/config.json", ".github/workflows/zdd.yml", ".githooks/pre-push"] });
+  }
+  if (oldEngine && /^\d+\.\d+\.\d+$/.test(oldEngine)) {
+    rules.push({ since: "this upgrade", find: new RegExp(`\\bv?${oldEngine.replace(/\./g, "\\.")}\\b`, "g"), now: `the new release (${pluginVersion()}) — your repo may hold the version somewhere ZDD does not write (a lock test, a setup guide)`, skip: [".claude/settings.json", "zdd/config.json", ".github/workflows/zdd.yml", ".githooks/pre-push"] });
+  }
+  const written = new Set(ledger.wrote);
+  const hits = [];
+  const list = sweepList(ledger, metadataRel);
+  for (const rel of list.files) {
+    if (hits.length > MAX_RETIRED_NOTES) break;
+    if (written.has(rel) || rel.endsWith(`/${INSTRUCTIONS_NAME}`) || rel === INSTRUCTIONS_NAME) continue;
+    let st;
+    try {
+      st = lstatSync(ledger.abs(rel));
+    } catch {
+      continue;
+    }
+    if (!st.isFile() || st.size > MAX_SCAN_BYTES) continue;
+    let text;
+    try {
+      text = ledger.read(rel);
+    } catch {
+      continue;
+    }
+    const lines = text.split(/\r?\n/);
+    for (const r of rules) {
+      if (r.skip?.includes(rel)) continue;
+      lines.forEach((line, i) => {
+        r.find.lastIndex = 0;
+        const m = r.find.exec(line);
+        if (m) hits.push(`${rel}:${i + 1} still says \`${m[0]}\` — since ${r.since} that is ${r.now}`);
+      });
+    }
+  }
+  const out = hits.length > MAX_RETIRED_NOTES ? [...hits.slice(0, MAX_RETIRED_NOTES), `…and ${hits.length - MAX_RETIRED_NOTES} more retired names — grep for them`] : hits;
+  if (list.truncated) out.push(`the sweep for retired names was cut short (more than ${MAX_RETIRED_FILES} files${list.source === "walk" ? ", or deeper than 6 folders" : ""}) — grep for the retired names yourself`);
+  return out;
 }
 function parseDrop(drop) {
   if (drop === null || drop === undefined || drop === false) return [];
@@ -1609,7 +2300,12 @@ export function newestTag(lsRemote) {
   }
   return best;
 }
-export function releaseStatus(root, remote = `https://github.com/${MARKETPLACE_REPO}.git`) {
+// Four facts (CAS-103 C3, C4): the newest release tag, the repo's lock, the
+// release this session runs, and the catalogue this machine holds
+// (known_marketplaces.json, the thing a restart moves). `ready` says the
+// running release and the catalogue are both already at the newest, so a
+// lock move can go straight on to the plan in the same session, no restart.
+export function releaseStatus(root, remote = `https://github.com/${MARKETPLACE_REPO}.git`, home) {
   const running = pluginVersion();
   let lock = null;
   try {
@@ -1619,9 +2315,19 @@ export function releaseStatus(root, remote = `https://github.com/${MARKETPLACE_R
   } catch {
     /* no settings: no lock */
   }
+  let catalogue = null;
+  try {
+    const ref = JSON.parse(readFileSync(join(pluginsDir(home), "known_marketplaces.json"), "utf8"))?.[MARKETPLACE]?.source?.ref;
+    if (typeof ref === "string") catalogue = ref;
+  } catch {
+    /* no catalogue: Codex, or a machine that never fetched one */
+  }
   const out = remoteTags(remote);
   const newest = newestTag(out);
-  return { lock, running, newest, newer: newest !== null && compareVersions(newest, running) > 0 };
+  const newer = newest !== null && compareVersions(newest, running) > 0;
+  const lockBehind = lock !== null && RELEASE_TAG.test(lock) && compareVersions(lock, running) < 0;
+  const ready = newest !== null && !newer && newest === `v${running}` && catalogue === newest;
+  return { lock, running, newest, catalogue, newer, lockBehind, ready };
 }
 function remoteTags(remote = `https://github.com/${MARKETPLACE_REPO}.git`) {
   return execFileSync("git", ["ls-remote", "--tags", "--refs", remote], { encoding: "utf8", timeout: 30000, stdio: ["ignore", "pipe", "pipe"] });
@@ -1630,7 +2336,7 @@ function remoteTags(remote = `https://github.com/${MARKETPLACE_REPO}.git`) {
 // marketplace's repository has (CR-003), never below this plugin or the
 // repo's current lock; an absent lock is written only with --lock (CR-008);
 // --plan writes nothing.
-function moveLockOnly(root, version, to, { plan = false, lock = false, remote } = {}) {
+function moveLockOnly(root, version, to, { plan = false, lock = false, remote, home } = {}) {
   if (!RELEASE_TAG.test(String(to))) throw new Error("--to must be a release tag, vX.Y.Z");
   if (compareVersions(to, version) < 0) throw new Error(`--to ${to} is older than this plugin (${version}) — upgrade never moves a lock backwards`);
   const ledger = new Ledger(root, { dryRun: plan });
@@ -1670,10 +2376,22 @@ function moveLockOnly(root, version, to, { plan = false, lock = false, remote } 
     ledger.overwrite(SETTINGS_FILE, text);
     ledger.notes.push(`${SETTINGS_FILE}: ${was ? `lock moved ${was.slice(0, 40)} → ${to}` : `locked this repo to ZDD ${to}`} (auto-update off) — nothing else changes in this run`);
   }
+  // Where this machine already is (CAS-103 C3, CR-314): running the target
+  // with the catalogue there too, the rest of the upgrade is this session's.
+  let catalogue = null;
+  try {
+    const ref = JSON.parse(readFileSync(join(pluginsDir(home), "known_marketplaces.json"), "utf8"))?.[MARKETPLACE]?.source?.ref;
+    if (typeof ref === "string") catalogue = ref;
+  } catch {
+    /* no catalogue */
+  }
+  const ready = to === `v${version}` && catalogue === to;
   ledger.notes.push(
-    `next: restart Claude Code; the first line of the new session names the commands that move this machine to ${to} — run them and restart again; then say "upgrade ZDD" again: that run is ${to}'s own, and shows the rest of the changes before writing them`,
+    ready
+      ? `next: this session already runs ${to} and the catalogue on this machine is at ${to} — no restart: say "upgrade ZDD" again now (or carry straight on to its plan), and that run shows the rest of the changes before writing them`
+      : `next: restart Claude Code; the first line of the new session names the commands that move this machine to ${to} — run them and restart again; then say "upgrade ZDD" again: that run is ${to}'s own, and shows the rest of the changes before writing them`,
   );
-  return { version, plan, to, ...ledgerOut(ledger), duplicates: [] };
+  return { version, plan, to, ready, ...ledgerOut(ledger), duplicates: [] };
 }
 
 // ---------------------------------------------------------------------------
@@ -1691,6 +2409,9 @@ export function narrateDetect(d, pocock) {
     out.push("Mode: GREENFIELD — no source to read. Ask for the intended stack and configure extractors ahead of the code.");
   } else {
     out.push(`Mode: EXISTING codebase (${d.sourceFiles} source files). Proposed extractors, with the evidence:`);
+  }
+  if (d.host) out.push(`Hosted on: ${d.host.kind === "none" ? "no remote yet (the GitHub default stands; ask where it will live)" : `${d.host.kind} (${d.host.remote})`}${d.host.kind !== "github" && d.host.kind !== "none" ? " — the CI workflow ZDD ships runs only on GitHub Actions; the merge gate is three commands for your own pipeline" : ""}`);
+  if (d.mode !== "greenfield") {
     for (const p of d.proposals) {
       out.push(`  - ${p.name}`);
       for (const e of p.evidence) out.push(`      evidence: ${e}`);
@@ -1705,9 +2426,35 @@ export function narrateDetect(d, pocock) {
 
 function narratePocock(p) {
   const pin = pocockPin();
-  if (p.installed) return `mattpocock-skills: installed (${p.hits[0].where}: ${p.hits[0].path}) — \`grill\` will run the real interview. ZDD pins ${pin.plugin} ${pin.version} (${pin.plugin}@${pin.marketplace}); this repo's .claude/settings.json keeps any other copy off here.`;
+  const ours = `${pin.plugin}@${pin.marketplace}`;
+  if (p.installed) {
+    // ZDD's pinned copy first (the one bootstrap switches on); another copy
+    // that happens to be on here is said as such, because bootstrap switches
+    // it off and `grill` then needs the pinned one (Sadies dry run, 2.3).
+    const h = p.hits.find((x) => x.id === ours && x.enabled !== false) ?? p.hits.find((x) => x.enabled !== false);
+    const detail = h.id ? `${h.where}: ${h.path}; ${h.id} ${h.version ?? "?"}, switched on here` : `${h.where}: ${h.path}`;
+    if (h.id && h.id !== ours && !p.pinned) {
+      return `mattpocock-skills: a copy is on here (${detail}), but it is not ZDD's pinned one (${ours} ${pin.version}), and bootstrap switches other copies off in this repo so the pinned one loads — install it: \`claude plugin install ${ZDD_PLUGIN_ID} --scope project\` from this repo's folder, then restart; until then \`grill\` would run the other copy.`;
+    }
+    return `mattpocock-skills: installed (${detail}) — \`grill\` will run the real interview. ZDD pins ${pin.plugin} ${pin.version} (${ours}); this repo's .claude/settings.json keeps any other copy off here.`;
+  }
+  // A copy is cached but this repo switches it off (finding 9): grill will
+  // not find it, and the fix is ZDD's own pinned copy, never switching the
+  // other one back on.
+  const off = p.hits.filter((x) => x.enabled === false);
+  const install = `\`claude plugin install ${ZDD_PLUGIN_ID} --scope project\` from this repo's folder (Claude Code)`;
+  if (p.unreadableSettings && p.hits.some((x) => x.where === "pluginCache" && x.enabled === null)) {
+    return `mattpocock-skills: a copy is cached, but ${p.unreadableSettings} could not be read as JSON, so whether it is switched on here is unknown — fix that file, then run detect again.`;
+  }
+  if (off.length) {
+    return (
+      `mattpocock-skills: NOT installed as ZDD's pinned copy (${ours}); a copy is present but switched off here: ${off.map((x) => `${x.id} ${x.version ?? "?"}`).join(", ")}. ` +
+      `This repo switches other copies off on purpose — ZDD brings the one release it is tested with: ${install} installs ${ours} ${pin.version} beside zdd; then restart. ` +
+      "Until then `grill` cannot run, so work decisions out in plan mode and let \"update ZDD\" capture them."
+    );
+  }
   return (
-    `mattpocock-skills: NOT installed. Installing zdd brings it: \`/plugin install ${ZDD_PLUGIN_ID}\` (Claude Code) installs ${pin.plugin}@${pin.marketplace}, ` +
+    `mattpocock-skills: NOT installed. Installing zdd brings it: ${install} installs ${ours}, ` +
     `the ${pin.version} release this ZDD release is tested with, beside it — so a missing copy means zdd was loaded another way (a --plugin-dir, a copied folder); run that install. ` +
     "Your glossary and ADRs will only be as good as the design sessions that fill them, and `grill` (the design interview that writes them as it goes) needs Matt Pocock's skills. " +
     "Without it, work decisions out in plan mode and let \"update ZDD\" capture them."
@@ -1716,17 +2463,35 @@ function narratePocock(p) {
 
 export function narrateApply(r) {
   const out = [`Bootstrap (${r.mode}) — plugin ${r.version}, ${r.date}`];
-  for (const f of r.wrote) out.push(`  wrote   ${f}`);
-  for (const f of r.kept) out.push(`  kept    ${f}`);
+  // Each file with its plain-words card (pick 2): what it is, why it
+  // exists, who writes it, whether it is ever hand-edited.
+  const card = (f) => {
+    const e = explain(f.replace(/ \(.*\)$/, ""));
+    if (!e) return;
+    out.push(`          what: ${e.what}`, `          why: ${e.why}`, `          who: ${e.who}`, `          hand-edited: ${e.handEdited}`);
+  };
+  for (const f of r.wrote) {
+    out.push(`  wrote   ${f}`);
+    card(f);
+  }
+  for (const f of r.kept) {
+    out.push(`  kept    ${f}`);
+    card(f);
+  }
   for (const f of r.skipped) out.push(`  skipped ${f}`);
   for (const n of r.notes) out.push(`  note    ${n}`);
   out.push("");
-  out.push("Next, run the engine (the skill does this): derive, then the mapping session, then render.");
+  out.push("Next, run the engine (the skill does this): derive, render and lint, then the one mapping session, then render again.");
   out.push(`  npx -y ${ENGINE_PACKAGE}@${r.version} derive`);
   out.push(`  npx -y ${ENGINE_PACKAGE}@${r.version} render`);
+  out.push(`  npx -y ${ENGINE_PACKAGE}@${r.version} lint`);
   out.push("");
   if (r.optIns.ci) {
     out.push("One step only you can do: in branch protection, require the `zdd` check to pass and require branches to be up to date before merging. Now stale generated artifacts cannot merge.");
+  } else if (r.host && !["github", "none"].includes(r.host.kind)) {
+    out.push(`This repo is hosted on ${r.host.kind}, where the workflow ZDD ships (GitHub Actions) cannot run. The merge gate for your own pipeline is three commands, run on every pull request:`);
+    for (const c of r.ciCommands ?? ciCommands(r.version)) out.push(`  ${c}`);
+    out.push("Fail the pipeline when any of them fails; the first two say when the generated artifacts are stale, the third refuses a merge while a pattern plan is left behind." + (r.optIns.prePush ? " Until then the pre-push hook makes a forgotten update loud on each developer's machine." : ""));
   } else {
     out.push(
       "CI declined: ZDD runs on the spoken verbs alone" +
@@ -1738,16 +2503,207 @@ export function narrateApply(r) {
   return out.map(printable).join("\n");
 }
 
+// ---------------------------------------------------------------------------
+// The plain-words card for every file ZDD puts in a repo (CAS-103 pick 2):
+// what it is, why it exists, who writes it, whether it is ever hand-edited.
+// The narration prints the card under each file, and a test binds every
+// path bootstrap writes to a card here. Written for someone who has never
+// heard of ZDD.
+// ---------------------------------------------------------------------------
+export const ARTIFACT_EXPLANATIONS = [
+  { match: /(^|\/)config\.json$/, what: "ZDD's settings for this repo: which parts of the code it reads (the extractors), where the docs live, and which helpers are switched on", why: "so every developer and every CI run reads the code the same way", who: "ZDD writes it at install; \"upgrade ZDD\" moves its version line", handEdited: "rarely — a path or an option when you change your mind; ZDD says so when it rewrites it" },
+  { match: /(^|\/)instructions\.md$/, what: "ZDD's instructions to the AI for every session: the spoken verbs (\"load ZDD\", \"choose patterns\", \"update ZDD\", \"upgrade ZDD\") and the rules that keep the docs honest", why: "the AI reads this before it touches anything, so it knows the vocabulary, the decisions and the shape of the system", who: "ZDD writes it and rewrites it on every upgrade", handEdited: "never — your own rules go in CLAUDE.md, which ZDD never edits after install" },
+  { match: /(^|\/)glossary\.md$/, what: "the glossary: one short paragraph per word your project uses with a precise meaning", why: "the AI calls things what you call them, instead of grepping for a near-synonym and guessing", who: "you (and the AI, with your approval, as each piece of work touches a word)", handEdited: "yes — it is yours; it starts empty and grows with the work" },
+  { match: /(^|\/)adr\/0001-adopt-zero-drift-docs\.md$/, what: "your first decision record: that this repo adopted ZDD, and why", why: "a worked example of the format, and the corpus's first entry — your decision, dated today", who: "ZDD seeds it once; it is yours from then on", handEdited: "yes — edit the reasons to match yours" },
+  { match: /(^|\/)adr\/?(\d{4}-.*\.md)?$/, what: "the decision records (ADRs): one short file per decision that was hard to reverse, surprising without context, and a real trade-off", why: "so the AI does not reintroduce the approach you rejected in March", who: "you (and the AI, as decisions crystallise); never reconstructed from old code by default", handEdited: "yes — written when decided, never rewritten into a new truth (a new one supersedes it)" },
+  { match: /(^|\/)map\/features\/example-feature\.md$/, what: "an example feature page in the semantic map, showing how a feature claims the code it owns by linking it", why: "so the folder is never an unexplained empty one; it shows the shape", who: "ZDD writes the example once", handEdited: "yes — rename it to a real feature or delete it" },
+  { match: /(^|\/)map\/apps\/[^/]+\.md$/, what: "one page per app you named (web, mobile, API) in the semantic map", why: "a home for the rules that apply across that whole app (the blessings: which code to copy, which to refuse)", who: "ZDD writes the stub at install; you fill it", handEdited: "yes — yours" },
+  { match: /(^|\/)map\/(features|apps|external-services)\/\.gitkeep$|(^|\/)map\/?$/, what: "the semantic map: short pages grouping the code into features, apps and the third-party systems it depends on, with the blessings (which existing code to copy for a kind of work, and what to refuse)", why: "grouping and precedent are the two things the code cannot say about itself", who: "you and the AI, one mapping session at install and then as each piece of work touches a feature", handEdited: "yes — yours; the links inside it are kept in step with the code by the drift check" },
+  { match: /(^|\/)metadata\/?$/, what: "the inventory of the code (routes, tables, screens, jobs, components, external services), one small JSON file each", why: "a mechanical, always-correct map of what exists, so the AI finds its way without grepping", who: "the engine (derive) — regenerated by \"update ZDD\"", handEdited: "never — the drift check fails if it is" },
+  { match: /(^|\/)graph\.json$/, what: "the whole generated picture in one machine-readable file: every record and every link", why: "the human index is rendered from it, and other tools can read it", who: "the engine (render)", handEdited: "never" },
+  { match: /(^|\/)agent-index\.md$/, what: "the short index the AI reads at the start of every session: each feature with pointers to its code", why: "orientation in one screen, so each session starts knowing where things are", who: "the engine (render)", handEdited: "never" },
+  { match: /(^|\/)adr-index\.md$/, what: "one line per decision record, with what supersedes what", why: "the AI reads the whole list before work, then only the decisions its task cites", who: "the engine (render)", handEdited: "never" },
+  { match: /(^|\/)blessing-index\.md$/, what: "one line per blessing: the question it answers (\"Adding an upload?\") and the reason", why: "read before any code is written, so the right existing code is copied", who: "the engine (render)", handEdited: "never" },
+  { match: /(^|\/)human-index\.html$/, what: "an interactive picture of the system for people: features, screens, endpoints, tables and how they connect", why: "for someone who must understand a system they did not build", who: "the engine (render)", handEdited: "never" },
+  { match: /^CLAUDE\.md$/, what: "Claude Code's instruction file for this repo — yours", why: "ZDD adds exactly one line to it, which loads zdd/instructions.md into every session", who: "you; ZDD adds the one line at install and never edits the file again", handEdited: "yes — yours" },
+  { match: /^AGENTS\.md$/, what: "Codex's instruction file for this repo — yours, with ZDD's instructions copied in between two marker lines (Codex cannot load a separate file)", why: "so Codex sessions get the same rules as Claude Code sessions", who: "you, outside the markers; ZDD rewrites what is between them on upgrade", handEdited: "yes outside the markers, never inside" },
+  { match: /^\.github\/workflows\/zdd\.yml$/, what: "the CI check that refuses to merge a pull request whose generated docs are stale", why: "this is what turns ZDD from a habit into a guarantee", who: "ZDD writes it; \"upgrade ZDD\" moves the engine version inside it", handEdited: "rarely — its header says ZDD manages it; remove the header to take it over" },
+  { match: /^\.githooks\/pre-push$/, what: "a local git hook that runs the same checks before a push and refuses the push if the docs are stale", why: "the fallback when there is no CI gate: it makes a forgotten update loud", who: "ZDD writes it; \"upgrade ZDD\" rewrites it", handEdited: "rarely — same ownership header as the workflow" },
+  { match: /^\.gitattributes$/, what: "one line telling git to keep the files under zdd/ with Unix line endings", why: "the engine writes them that way; without this, Windows shows every generated file as changed", who: "ZDD adds the one line; the rest of the file is yours", handEdited: "yes outside ZDD's line" },
+  { match: /^docs\/agents\/domain\.md$/, what: "a short note telling Matt Pocock's skills (the design interview ZDD builds on) where this repo keeps its glossary and decisions", why: "those skills look for files at the repo root by default and would create strays", who: "ZDD writes it once, only when absent", handEdited: "yes — yours from the first byte" },
+  { match: /^\.claude\/settings\.json$/, what: "Claude Code's project settings: which plugins are on for this repo, and the lock that pins this repo to one ZDD release", why: "every developer runs the same ZDD release, and moving to a new one is a deliberate change", who: "ZDD merges its lines in, keeping yours; \"upgrade ZDD\" moves the lock", handEdited: "yes for your own settings; ZDD's lines are rewritten on upgrade" },
+];
+export function explain(rel) {
+  const clean = String(rel).replace(/\\/g, "/").replace(/^\.\//, "");
+  return ARTIFACT_EXPLANATIONS.find((e) => e.match.test(clean)) ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Preflight (CAS-103 C7): every piece of tech ZDD needs, checked before a
+// question is asked and again before an upgrade's engine run. Today the
+// plugin carries no engine: every skill that does real work runs `npx -y
+// @rich-rees/zdd-engine@<pin>`, so the engine is downloaded from the public
+// npm registry on a machine's first run; the plugin and Matt Pocock's skills
+// come from public GitHub repositories. No account is needed anywhere.
+// ---------------------------------------------------------------------------
+export const NODE_MIN = 20;
+const REGISTRY_DEFAULT = "https://registry.npmjs.org";
+const GITHUB_DEFAULT = `https://github.com/${MARKETPLACE_REPO}`;
+const USES = {
+  node: "ZDD's scripts and its engine run on it (20 or newer)",
+  npx: "comes with Node.js; it downloads and runs the ZDD engine from the public npm registry on its first use, and on each new engine version",
+  git: "ZDD reads the repo's history for freshness and locks a release by a git tag",
+  repo: "ZDD reads the repo's history for freshness and locks a release by a git tag; run `git init` in the folder first",
+  github: "ZDD and Matt Pocock's skills are installed from public GitHub repositories, and the release check reads the list of releases there",
+  registry: "ZDD's engine, @rich-rees/zdd-engine, is downloaded from the public npm registry by npx; no npm account is needed, the package is public",
+  engine: "the exact engine version this ZDD release pins must be there to download",
+};
+function head(url, timeoutMs = 5000) {
+  return new Promise((ok) => {
+    let u;
+    try {
+      u = new URL(url);
+    } catch {
+      return ok({ reachable: false, status: null, reason: "not a URL" });
+    }
+    const req = (u.protocol === "http:" ? httpRequest : httpsRequest)(u, { method: "GET", timeout: timeoutMs, headers: { "user-agent": "zdd-preflight" } }, (res) => {
+      res.resume();
+      ok({ reachable: true, status: res.statusCode ?? 0, reason: null });
+    });
+    req.on("timeout", () => {
+      req.destroy(new Error("timed out"));
+    });
+    req.on("error", (e) => ok({ reachable: false, status: null, reason: e.code ?? e.message }));
+    req.end();
+  });
+}
+export async function preflight(root, { registry = REGISTRY_DEFAULT, github = GITHUB_DEFAULT } = {}) {
+  const version = pluginVersion();
+  const checks = [];
+  const add = (name, ok, found, says) => checks.push({ name, ok, found, uses: USES[name], says });
+  const nodeVersion = process.versions.node;
+  const major = Number(nodeVersion.split(".")[0]);
+  add("node", major >= NODE_MIN, `Node.js ${nodeVersion}`, major >= NODE_MIN ? `Node.js ${nodeVersion} — ${USES.node}` : `Node.js ${nodeVersion} is older than ${NODE_MIN} — ${USES.node}; install Node.js ${NODE_MIN} or newer from https://nodejs.org and open a new terminal`);
+  let npx = null;
+  try {
+    npx = execFileSync(process.platform === "win32" ? "npx.cmd" : "npx", ["--version"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 20_000, shell: process.platform === "win32" }).trim();
+  } catch {
+    npx = null;
+  }
+  add("npx", npx !== null, npx ? `npx ${npx}` : null, npx ? `npx ${npx} — ${USES.npx}` : `npx — not found on this machine. ${USES.npx}. It is installed with Node.js from https://nodejs.org; a Claude Code installed on its own does not bring it`);
+  let gitVersion = null;
+  try {
+    gitVersion = execFileSync("git", ["--version"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 10_000 }).trim();
+  } catch {
+    gitVersion = null;
+  }
+  add("git", gitVersion !== null, gitVersion, gitVersion ? `git — ${USES.git}` : `git — not found on this machine. ${USES.git}; install it from https://git-scm.com`);
+  let isRepo = false;
+  if (gitVersion) {
+    try {
+      execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 10_000 });
+      isRepo = true;
+    } catch {
+      isRepo = false;
+    }
+  }
+  add("repo", isRepo, isRepo ? "a git repository" : null, isRepo ? `a git repository — ${USES.git}` : `a git repository — this folder is not one. ${USES.repo}`);
+  const gh = await head(github);
+  add("github", gh.reachable, gh.reachable ? `${github} answered ${gh.status}` : null, gh.reachable ? `github.com — ${USES.github}` : `github.com — could not be reached (${gh.reason}). ${USES.github}; check the network, a proxy or a firewall`);
+  const reg = await head(`${registry.replace(/\/$/, "")}/`);
+  add("registry", reg.reachable, reg.reachable ? `${registry} answered ${reg.status}` : null, reg.reachable ? `the npm registry — ${USES.registry}; ${USES.engine.replace("the exact engine version this ZDD release pins must be", `the engine, ${ENGINE_PACKAGE}@${version}, is`)}` : `the npm registry — could not be reached (${reg.reason}). ${USES.registry}; check the network, a proxy or a firewall`);
+  if (reg.reachable) {
+    const eng = await head(`${registry.replace(/\/$/, "")}/${ENGINE_PACKAGE.replace("/", "%2f")}/${version}`);
+    const there = eng.reachable && eng.status >= 200 && eng.status < 300;
+    add("engine", there, there ? `${ENGINE_PACKAGE}@${version} on the registry` : null, there ? `the engine, ${ENGINE_PACKAGE}@${version} — there to download` : `the engine, ${ENGINE_PACKAGE}@${version} — the npm registry answered but does not have this version (${eng.status ?? eng.reason}); a release of ZDD is published before its tag, so this is a ZDD defect — report it at https://github.com/${MARKETPLACE_REPO}/issues`);
+  } else add("engine", false, null, `the engine, ${ENGINE_PACKAGE}@${version} — not checked: the registry could not be reached`);
+  return { ok: checks.every((c) => c.ok), version, checks };
+}
+export function narratePreflight(p) {
+  const out = ["Before anything is written, the things ZDD needs:"];
+  for (const c of p.checks) out.push(`  ${c.ok ? "ok     " : "MISSING"} ${c.says}`);
+  out.push("");
+  out.push(p.ok ? "Everything ZDD needs is here. No account is needed anywhere." : "Nothing was written. Fix what is missing and run bootstrap again. No account is needed anywhere.");
+  return out.map(printable).join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// Estimate (CAS-103, Rich's additions to pick 5): which of the three install
+// scenarios this repo is, and an honest estimate of the review time the
+// opt-in backfill would ask of the user. Heuristics, said as such.
+// ---------------------------------------------------------------------------
+export function estimate(root) {
+  const d = detect(root);
+  let commits = 0;
+  let ageMonths = 0;
+  let contributors = 0;
+  if (hasGit(root)) {
+    try {
+      commits = Number(execFileSync("git", ["rev-list", "--count", "HEAD"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 10_000 }).trim()) || 0;
+      // The root commit's date: --max-count applies before --reverse, so the whole list is read and its last line taken.
+      const dates = execFileSync("git", ["log", "--format=%cI"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 10_000, maxBuffer: 64 * 1024 * 1024 }).trim().split(/\r?\n/).filter(Boolean);
+      const first = dates.at(-1) ?? "";
+      const last = execFileSync("git", ["log", "-1", "--format=%cI"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 10_000 }).trim();
+      if (first && last) ageMonths = Math.max(0, Math.round((new Date(last) - new Date(first)) / (30.44 * 24 * 3600 * 1000)));
+      contributors = execFileSync("git", ["shortlog", "-sn", "HEAD"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 10_000 }).trim().split(/\r?\n/).filter(Boolean).length;
+    } catch {
+      /* a repo with no commits yet */
+    }
+  }
+  const sourceFiles = d.sourceFiles;
+  const scenario = d.mode === "greenfield" ? "greenfield" : sourceFiles < 300 && ageMonths < 24 ? "young" : "mature";
+  let backfill = null;
+  if (scenario !== "greenfield") {
+    const terms = Math.max(5, Math.round(sourceFiles / 12));
+    const blessings = Math.max(3, Math.round(sourceFiles / 40));
+    const adrs = Math.min(15, Math.max(5, Math.round(commits / 40)));
+    const minutes = { glossary: Math.round(terms * 0.5), blessings: Math.round(blessings * 2), adrs: adrs * 3 };
+    const total = minutes.glossary + minutes.blessings + minutes.adrs;
+    const say = (m) => (m < 50 ? `about ${Math.max(5, Math.round(m / 5) * 5)} minutes` : m < 80 ? "about an hour" : `about ${Math.round(m / 60)} hours`);
+    backfill = {
+      glossary: `${say(minutes.glossary)} — roughly ${terms} terms proposed from the names in the code, as one reviewable file you tick, edit or strike`,
+      blessings: `${say(minutes.blessings)} — roughly ${blessings} kinds of work done more than once, each with the existing code to start from, as one reviewable file`,
+      adrs: `${say(minutes.adrs)} — about ${adrs} decisions, only the ones that would surprise a newcomer; the code shows what was decided, never why, so you supply the why for each (with clues from commit messages and comments) and each is marked as recorded after the fact`,
+      total: say(total),
+    };
+  }
+  return { scenario, sourceFiles, commits, ageMonths, contributors, proposals: d.proposals.map((p) => p.name), backfill };
+}
+export function narrateEstimate(e) {
+  const out = [];
+  if (e.scenario === "greenfield") out.push("Greenfield: no source to read yet. ZDD sets up an empty zdd/ folder; every task's \"update ZDD\" fills it, and nothing is asked up front beyond the intended stack.");
+  else {
+    const label = e.scenario === "young" ? "A young app" : "A mature codebase";
+    const age = e.ageMonths === 0 ? "less than a month" : e.ageMonths === 1 ? "about a month" : e.ageMonths >= 24 ? `about ${Math.round(e.ageMonths / 12)} years` : `about ${e.ageMonths} months`;
+    out.push(`${label}: ${e.sourceFiles} source files, ${e.commits} commit${e.commits === 1 ? "" : "s"} over ${age}${e.contributors > 1 ? `, ${e.contributors} people` : ""}.`);
+    out.push("On day one the inventory (derive) is complete with no questions; one mapping session proposes the feature groupings and asks only where the evidence is thin; the unclaimed list is a to-do list, not a gate. Decisions are never reconstructed by default: glossary terms, decisions and blessings arrive as each task's \"update ZDD\" touches them, so the docs fill in where the team works.");
+    out.push(`The backfill, if you want it, is ${e.backfill.total} of your review time:`);
+    out.push(`  glossary — ${e.backfill.glossary}`);
+    out.push(`  blessings — ${e.backfill.blessings}`);
+    out.push(`  decisions — ${e.backfill.adrs}`);
+    out.push("It is offered once, never default; skippable, resumable, and doable per artifact.");
+  }
+  return out.map(printable).join("\n");
+}
+
 export function narrateUpgrade(r) {
   const title = r.to ? `Lock move to ${r.to}` : `Upgrade to plugin ${r.version}`;
   const out = [r.plan ? `${r.to ? `Lock move plan to ${r.to}` : `Upgrade plan for plugin ${r.version}`} — nothing written yet` : title];
   const verb = r.plan ? "would change" : "changed";
   if (!r.wrote.length) out.push("  nothing to change — every plugin-owned file is already at this version");
-  for (const f of r.wrote) out.push(`  ${verb} ${f}`);
+  // The plain-words card under each file (pick 2), as the apply ledger has.
+  for (const f of r.wrote) {
+    out.push(`  ${verb} ${f}`);
+    const e = explain(f.replace(/ \(.*\)$/, ""));
+    if (e) out.push(`          what: ${e.what}`, `          why: ${e.why}`, `          who: ${e.who}`, `          hand-edited: ${e.handEdited}`);
+  }
   for (const f of r.kept) out.push(`  kept    ${f}`);
   for (const n of r.notes) out.push(`  note    ${n}`);
   for (const d of r.duplicates ?? []) {
-    out.push(`  outside the ZDD block: [${d.id}] ${d.file} lines ${d.from}–${d.to} "${d.heading}" — read it against the block; remove it only on the user's word (--drop=${d.id})`);
+    const says = (d.rules ?? []).map((id) => INSTRUCTION_RULES.find((x) => x.id === id)?.says).filter(Boolean);
+    out.push(`  your text, ${d.file} ${lineRange(d)} under "${d.heading}": ${brief(d.text)}`);
+    for (const s of says) out.push(`      ZDD now says: ${s}`);
+    out.push(`      → read the two together: same, different, or contradicting? Keep it, change it by hand, or remove this whole paragraph or bullet on the user's word (--drop=${d.id})`);
   }
   return out.map(printable).join("\n");
 }
@@ -1755,8 +2711,15 @@ export function narrateUpgrade(r) {
 export function narrateReleaseStatus(s) {
   if (!s.newest) return "No ZDD release tag found on the marketplace's repository.";
   const lock = s.lock ? `this repo locks ${s.lock}` : "this repo has no lock";
-  if (s.newer) return `ZDD ${s.newest} is out; ${lock} and this session runs ${s.running}. Release notes: https://github.com/${MARKETPLACE_REPO}/releases/tag/${s.newest}`;
-  return `ZDD ${s.running} is the newest release; ${lock}.`;
+  const catalogue = `the catalogue on this machine is at ${s.catalogue ?? "no recorded ref"}`;
+  if (s.newer) return `ZDD ${s.newest} is out; ${lock} and this session runs ${s.running}; ${catalogue}. Release notes: https://github.com/${MARKETPLACE_REPO}/releases/tag/${s.newest}`;
+  let line = `ZDD ${s.running} is the newest release; ${lock}; this session runs ${s.running}; ${catalogue}.`;
+  if (s.lockBehind || !s.lock) {
+    line += s.ready
+      ? ` this session already runs the newest release and the catalogue is there too: move the lock with \`upgrade --to=${s.newest}\` and go straight on to step 2 in this session — no restart`
+      : ` moving the lock needs a restart afterwards: the catalogue follows the lock on restart, then the update commands the first line of the next session names, then a second restart`;
+  }
+  return line;
 }
 
 // ---------------------------------------------------------------------------
@@ -1766,6 +2729,8 @@ if (process.argv[1] && posixify(process.argv[1]).endsWith("/scripts/bootstrap.mj
   const { flags, positional } = parseArgs(process.argv.slice(2));
   const cmd = positional[0];
   const root = adopterRoot(flags);
+  // eslint-disable-next-line no-inner-declarations
+  async function main() {
   try {
     if (cmd === "detect") {
       const d = detect(root);
@@ -1780,17 +2745,26 @@ if (process.argv[1] && posixify(process.argv[1]).endsWith("/scripts/bootstrap.mj
     } else if (cmd === "upgrade") {
       const to = flags.to === undefined ? null : String(flags.to);
       const remote = typeof flags.remote === "string" ? flags.remote : undefined;
-      const r = upgrade(root, { lock: flags.lock === true, plan: flags.plan === true, drop: flags.drop ?? null, to, remote });
+      const r = upgrade(root, { lock: flags.lock === true, plan: flags.plan === true, drop: flags.drop ?? null, to, remote, home: flags.home });
       process.stdout.write(flags.json ? JSON.stringify(r, null, 2) + "\n" : narrateUpgrade(r) + "\n");
+    } else if (cmd === "preflight") {
+      const p = await preflight(root, { ...(typeof flags.registry === "string" ? { registry: flags.registry } : {}), ...(typeof flags.github === "string" ? { github: flags.github } : {}) });
+      process.stdout.write(flags.json ? JSON.stringify(p, null, 2) + "\n" : narratePreflight(p) + "\n");
+      if (!p.ok) process.exit(1);
+    } else if (cmd === "estimate") {
+      const e = estimate(root);
+      process.stdout.write(flags.json ? JSON.stringify(e, null, 2) + "\n" : narrateEstimate(e) + "\n");
     } else if (cmd === "release-status") {
-      const s = releaseStatus(root, typeof flags.remote === "string" ? flags.remote : undefined);
+      const s = releaseStatus(root, typeof flags.remote === "string" ? flags.remote : undefined, flags.home);
       process.stdout.write(flags.json ? JSON.stringify(s) + "\n" : printable(narrateReleaseStatus(s)) + "\n");
     } else {
-      process.stderr.write("Usage: bootstrap.mjs <detect|apply --answers=<file>|upgrade [--plan] [--lock] [--drop=<ids>] [--to=vX.Y.Z]|release-status [--remote=<url>]> [--root=<dir>] [--date=YYYY-MM-DD] [--home=<dir>] [--json]\n");
+      process.stderr.write("Usage: bootstrap.mjs <preflight [--registry=<url>] [--github=<url>]|detect|estimate|apply --answers=<file>|upgrade [--plan] [--lock] [--drop=<ids>] [--to=vX.Y.Z]|release-status [--remote=<url>]> [--root=<dir>] [--date=YYYY-MM-DD] [--home=<dir>] [--json]\n");
       process.exit(2);
     }
   } catch (e) {
     process.stderr.write(`bootstrap: ${e.message}\n`);
     process.exit(1);
   }
+  }
+  main();
 }

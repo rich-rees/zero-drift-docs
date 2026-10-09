@@ -1,6 +1,15 @@
-// services extractor — external services a module depends on (CAS-97, ZDD
-// 2.1, decision 0020). A service is DECLARED in config with the markers that
-// reveal it; the engine ships no vendor list:
+// external-services extractor — the third-party systems a module depends on
+// (Resend, Sentry, Salesforce, Google Places): CAS-97, ZDD 2.1, decision
+// 0020; renamed from `services` in 2.3 (CAS-103 pick 3) because "services"
+// read as a code service layer. The old name is an alias for one release
+// (derive's registry and config.mjs route it here, passing `legacyName`),
+// and under the alias the records keep the OLD kind, ids and folder
+// (`service`, `service:<slug>`, metadata/service/): nothing in an adopter's
+// generated artifacts moves until "upgrade ZDD" renames the config key, and
+// then it moves once, listed in the upgrade notes — so the rename is a
+// minor, not a metadata-contract break (slice 1 review CR-302). A service
+// is DECLARED in config with the markers that reveal it; the engine ships
+// no vendor list:
 //   { "name": "Sentry", "imports": ["sentry_sdk", "@sentry/react"], "env": ["SENTRY_"] }
 // The extractor scans source for an import of a marker package (Python
 // `import x` / `from x import`, JS `import … from "x"` / `require("x")`) and
@@ -8,7 +17,7 @@
 // (`os.environ["X"]`, `os.getenv("X")`, `.get("X")`, `process.env.X`,
 // `import.meta.env.X`, `Deno.env.get("X")`) — names only, never values, and
 // never a `.env` file or the process environment. One record per declared
-// service, kind `service`: its `resource` is the file that declares the
+// service, kind `external-service`: its `resource` is the file that declares the
 // dependency (the first import site; failing that, the first env read), so
 // the panel's link opens the code that makes the node true; `facts.usedBy`
 // lists every file that hit a marker, and `facts.edges.usedBy` names the
@@ -27,7 +36,7 @@
 // names, is a WARNING printed by every derive (not only --verbose), so the
 // branch that added a vendor is told on that branch. Prefixes ZDD already
 // knows as the database or the platform are never candidates.
-// Options (extractorOptions.services):
+// Options (extractorOptions["external-services"]):
 //   services   [{ name, imports?, env? }] (at least one of imports/env)
 //   ignore     env prefixes that are not services (added to the built-ins)
 //   roots      dirs scanned (default ["."]); node_modules, .git, build
@@ -38,7 +47,8 @@
 import { repoRelative } from "../../lib/paths.mjs";
 
 export const FACTS_KEY_ORDER = {
-  service: ["markers", "usedBy", "edges"],
+  "external-service": ["markers", "usedBy", "edges"],
+  service: ["markers", "usedBy", "edges"], // the pre-2.3 kind, emitted under the alias
 };
 export const MAX_SOURCE_BYTES = 1024 * 1024;
 const DEFAULT_EXTENSIONS = [".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"];
@@ -80,29 +90,37 @@ const importMatches = (spec, marker) => spec === marker || spec.startsWith(`${ma
 const envPrefixOf = (name) => name.replace(PUBLIC_PREFIXES, "").split("_")[0];
 const slug = (name) => name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
-export function derive({ repoRoot, options, io }) {
+export function derive({ repoRoot, options, io, legacyName }) {
   void repoRoot;
   const diagnostics = [];
   const warnings = [];
+  const kind = legacyName === "services" ? "service" : "external-service";
+  const label = legacyName === "services" ? "services" : "external-services";
   const services = options.services ?? [];
-  if (!Array.isArray(services)) throw new Error("services.services must be an array");
+  if (!Array.isArray(services)) throw new Error(`${label}.services must be an array`);
   const declared = services.map((s, i) => {
-    if (!s || typeof s !== "object" || typeof s.name !== "string" || !s.name.trim()) throw new Error(`services.services[${i}] must have a name`);
+    if (!s || typeof s !== "object" || typeof s.name !== "string" || !s.name.trim()) throw new Error(`${label}.services[${i}] must have a name`);
     const imports = s.imports ?? [];
     const env = s.env ?? [];
-    if (!Array.isArray(imports) || imports.some((x) => typeof x !== "string") || !Array.isArray(env) || env.some((x) => typeof x !== "string")) throw new Error(`services.services[${i}] (${s.name}): imports and env must be arrays of strings`);
-    if (!imports.length && !env.length) throw new Error(`services.services[${i}] (${s.name}): declare at least one import or env marker`);
-    return { name: s.name.trim(), imports, env: env.map((e) => e.toUpperCase()) };
+    if (!Array.isArray(imports) || imports.some((x) => typeof x !== "string") || !Array.isArray(env) || env.some((x) => typeof x !== "string")) throw new Error(`${label}.services[${i}] (${s.name}): imports and env must be arrays of strings`);
+    // A blank marker would match everything (an empty env prefix is a prefix
+    // of every name): dropped with a diagnostic, never matched (CR-405).
+    const cleanImports = imports.map((x) => x.trim()).filter(Boolean);
+    const cleanEnv = env.map((x) => x.trim().toUpperCase()).filter(Boolean);
+    if (cleanImports.length !== imports.length || cleanEnv.length !== env.length) diagnostics.push(`${label}.services[${i}] (${s.name}): a blank marker was ignored — a marker is a package name or an env-name prefix`);
+    if (!cleanImports.length && !cleanEnv.length) throw new Error(`${label}.services[${i}] (${s.name}): declare at least one import or env marker`);
+    if (!slug(s.name)) throw new Error(`${label}.services[${i}]: the name '${s.name}' holds no letters or digits to name a record by`);
+    return { name: s.name.trim(), imports: cleanImports, env: cleanEnv };
   });
   const names = new Set();
   for (const s of declared) {
-    if (names.has(slug(s.name))) throw new Error(`services.services: '${s.name}' is declared twice`);
+    if (names.has(slug(s.name))) throw new Error(`${label}.services: '${s.name}' is declared twice`);
     names.add(slug(s.name));
   }
-  const ignore = new Set([...BUILT_IN_IGNORE, ...(options.ignore ?? []).map((p) => String(p).toUpperCase().replace(/_$/, ""))]);
-  const roots = (options.roots ?? ["."]).map((r) => repoRelative(r, "services.roots"));
+  const ignore = new Set([...BUILT_IN_IGNORE, ...(options.ignore ?? []).map((p) => String(p).trim().toUpperCase().replace(/_$/, "")).filter(Boolean)]);
+  const roots = (options.roots ?? ["."]).map((r) => repoRelative(r, "external-services.roots"));
   const extensions = options.extensions ?? DEFAULT_EXTENSIONS;
-  if (!Array.isArray(extensions) || extensions.some((e) => typeof e !== "string")) throw new Error("services.extensions must be an array of strings");
+  if (!Array.isArray(extensions) || extensions.some((e) => typeof e !== "string")) throw new Error("external-services.extensions must be an array of strings");
 
   const files = [];
   const seen = new Set();
@@ -166,8 +184,8 @@ export function derive({ repoRoot, options, io }) {
     const resource = [...h.importSites].sort()[0] ?? [...h.envSites].sort()[0];
     const at = usedBy.map((f) => `?at:${f}`);
     records.push({
-      kind: "service",
-      id: `service:${slug(s.name)}`,
+      kind,
+      id: `${kind}:${slug(s.name)}`,
       title: s.name,
       description: "",
       resource: [resource],
@@ -180,7 +198,7 @@ export function derive({ repoRoot, options, io }) {
   for (const [prefix, c] of [...candidates].sort(([a], [b]) => (a < b ? -1 : 1))) {
     const names = [...c.names].sort();
     const where = [...c.files].sort();
-    warnings.push(`${names.join(", ")} read in ${where.join(", ")} matches no declared service — add { "name": "…", "env": ["${prefix}_"] } to extractorOptions.services.services, or "${prefix}" to its ignore list`);
+    warnings.push(`${names.join(", ")} read in ${where.join(", ")} matches no declared service — add { "name": "…", "env": ["${prefix}_"] } to extractorOptions["${label}"].services, or "${prefix}" to its ignore list`);
   }
   if (!declared.length) diagnostics.push("no services declared — nothing to inventory (candidates are still reported)");
   return { records, diagnostics, warnings };

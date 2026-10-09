@@ -1,0 +1,6 @@
+{
+  "name": "sandwich-shop",
+  "private": true,
+  "scripts": { "dev": "next dev", "build": "next build", "seed:menu": "node scripts/seed.mjs" },
+  "dependencies": { "next": "15.3.0", "react": "19.0.0", "@supabase/supabase-js": "2.49.0" }
+}

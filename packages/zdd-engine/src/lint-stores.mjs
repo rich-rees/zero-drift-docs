@@ -66,6 +66,9 @@ export function run(args) {
   const isObject = claimsCfg !== null && typeof claimsCfg === "object" && !Array.isArray(claimsCfg);
   const unknownKey = isObject ? Object.keys(claimsCfg).find((k) => !CLAIMS_KEYS.includes(k)) : undefined;
   const allow = isObject ? claimsCfg.allowUnclaimed : undefined;
+  // `service` and `external-service` are both real kinds for one release (2.3
+  // rename, CAS-103 pick 3): which one a repo emits follows its config key,
+  // and "upgrade ZDD" moves both the key and this list together.
   const strictKinds = isObject ? claimsCfg.strictKinds : undefined;
   const badKind = Array.isArray(strictKinds) ? strictKinds.find((k) => typeof k !== "string" || !OPT_IN_CLAIMABLE_KINDS.includes(k)) : undefined;
   const claimsError =
@@ -90,7 +93,15 @@ export function run(args) {
   const ALLOWED = new Set(claimsCfg.allowUnclaimed ?? []);
   // Which kinds strict governs (decision 0017): the original five always;
   // an opt-in kind only when strictKinds names it.
-  const STRICT_KINDS = new Set([...CLAIMABLE_KINDS, ...(claimsCfg.strictKinds ?? [])]);
+  const STRICT_KINDS = new Set([...CLAIMABLE_KINDS, ...(strictKinds ?? [])]);
+  // A half-migrated config (CR-419): strictKinds names `service` while the
+  // records are `external-service`, or the reverse — strict would govern
+  // nothing of either. Said, so a green lint is not a silent loosening.
+  for (const [named, emitted] of [["service", "external-service"], ["external-service", "service"]]) {
+    if ((strictKinds ?? []).includes(named) && !existsSync(resolve(REPO, paths.metadataDir, named)) && existsSync(resolve(REPO, paths.metadataDir, emitted))) {
+      console.error(`WARNING: claims.strictKinds names '${named}' but the records are '${emitted}' (${paths.metadataDir}/${emitted}/) — strict governs neither; say "upgrade ZDD", which moves the config key and this list together`);
+    }
+  }
   const ADR_DIR = resolve(REPO, paths.adrDir);
   const MAP_DIR = resolve(REPO, paths.mapDir);
   const METADATA_DIR = resolve(REPO, paths.metadataDir);
@@ -181,6 +192,13 @@ for (const path of walkMarkdown(MAP_DIR)) {
       problems.push(
         `${where}: opens with no trigger question — start it with the question it answers ("Adding an endpoint? Copy …"); ` +
           `the blessing index lists blessings by that question, so this one is invisible to a session choosing patterns`,
+      );
+    }
+    if (!shape.exemplar) {
+      console.error(
+        `WARNING: ${where} points at no code — a blessing answers a kind of work with existing code to start from and reuse ` +
+          `("Adding an upload? Start from \`lib/media-upload-client.ts\` …"), then the one trap it refuses; a rule with no code to point at ` +
+          `belongs in its ADR and a code comment at the site, and a kind of work with no exemplar yet is a candidate, minted once the code exists`,
       );
     }
     if (shape.length > BLESSING_LENGTH_BUDGET) {
@@ -328,7 +346,7 @@ for (const name of ["GLOSSARY.md", "CONTEXT.md"]) {
   if (!present) continue;
   console.error(
     `WARNING: ${name} at the repo root beside ${paths.glossary} — Matt Pocock's skills read and create a root ${name === "CONTEXT.md" ? "CONTEXT.md (GLOSSARY.md since 1.3)" : "GLOSSARY.md"} unless docs/agents/domain.md points them at ZDD's glossary; ` +
-      `fold its terms into ${paths.glossary} and delete it (bootstrap --upgrade writes docs/agents/domain.md when it is missing)`,
+      `fold its terms into ${paths.glossary} and delete it ("upgrade ZDD" writes docs/agents/domain.md when it is missing)`,
   );
 }
 

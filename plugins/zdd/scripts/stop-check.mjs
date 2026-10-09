@@ -35,7 +35,7 @@
 // delimited so a quoted (non-ASCII) name cannot be misclassified (CR-005).
 
 import { execFileSync } from "node:child_process";
-import { openSync, closeSync } from "node:fs";
+import { openSync, closeSync, readSync, fstatSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join, resolve, relative, isAbsolute } from "node:path";
@@ -177,10 +177,60 @@ export function classify(changed, root, config) {
     if (prefix && !fold(f).startsWith(fold(prefix))) continue;
     const rel = f.slice(prefix.length);
     if (!rel) continue;
+    if (isManaged(rel)) continue;
     (isZdd(rel) ? zdd : code).push(rel);
   }
   return { zdd, code };
 }
+
+// Files ZDD itself writes, or that carry only ZDD's own line, are neither
+// code nor the curated half (CAS-103 finding 16 / C5): a lock move, an
+// engine-pin bump or the import line in CLAUDE.md is the upgrade's own
+// pause, not a finished unit of work, and must not trigger the prompt.
+export const ZDD_MANAGED = [".claude/settings.json", ".claude/settings.local.json", ".gitattributes", ".github/workflows/zdd.yml", ".githooks/pre-push", "CLAUDE.md", "AGENTS.md", "docs/agents/domain.md"];
+export const isManaged = (rel) => ZDD_MANAGED.some((m) => fold(m) === fold(rel));
+
+// The turn's last words (finding 16): a turn that ends on a question to the
+// developer is mid-task — the session is waiting, and a prompt now lands
+// on the person instead of the agent. Claude Code's payload names the
+// transcript (JSONL, one entry per message); the tail is read, bounded, and
+// the last assistant text decides. Codex sends no transcript: not mid-task.
+export const TRANSCRIPT_TAIL_BYTES = 256 * 1024;
+export function lastAssistantText(transcriptPath) {
+  if (typeof transcriptPath !== "string" || !transcriptPath || transcriptPath.length > 4096) return null;
+  let fd;
+  try {
+    fd = openSync(transcriptPath, "r");
+  } catch {
+    return null;
+  }
+  try {
+    const size = fstatSync(fd).size;
+    const start = Math.max(0, size - TRANSCRIPT_TAIL_BYTES);
+    const buf = Buffer.alloc(size - start);
+    let n = 0;
+    for (let got; n < buf.length && (got = readSync(fd, buf, n, buf.length - n, start + n)) > 0; ) n += got;
+    const lines = buf.subarray(0, n).toString("utf8").split(/\r?\n/);
+    for (let i = lines.length - 1; i >= 0; i--) {
+      let entry;
+      try {
+        entry = JSON.parse(lines[i]);
+      } catch {
+        continue;
+      }
+      if (!entry || entry.type !== "assistant") continue;
+      const content = entry.message?.content;
+      const texts = Array.isArray(content) ? content.filter((c) => c && c.type === "text" && typeof c.text === "string").map((c) => c.text) : typeof content === "string" ? [content] : [];
+      if (texts.length) return texts.at(-1);
+    }
+    return null;
+  } catch {
+    return null;
+  } finally {
+    closeSync(fd);
+  }
+}
+export const endsOnQuestion = (text) => typeof text === "string" && /\?\s*(?:\*{0,2}|_{0,2})\s*$/.test(text.trimEnd());
 
 // Filenames come from the checkout; a control character in one must not
 // reach the model's context or the terminal as anything but "?".
@@ -221,6 +271,7 @@ function main() {
   const marker = markerPath(input.session_id, root);
   if (!marker) return; // nothing to key "once" on — silence, not a guess (CR-001)
 
+  if (endsOnQuestion(lastAssistantText(input.transcript_path))) return; // mid-task: the agent is waiting on the developer (finding 16)
   const changed = changedPaths(root, validBaseBranch(config.baseBranch, git), git);
   if (!changed) return;
   const split = classify(changed, root, config);

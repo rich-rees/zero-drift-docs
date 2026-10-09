@@ -25,6 +25,9 @@
 import { readFileSync, realpathSync, existsSync } from "node:fs";
 import { resolve, isAbsolute, dirname, relative, join } from "node:path";
 import { adopterRoot, readConfig, artifactPaths, resolveInside, samePath, isUnder, FENCE_TOOLS, REMOTE_OR_DEVICE } from "./lib/repo.mjs";
+// ZDD's own instructions file (2.3): plugin-owned, rewritten by "upgrade
+// ZDD", fenced like the generated artifacts but with its own reason.
+const INSTRUCTIONS_NAME = "instructions.md";
 
 // hooks.json's matcher is the union of these three (CR-077).
 const EDIT_TOOLS = new Set(FENCE_TOOLS.edit);
@@ -212,7 +215,12 @@ function shellTarget(command, cwd, hit) {
     } else if (WRITE_VERB.test(verb) || sedInPlace || (isGit && GIT_WRITE_SUBVERB.test(sub))) {
       candidates.push(...operands, ...literals(), ...targetDirs);
     } else if (INTERPRETER.test(verb) && WRITE_API.test(simple)) {
-      candidates.push(...operands, ...literals());
+      // Only the path a write API is CALLED WITH is a candidate (CAS-103
+      // finding 17): a one-liner that merely mentions a generated path in a
+      // string it writes elsewhere is a write to that elsewhere. The target
+      // is the first path-like literal in the call's arguments — the last
+      // for a copy or a rename, whose destination comes second.
+      candidates.push(...operands, ...writeApiTargets(simple));
     }
     for (const c of candidates) {
       const t = hit(c, cwd, { ancestor: destructive });
@@ -220,6 +228,60 @@ function shellTarget(command, cwd, hit) {
     }
   }
   return null;
+}
+
+// The path-like literals a write API is called with. A call with
+// parentheses yields its argument list; a PowerShell writer or a bare
+// `rename`/`unlink` takes the rest of the simple command. copy/move/rename
+// name their destination last; everything else names its target first.
+const WRITE_API_GLOBAL = new RegExp(WRITE_API.source, "gi");
+// Any quoted literal: a generated file at the repo root is a bare name
+// (`graph.json`), and `hit` decides whether a literal is a target (CR-512).
+const PATH_LITERAL = /['"]([^'"]+)['"]/g;
+// A method on a receiver — `Path('zdd/graph.json').write_text('x')`,
+// `.unlink()` — names its target BEFORE the call: the last quoted literal
+// in the receiver expression (CR-512).
+const RECEIVER_API = /^(write_text|write_bytes|unlink|rmdir|touch|rename|replace)$/i;
+function writeApiTargets(simple) {
+  const out = [];
+  let m;
+  while ((m = WRITE_API_GLOBAL.exec(simple))) {
+    const name = m[0];
+    if (RECEIVER_API.test(name) && simple[m.index - 1] === ".") {
+      const receiver = simple.slice(0, m.index - 1);
+      const seg = receiver.slice(receiver.lastIndexOf(";") + 1);
+      const paths = [...seg.matchAll(PATH_LITERAL)].map((x) => x[1]);
+      if (paths.length) out.push(paths[paths.length - 1]);
+    }
+    let i = m.index + name.length;
+    // `open('x','w'` matched into its own arguments: back up to the paren.
+    const paren = name.indexOf("(");
+    if (paren !== -1) i = m.index + paren;
+    while (i < simple.length && /\s/.test(simple[i])) i++;
+    let span;
+    if (simple[i] === "(") {
+      let depth = 0;
+      let j = i;
+      for (; j < simple.length; j++) {
+        if (simple[j] === "(") depth++;
+        else if (simple[j] === ")" && --depth === 0) break;
+      }
+      span = simple.slice(i + 1, j);
+    } else span = simple.slice(i);
+    const paths = [...span.matchAll(PATH_LITERAL)].map((x) => x[1]);
+    if (!paths.length) continue;
+    const api = name.replace(/^.*?(?=copyFile|rename|shutil|Move|Copy)/, "");
+    const destinationLast = /^(copyFile|rename|shutil\.(move|copy)|Move-Item|Copy-Item)/i.test(api);
+    // A rename or a move changes its source as well as its destination; a
+    // copy changes its destination only (copying a generated file out is a read).
+    const sourceToo = /^(rename|shutil\.move|Move-Item)/i.test(api);
+    if (destinationLast) {
+      out.push(paths[paths.length - 1]);
+      if (sourceToo && paths.length > 1) out.push(paths[0]);
+    } else out.push(paths[0]);
+  }
+  WRITE_API_GLOBAL.lastIndex = 0;
+  return out;
 }
 
 function main() {
@@ -250,6 +312,8 @@ function main() {
     { rel: paths.adrIndex, kind: "file" },
     { rel: paths.blessingIndex, kind: "file" },
     { rel: paths.humanIndex, kind: "file" },
+    { rel: /\.md$/i.test(paths.agentIndex ?? "") ? paths.agentIndex.replace(/\.md$/i, "") : null, kind: "dir" }, // the two-level index's area folder (2.3)
+    { rel: !paths.bundleDir || paths.bundleDir === "." ? INSTRUCTIONS_NAME : `${paths.bundleDir}/${INSTRUCTIONS_NAME}`, kind: "file", owned: true },
   ]) {
     if (!g.rel) continue; // no safe location for this key (CR-075)
     try {
@@ -302,10 +366,14 @@ function main() {
   }
   if (!target) return 0;
 
-  const reason =
-    `ZDD fence: ${target} is a generated artifact — never hand-edit it. ` +
-    `Run the ZDD update ritual ("update ZDD" / the \`update\` skill) to regenerate it ` +
-    `(zdd-engine derive + render). To lift the fence for this repo set "hooks": { "fence": false } in zdd/config.json.`;
+  const owned = generated.find((g) => g.rel === target)?.owned === true;
+  const reason = owned
+    ? `ZDD fence: ${target} is ZDD's own instructions file, rewritten by "upgrade ZDD" — never hand-edit it. ` +
+      `A rule of your own goes in CLAUDE.md (everything there outside ZDD's one import line is yours); a ZDD defect goes to https://github.com/rich-rees/zero-drift-docs/issues. ` +
+      `To lift the fence for this repo set "hooks": { "fence": false } in zdd/config.json.`
+    : `ZDD fence: ${target} is a generated artifact — never hand-edit it. ` +
+      `Run the ZDD update ritual ("update ZDD" / the \`update\` skill) to regenerate it ` +
+      `(zdd-engine derive + render). To lift the fence for this repo set "hooks": { "fence": false } in zdd/config.json.`;
   // The block is the JSON PreToolUse deny reply on stdout with exit 0 — the
   // shape both hosts document AND honour (decision 0007). Exit 2 + stderr was
   // observed to fail open in Codex 0.145.0 (hook "Failed", edit applied). The

@@ -222,7 +222,16 @@ export function blessingShape(text) {
   const question = q && q[1].length <= QUESTION_MAX && !/[.!]\s+[A-Z]/.test(q[1]) ? q[1] : null;
   const b = /\bbecause\b[^.;—]*/i.exec(visible);
   const because = b ? b[0].trim().replace(/[,\s]+$/, "") : null;
-  return { visible, question, because, length: visible.length };
+  // A blessing is a pointer to existing code to start from (CAS-103 pick 4):
+  // a markdown link whose destination is a metadata record or a file in the
+  // repo (not a URL, not an ADR — those are the reason, not the exemplar:
+  // CR-521), or a code span naming a path or a file. A rule with nothing to
+  // point at is not one.
+  // The destination must look like a file or a folder path (a `/` or an
+  // extension): `](foo)` points at nothing (verify CR-521).
+  const codeLink = [...text.matchAll(/\]\((<?)([^)\s>]+)/g)].some(([, , dest]) => /[\/.]/.test(dest) && !/^[a-z][a-z0-9+.-]*:/i.test(dest) && !dest.startsWith("//") && !/(^|\/)\d{4}-[^/]*\.md(#|$)/i.test(dest) && !/(^|\/)adr\//i.test(dest));
+  const exemplar = codeLink || /`[^`\n]*[\/.][^`\n]*`/.test(text);
+  return { visible, question, because, exemplar, length: visible.length };
 }
 
 // The forward stamps an ADR body carries: a LINE that opens with

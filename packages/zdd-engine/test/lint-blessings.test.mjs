@@ -114,7 +114,7 @@ test("lint: a partial supersession and a reasonless blessing are WARNING lines, 
   assert.match(r.stdout, /store lints passed/);
   assert.match(r.stderr, /^WARNING: zdd\/map\/features\/things\.md:10 .*cites ADR-0002, superseded in part by ADR-0003/m);
   assert.match(r.stderr, /^WARNING: zdd\/map\/features\/things\.md:11 .*gives no reason — cite the ADR that blessed it, or say why inline/m);
-  assert.doesNotMatch(r.stderr, /things\.md:12/, "a 'because' clause is a reason; no ADR is required");
+  assert.doesNotMatch(r.stderr, /things\.md:12 .*gives no reason/, "a 'because' clause is a reason; no ADR is required (2.3 adds a separate 'points at no code' warning for it)");
   rmSync(repo, { recursive: true, force: true });
 });
 
@@ -189,4 +189,33 @@ test("lint: an absent mapDir is greenfield-tolerated; a mistyped one in a popula
   assert.equal(r.stderr, "");
   rmSync(repo, { recursive: true, force: true });
   rmSync(green, { recursive: true, force: true });
+});
+
+test("2.3 (CAS-103 pick 4): a blessing that points at no code warns — a blessing is a pointer to reusable code; a link or a path in backticks satisfies it", (t) => {
+  const repo = mkRepo();
+  t.after(() => rmSync(repo, { recursive: true, force: true }));
+  concept(repo, "answers", "# Blessings\n- Deciding where an answer is stored? Keep it in the session, because the store is append-only — never in the browser.\n");
+  const r1 = lint(repo);
+  assert.equal(r1.status, 0, r1.stderr);
+  assert.match(r1.stderr, /answers\.md:\d+ \(blessing: "Deciding where an answer is stored\?.*points at no code — a blessing answers a kind of work with existing code to start from/, r1.stderr);
+  assert.equal(blessingShape("Deciding where an answer is stored? Keep it in the session.").exemplar, false);
+  for (const ok of ["Adding an upload? Start from `lib/media-upload-client.ts` (`uploadMedia`) — reuse it before writing new upload code; never through a Vercel function, because the limit is 4.5 MB.", "Adding a route? Start from [GET /me](/metadata/route/me.json), per ADR-0001 — never inline auth."]) {
+    assert.equal(blessingShape(ok).exemplar, true, ok);
+  }
+  concept(repo, "answers", "# Blessings\n- Adding an upload? Start from `lib/media-upload-client.ts` (`uploadMedia`) — reuse it before writing new upload code, because three screens share it — never a second client.\n");
+  const r2 = lint(repo);
+  assert.equal(r2.status, 0, r2.stderr);
+  assert.doesNotMatch(r2.stderr, /points at no code/);
+});
+
+test("CR-521: a link to an ADR or a URL is a reason, not an exemplar; a metadata record or a repo file is one", () => {
+  assert.equal(blessingShape("Naming a migration? Prefix it with the ticket id, per [ADR-0001](../adr/0001-things.md) — never a sequence.").exemplar, false);
+  assert.equal(blessingShape("Naming a migration? Prefix it, see [the guide](https://example.com/guide) — never a sequence.").exemplar, false);
+  assert.equal(blessingShape("Adding a route? Start from [GET /me](/metadata/route/me.json) — never inline auth.").exemplar, true);
+  assert.equal(blessingShape("Adding a route? Start from [the client](../../src/lib/client.ts) — never a second one.").exemplar, true);
+});
+
+test("verify CR-521: a link whose destination is no path (`](foo)`) is not an exemplar", () => {
+  assert.equal(blessingShape("Adding a route? Start from [GET /me](foo) — never inline auth.").exemplar, false);
+  assert.equal(blessingShape("Adding a route? Start from [GET /me](foo.ts) — never inline auth.").exemplar, true);
 });
