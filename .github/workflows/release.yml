@@ -84,6 +84,12 @@ jobs:
           cd packages/zdd-engine && npm publish --access public --provenance
 
       - name: Published and fetchable from outside the repo
+        # setup-node's registry-url leaves an .npmrc whose auth token is a
+        # placeholder; a fetch with it is refused, so this step reads the
+        # registry as any user does: no npmrc at all (the 2.3.0 release run).
+        env:
+          NPM_CONFIG_USERCONFIG: /dev/null
+          NODE_AUTH_TOKEN: ""
         run: |
           V="${GITHUB_REF_NAME#v}"
           cd "$(mktemp -d)"
