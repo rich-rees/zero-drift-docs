@@ -63,7 +63,7 @@ the plugin at it:
 - [ ] Repin the CI template (`plugins/zdd/templates/zdd.yml`), the pre-push
       template (`plugins/zdd/templates/pre-push`) and every skill's `npx` line.
 - [ ] Install the forked plugin in place of the upstream one, and run
-      `zdd:bootstrap --upgrade` in each adopting repo to rewrite its pins.
+      "upgrade ZDD" in each adopting repo to rewrite its pins.
 
 A fork owns every future engine fix by hand. Before recommending it, offer
 tier 1: a local extractor needs no fork at all.

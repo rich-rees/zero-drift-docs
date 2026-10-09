@@ -72,8 +72,13 @@ exists. The agent index and metadata paths are the ones `load` used.
      with a reason is legitimate; a silent one is the failure this step
      exists to prevent)
    - **no blessing applies** — say what you checked
-   - **new pattern, candidate blessing** — the question it would answer, the
-     exemplar it would point at once written, the pattern it refuses — because …
+   - **new pattern, candidate blessing** — the question it would answer (a
+     *kind* of work that recurs, not this feature's instance), the existing
+     code it would point at — a shared helper or base layer to reuse, named
+     now if it exists, or the code this work will write — the one trap it
+     refuses, and the reason. It must pass the test in
+     [authoring.md](../authoring.md): pointer to reusable code first; a rule
+     with no code to point at is an ADR and a code comment, not a blessing.
 7. **Write the plan file** in the shape below, **say the plan aloud** (one
    line per piece), and commit it on the branch. It is a working file: it
    crosses sessions and machines because it is committed.

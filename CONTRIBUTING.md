@@ -6,7 +6,7 @@ at **both ends** of the pipeline: **extractors** feed data in (one per
 convention), and **viewers** render it out (one per visualization), with a stable
 graph in the middle.
 
-> **Status.** ZDD is `2.2.1` and public. The engine (`packages/zdd-engine`, on
+> **Status.** ZDD is `2.3.0` and public. The engine (`packages/zdd-engine`, on
 > npm as `@rich-rees/zdd-engine`) is what the plugin's skills and adopters' CI
 > both run, and both contracts below — extractors and viewers — are the ones it
 > executes today. Issues and discussion are welcome; the tests are the contract
@@ -64,17 +64,21 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
   extractor on each run (engine 1.3.0+). `io.read(rel, { maxBytes })` returns
   `{ ok: true, text }` for a regular file physically inside the repo under a
   1 MiB cap (`maxBytes` may lower it). Otherwise it returns
-  `{ ok: false, code, reason }`, where `code` is `missing`, `not-regular` or
-  `too-large`. `io.walk(relDir, onFile, { enter })` hands `onFile` every regular
-  file as a sorted, repo-relative POSIX path. It never follows a symlink, caps
-  depth, skips `.git` by default and shares one entry budget across every walk,
-  and returns `{ exists, truncated, skipped }`. A path that is not
+  `{ ok: false, code, reason }`, where `code` is `missing`, `not-regular`,
+  `too-large`, `over-budget`, `unreadable` or (2.3) `ignored` — the path is
+  gitignored, so it is not source and a clean clone has no such file; treat
+  it as `missing`. `io.walk(relDir, onFile, { enter })` hands `onFile` every
+  regular file as a sorted, repo-relative POSIX path, never one git ignores.
+  It never follows a symlink, caps depth, skips `.git` by default and shares
+  one entry budget across every walk, and returns `{ exists, truncated,
+  skipped }`. `io.isIgnored(rel)` (2.3) answers the same veto for an extractor
+  that walks on its own; `.claude/worktrees/` counts as ignored everywhere. A path that is not
   repo-relative throws. A local extractor cannot import the engine under
   `npx`, which is why `io` is handed in. Decide structure on text with its
   comments and strings masked, so a commented-out declaration never becomes a
   record.
 - Each **record** has: `kind` (`route` | `table` | `surface` | `function` |
-  `bucket` | `module` | `component` | `job` | `service` | …), `id`, `title`, a one-sentence `description`
+  `bucket` | `module` | `component` | `job` | `external-service` | …), `id`, `title`, a one-sentence `description`
   *where mechanically extractable*, repo-relative POSIX `resource` path(s),
   `refs` (outbound references discovered by static scan), `facts` (convention-
   specific key–values), and `filename` (the metadata file, unique per kind).
@@ -101,7 +105,7 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
   `facts.edges` renders exactly as before.
 - **A third channel, `warnings`, is optional** and prints on every derive,
   not only under `--verbose`: for what the branch that caused it should
-  hear (the `services` extractor's "this env name matches no declared
+  hear (the `external-services` extractor's "this env name matches no declared
   service"). Diagnostics stay the quiet channel. Neither ever fails derive.
 - **Missing source is "nothing to inventory."** A configured root that does not
   exist yields no records and a diagnostic, never an error — greenfield repos

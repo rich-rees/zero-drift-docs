@@ -41,7 +41,7 @@ test("a custom paths.metadataDir: service records and feature pointers still lin
   const cfg = JSON.parse(readFileSync(cfgPath, "utf8"));
   cfg.paths = { metadataDir: "zdd/inventory" };
   writeFileSync(cfgPath, JSON.stringify(cfg));
-  for (const page of ["features/health.md", "services/sentry.md"]) {
+  for (const page of ["features/health.md", "external-services/sentry.md"]) {
     const p = join(repo, "zdd", "map", page);
     writeFileSync(p, readFileSync(p, "utf8").replaceAll("../../metadata/", "../../inventory/"));
   }
@@ -51,7 +51,7 @@ test("a custom paths.metadataDir: service records and feature pointers still lin
   const r = run(["render"]);
   assert.equal(r.status, 0, r.stderr);
   const index = readFileSync(join(repo, "zdd", "agent-index.md"), "utf8");
-  assert.match(index, /\(inventory\/service\/resend\.json\)/, index);
+  assert.match(index, /\(inventory\/external-service\/resend\.json\)/, index);
   const hrefs = [...index.matchAll(/\]\(([^)\s]+)\)/g)].map((m) => m[1]).filter((h) => !/^[a-z]+:/i.test(h) && !h.startsWith("#"));
   assert.deepEqual(hrefs.filter((h) => !existsSync(join(repo, "zdd", decodeURI(h.split("#")[0])))), []);
 });

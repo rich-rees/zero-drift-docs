@@ -57,28 +57,36 @@ already holds, so a red suite names what was forgotten.
       release check reads). *(test, per feature)*
 - [ ] `UPGRADE_NOTES` in `scripts/bootstrap.mjs` has an entry for this minor,
       and `skills/upgrade/SKILL.md` an "Upgrading to X.Y" section. *(test)*
-- [ ] The instruction block (`templates/claude-md-snippet.md`) reviewed
-      against the skills that shipped; it names every skill. *(test)*
+- [ ] ZDD's instructions (`templates/instructions.md` — written to the
+      adopter's `zdd/instructions.md`, loaded by one import line in
+      `CLAUDE.md`, copied into `AGENTS.md` for Codex) reviewed against the
+      skills that shipped; they name every skill. *(test)*
 - [ ] README: status, roadmap entry, Versioning entry. *(test)* CONTRIBUTING
       status. *(test)*
 - [ ] Adopter impact stated in the Versioning entry: what moves in their
       `derive --check` / `render --check` on the bump.
 - [ ] Both suites green on CI (ubuntu + windows × Node 20/22).
 
-**Release order** (held since 1.3.1)
+**Release order** (since 2.3.0 the tag does the publishing —
+`.github/workflows/release.yml`; before it, the engine was published by hand
+first, which that workflow now refuses)
 
 1. Merge the PR (merge commit).
-2. `npm whoami` prints the publisher — an expired token makes `npm publish`
-   fail **404 with no OTP prompt**; `npm login` first.
-3. Publish the engine from `main` (`packages/zdd-engine`).
-4. Tag the merge commit `vX.Y.Z` and push the tag.
-5. GitHub release for the tag, marked **Latest**, notes from the Versioning
-   entry.
-6. Check from **outside** this repo: `npx -y @rich-rees/zdd-engine@X.Y.Z`
+2. On `main` at the merge commit, `node scripts/pre-tag.mjs vX.Y.Z [adopter
+   checkouts…]`: the pins, both suites, and a dry run of the upgrade on each
+   real adopter given (a throwaway copy; never pushed).
+3. Tag the merge commit `vX.Y.Z` and push the tag. The workflow refuses a tag
+   that is not on `main`, proves the pins, runs both suites, publishes the
+   engine (no secret: npm trusts this workflow by name, set up once on the
+   package's npmjs.com settings), waits until the version is fetchable, and
+   creates the GitHub release marked **Latest** with the Versioning entry as
+   its notes. A failed run after the publish is rerun as it is: a version
+   already on npm from this commit is resumed, not refused.
+4. Check from **outside** this repo: `npx -y @rich-rees/zdd-engine@X.Y.Z`
    prints the engine's usage, and `npm view @rich-rees/zdd-engine version`
    names X.Y.Z (inside the repo, npm finds the workspace copy and installs
    nothing).
-7. Move this machine's install: the route the release check prints.
+5. Move this machine's install: the route the release check prints.
 
 **After**
 
@@ -94,7 +102,8 @@ drives `bootstrap.mjs upgrade`) — plus `bootstrap` (the runbook), the optional
 `grill`, and `extractor` (scaffold a local extractor — decision 0010). The runbook's writer is
 `plugins/zdd/scripts/bootstrap.mjs`: the skill asks, the script detects and
 writes, and it is the only writer of *adopter-owned* files — config, skeleton,
-opt-ins, the instruction block (decision 0003) — save one:
+opt-ins, ZDD's instructions file and the one line that loads it (decisions
+0003 and 0024) — save one:
 `scripts/scaffold-extractor.mjs`, which writes a local extractor's skeleton and
 its config lines by bootstrap's rules (exclusive create, never overwrite,
 the same `Ledger` report). The engine's `derive` /

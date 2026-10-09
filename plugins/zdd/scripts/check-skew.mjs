@@ -6,7 +6,7 @@
 // pin differs from the plugin, the agent regenerates with one engine and CI
 // checks with another, and the mismatch surfaces as a red check nobody can
 // explain. Warn where the developer will see it, and name the fix:
-// `bootstrap --upgrade` rewrites every pin.
+// "upgrade ZDD" rewrites every pin.
 //
 //   node check-skew.mjs [--root=<dir>] [--json]
 //
@@ -55,7 +55,7 @@ export function findPins(root) {
 // is decided by exact string inequality before this is consulted, so
 // `1.0.0-rc.1` against plugin `1.0.0` is skew either way; this merely chooses
 // the "behind" or "ahead" wording (here: equal numbers ⇒ 0 ⇒ "behind", whose
-// fix — `bootstrap --upgrade` — is the right one for a prerelease pin too).
+// fix — "upgrade ZDD" — is the right one for a prerelease pin too).
 export function compareSemver(a, b) {
   const pa = SEMVER.exec(a);
   const pb = SEMVER.exec(b);
@@ -75,7 +75,7 @@ function main() {
   const invalid = pins.filter((p) => p.version === null && !p.unpinned);
   const behind = pins.filter((p) => p.version !== null && p.version !== plugin && compareSemver(p.version, plugin) <= 0);
   const ahead = pins.filter((p) => p.version !== null && p.version !== plugin && compareSemver(p.version, plugin) > 0);
-  const upgrade = "Run `bootstrap --upgrade` (the bootstrap skill with --upgrade) to rewrite every pin, then run `render` and commit the result in the same PR.";
+  const upgrade = 'Say "upgrade ZDD" (the upgrade skill) to rewrite every pin, then run `render` and commit the result in the same PR.';
 
   if (flags.json) {
     process.stdout.write(JSON.stringify({ plugin, pins, skew: behind.length + ahead.length + invalid.length + unpinned.length > 0, behind, ahead, invalid, unpinned }) + "\n");
