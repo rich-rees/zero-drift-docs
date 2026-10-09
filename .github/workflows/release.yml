@@ -77,7 +77,7 @@ jobs:
             echo "published=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Publish the engine (trusted publishing: no token)
+      - name: "Publish the engine (trusted publishing, no token)"
         if: steps.npm.outputs.published == 'false'
         run: |
           npm install -g npm@latest   # trusted publishing needs npm 11.5+
