@@ -30,7 +30,8 @@ export const DEFAULT_REFS = {
 // wholesale for setup/assertions; those edges describe the harness, not
 // production data flow. A missing root is reported, never fatal (CR-002);
 // symlink cycles are cut by the shared walker (CR-016).
-export function walkSourceFiles(repoRoot, { roots, extensions, excludeDirs, excludeSuffixes }, diagnostics = []) {
+// `isIgnored`: a gitignored path is never source (CAS-103 pick 1).
+export function walkSourceFiles(repoRoot, { roots, extensions, excludeDirs, excludeSuffixes }, diagnostics = [], isIgnored = () => false) {
   const out = [];
   const seen = new Set();
   for (const root of roots) {
@@ -42,14 +43,15 @@ export function walkSourceFiles(repoRoot, { roots, extensions, excludeDirs, excl
     walkDir(
       abs,
       (p, name) => {
-        if (extensions.some((e) => name.endsWith(e)) && !excludeSuffixes.some((s) => name.endsWith(s))) {
-          out.push(posixify(p.slice(repoRoot.length + 1)));
+        const rel = posixify(p.slice(repoRoot.length + 1));
+        if (extensions.some((e) => name.endsWith(e)) && !excludeSuffixes.some((s) => name.endsWith(s)) && !isIgnored(rel)) {
+          out.push(rel);
         }
       },
       seen,
       (p, name) => {
         const rel = posixify(p.slice(repoRoot.length + 1));
-        return !excludeDirs.some((d) => rel === d || rel.endsWith(`/${d}`) || name === d);
+        return !excludeDirs.some((d) => rel === d || rel.endsWith(`/${d}`) || name === d) && !isIgnored(rel);
       },
       (p, reason) => diagnostics.push(`${posixify(p.slice(repoRoot.length + 1))}: ${reason} — skipped`),
     );

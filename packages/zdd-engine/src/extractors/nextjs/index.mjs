@@ -46,12 +46,16 @@ export const FACTS_KEY_ORDER = {
 // Route & surface walkers
 // ---------------------------------------------------------------------------
 
-function walkTree(dir, repoRoot, diagnostics, out = []) {
+// `isIgnored` (io.isIgnored): a gitignored path is never source (pick 1).
+function walkTree(dir, repoRoot, diagnostics, isIgnored, out = []) {
+  const rel = (p) => posixify(p.slice(repoRoot.length + 1));
   walkDir(
     dir,
-    (p) => out.push(p),
+    (p) => {
+      if (!isIgnored(rel(p))) out.push(p);
+    },
     new Set(),
-    () => true,
+    (p) => !isIgnored(rel(p)),
     (p, reason) => diagnostics.push(`${posixify(p.slice(repoRoot.length + 1))}: ${reason} — skipped`),
   );
   return out;
@@ -177,8 +181,9 @@ function deriveAuth(urlPath, routeText, matchers, authPatterns, apiPrefix) {
 // derive(ctx) — the extractor contract
 // ---------------------------------------------------------------------------
 
-export function derive({ repoRoot, options }) {
+export function derive({ repoRoot, options, io }) {
   const diagnostics = [];
+  const isIgnored = io?.isIgnored ?? (() => false);
   const {
     appDir: appDirOpt = "src/app",
     apiPrefix = "/api",
@@ -214,7 +219,7 @@ export function derive({ repoRoot, options }) {
   // ---- Route & surface trees ----
   const appAbs = join(repoRoot, appDir);
   if (!existsSync(appAbs)) diagnostics.push(`${appDir} not found — nothing to inventory`);
-  const appFiles = walkTree(appAbs, repoRoot, diagnostics).map((p) => posixify(p.slice(repoRoot.length + 1)));
+  const appFiles = walkTree(appAbs, repoRoot, diagnostics, isIgnored).map((p) => posixify(p.slice(repoRoot.length + 1)));
   const apiDirRel = posixify(join(appDir, apiPrefix.replace(/^\//, "")));
 
   const routes = [];
@@ -232,7 +237,7 @@ export function derive({ repoRoot, options }) {
   }
 
   // ---- Refs scan ----
-  const sourceFiles = walkSourceFiles(repoRoot, refsOptions, diagnostics);
+  const sourceFiles = walkSourceFiles(repoRoot, refsOptions, diagnostics, isIgnored);
   const scans = scanFiles(repoRoot, sourceFiles, subscribeCalls);
 
   // Attribution: nearest enclosing route dir wins; else nearest page (then
