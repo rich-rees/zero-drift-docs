@@ -293,6 +293,16 @@ runs: the agent loads before it works and updates before it finishes. You lose
 running the engine's `--check`, which makes a forgotten update **loud** without a
 merge gate.
 
+### Known issues
+
+- **2.2.1: the `services` extractor's default roots read gitignored folders**,
+  including the `.claude/worktrees/` folder the Claude desktop app creates
+  (a second checkout of the repo). On DiO the committed records named
+  worktree files: local `derive --check` passed and CI failed. Until the
+  next release, set `extractorOptions.services.roots` to the folders that
+  hold your source (for example `["apps", "scripts"]`). Fixed in 2.3.0:
+  what git ignores is never source.
+
 ### Upgrading
 
 Updating the plugin never touches your repo; moving the repo to a newer release
