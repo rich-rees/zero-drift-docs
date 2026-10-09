@@ -1,13 +1,26 @@
 ---
 name: upgrade
-description: "\"upgrade ZDD\" — move a repo that already uses Zero-Drift Docs to a newer release, as one guided flow: checks for a newer release and moves the repo's lock on the user's yes (then a restart), or, on the release that is running, shows every file it will change, asks once, writes, regenerates, and lists what to commit. Also run when the user says bootstrap --upgrade."
+description: "\"upgrade ZDD\" — move a repo that already uses Zero-Drift Docs to a newer release, as one guided flow in plain words: checks that everything ZDD needs is still here, checks for a newer release and moves the repo's lock on the user's yes (then a restart, or none when this machine is already there), or, on the release that is running, shows every file it will change with what it is and why, reads the repo's own instruction text against ZDD's rules sentence by sentence, asks one question at a time, writes, regenerates, and lists what to commit. Also run when the user says bootstrap --upgrade."
 ---
 
 # zdd:upgrade — "upgrade ZDD"
 
 The adopter is **choosing** to upgrade, so this is a guided flow: say what is
 coming, ask, then act. **`scripts/bootstrap.mjs` is the only writer** — you
-run it, relay its ledger verbatim, and never hand-write a file it writes.
+run it, relay its ledger in plain words, and never hand-write a file it writes.
+
+**Who you are talking to.** Assume the person has never seen an upgrade and
+may not be a developer. Every change is explained as it comes up — what the
+file is, why it changes, who owns it — in the words the script's cards use
+(**what / why / who / hand-edited**). Never the bare ledger: no hash ids, no
+JSON, no "repair apply". **One question at a time**, each with a recommended
+answer, its cost, and what saying no gives up; keep a running count; after a
+question, stop and wait. Explain a term the first time it comes up: the
+**lock** (one line in the repo's settings pinning it to one ZDD release), the
+**catalogue** (this machine's downloaded copy of ZDD's release list, which a
+restart moves to the lock), a **generated file** (written by ZDD from the
+code, never hand-edited), an **extractor** (the part of ZDD that reads one
+convention of the code).
 
 **Where the script is.** Two directories up from this SKILL.md
 (`<plugin>/skills/upgrade/SKILL.md` → `<plugin>/scripts/bootstrap.mjs`):
@@ -22,7 +35,18 @@ $PLUGIN = (Resolve-Path "<skill-dir>\..\..").Path   # PowerShell
 Run every command from the adopter's repo root. A repo with no
 `zdd/config.json` has nothing to upgrade: offer the `bootstrap` skill instead.
 
-## Step 1 — is there a newer release?
+## Step 1 — what ZDD needs, and is there a newer release?
+
+```
+node "$PLUGIN/scripts/bootstrap.mjs" preflight
+```
+
+The same check the install ran: Node.js 20+, `npx`, git and a repository,
+github.com, the npm registry, and that the engine this release pins is there
+to download — a new release is a new engine download, so a firewall or a
+missing Node is named up front, not as a raw `npx` error mid-upgrade. Relay
+the lines; on a MISSING line say it in your own words and **stop** (nothing
+was written).
 
 ```
 node "$PLUGIN/scripts/bootstrap.mjs" release-status
@@ -37,28 +61,32 @@ every developer to run; the catalogue is this machine's downloaded copy of
 ZDD's release list, which a restart moves to the lock; the running release
 is what loaded when this session started.
 
-- **The lock trails and the line says "no restart"** (this session already
-  runs the newest release and the catalogue is there): ask **"Move this
-  repo's lock to vX.Y.Z?"**; on yes run `upgrade --to=vX.Y.Z` (add `--lock`
-  when there was no lock), relay its ledger, and **carry straight on to step
-  2 in this session**.
-
-- **A newer release exists, in Claude Code:** tell the user what it is, link
-  its release notes as printed, and ask **"Move this repo to vX.Y.Z?"** — or,
-  when the repo has **no lock**, **"Lock this repo and move it to vX.Y.Z?"**
-  (decision 0021). On yes:
+- **A newer release exists, in Claude Code** (question 1 of about 5): tell
+  the user what it is, link its release notes as printed, and ask **"Move
+  this repo to vX.Y.Z?"** — or, when the repo has **no lock**, **"Lock this
+  repo and move it to vX.Y.Z?"** (decision 0021). Recommended: yes, the
+  notes say what it brings; cost: one PR and, for each teammate, two
+  restarts; saying no keeps the repo where it is, which is a fine choice.
+  On yes:
 
   ```
   node "$PLUGIN/scripts/bootstrap.mjs" upgrade --to=vX.Y.Z           # add --lock when there was no lock
   ```
 
-  It checks the tag exists, then writes only the lock. Relay its ledger,
-  then the route, word for word: **restart Claude Code; the first line of
-  the next session names the commands that move this machine — run them,
-  restart again; then say "upgrade ZDD" again.** Claude Code loads a new
-  plugin version only at start, so the rest of the upgrade is the new
-  release's own run. **Stop here** — this run is complete when the lock has
-  moved and the user has the route.
+  It checks the tag exists, then writes only the lock, and its **`next:`**
+  note names the route for *this* machine:
+  - **"no restart"** — this session already runs the target and the
+    catalogue is there: carry **straight on to step 2** in this session.
+  - otherwise — relay it word for word: **restart Claude Code; the first
+    line of the next session names the commands that move this machine —
+    run them, restart again; then say "upgrade ZDD" again.** Claude Code
+    loads a new plugin version only at start, so the rest of the upgrade is
+    the new release's own run. **Stop here** — this run is complete when
+    the lock has moved and the user has the route.
+- **The lock trails and the line says "no restart"** (this session already
+  runs the newest release and the catalogue is there): ask the same
+  question; on yes run `upgrade --to=vX.Y.Z` (add `--lock` when there was
+  no lock), relay its ledger, and **carry straight on to step 2**.
 - **A newer release exists, in Codex** (Codex reads no lock): ask **"Update
   ZDD to vX.Y.Z?"** On yes, the user updates the install from a terminal —
   `codex plugin marketplace upgrade zero-drift-docs`, then `codex plugin
@@ -68,31 +96,63 @@ is what loaded when this session started.
   release that is running. If the repo already locks a newer release than
   this session runs, step 2 refuses and names the update — relay it.
 
-## Step 2 — the plan
+## Step 2 — the plan, explained file by file
 
 ```
 node "$PLUGIN/scripts/bootstrap.mjs" upgrade --plan
 ```
 
-It writes nothing. Relay it verbatim: every file it **would change**, every
-file it keeps, every note — the notes are this upgrade's changelog, a line
-or two for each release the repo crosses, and the "Upgrading to X.Y" sections
-below (for the releases that ask something of you) say what
-each one asks of you — and every **section outside the ZDD block** it names.
+It writes nothing. Walk the person through it in plain words, in this order:
 
-For each named section, read it against the new block and tell the user, by
-line, what the block now covers and anything in the section that
-**contradicts** the block. The section is theirs; it is removed only on their
-word.
+1. **Every file it would change**, with its card (what, why, who,
+   hand-edited) — the config's version line, the engine pin in the CI
+   workflow or the pre-push hook, `zdd/instructions.md` (ZDD's own file,
+   rewritten to this release's text), the lock, `.gitattributes`. Say for
+   each what moves and why in one sentence.
+2. **The instructions file and the one line in `CLAUDE.md`.** On a repo from
+   before 2.3 the plan replaces the old marked block in `CLAUDE.md` with one
+   line, `@zdd/instructions.md`. Show `CLAUDE.md` **before and after** in
+   plain words: the markers and the block go; one line stays, which makes
+   Claude Code read ZDD's file at the start of every session as if it were
+   written there; ZDD owns that file; **everything else in `CLAUDE.md` is
+   theirs** and ZDD never edits it again. Then say what each new rule makes
+   the AI do differently (the release's notes list them). For Codex users,
+   `AGENTS.md` keeps a copy of the text between its two marker lines,
+   because Codex cannot load a separate file.
+3. **The notes** — this upgrade's changelog, a line or two per release the
+   repo crosses; the "Upgrading to X.Y" sections below say what each one
+   asks of you. Say them in plain words; the questions they raise are asked
+   at step 4.
+4. **Their own text that speaks to a ZDD rule.** The plan lists every
+   paragraph or bullet in `CLAUDE.md` / `AGENTS.md`, outside ZDD's line or
+   block, that speaks to one of ZDD's rules — never a whole section — and
+   prints **what ZDD now says** beside it. For each one, read the two
+   together and tell the person, in plain words: **same** (their sentence
+   says what ZDD's instructions already say — safe to remove, their call),
+   **different** (it says something ZDD's rules do not cover — keep it), or
+   **contradicting** (it tells the AI to do something ZDD's rules forbid —
+   recommend removing or changing it, and say why). A sentence is theirs;
+   it is removed only on their word, and the heading goes with it only when
+   the sentence was all the section held.
+5. **Retired names.** The plan lists every file in the repo that still uses
+   a name a release retired (an old command, an old extractor key, the old
+   release tag held somewhere ZDD does not write — a lock test, a setup
+   guide), each with its replacement. Say where each is and what to change
+   it to; these are the person's files, changed by hand.
 
-Then ask **once**, covering all of it:
+Then ask, **one question at a time** (questions 2 to 4 of about 5):
 
-1. Write these changes?
-2. If the plan says the repo has **no lock**: lock it to this release
-   (recommended — decision 0021)?
-3. If sections were named: which to remove (their ids)?
+- **"Write these changes?"** — recommended yes; cost: one commit in a PR;
+  saying no leaves the repo on its current release.
+- If the plan says the repo has **no lock**: **"Lock it to this release?"**
+  — recommended yes (decision 0021): every developer then runs the same
+  release and the next upgrade starts at step 1; saying no leaves the repo
+  floating on whatever each machine last fetched.
+- If their own text was named: **"Which of these sentences shall I
+  remove?"** — list them with your same / different / contradicting reading
+  and a recommendation for each; they answer with the ones to drop.
 
-The step is complete when the user has answered all three.
+Read the answers back, then go on.
 
 ## Step 3 — write
 
@@ -100,32 +160,46 @@ The step is complete when the user has answered all three.
 node "$PLUGIN/scripts/bootstrap.mjs" upgrade [--lock] [--drop=<ids>]
 ```
 
-`--lock` only on a yes to question 2; `--drop=<id>,<id>` only with the ids
-the plan printed for the sections the user chose (each id is a hash of the
-section's text: if the section changed since the plan, the run refuses — show
-the plan again). Relay the ledger verbatim. Its notes match the plan's.
+`--lock` only on a yes to the lock question; `--drop=<id>,<id>` only with the
+ids the plan printed for the sentences the user chose (each id binds the
+sentence's text and its place: if it changed since the plan, the run refuses
+— show the plan again). Relay the ledger in plain words, as in step 2. Its
+notes match the plan's.
 
-## Step 4 — the questions the notes raise
+## Step 4 — the questions the notes raise, one at a time
 
 Work through every note that asks something, one question at a time, each
-recorded by the script, never by hand:
+recorded by the script, never by hand (the remaining questions of about 5):
 
-- **An opt-in extractor offered with evidence** (2.1): show the evidence and
-  ask. On yes, a repair apply with the extractor added — `apply
-  --answers=<file>` where the file is `{ "extractors": [<current…>, "<name>"],
-  "extractorOptions": { "<name>": <options from the note> } }`. Repair mode
-  keeps every other choice. Never add one the user did not confirm.
-- **The Stop prompt is unset** (1.1): ask (default yes), record it with a
+- **An opt-in extractor offered with evidence** (2.1): say what the person
+  would see ("the map would show which code depends on Sentry and Resend"),
+  show the evidence and ask. On yes, a repair apply with the extractor added
+  — `apply --answers=<file>` where the file is `{ "extractors": [<current…>,
+  "<name>"], "extractorOptions": { "<name>": <options from the note> } }`.
+  Repair mode keeps every other choice. Never add one the user did not
+  confirm. Say the cost plainly: switching an extractor on adds records,
+  which lengthens the agent index and the unclaimed list until the map
+  claims them.
+- **The finish prompt is unset** (1.1): ask (default yes), record it with a
   repair apply `{ "optIns": { "stop": true } }` (or `false`).
 - **Realtime wrappers** (2.1): ask whether the app subscribes through a
   wrapper; record the call names with a repair apply — `{ "extractorOptions":
   { "react-router": { "subscribeCalls": ["live.onInsert"] } } }`, or for
   Next.js `{ "extractorOptions": { "nextjs": { "refs": { "subscribeCalls":
   [...] } } } }`. Options merge into what is there; nothing else moves.
+- **The map's `services/` folder** (2.3): the note suggests renaming it to
+  `external-services/`; it is theirs and is never renamed for them.
 
 ## Step 5 — regenerate, check, and list the commit
 
-With the engine this plugin pins:
+Run the preflight once more — the engine pin may have moved, and a new pin is
+a new download:
+
+```
+node "$PLUGIN/scripts/bootstrap.mjs" preflight
+```
+
+Then, with the engine this plugin pins:
 
 ```
 npx -y @rich-rees/zdd-engine@2.2.1 derive
@@ -140,9 +214,11 @@ tightened what; fix it with the user in this PR.
 
 The run is complete when you have listed every file to commit **in one PR**:
 the ledger's changed files, the regenerated artifacts, and any repair-apply
-changes. Close with the team's next step: after the PR merges, each
-developer's next session start prints one line naming the commands that move
-their machine — they run them and restart.
+changes. Close with the team's next step, in plain words: after the PR
+merges, each developer's next session start prints one line naming the
+commands that move their machine — they run them and restart. A ZDD defect
+met on the way is proposed for filing at
+https://github.com/rich-rees/zero-drift-docs/issues, labelled `finding`.
 
 ## Upgrading to 2.0 ("choose patterns")
 
@@ -152,8 +228,10 @@ their machine — they run them and restart.
   migrated in place; another shape is named for the user to change by hand),
   so CI fails while a branch's `zdd/patterns-plan.md` exists.
 - A blessing that does not open with its **trigger question** now **fails**
-  `lint`. Show the user every blessing lint names and propose the question
-  each one answers; change the map only on their word, in the upgrade PR.
+  `lint`. Propose the questions as **one reviewable file** (each blessing
+  lint names, with the question it would answer, one line each), approved in
+  one pass — never one question per blessing; change the map only on the
+  user's word, in the upgrade PR.
 
 ## Upgrading to 2.1 (the front end, jobs and services)
 
@@ -185,3 +263,27 @@ their machine — they run them and restart.
 - **From a release before 2.2** there is no step 1 yet: the README's
   one-time hand step moves the lock (edit the ref, restart, run the commands
   the session-start line names, restart), then "upgrade ZDD" runs from step 2.
+
+## Upgrading to 2.3 (plain words, the instructions file, external services)
+
+- **The instructions file.** ZDD's rules move out of the marked block in
+  `CLAUDE.md` into `zdd/instructions.md`, loaded by one line; the plan
+  replaces the block with the line, once (step 2, point 2). `AGENTS.md`
+  keeps a block. The text gains the rules this release's findings asked for:
+  both install commands in order, the three cases a release line can mean,
+  the merge-conflict steps, reuse-first in "choose patterns", and where a
+  ZDD defect is filed.
+- **External services.** The `services` extractor is now
+  `external-services`, its records `external-service`: the plan renames the
+  config keys, `claims.strictKinds` and the allow-list ids, and the map's
+  links to the records; the next `derive` moves the records from
+  `zdd/metadata/service/` to `zdd/metadata/external-service/`, so expect that
+  in `derive --check` and the indexes in `render --check`. A hand-written
+  `zdd/map/services/` folder is suggested for renaming, never renamed.
+- **What git ignores is never source.** `derive` now skips every
+  gitignored path (and `.claude/worktrees/`); a repo whose records named
+  one sees those records change on the bump.
+- **`.gitattributes`** gains one line pinning `zdd/` to LF, so Windows
+  checkouts stop showing every generated file as modified.
+- **Their own text** is read sentence by sentence against ZDD's rules, and
+  retired names in their files are listed (step 2, points 4 and 5).
