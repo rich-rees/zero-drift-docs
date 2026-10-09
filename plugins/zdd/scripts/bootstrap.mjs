@@ -19,6 +19,18 @@
 //       that already has a config (repair), an omitted answer keeps the
 //       current choice; only an explicit answer changes it.
 //
+//   bootstrap.mjs preflight [--registry=<url>] [--github=<url>] [--json]
+//       Every piece of tech ZDD needs, checked before a question is asked
+//       (CAS-103 C7): Node.js 20+, npx, git and a git repository, reachability
+//       of github.com and the npm registry, and that the pinned engine is
+//       there to download. Each failure says what is missing, what ZDD uses
+//       it for, how to get it, and that nothing was written. Exit 1 on any.
+//
+//   bootstrap.mjs estimate [--root=<dir>] [--json]
+//       Sizes the repo for the three install scenarios (greenfield, a young
+//       app, a mature codebase) and the opt-in backfill: source files,
+//       commits, age, and an honest estimate of the user's review time.
+//
 //   bootstrap.mjs upgrade [--lock] [--root=<dir>] [--json]
 //       The only later writer into an adopter's repo. Migrates `adapter` →
 //       `extractors`, moves `viewer.nonAreaTags` to the top level, rewrites
@@ -51,6 +63,8 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, lstatS
 import { join, dirname, basename, relative } from "node:path";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
 import {
   PLUGIN_ROOT,
   ENGINE_PACKAGE,
@@ -465,6 +479,7 @@ export function detect(root) {
   if (deps.expo || deps["expo-router"] || nestedDeps.has("expo") || nestedDeps.has("expo-router") || expoDirs.length) apps.push({ name: "Mobile (Expo)", evidence: expoDirs.length ? `Expo Router tree at \`${expoDirs[0]}\`` : "`expo` in package.json", extractor: expoDirs.length ? "expo-router (proposed above)" : "expo-router — switched on by an `app/` folder with a `_layout` file (ZDD 2.1, early); map-only until then" });
   if (routesFiles.length || reactRouterDep || skippedRoutesFiles.length) apps.push({ name: "Web (React)", evidence: routesFiles.length ? `route tree in \`${routesFiles[0]}\`` : reactRouterDep ? "`react-router` in package.json" : `route tree at a refused path (\`${skippedRoutesFiles[0]}\`)`, extractor: "react-router (proposed above)" });
 
+  const host = repoHost(root);
   const mode = sourceFiles === 0 && !pkg ? "greenfield" : "existing";
   if (mode === "existing" && !proposals.length) {
     proposals.push({ name: "generic", evidence: ["source present but no known convention found — map-only ZDD; scaffold an extractor for it with the `extractor` skill once bootstrap is done"], options: {} });
@@ -487,7 +502,30 @@ export function detect(root) {
       });
     }
   }
-  return { mode, proposals, apps, sourceFiles, questions };
+  return { mode, proposals, apps, sourceFiles, questions, host };
+}
+
+// Where the repo is hosted (CAS-103 C6): the shipped CI workflow runs only on
+// GitHub Actions, so the CI offer depends on this. From the origin remote;
+// a repo with no remote yet (greenfield) is "none" and keeps the GitHub
+// default, which the skill then asks about.
+export function hostOf(remote) {
+  if (typeof remote !== "string" || !remote.trim()) return { kind: "none", remote: null };
+  const r = remote.trim();
+  const kind = /(^|[@/.])github\.com([:/]|$)/i.test(r) ? "github"
+    : /(^|[@/.])gitlab\.com([:/]|$)/i.test(r) ? "gitlab"
+    : /dev\.azure\.com|visualstudio\.com/i.test(r) ? "azure"
+    : /(^|[@/.])bitbucket\.org([:/]|$)/i.test(r) ? "bitbucket"
+    : "other";
+  return { kind, remote: r };
+}
+function repoHost(root) {
+  if (!hasGit(root)) return hostOf(null);
+  try {
+    return hostOf(execFileSync("git", ["remote", "get-url", "origin"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 10_000 }));
+  } catch {
+    return hostOf(null);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1202,6 +1240,13 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
       }
     : { autoLoad: true, fence: true, stop: true, ci: true, prePush: true };
   const optIns = { ...current, ...(answers.optIns ?? {}) };
+  // The shipped workflow is GitHub Actions (C6): on another host it would
+  // never run and the user would believe they had a merge gate. The opt-in
+  // is recorded as off, the three commands are printed for their own
+  // pipeline, and the pre-push hook is offered as the fallback.
+  const host = detection.host ?? hostOf(null);
+  const ciOffHost = optIns.ci && !["github", "none"].includes(host.kind);
+  if (ciOffHost) optIns.ci = false;
 
   // --- config.json -------------------------------------------------------
   let config = existingConfig;
@@ -1331,6 +1376,9 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
   // --- opt-ins ------------------------------------------------------------
   ledger.notes.push(`hooks: autoLoad ${optIns.autoLoad ? "on" : "off"}, fence ${optIns.fence ? "on" : "off"}, stop ${optIns.stop ? "on" : "off"} (recorded in zdd/config.json; the plugin's hooks.json reads it)`);
 
+  if (ciOffHost) {
+    ledger.notes.push(`CI workflow not written: this repo's origin is ${host.kind} (${host.remote}), and the workflow ZDD ships runs only on GitHub Actions — a file there would never run. The merge gate for your own pipeline is the three commands the summary prints; the pre-push hook is the local fallback`);
+  }
   if (optIns.ci) {
     ensureOwned(ledger, ".github/workflows/zdd.yml", workflowText(version));
     if (ledger.exists(".githooks/pre-push")) ledger.notes.push(".githooks/pre-push also present — with CI accepted it is redundant; remove it if you no longer want the local check");
@@ -1358,8 +1406,10 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
   writePluginSettings(ledger, version);
 
   const pocock = findPocock(root, home);
-  return { mode, version, date, config, optIns, pocock, detection, ...ledgerOut(ledger) };
+  return { mode, version, date, config, optIns, pocock, detection, host, ciCommands: ciCommands(version), ...ledgerOut(ledger) };
 }
+// The merge gate as three commands, for a pipeline ZDD ships no workflow for.
+export const ciCommands = (version) => [`npx -y ${ENGINE_PACKAGE}@${version} derive --check`, `npx -y ${ENGINE_PACKAGE}@${version} render --check`, `npx -y ${ENGINE_PACKAGE}@${version} lint --merge`];
 
 // The example feature slice's text, from the configured extractors. The
 // example TARGETS are shown as bare paths, never in the `[x](y.json)` shape:
@@ -2213,8 +2263,21 @@ function narratePocock(p) {
 
 export function narrateApply(r) {
   const out = [`Bootstrap (${r.mode}) — plugin ${r.version}, ${r.date}`];
-  for (const f of r.wrote) out.push(`  wrote   ${f}`);
-  for (const f of r.kept) out.push(`  kept    ${f}`);
+  // Each file with its plain-words card (pick 2): what it is, why it
+  // exists, who writes it, whether it is ever hand-edited.
+  const card = (f) => {
+    const e = explain(f.replace(/ \(.*\)$/, ""));
+    if (!e) return;
+    out.push(`          what: ${e.what}`, `          why: ${e.why}`, `          who: ${e.who}`, `          hand-edited: ${e.handEdited}`);
+  };
+  for (const f of r.wrote) {
+    out.push(`  wrote   ${f}`);
+    card(f);
+  }
+  for (const f of r.kept) {
+    out.push(`  kept    ${f}`);
+    card(f);
+  }
   for (const f of r.skipped) out.push(`  skipped ${f}`);
   for (const n of r.notes) out.push(`  note    ${n}`);
   out.push("");
@@ -2224,6 +2287,10 @@ export function narrateApply(r) {
   out.push("");
   if (r.optIns.ci) {
     out.push("One step only you can do: in branch protection, require the `zdd` check to pass and require branches to be up to date before merging. Now stale generated artifacts cannot merge.");
+  } else if (r.host && !["github", "none"].includes(r.host.kind)) {
+    out.push(`This repo is hosted on ${r.host.kind}, where the workflow ZDD ships (GitHub Actions) cannot run. The merge gate for your own pipeline is three commands, run on every pull request:`);
+    for (const c of r.ciCommands ?? ciCommands(r.version)) out.push(`  ${c}`);
+    out.push("Fail the pipeline when any of them fails; the first two say when the generated artifacts are stale, the third refuses a merge while a pattern plan is left behind." + (r.optIns.prePush ? " Until then the pre-push hook makes a forgotten update loud on each developer's machine." : ""));
   } else {
     out.push(
       "CI declined: ZDD runs on the spoken verbs alone" +
@@ -2232,6 +2299,188 @@ export function narrateApply(r) {
     );
   }
   out.push(narratePocock(r.pocock));
+  return out.map(printable).join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// The plain-words card for every file ZDD puts in a repo (CAS-103 pick 2):
+// what it is, why it exists, who writes it, whether it is ever hand-edited.
+// The narration prints the card under each file, and a test binds every
+// path bootstrap writes to a card here. Written for someone who has never
+// heard of ZDD.
+// ---------------------------------------------------------------------------
+export const ARTIFACT_EXPLANATIONS = [
+  { match: /(^|\/)config\.json$/, what: "ZDD's settings for this repo: which parts of the code it reads (the extractors), where the docs live, and which helpers are switched on", why: "so every developer and every CI run reads the code the same way", who: "ZDD writes it at install; \"upgrade ZDD\" moves its version line", handEdited: "rarely — a path or an option when you change your mind; ZDD says so when it rewrites it" },
+  { match: /(^|\/)instructions\.md$/, what: "ZDD's instructions to the AI for every session: the spoken verbs (\"load ZDD\", \"choose patterns\", \"update ZDD\", \"upgrade ZDD\") and the rules that keep the docs honest", why: "the AI reads this before it touches anything, so it knows the vocabulary, the decisions and the shape of the system", who: "ZDD writes it and rewrites it on every upgrade", handEdited: "never — your own rules go in CLAUDE.md, which ZDD never edits after install" },
+  { match: /(^|\/)glossary\.md$/, what: "the glossary: one short paragraph per word your project uses with a precise meaning", why: "the AI calls things what you call them, instead of grepping for a near-synonym and guessing", who: "you (and the AI, with your approval, as each piece of work touches a word)", handEdited: "yes — it is yours; it starts empty and grows with the work" },
+  { match: /(^|\/)adr\/0001-adopt-zero-drift-docs\.md$/, what: "your first decision record: that this repo adopted ZDD, and why", why: "a worked example of the format, and the corpus's first entry — your decision, dated today", who: "ZDD seeds it once; it is yours from then on", handEdited: "yes — edit the reasons to match yours" },
+  { match: /(^|\/)adr\/?(\d{4}-.*\.md)?$/, what: "the decision records (ADRs): one short file per decision that was hard to reverse, surprising without context, and a real trade-off", why: "so the AI does not reintroduce the approach you rejected in March", who: "you (and the AI, as decisions crystallise); never reconstructed from old code by default", handEdited: "yes — written when decided, never rewritten into a new truth (a new one supersedes it)" },
+  { match: /(^|\/)map\/features\/example-feature\.md$/, what: "an example feature page in the semantic map, showing how a feature claims the code it owns by linking it", why: "so the folder is never an unexplained empty one; it shows the shape", who: "ZDD writes the example once", handEdited: "yes — rename it to a real feature or delete it" },
+  { match: /(^|\/)map\/apps\/[^/]+\.md$/, what: "one page per app you named (web, mobile, API) in the semantic map", why: "a home for the rules that apply across that whole app (the blessings: which code to copy, which to refuse)", who: "ZDD writes the stub at install; you fill it", handEdited: "yes — yours" },
+  { match: /(^|\/)map\/(features|apps|external-services)\/\.gitkeep$|(^|\/)map\/?$/, what: "the semantic map: short pages grouping the code into features, apps and the third-party systems it depends on, with the blessings (which existing code to copy for a kind of work, and what to refuse)", why: "grouping and precedent are the two things the code cannot say about itself", who: "you and the AI, one mapping session at install and then as each piece of work touches a feature", handEdited: "yes — yours; the links inside it are kept in step with the code by the drift check" },
+  { match: /(^|\/)metadata\/?$/, what: "the inventory of the code (routes, tables, screens, jobs, components, external services), one small JSON file each", why: "a mechanical, always-correct map of what exists, so the AI finds its way without grepping", who: "the engine (derive) — regenerated by \"update ZDD\"", handEdited: "never — the drift check fails if it is" },
+  { match: /(^|\/)graph\.json$/, what: "the whole generated picture in one machine-readable file: every record and every link", why: "the human index is rendered from it, and other tools can read it", who: "the engine (render)", handEdited: "never" },
+  { match: /(^|\/)agent-index\.md$/, what: "the short index the AI reads at the start of every session: each feature with pointers to its code", why: "orientation in one screen, so each session starts knowing where things are", who: "the engine (render)", handEdited: "never" },
+  { match: /(^|\/)adr-index\.md$/, what: "one line per decision record, with what supersedes what", why: "the AI reads the whole list before work, then only the decisions its task cites", who: "the engine (render)", handEdited: "never" },
+  { match: /(^|\/)blessing-index\.md$/, what: "one line per blessing: the question it answers (\"Adding an upload?\") and the reason", why: "read before any code is written, so the right existing code is copied", who: "the engine (render)", handEdited: "never" },
+  { match: /(^|\/)human-index\.html$/, what: "an interactive picture of the system for people: features, screens, endpoints, tables and how they connect", why: "for someone who must understand a system they did not build", who: "the engine (render)", handEdited: "never" },
+  { match: /^CLAUDE\.md$/, what: "Claude Code's instruction file for this repo — yours", why: "ZDD adds exactly one line to it, which loads zdd/instructions.md into every session", who: "you; ZDD adds the one line at install and never edits the file again", handEdited: "yes — yours" },
+  { match: /^AGENTS\.md$/, what: "Codex's instruction file for this repo — yours, with ZDD's instructions copied in between two marker lines (Codex cannot load a separate file)", why: "so Codex sessions get the same rules as Claude Code sessions", who: "you, outside the markers; ZDD rewrites what is between them on upgrade", handEdited: "yes outside the markers, never inside" },
+  { match: /^\.github\/workflows\/zdd\.yml$/, what: "the CI check that refuses to merge a pull request whose generated docs are stale", why: "this is what turns ZDD from a habit into a guarantee", who: "ZDD writes it; \"upgrade ZDD\" moves the engine version inside it", handEdited: "rarely — its header says ZDD manages it; remove the header to take it over" },
+  { match: /^\.githooks\/pre-push$/, what: "a local git hook that runs the same checks before a push and refuses the push if the docs are stale", why: "the fallback when there is no CI gate: it makes a forgotten update loud", who: "ZDD writes it; \"upgrade ZDD\" rewrites it", handEdited: "rarely — same ownership header as the workflow" },
+  { match: /^\.gitattributes$/, what: "one line telling git to keep the files under zdd/ with Unix line endings", why: "the engine writes them that way; without this, Windows shows every generated file as changed", who: "ZDD adds the one line; the rest of the file is yours", handEdited: "yes outside ZDD's line" },
+  { match: /^docs\/agents\/domain\.md$/, what: "a short note telling Matt Pocock's skills (the design interview ZDD builds on) where this repo keeps its glossary and decisions", why: "those skills look for files at the repo root by default and would create strays", who: "ZDD writes it once, only when absent", handEdited: "yes — yours from the first byte" },
+  { match: /^\.claude\/settings\.json$/, what: "Claude Code's project settings: which plugins are on for this repo, and the lock that pins this repo to one ZDD release", why: "every developer runs the same ZDD release, and moving to a new one is a deliberate change", who: "ZDD merges its lines in, keeping yours; \"upgrade ZDD\" moves the lock", handEdited: "yes for your own settings; ZDD's lines are rewritten on upgrade" },
+];
+export function explain(rel) {
+  const clean = String(rel).replace(/\\/g, "/").replace(/^\.\//, "");
+  return ARTIFACT_EXPLANATIONS.find((e) => e.match.test(clean)) ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Preflight (CAS-103 C7): every piece of tech ZDD needs, checked before a
+// question is asked and again before an upgrade's engine run. Today the
+// plugin carries no engine: every skill that does real work runs `npx -y
+// @rich-rees/zdd-engine@<pin>`, so the engine is downloaded from the public
+// npm registry on a machine's first run; the plugin and Matt Pocock's skills
+// come from public GitHub repositories. No account is needed anywhere.
+// ---------------------------------------------------------------------------
+export const NODE_MIN = 20;
+const REGISTRY_DEFAULT = "https://registry.npmjs.org";
+const GITHUB_DEFAULT = `https://github.com/${MARKETPLACE_REPO}`;
+const USES = {
+  node: "ZDD's scripts and its engine run on it (20 or newer)",
+  npx: "comes with Node.js; it downloads and runs the ZDD engine from the public npm registry on its first use, and on each new engine version",
+  git: "ZDD reads the repo's history for freshness and locks a release by a git tag",
+  repo: "ZDD reads the repo's history for freshness and locks a release by a git tag; run `git init` in the folder first",
+  github: "ZDD and Matt Pocock's skills are installed from public GitHub repositories, and the release check reads the list of releases there",
+  registry: "ZDD's engine, @rich-rees/zdd-engine, is downloaded from the public npm registry by npx; no npm account is needed, the package is public",
+  engine: "the exact engine version this ZDD release pins must be there to download",
+};
+function head(url, timeoutMs = 5000) {
+  return new Promise((ok) => {
+    let u;
+    try {
+      u = new URL(url);
+    } catch {
+      return ok({ reachable: false, status: null, reason: "not a URL" });
+    }
+    const req = (u.protocol === "http:" ? httpRequest : httpsRequest)(u, { method: "GET", timeout: timeoutMs, headers: { "user-agent": "zdd-preflight" } }, (res) => {
+      res.resume();
+      ok({ reachable: true, status: res.statusCode ?? 0, reason: null });
+    });
+    req.on("timeout", () => {
+      req.destroy(new Error("timed out"));
+    });
+    req.on("error", (e) => ok({ reachable: false, status: null, reason: e.code ?? e.message }));
+    req.end();
+  });
+}
+export async function preflight(root, { registry = REGISTRY_DEFAULT, github = GITHUB_DEFAULT } = {}) {
+  const version = pluginVersion();
+  const checks = [];
+  const add = (name, ok, found, says) => checks.push({ name, ok, found, uses: USES[name], says });
+  const nodeVersion = process.versions.node;
+  const major = Number(nodeVersion.split(".")[0]);
+  add("node", major >= NODE_MIN, `Node.js ${nodeVersion}`, major >= NODE_MIN ? `Node.js ${nodeVersion} — ${USES.node}` : `Node.js ${nodeVersion} is older than ${NODE_MIN} — ${USES.node}; install Node.js ${NODE_MIN} or newer from https://nodejs.org and open a new terminal`);
+  let npx = null;
+  try {
+    npx = execFileSync(process.platform === "win32" ? "npx.cmd" : "npx", ["--version"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 20_000, shell: process.platform === "win32" }).trim();
+  } catch {
+    npx = null;
+  }
+  add("npx", npx !== null, npx ? `npx ${npx}` : null, npx ? `npx ${npx} — ${USES.npx}` : `npx — not found on this machine. ${USES.npx}. It is installed with Node.js from https://nodejs.org; a Claude Code installed on its own does not bring it`);
+  let gitVersion = null;
+  try {
+    gitVersion = execFileSync("git", ["--version"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 10_000 }).trim();
+  } catch {
+    gitVersion = null;
+  }
+  add("git", gitVersion !== null, gitVersion, gitVersion ? `git — ${USES.git}` : `git — not found on this machine. ${USES.git}; install it from https://git-scm.com`);
+  let isRepo = false;
+  if (gitVersion) {
+    try {
+      execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 10_000 });
+      isRepo = true;
+    } catch {
+      isRepo = false;
+    }
+  }
+  add("repo", isRepo, isRepo ? "a git repository" : null, isRepo ? `a git repository — ${USES.git}` : `a git repository — this folder is not one. ${USES.repo}`);
+  const gh = await head(github);
+  add("github", gh.reachable, gh.reachable ? `${github} answered ${gh.status}` : null, gh.reachable ? `github.com — ${USES.github}` : `github.com — could not be reached (${gh.reason}). ${USES.github}; check the network, a proxy or a firewall`);
+  const reg = await head(`${registry.replace(/\/$/, "")}/`);
+  add("registry", reg.reachable, reg.reachable ? `${registry} answered ${reg.status}` : null, reg.reachable ? `the npm registry — ${USES.registry}; ${USES.engine.replace("the exact engine version this ZDD release pins must be", `the engine, ${ENGINE_PACKAGE}@${version}, is`)}` : `the npm registry — could not be reached (${reg.reason}). ${USES.registry}; check the network, a proxy or a firewall`);
+  if (reg.reachable) {
+    const eng = await head(`${registry.replace(/\/$/, "")}/${ENGINE_PACKAGE.replace("/", "%2f")}/${version}`);
+    const there = eng.reachable && eng.status >= 200 && eng.status < 300;
+    add("engine", there, there ? `${ENGINE_PACKAGE}@${version} on the registry` : null, there ? `the engine, ${ENGINE_PACKAGE}@${version} — there to download` : `the engine, ${ENGINE_PACKAGE}@${version} — the npm registry answered but does not have this version (${eng.status ?? eng.reason}); a release of ZDD is published before its tag, so this is a ZDD defect — report it at https://github.com/${MARKETPLACE_REPO}/issues`);
+  } else add("engine", false, null, `the engine, ${ENGINE_PACKAGE}@${version} — not checked: the registry could not be reached`);
+  return { ok: checks.every((c) => c.ok), version, checks };
+}
+export function narratePreflight(p) {
+  const out = ["Before anything is written, the things ZDD needs:"];
+  for (const c of p.checks) out.push(`  ${c.ok ? "ok     " : "MISSING"} ${c.says}`);
+  out.push("");
+  out.push(p.ok ? "Everything ZDD needs is here. No account is needed anywhere." : "Nothing was written. Fix what is missing and run bootstrap again. No account is needed anywhere.");
+  return out.map(printable).join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// Estimate (CAS-103, Rich's additions to pick 5): which of the three install
+// scenarios this repo is, and an honest estimate of the review time the
+// opt-in backfill would ask of the user. Heuristics, said as such.
+// ---------------------------------------------------------------------------
+export function estimate(root) {
+  const d = detect(root);
+  let commits = 0;
+  let ageMonths = 0;
+  let contributors = 0;
+  if (hasGit(root)) {
+    try {
+      commits = Number(execFileSync("git", ["rev-list", "--count", "HEAD"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 10_000 }).trim()) || 0;
+      // The root commit's date: --max-count applies before --reverse, so the whole list is read and its last line taken.
+      const dates = execFileSync("git", ["log", "--format=%cI"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 10_000, maxBuffer: 64 * 1024 * 1024 }).trim().split(/\r?\n/).filter(Boolean);
+      const first = dates.at(-1) ?? "";
+      const last = execFileSync("git", ["log", "-1", "--format=%cI"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 10_000 }).trim();
+      if (first && last) ageMonths = Math.max(0, Math.round((new Date(last) - new Date(first)) / (30.44 * 24 * 3600 * 1000)));
+      contributors = execFileSync("git", ["shortlog", "-sn", "HEAD"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 10_000 }).trim().split(/\r?\n/).filter(Boolean).length;
+    } catch {
+      /* a repo with no commits yet */
+    }
+  }
+  const sourceFiles = d.sourceFiles;
+  const scenario = d.mode === "greenfield" ? "greenfield" : sourceFiles < 300 && ageMonths < 24 ? "young" : "mature";
+  let backfill = null;
+  if (scenario !== "greenfield") {
+    const terms = Math.max(5, Math.round(sourceFiles / 12));
+    const blessings = Math.max(3, Math.round(sourceFiles / 40));
+    const adrs = Math.min(15, Math.max(5, Math.round(commits / 40)));
+    const minutes = { glossary: Math.round(terms * 0.5), blessings: Math.round(blessings * 2), adrs: adrs * 3 };
+    const total = minutes.glossary + minutes.blessings + minutes.adrs;
+    const say = (m) => (m < 50 ? `about ${Math.max(5, Math.round(m / 5) * 5)} minutes` : m < 80 ? "about an hour" : `about ${Math.round(m / 60)} hours`);
+    backfill = {
+      glossary: `${say(minutes.glossary)} — roughly ${terms} terms proposed from the names in the code, as one reviewable file you tick, edit or strike`,
+      blessings: `${say(minutes.blessings)} — roughly ${blessings} kinds of work done more than once, each with the existing code to start from, as one reviewable file`,
+      adrs: `${say(minutes.adrs)} — about ${adrs} decisions, only the ones that would surprise a newcomer; the code shows what was decided, never why, so you supply the why for each (with clues from commit messages and comments) and each is marked as recorded after the fact`,
+      total: say(total),
+    };
+  }
+  return { scenario, sourceFiles, commits, ageMonths, contributors, proposals: d.proposals.map((p) => p.name), backfill };
+}
+export function narrateEstimate(e) {
+  const out = [];
+  if (e.scenario === "greenfield") out.push("Greenfield: no source to read yet. ZDD sets up an empty zdd/ folder; every task's \"update ZDD\" fills it, and nothing is asked up front beyond the intended stack.");
+  else {
+    const label = e.scenario === "young" ? "A young app" : "A mature codebase";
+    out.push(`${label}: ${e.sourceFiles} source files, ${e.commits} commits over about ${e.ageMonths} months${e.contributors > 1 ? `, ${e.contributors} people` : ""}.`);
+    out.push("On day one the inventory (derive) is complete with no questions; one mapping session proposes the feature groupings and asks only where the evidence is thin; the unclaimed list is a to-do list, not a gate. Decisions are never reconstructed by default: glossary terms, decisions and blessings arrive as each task's \"update ZDD\" touches them, so the docs fill in where the team works.");
+    out.push(`The backfill, if you want it, is ${e.backfill.total} of your review time:`);
+    out.push(`  glossary — ${e.backfill.glossary}`);
+    out.push(`  blessings — ${e.backfill.blessings}`);
+    out.push(`  decisions — ${e.backfill.adrs}`);
+    out.push("It is offered once, never default; skippable, resumable, and doable per artifact.");
+  }
   return out.map(printable).join("\n");
 }
 
@@ -2273,6 +2522,8 @@ if (process.argv[1] && posixify(process.argv[1]).endsWith("/scripts/bootstrap.mj
   const { flags, positional } = parseArgs(process.argv.slice(2));
   const cmd = positional[0];
   const root = adopterRoot(flags);
+  // eslint-disable-next-line no-inner-declarations
+  async function main() {
   try {
     if (cmd === "detect") {
       const d = detect(root);
@@ -2289,15 +2540,24 @@ if (process.argv[1] && posixify(process.argv[1]).endsWith("/scripts/bootstrap.mj
       const remote = typeof flags.remote === "string" ? flags.remote : undefined;
       const r = upgrade(root, { lock: flags.lock === true, plan: flags.plan === true, drop: flags.drop ?? null, to, remote, home: flags.home });
       process.stdout.write(flags.json ? JSON.stringify(r, null, 2) + "\n" : narrateUpgrade(r) + "\n");
+    } else if (cmd === "preflight") {
+      const p = await preflight(root, { ...(typeof flags.registry === "string" ? { registry: flags.registry } : {}), ...(typeof flags.github === "string" ? { github: flags.github } : {}) });
+      process.stdout.write(flags.json ? JSON.stringify(p, null, 2) + "\n" : narratePreflight(p) + "\n");
+      if (!p.ok) process.exit(1);
+    } else if (cmd === "estimate") {
+      const e = estimate(root);
+      process.stdout.write(flags.json ? JSON.stringify(e, null, 2) + "\n" : narrateEstimate(e) + "\n");
     } else if (cmd === "release-status") {
       const s = releaseStatus(root, typeof flags.remote === "string" ? flags.remote : undefined, flags.home);
       process.stdout.write(flags.json ? JSON.stringify(s) + "\n" : printable(narrateReleaseStatus(s)) + "\n");
     } else {
-      process.stderr.write("Usage: bootstrap.mjs <detect|apply --answers=<file>|upgrade [--plan] [--lock] [--drop=<ids>] [--to=vX.Y.Z]|release-status [--remote=<url>]> [--root=<dir>] [--date=YYYY-MM-DD] [--home=<dir>] [--json]\n");
+      process.stderr.write("Usage: bootstrap.mjs <preflight [--registry=<url>] [--github=<url>]|detect|estimate|apply --answers=<file>|upgrade [--plan] [--lock] [--drop=<ids>] [--to=vX.Y.Z]|release-status [--remote=<url>]> [--root=<dir>] [--date=YYYY-MM-DD] [--home=<dir>] [--json]\n");
       process.exit(2);
     }
   } catch (e) {
     process.stderr.write(`bootstrap: ${e.message}\n`);
     process.exit(1);
   }
+  }
+  main();
 }

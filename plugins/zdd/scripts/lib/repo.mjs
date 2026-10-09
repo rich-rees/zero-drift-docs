@@ -416,7 +416,14 @@ export function findPocock(root, home) {
   // <version>/…, so a bounded walk of a large cache can never miss it.
   const found = new Set();
   const pinnedDir = join(loc.pluginCache, pin.marketplace, pin.plugin);
-  for (const p of findAllUnder(pinnedDir, ["domain-modeling", "SKILL.md"], 6)) found.add(p);
+  let versions = [];
+  try {
+    versions = readdirSync(pinnedDir).sort();
+  } catch {
+    versions = [];
+  }
+  // Each cached version on its own, so no number of versions hides one (verify CR-318).
+  for (const v of versions) for (const p of findAllUnder(join(pinnedDir, v), ["domain-modeling", "SKILL.md"], 4)) found.add(p);
   for (const p of findAllUnder(loc.pluginCache, ["domain-modeling", "SKILL.md"], 8)) found.add(p);
   for (const path of [...found].sort()) {
     // A cache entry is a plugin only in the cache's own layout, reached
