@@ -333,6 +333,13 @@ merge gate.
 - A Supabase Realtime subscription written as a direct
   `.on('postgres_changes')` inside a hook yields no `subscribes` edge; name
   the wrapper in `subscribeCalls`. Filed as a finding.
+- **Still on 2.2.1? The `services` extractor's default roots read gitignored
+  folders**, including the `.claude/worktrees/` folder the Claude desktop app
+  creates (a second checkout of the repo): the committed records can name
+  worktree files, so local `derive --check` passes and CI fails. Until you
+  move, set `extractorOptions.services.roots` to the folders that hold your
+  source (for example `["apps", "scripts"]`). Fixed in 2.3.0: what git
+  ignores is never source.
 - Findings — things ZDD got wrong, as opposed to things wrong in your repo —
   live as [GitHub Issues labelled `finding`](https://github.com/rich-rees/zero-drift-docs/issues?q=is%3Aopen+label%3Afinding);
   a `blocker` is one a new user following this README can hit. A finding
