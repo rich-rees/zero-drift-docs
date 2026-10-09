@@ -35,9 +35,14 @@ const EXTRACTORS = {
   components: "./extractors/components/index.mjs",
   "expo-router": "./extractors/expo-router/index.mjs",
   jobs: "./extractors/jobs/index.mjs",
-  services: "./extractors/services/index.mjs",
+  "external-services": "./extractors/external-services/index.mjs",
   generic: "./extractors/generic/index.mjs",
 };
+// A name a release retired, still accepted for ONE release (the engine
+// prints the new name; "upgrade ZDD" rewrites the config). 2.3: `services`
+// became `external-services` (CAS-103 pick 3) — the records are third-party
+// systems, not a code service layer.
+export const EXTRACTOR_ALIASES = { services: "external-services" };
 const NAME_RE = /^[a-z][a-z0-9-]*$/;
 
 const RECORD_KEYS = ["kind", "id", "title", "description", "resource", "refs", "facts"];
@@ -182,8 +187,9 @@ async function loadExtractor(name, repoRoot, config) {
     if (local.has(name)) fail(`Local extractor '${name}' shadows the built-in of the same name — rename it`);
     return import(EXTRACTORS[name]);
   }
+  if (Object.hasOwn(EXTRACTOR_ALIASES, name)) return import(EXTRACTORS[EXTRACTOR_ALIASES[name]]);
   if (local.has(name)) return import(pathToFileURL(local.get(name)).href);
-  const known = Object.keys(EXTRACTORS).sort().join(", ");
+  const known = [...Object.keys(EXTRACTORS), ...Object.keys(EXTRACTOR_ALIASES)].sort().join(", ");
   const localList = localDir ? `; local ${localDir}: ${[...local.keys()].join(", ") || "(none)"}` : "";
   fail(`Unknown extractor '${name}' (known: ${known}${localList})`);
 }

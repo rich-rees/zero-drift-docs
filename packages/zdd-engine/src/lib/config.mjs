@@ -229,6 +229,10 @@ export function loadConfig(args, cwd = process.cwd()) {
 // does (plugins/zdd/scripts/bootstrap.mjs mirrors LEGACY_ADAPTERS for that),
 // and the deprecation note says how to do it by hand.
 // ---------------------------------------------------------------------------
+// Mirror of derive's EXTRACTOR_ALIASES (config is resolved before the
+// registry is consulted): old extractor name -> current name.
+export const EXTRACTOR_NAME_ALIASES = { services: "external-services" };
+
 export const LEGACY_ADAPTERS = {
   "nextjs-supabase": {
     extractors: ["supabase", "nextjs"],
@@ -266,6 +270,14 @@ export function resolveExtractors(config) {
     if (list.some((n) => typeof n !== "string")) return { error: `'extractors' entries must be strings (names)` };
     const dup = list.find((n, i) => list.indexOf(n) !== i);
     if (dup) return { error: `extractor '${dup}' is listed twice` };
+    // A retired name (2.3: `services` → `external-services`, CAS-103 pick 3)
+    // still works for one release and is said once per derive; both names
+    // at once is the same extractor twice.
+    for (const [old, now] of Object.entries(EXTRACTOR_NAME_ALIASES)) {
+      if (!list.includes(old)) continue;
+      if (list.includes(now)) return { error: `extractors lists both '${old}' and '${now}' — they are one extractor; keep '${now}'` };
+      diagnostics.push(`[config] extractor '${old}' is now '${now}' (ZDD 2.3) — "upgrade ZDD" renames it in zdd/config.json (extractors and extractorOptions); the old name works for this release only`);
+    }
     // `extractorOptions: null` / `[]` / a string, or a per-extractor entry
     // that is not an object, reached the extractor's destructuring as-is
     // (CR-107). Refuse with the key named.
@@ -273,14 +285,22 @@ export function resolveExtractors(config) {
     if (!isPlainObject(options)) return { error: `'extractorOptions' must be an object keyed by extractor name, got ${JSON.stringify(options)}` };
     // hasOwn: an extractor named `constructor` must read its own options,
     // not Object.prototype's (CR-022).
-    const own = (name) => (Object.hasOwn(options, name) ? options[name] : undefined);
+    const aliasOf = (name) => Object.entries(EXTRACTOR_NAME_ALIASES).find(([, now]) => now === name)?.[0];
+    const own = (name) => {
+      if (Object.hasOwn(options, name)) return options[name];
+      const old = aliasOf(name);
+      return old !== undefined && Object.hasOwn(options, old) ? options[old] : undefined;
+    };
     for (const name of list) {
       if (own(name) !== undefined && !isPlainObject(own(name))) {
         return { error: `'extractorOptions.${name}' must be an object, got ${JSON.stringify(own(name))}` };
       }
     }
     return {
-      extractors: list.map((name) => ({ name, options: own(name) ?? {} })),
+      extractors: list.map((name) => {
+        const now = Object.hasOwn(EXTRACTOR_NAME_ALIASES, name) ? EXTRACTOR_NAME_ALIASES[name] : name; // hasOwn: an extractor named `constructor` (CR-022)
+        return { name: now, options: own(now) ?? {} };
+      }),
       diagnostics,
     };
   }

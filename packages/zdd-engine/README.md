@@ -60,9 +60,9 @@ version:
 
 | Key | Default | What it is |
 |---|---|---|
-| `extractors` | *(required, unless legacy `adapter`)* | Extractors to run, composed per convention: `supabase`, `nextjs`, `fastapi`, `react-router`, `components`, `expo-router`, `jobs`, `services`, `generic` (built-in), or a name from `localExtractorDir`. Names only, never paths |
-| `extractorOptions` | — | Per-extractor source layout, keyed by name — `supabase`: `migrationNamespaces`, `externalBuckets`; `nextjs`: `appDir`, `apiPrefix`, `middlewarePath`, `authPatterns`, `refs` (+ `subscribeCalls`), `srcAliasRoot`; `fastapi`: `roots`, `excludeDirs`, `appVar`; `react-router`: `routesFile`, `srcAliasRoot`, `subscribeCalls`; `components`: `roots`, `pageDirs`, `sharedDirs`, …; `expo-router`: `appDir`; `jobs`: `roots`, `exclude`, `modes`, `entries`; `services`: `services`, `ignore`, `roots` — all in `config.schema.json` |
-| `claims.strictKinds` | `[]` | The opt-in kinds (`component`, `job`, `service`) that `claims.strict` also fails on; unlisted they warn (decision 0017) |
+| `extractors` | *(required, unless legacy `adapter`)* | Extractors to run, composed per convention: `supabase`, `nextjs`, `fastapi`, `react-router`, `components`, `expo-router`, `jobs`, `external-services`, `generic` (built-in; `services` is the 2.1–2.2 name of `external-services`, accepted for one more release), or a name from `localExtractorDir`. Names only, never paths |
+| `extractorOptions` | — | Per-extractor source layout, keyed by name — `supabase`: `migrationNamespaces`, `externalBuckets`; `nextjs`: `appDir`, `apiPrefix`, `middlewarePath`, `authPatterns`, `refs` (+ `subscribeCalls`), `srcAliasRoot`; `fastapi`: `roots`, `excludeDirs`, `appVar`; `react-router`: `routesFile`, `srcAliasRoot`, `subscribeCalls`; `components`: `roots`, `pageDirs`, `sharedDirs`, …; `expo-router`: `appDir`; `jobs`: `roots`, `exclude`, `modes`, `entries`; `external-services`: `services`, `ignore`, `roots` — all in `config.schema.json` |
+| `claims.strictKinds` | `[]` | The opt-in kinds (`component`, `job`, `external-service`) that `claims.strict` also fails on; unlisted they warn (decision 0017) |
 | `localExtractorDir` | — | Repo-relative folder of repo-local extractors (`<name>.mjs` or `<name>/index.mjs`) — the one place config may point at code |
 | `adapter` / `adapterOptions` | *(deprecated)* | The pre-1.0 single adapter; `nextjs-supabase` still expands to `[supabase, nextjs]` with a deprecation note |
 | `name` | `"Codebase"` | Display name for the indexes |

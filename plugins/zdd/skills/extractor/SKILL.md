@@ -46,7 +46,7 @@ Run everything from the adopter's repo root.
   `nextjs` (App Router), `fastapi` (decorators), `react-router` (a route tree
   in one file), `components` (React / React Native components),
   `expo-router` (an Expo Router folder tree), `jobs` (workers and scheduled
-  jobs from run manifests), `services` (external services by declared
+  jobs from run manifests), `external-services` (third-party systems by declared
   marker). If it is, the answer is config, not code.
 
 Done when all three hold.

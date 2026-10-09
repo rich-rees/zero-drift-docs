@@ -16,7 +16,7 @@
       "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
       "minItems": 1,
       "uniqueItems": true,
-      "description": "Extractors to run, composed: one per convention in the stack (built-in: supabase, nextjs, fastapi, react-router, components, expo-router, jobs, services, generic). Selected by NAME from the engine's registry or from localExtractorDir — never by path. Records from every extractor are merged and cross-extractor refs resolved after the merge.",
+      "description": "Extractors to run, composed: one per convention in the stack (built-in: supabase, nextjs, fastapi, react-router, components, expo-router, jobs, external-services, generic; `services` is the pre-2.3 name of external-services). Selected by NAME from the engine's registry or from localExtractorDir — never by path. Records from every extractor are merged and cross-extractor refs resolved after the merge.",
       "examples": [["supabase", "nextjs"], ["supabase", "fastapi"], ["fastapi", "react-router"], ["generic"]]
     },
     "extractorOptions": {
@@ -114,15 +114,27 @@
             "entries": { "type": "array", "description": "Processes no manifest names.", "items": { "type": "object", "required": ["name"], "additionalProperties": false, "properties": { "name": { "type": "string" }, "module": { "type": "string", "description": "A Python module, dotted (app.housekeeping)." }, "file": { "type": "string", "description": "A JS/TS entry file, relative to cwd." }, "cwd": { "type": "string", "description": "The folder the command runs in (default the repo root)." }, "mode": { "type": "string", "enum": ["worker", "scheduled"] }, "schedule": { "type": "string" }, "command": { "type": "string" }, "description": { "type": "string" } } } }
           }
         },
-        "services": {
+        "external-services": {
           "type": "object",
           "additionalProperties": false,
-          "description": "External services a module depends on (ZDD 2.1, opt-in, decision 0020): declared with the markers that reveal them — imports of a package and/or environment variable NAME prefixes read in source (names only, never values). One record per declared service; usedBy edges to the records in the files that hit a marker. An env name with a credential-shaped suffix no service covers is a warning on every derive.",
+          "description": "External services — the third-party systems a module depends on (ZDD 2.1, opt-in, decision 0020; named `services` until 2.3): declared with the markers that reveal them — imports of a package and/or environment variable NAME prefixes read in source (names only, never values). One record per declared service; usedBy edges to the records in the files that hit a marker. An env name with a credential-shaped suffix no service covers is a warning on every derive.",
           "properties": {
             "services": { "type": "array", "items": { "type": "object", "required": ["name"], "additionalProperties": false, "properties": { "name": { "type": "string" }, "imports": { "type": "array", "items": { "type": "string" } }, "env": { "type": "array", "items": { "type": "string" }, "description": "Env name prefixes, e.g. \"SENTRY_\"." } } } },
             "ignore": { "type": "array", "items": { "type": "string" }, "description": "Env name prefixes that are not services (beside the built-in database and platform prefixes)." },
             "roots": { "type": "array", "items": { "type": "string" }, "default": ["."] },
             "extensions": { "type": "array", "items": { "type": "string" }, "default": [".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"] }
+          }
+        },
+        "services": {
+          "type": "object",
+          "deprecated": true,
+          "description": "The 2.1–2.2 name of `external-services`, accepted for one release (ZDD 2.3); \"upgrade ZDD\" renames it. Same shape.",
+          "additionalProperties": false,
+          "properties": {
+            "services": { "type": "array", "items": { "type": "object", "required": ["name"], "additionalProperties": false, "properties": { "name": { "type": "string" }, "imports": { "type": "array", "items": { "type": "string" } }, "env": { "type": "array", "items": { "type": "string" } } } } },
+            "ignore": { "type": "array", "items": { "type": "string" } },
+            "roots": { "type": "array", "items": { "type": "string" } },
+            "extensions": { "type": "array", "items": { "type": "string" } }
           }
         },
         "generic": { "type": "object", "additionalProperties": false }

@@ -179,3 +179,35 @@ test("C4/C3: release-status names the running release and the catalogue, and say
   assert.match(noHome, /the catalogue on this machine is at no recorded ref/, noHome);
   assert.match(noHome, /restart/, "with the catalogue elsewhere, the route still has a restart");
 });
+
+// --- pick 3: services → external-services ------------------------------------------
+
+test("pick 3: upgrade renames the extractor and its options key in place, strictKinds too, rewrites the map's record links, suggests (never renames) a map/services folder; a plan shows all of it and writes nothing", () => {
+  const repo = adopted("rename", { engine: "2.2.1" });
+  writeFileSync(
+    join(repo, "zdd", "config.json"),
+    JSON.stringify({ name: "X", extractors: ["fastapi", "services"], engine: "2.2.1", extractorOptions: { fastapi: { roots: ["api"] }, services: { services: [{ name: "Sentry", env: ["SENTRY_"] }], roots: ["api"] } }, claims: { strict: true, strictKinds: ["service", "job"] } }, null, 2) + "\n",
+  );
+  mkdirSync(join(repo, "zdd", "map", "services"), { recursive: true });
+  mkdirSync(join(repo, "zdd", "map", "features"), { recursive: true });
+  const sentryPage = "---\ntype: External Service\ntitle: Sentry\n---\n\n- [Sentry (code)](../../metadata/service/sentry.json)\n- prose about a service/ path that is not a link\n";
+  writeFileSync(join(repo, "zdd", "map", "services", "sentry.md"), sentryPage);
+  writeFileSync(join(repo, "zdd", "map", "features", "health.md"), "---\ntype: Feature\ntitle: Health\n---\n\n- [Health](../../metadata/route/health.json)\n");
+  const plan = runJson(repo, ["upgrade", "--plan"]);
+  assert.ok(plan.wrote.includes("zdd/config.json") && plan.wrote.includes("zdd/map/services/sentry.md"), plan.wrote.join("\n"));
+  assert.ok(!plan.wrote.includes("zdd/map/features/health.md"), "a page with no such link is untouched");
+  assert.equal(readFileSync(join(repo, "zdd", "map", "services", "sentry.md"), "utf8"), sentryPage, "a plan writes nothing");
+  const json = runJson(repo, ["upgrade"]);
+  const cfg = JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8"));
+  assert.deepEqual(cfg.extractors, ["fastapi", "external-services"]);
+  assert.deepEqual(Object.keys(cfg.extractorOptions), ["fastapi", "external-services"], "the new key where the old one sat");
+  assert.deepEqual(cfg.extractorOptions["external-services"], { services: [{ name: "Sentry", env: ["SENTRY_"] }], roots: ["api"] });
+  assert.deepEqual(cfg.claims.strictKinds, ["external-service", "job"]);
+  assert.equal(readFileSync(join(repo, "zdd", "map", "services", "sentry.md"), "utf8"), sentryPage.replace("metadata/service/", "metadata/external-service/"));
+  assert.ok(json.notes.some((n) => /zdd\/config\.json: extractor "services" → "external-services"/.test(n)), json.notes.join("\n"));
+  assert.ok(json.notes.some((n) => /zdd\/map\/services\/sentry\.md: links to metadata\/service\/ now point at metadata\/external-service\//.test(n)), json.notes.join("\n"));
+  assert.ok(json.notes.some((n) => /zdd\/map\/services\/ is your hand-written folder .* never renamed for you/.test(n)), json.notes.join("\n"));
+  assert.ok(existsSync(join(repo, "zdd", "map", "services", "sentry.md")), "the folder keeps its name");
+  const again = runJson(repo, ["upgrade"]);
+  assert.ok(!again.notes.some((n) => /→ "external-services"/.test(n)), "second run: nothing to rename");
+});

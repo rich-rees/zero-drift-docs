@@ -85,8 +85,8 @@ const LEGACY_SNIPPET_HEADING = "## Documentation — Zero-Drift Docs (ZDD)";
 const LEGACY_FINGERPRINT = ["/zdd:orient", "/zdd:update"];
 // Ownership line carried by every file the plugin writes besides config.
 export const OWNER_MARK = "Managed by Zero-Drift Docs (zdd)";
-// Mirrors of the engine's services extractor (src/extractors/services/
-// index.mjs: CANDIDATE_SUFFIXES, BUILT_IN_IGNORE) — the plugin cannot import
+// Mirrors of the engine's external-services extractor (src/extractors/
+// external-services/index.mjs: CANDIDATE_SUFFIXES, BUILT_IN_IGNORE) — the plugin cannot import
 // the engine under npx; a test keeps the two pairs equal.
 export const SERVICE_SUFFIXES = ["_API_KEY", "_DSN", "_SECRET", "_TOKEN", "_URL", "_KEY"];
 export const SERVICE_IGNORE = ["DATABASE", "SUPABASE", "PG", "POSTGRES", "NODE", "NEXT", "VITE", "EXPO", "PUBLIC", "CI", "GITHUB", "RAILWAY", "VERCEL", "PORT", "HOST", "BASE", "API", "APP", "WEB", "SERVER", "CLIENT", "AUTH", "JWT", "SESSION", "COOKIE", "TEST", "DEV", "LOG"];
@@ -247,9 +247,9 @@ export function detect(root) {
         if (hits.length) jobManifests.push({ manifest: rel, scripts: hits });
       } else if (/startCommand/.test(text)) jobManifests.push({ manifest: rel, scripts: ["startCommand"] });
     }
-    // services: environment variable NAMES read in source whose suffix says
-    // "a credential or an address", grouped by prefix — a mirror of the
-    // engine's services extractor (a test pins the two lists together), so
+    // external-services: environment variable NAMES read in source whose
+    // suffix says "a credential or an address", grouped by prefix — a mirror
+    // of the engine's extractor (a test pins the two lists together), so
     // the proposal and the warning agree. Names only, never a value.
     if (/\.(py|ts|tsx|js|jsx|mjs|cjs)$/.test(name) && !/\.(test|spec|stories)\.[cm]?[jt]sx?$|\.d\.ts$/.test(name) && !/(^|\/)(test_[^/]*\.py|[^/]*_test\.py|conftest\.py)$/.test(rel)) {
       let text = "";
@@ -446,7 +446,7 @@ export function detect(root) {
     }
     evidence.push("usedBy lists the files carrying a service's marker (its env name or a matching import), never the files that reach the provider through a settings object or a wrapper — say so when proposing");
     evidence.push("names are guessed from the env prefix — confirm or rename each; a prefix that is not a service goes in `ignore`");
-    proposals.push({ name: "services", evidence, options: { services } });
+    proposals.push({ name: "external-services", evidence, options: { services } });
   }
 
   const apps = [];
@@ -589,8 +589,8 @@ function validateExtractorOptions(all) {
     } else if (name === "react-router") {
       for (const k of ["routesFile", "srcAliasRoot"]) if (opts[k] !== undefined) enginePath(opts[k], `react-router.${k}`);
       calls(opts.subscribeCalls, "react-router.subscribeCalls");
-    } else if (name === "services") {
-      if (opts.roots !== undefined) list(opts.roots, "services.roots");
+    } else if (name === "external-services" || name === "services") {
+      if (opts.roots !== undefined) list(opts.roots, `${name}.roots`);
     } else if (name === "jobs") {
       if (opts.roots !== undefined) list(opts.roots, "jobs.roots");
     } else if (name === "expo-router") {
@@ -1192,7 +1192,10 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
 
   // --- curated skeleton (empty templates; never overwritten) ---------------
   ledger.create(paths.glossary, "# Glossary\n\n<!-- One paragraph per term: **Term**: definition. Canonical, not descriptive. -->\n");
-  for (const sub of ["features", "apps", "services"]) {
+  // Fresh skeleton: the hand-written pages for third-party systems live in
+  // `external-services/` (2.3 rename, CAS-103 pick 3). An adopter's existing
+  // `services/` folder is theirs: suggested, never renamed (upgrade's note).
+  for (const sub of ["features", "apps", "external-services"]) {
     const dir = ledger.abs(`${paths.mapDir}/${sub}`);
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true });
@@ -1372,6 +1375,9 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
     Object.assign(config, next);
     changes.push(`adapter "${adapterName}" → extractors ${JSON.stringify(next.extractors)}; adapterOptions split into extractorOptions`);
   }
+  const renamed = [];
+  migrateRenames(config, renamed);
+  changes.push(...renamed);
   if (config.viewer && typeof config.viewer === "object" && Array.isArray(config.viewer.nonAreaTags)) {
     if (config.nonAreaTags === undefined) config.nonAreaTags = config.viewer.nonAreaTags;
     delete config.viewer.nonAreaTags;
@@ -1424,6 +1430,11 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
       if (gate?.how === "added") ledger.notes.push(`${rel}: the lint step now runs \`lint --merge\` (2.0) — the merge gate fails while the branch's pattern plan exists`);
     } else ledger.kept.push(rel);
   }
+  if (renamed.length) {
+    const mapDir = artifactPaths(config, { lenient: true }).mapDir;
+    for (const rel of migrateMapLinks(ledger, mapDir)) ledger.notes.push(`${rel}: links to metadata/service/ now point at metadata/external-service/ (2.3 rename) — the next derive moves the records there`);
+    if (existsSync(ledger.abs(`${mapDir}/services`))) ledger.notes.push(`${mapDir}/services/ is your hand-written folder for third-party systems — ZDD now calls them external services and a fresh install names the folder external-services/; rename it if you like (git mv), it is never renamed for you`);
+  }
   for (const file of ["CLAUDE.md", "AGENTS.md"]) {
     if (!ledger.exists(file)) continue;
     const cur = ledger.read(file);
@@ -1468,7 +1479,90 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
 // `upgrade` skill carries a matching "Upgrading to X.Y" section. Each note
 // opens with its release so the narration reads as a changelog.
 // ---------------------------------------------------------------------------
-const OPT_IN_EXTRACTORS = ["components", "expo-router", "jobs", "services"];
+const OPT_IN_EXTRACTORS = ["components", "expo-router", "jobs", "external-services"];
+// 2.3 (CAS-103 pick 3): the extractor `services` is `external-services`, its
+// record kind `service` is `external-service`. The engine accepts the old
+// names for one release; upgrade rewrites them here, so the alias is never
+// what an upgraded repo relies on.
+const RENAMED_EXTRACTORS = { services: "external-services" };
+const RENAMED_KINDS = { service: "external-service" };
+function migrateRenames(config, changes) {
+  if (Array.isArray(config.extractors)) {
+    for (const [old, now] of Object.entries(RENAMED_EXTRACTORS)) {
+      const i = config.extractors.indexOf(old);
+      if (i === -1) continue;
+      if (config.extractors.includes(now)) config.extractors.splice(i, 1);
+      else config.extractors[i] = now;
+      changes.push(`extractor "${old}" → "${now}" (2.3: the records are third-party systems, not a code service layer)`);
+      if (isPlainObject(config.extractorOptions) && Object.hasOwn(config.extractorOptions, old)) {
+        // Keep the adopter's key order: the new key where the old one sat.
+        const next = {};
+        for (const [k, v] of Object.entries(config.extractorOptions)) {
+          if (k === old) {
+            if (!Object.hasOwn(config.extractorOptions, now)) next[now] = v;
+          } else next[k] = v;
+        }
+        config.extractorOptions = next;
+        changes.push(`extractorOptions.${old} → extractorOptions["${now}"]`);
+      }
+    }
+  }
+  if (isPlainObject(config.claims) && Array.isArray(config.claims.strictKinds)) {
+    const kinds = config.claims.strictKinds;
+    for (const [old, now] of Object.entries(RENAMED_KINDS)) {
+      const i = kinds.indexOf(old);
+      if (i === -1) continue;
+      if (kinds.includes(now)) kinds.splice(i, 1);
+      else kinds[i] = now;
+      changes.push(`claims.strictKinds "${old}" → "${now}"`);
+    }
+  }
+}
+// The map's links to records of a renamed kind: `…/metadata/service/x.json`
+// → `…/metadata/external-service/x.json`, in every page under mapDir. A
+// mechanical pointer at a generated file, never the adopter's prose — the
+// old folder is gone after the next derive, and a link the render cannot
+// resolve blocks it.
+function migrateMapLinks(ledger, mapDir) {
+  const abs = ledger.abs(mapDir);
+  if (!existsSync(abs)) return [];
+  const touched = [];
+  const files = [];
+  const rec = (dir, depth) => {
+    if (depth > 6) return;
+    let names;
+    try {
+      names = readdirSync(dir).sort();
+    } catch {
+      return;
+    }
+    for (const name of names) {
+      const p = join(dir, name);
+      let st;
+      try {
+        st = lstatSync(p);
+      } catch {
+        continue;
+      }
+      if (st.isDirectory()) rec(p, depth + 1);
+      else if (st.isFile() && /\.md$/i.test(name)) files.push(p);
+    }
+  };
+  rec(abs, 0);
+  for (const p of files) {
+    const rel = posixify(relative(ledger.root, p));
+    const text = ledger.read(rel);
+    let next = text;
+    for (const [old, now] of Object.entries(RENAMED_KINDS)) {
+      next = next.replace(new RegExp(`(\\]\\([^)\\s]*/)${old}/([^)/\\s]+\\.json\\))`, "g"), `$1${now}/$2`);
+    }
+    if (next !== text) {
+      ledger.overwrite(rel, next);
+      touched.push(rel);
+    }
+  }
+  return touched;
+}
 export const UPGRADE_NOTES = {
   "1.1.0": ({ version }) => [
     "1.1 adds a blocking lint (a blessing citing a superseded or missing ADR fails `lint`) — run `npx -y " + ENGINE_PACKAGE + "@" + version + " lint` before pushing; a red result is the lint doing its job on a stale blessing",
@@ -1491,12 +1585,12 @@ export const UPGRADE_NOTES = {
   ],
   "2.1.0": ({ root, config }) => {
     const notes = [];
-    const have = new Set(Array.isArray(config.extractors) ? config.extractors : []);
+    const have = new Set((Array.isArray(config.extractors) ? config.extractors : []).map((n) => (Object.hasOwn(RENAMED_EXTRACTORS, n) ? RENAMED_EXTRACTORS[n] : n)));
     let proposals = [];
     try {
       proposals = detect(root).proposals ?? [];
     } catch {
-      notes.push("2.1 could not re-run detection here — run `bootstrap.mjs detect` to see whether the opt-in extractors (components, expo-router, jobs, services) apply");
+      notes.push("2.1 could not re-run detection here — run `bootstrap.mjs detect` to see whether the opt-in extractors (components, expo-router, jobs, external-services) apply");
     }
     for (const p of proposals) {
       if (!OPT_IN_EXTRACTORS.includes(p.name) || have.has(p.name)) continue;

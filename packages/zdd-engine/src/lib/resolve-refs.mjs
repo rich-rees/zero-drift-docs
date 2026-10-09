@@ -151,7 +151,7 @@ export function resolveRefs(records) {
     for (const f of r.resource) {
       // A service's resource is the file that declares it, not a file that
       // "uses" it: a service never resolves as another service's dependant.
-      if (r.kind !== "service") {
+      if (r.kind !== "external-service") {
         if (!recordsByFile.has(f)) recordsByFile.set(f, []);
         recordsByFile.get(f).push(r.id);
       }

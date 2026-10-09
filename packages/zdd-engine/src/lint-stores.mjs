@@ -66,7 +66,8 @@ export function run(args) {
   const isObject = claimsCfg !== null && typeof claimsCfg === "object" && !Array.isArray(claimsCfg);
   const unknownKey = isObject ? Object.keys(claimsCfg).find((k) => !CLAIMS_KEYS.includes(k)) : undefined;
   const allow = isObject ? claimsCfg.allowUnclaimed : undefined;
-  const strictKinds = isObject ? claimsCfg.strictKinds : undefined;
+  // `service` in strictKinds is read as `external-service` for one release (2.3 rename, CAS-103 pick 3).
+  const strictKinds = isObject && Array.isArray(claimsCfg.strictKinds) ? claimsCfg.strictKinds.map((k) => (k === "service" ? "external-service" : k)) : isObject ? claimsCfg.strictKinds : undefined;
   const badKind = Array.isArray(strictKinds) ? strictKinds.find((k) => typeof k !== "string" || !OPT_IN_CLAIMABLE_KINDS.includes(k)) : undefined;
   const claimsError =
     !isObject ? "'claims' must be an object"
@@ -90,7 +91,7 @@ export function run(args) {
   const ALLOWED = new Set(claimsCfg.allowUnclaimed ?? []);
   // Which kinds strict governs (decision 0017): the original five always;
   // an opt-in kind only when strictKinds names it.
-  const STRICT_KINDS = new Set([...CLAIMABLE_KINDS, ...(claimsCfg.strictKinds ?? [])]);
+  const STRICT_KINDS = new Set([...CLAIMABLE_KINDS, ...(strictKinds ?? [])]);
   const ADR_DIR = resolve(REPO, paths.adrDir);
   const MAP_DIR = resolve(REPO, paths.mapDir);
   const METADATA_DIR = resolve(REPO, paths.metadataDir);

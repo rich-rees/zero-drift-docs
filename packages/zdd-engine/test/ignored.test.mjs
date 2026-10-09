@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { gitIgnoredPredicate, ALWAYS_IGNORED } from "../src/lib/ignored.mjs";
 import { makeExtractorIo } from "../src/lib/extractor-io.mjs";
-import { derive as services } from "../src/extractors/services/index.mjs";
+import { derive as services } from "../src/extractors/external-services/index.mjs";
 import { derive as nextjs } from "../src/extractors/nextjs/index.mjs";
 import { derive as fastapi } from "../src/extractors/fastapi/index.mjs";
 
@@ -92,9 +92,9 @@ test("services: a declared service under a worktree copy does not become usedBy,
   cpSync(FIXTURE_SERVICES, repo, { recursive: true });
   // A worktree is another checkout of the same repo: a full copy of the source.
   cpSync(join(FIXTURE_SERVICES, "apps"), join(repo, ".claude", "worktrees", "feat-x", "apps"), { recursive: true });
-  const options = JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8")).extractorOptions.services;
-  const before = services({ repoRoot: FIXTURE_SERVICES, options, io: makeExtractorIo(FIXTURE_SERVICES, "services") });
-  const after = services({ repoRoot: repo, options, io: makeExtractorIo(repo, "services") });
+  const options = JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8")).extractorOptions["external-services"];
+  const before = services({ repoRoot: FIXTURE_SERVICES, options, io: makeExtractorIo(FIXTURE_SERVICES, "external-services") });
+  const after = services({ repoRoot: repo, options, io: makeExtractorIo(repo, "external-services") });
   assert.deepEqual(after.records, before.records, "the worktree copy changed nothing");
   assert.ok(!JSON.stringify(after.records).includes("worktrees"));
 });
@@ -130,7 +130,7 @@ test("CLI: derive on a repo with an ignored worktree copy writes the same record
   run(plain);
   run(withTree);
   const read = (repo, rel) => (existsSync(join(repo, "zdd", "metadata", rel)) ? readFileSync(join(repo, "zdd", "metadata", rel), "utf8") : null);
-  for (const rel of ["service/sentry.json", "service/resend.json"]) {
+  for (const rel of ["external-service/sentry.json", "external-service/resend.json"]) {
     assert.ok(read(plain, rel), `${rel} exists`);
     assert.equal(read(withTree, rel), read(plain, rel), `${rel} byte-identical`);
   }
