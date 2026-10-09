@@ -52,8 +52,15 @@ test("jobs fixture: jobs from the package scripts, the Procfile and the Railway 
   const jobs = named(json, "jobs");
   assert.deepEqual(jobs.options, {});
   // `missing` is job-shaped too; the engine skips it with a diagnostic when its module resolves to nothing.
-  assert.ok(jobs.evidence.some((e) => e === "`apps/api/package.json` runs a process: `housekeeping`, `missing`, `replay`, `worker`"), jobs.evidence.join("|"));
+  // 2.3: a package.json script on its own is a hand-run tool, never evidence; the manifests that run or schedule a process are.
+  assert.ok(!jobs.evidence.some((e) => /apps\/api\/package\.json/.test(e)), jobs.evidence.join("|"));
   assert.ok(jobs.evidence.some((e) => e === "`Procfile` runs a process: `nightly`"), jobs.evidence.join("|"));
+  assert.ok(jobs.evidence.some((e) => e === "`apps/api/Procfile` runs a process: `worker`"), jobs.evidence.join("|"));
+  assert.ok(jobs.evidence.some((e) => e === "`apps/web/vercel.json` schedules a cron for: `/api/cron/sweep-stalled`"), jobs.evidence.join("|"));
+  assert.ok(jobs.evidence.some((e) => e === "`workers/edge/wrangler.toml` schedules: `triggers.crons`"), jobs.evidence.join("|"));
+  assert.ok(jobs.evidence.some((e) => e === "`docker-compose.yml` runs a service: `transcoder`"), jobs.evidence.join("|"));
+  assert.ok(jobs.evidence.some((e) => e === "`supabase/migrations/0002_cron.sql` schedules (pg_cron): `nightly-digest`"), jobs.evidence.join("|"));
+  assert.ok(jobs.evidence.some((e) => e === "`scripts/transcode.mjs` names a queue: `video-transcode`"), jobs.evidence.join("|"));
   assert.ok(jobs.evidence.some((e) => /`apps\/api\/services\/housekeeping\/railway\.toml` runs a process: `startCommand`/.test(e)));
   assert.ok(jobs.evidence.some((e) => /never guessed/.test(e)));
 });

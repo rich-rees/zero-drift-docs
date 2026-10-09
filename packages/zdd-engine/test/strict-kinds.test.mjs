@@ -29,31 +29,34 @@ const setClaims = (repo, claims) => {
 };
 const open = (repo) => unclaimedRecords({ metadataDir: join(repo, "zdd", "metadata"), mapDir: join(repo, "zdd", "map"), bundleDir: join(repo, "zdd") });
 
-test("jobs fixture: jobs are claimable; strict alone fails only the tables; strictKinds ['job'] fails the unclaimed jobs too; the claimed worker stays claimed", (t) => {
+test("jobs fixture: jobs are claimable; strict alone fails only the original kinds; strictKinds ['job'] fails the unclaimed jobs too; the claimed worker stays claimed", (t) => {
   const repo = derived(t, "fixture-jobs");
   const u = open(repo);
-  assert.deepEqual(u.unclaimed.map((r) => r.id), ["job:housekeeping", "job:nightly", "job:replay", "table:db/audit_events", "table:db/jobs", "table:db/reports"]);
+  // 2.3's fixture: eight jobs (one claimed), a cron route, a pg_cron function and four tables.
+  const JOBS = ["job:edge", "job:housekeeping", "job:nightly", "job:nightly-digest", "job:sweep-stalled", "job:transcoder", "job:video-transcode"];
+  const ORIGINAL = ["function:db/public.send_digest", "route:/api/cron/sweep-stalled", "table:db/audit_events", "table:db/jobs", "table:db/reports"];
+  assert.deepEqual(u.unclaimed.map((r) => r.id), ["function:db/public.send_digest", ...JOBS, "route:/api/cron/sweep-stalled", "table:db/audit_events", "table:db/jobs", "table:db/reports"]);
   assert.equal(u.records.find((r) => r.id === "job:worker").optIn, true);
-  // Default mode: one warning list, jobs and tables alike.
+  // Default mode: one warning list, jobs and the rest alike.
   const plain = run(repo, ["lint"]);
   assert.equal(plain.status, 0, plain.stderr);
-  assert.match(plain.stderr, /WARNING: 6 of 8 records unclaimed/);
-  // Strict with the tables allowed: the jobs are a warning, not a failure.
-  setClaims(repo, { strict: true, allowUnclaimed: ["table:db/audit_events", "table:db/jobs", "table:db/reports"] });
+  assert.match(plain.stderr, /WARNING: 12 of 14 records unclaimed/);
+  // Strict with the original kinds allowed: the jobs are a warning, not a failure.
+  setClaims(repo, { strict: true, allowUnclaimed: ORIGINAL });
   const soft = run(repo, ["lint"]);
   assert.equal(soft.status, 0, soft.stderr);
-  assert.match(soft.stderr, /WARNING: 3 records of an opt-in kind unclaimed — not a failure until claims\.strictKinds names the kind \(job\):/);
+  assert.match(soft.stderr, /WARNING: 7 records of an opt-in kind unclaimed — not a failure until claims\.strictKinds names the kind \(job\):/);
   assert.match(soft.stderr, /job {7}housekeeping {2}\(zdd\/metadata\/job\/housekeeping\.json\)/);
   assert.doesNotMatch(soft.stderr, /is unclaimed — claims\.strict/);
   // Naming the kind makes it a failure, with the same line a route gets.
-  setClaims(repo, { strict: true, allowUnclaimed: ["table:db/audit_events", "table:db/jobs", "table:db/reports"], strictKinds: ["job"] });
+  setClaims(repo, { strict: true, allowUnclaimed: ORIGINAL, strictKinds: ["job"] });
   const hard = run(repo, ["lint"]);
   assert.equal(hard.status, 1, hard.stderr);
   assert.match(hard.stderr, /job:housekeeping is unclaimed — claims\.strict: link it from one feature slice, or add it to claims\.allowUnclaimed/);
   assert.match(hard.stderr, /job:nightly is unclaimed/);
   assert.doesNotMatch(hard.stderr, /job:worker is unclaimed/);
   // Allow-listing a job works like any record.
-  setClaims(repo, { strict: true, allowUnclaimed: ["table:db/audit_events", "table:db/jobs", "table:db/reports", "job:housekeeping", "job:nightly", "job:replay"], strictKinds: ["job"] });
+  setClaims(repo, { strict: true, allowUnclaimed: [...ORIGINAL, ...JOBS], strictKinds: ["job"] });
   assert.equal(run(repo, ["lint"]).status, 0);
 });
 

@@ -1,10 +1,35 @@
 {
   "name": "Fixture Jobs",
   "baseBranch": "main",
-  "extractors": ["supabase", "jobs"],
-  "render": { "storeChanges": false },
+  "extractors": [
+    "supabase",
+    "nextjs",
+    "jobs"
+  ],
+  "render": {
+    "storeChanges": false
+  },
   "extractorOptions": {
-    "supabase": { "migrationNamespaces": [{ "name": "db", "dir": "supabase/migrations" }] },
-    "jobs": { "modes": { "worker": "worker" } }
+    "supabase": {
+      "migrationNamespaces": [
+        {
+          "name": "db",
+          "dir": "supabase/migrations"
+        }
+      ]
+    },
+    "jobs": {
+      "modes": {
+        "worker": "worker"
+      }
+    },
+    "nextjs": {
+      "appDir": "apps/web/src/app",
+      "refs": {
+        "roots": [
+          "apps/web/src"
+        ]
+      }
+    }
   }
 }
