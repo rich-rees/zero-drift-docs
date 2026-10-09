@@ -285,24 +285,27 @@ export function resolveExtractors(config) {
     if (!isPlainObject(options)) return { error: `'extractorOptions' must be an object keyed by extractor name, got ${JSON.stringify(options)}` };
     // hasOwn: an extractor named `constructor` must read its own options,
     // not Object.prototype's (CR-022).
-    const aliasOf = (name) => Object.entries(EXTRACTOR_NAME_ALIASES).find(([, now]) => now === name)?.[0];
-    const own = (name) => {
-      if (Object.hasOwn(options, name)) return options[name];
-      const old = aliasOf(name);
-      return old !== undefined && Object.hasOwn(options, old) ? options[old] : undefined;
+    // The options key is the name as listed; a retired name's options may
+    // also sit under the current name. Both at once is a conflict, and the
+    // value validated is exactly the value handed over (CR-306).
+    const canonical = (name) => (Object.hasOwn(EXTRACTOR_NAME_ALIASES, name) ? EXTRACTOR_NAME_ALIASES[name] : name); // hasOwn: an extractor named `constructor` (CR-022)
+    const optionsFor = (name) => {
+      const now = canonical(name);
+      const keys = [...new Set([name, now])].filter((k) => Object.hasOwn(options, k));
+      if (keys.length === 2) return { error: `extractorOptions has both '${name}' and '${now}' — they are one extractor; keep '${now}'` };
+      const key = keys[0];
+      const value = key === undefined ? {} : options[key];
+      if (!isPlainObject(value)) return { error: `'extractorOptions.${key}' must be an object, got ${JSON.stringify(value)}` };
+      return { value };
     };
+    const extractors = [];
     for (const name of list) {
-      if (own(name) !== undefined && !isPlainObject(own(name))) {
-        return { error: `'extractorOptions.${name}' must be an object, got ${JSON.stringify(own(name))}` };
-      }
+      const picked = optionsFor(name);
+      if (picked.error) return { error: picked.error };
+      const now = canonical(name);
+      extractors.push(now === name ? { name, options: picked.value } : { name: now, options: picked.value, legacyName: name });
     }
-    return {
-      extractors: list.map((name) => {
-        const now = Object.hasOwn(EXTRACTOR_NAME_ALIASES, name) ? EXTRACTOR_NAME_ALIASES[name] : name; // hasOwn: an extractor named `constructor` (CR-022)
-        return { name: now, options: own(now) ?? {} };
-      }),
-      diagnostics,
-    };
+    return { extractors, diagnostics };
   }
   if (config.adapter !== undefined) {
     const legacy = LEGACY_ADAPTERS[config.adapter];

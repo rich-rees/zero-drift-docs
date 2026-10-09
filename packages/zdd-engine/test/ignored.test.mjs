@@ -135,3 +135,85 @@ test("CLI: derive on a repo with an ignored worktree copy writes the same record
     assert.equal(read(withTree, rel), read(plain, rel), `${rel} byte-identical`);
   }
 });
+
+// --- slice 1 review: CR-307, CR-308, CR-309, CR-320 ---------------------------------
+
+test("CR-308: only the repository's own ignore sources count — a user's global excludes file is never consulted, so two machines agree on the same bytes", (t) => {
+  const root = scratch({ "src/a.ts": "a", "src/local-only.ts": "b", ".gitignore": "" });
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  git(root, "init", "-q");
+  const globalExcludes = join(root, "..", `zdd-global-excludes-${process.pid}`);
+  writeFileSync(globalExcludes, "local-only.ts\n");
+  t.after(() => rmSync(globalExcludes, { force: true }));
+  git(root, "config", "core.excludesFile", globalExcludes);
+  // git itself would ignore it under --exclude-standard:
+  assert.match(git(root, "ls-files", "--others", "--ignored", "--exclude-standard"), /local-only/);
+  const isIgnored = gitIgnoredPredicate(root);
+  assert.equal(isIgnored.source, "git");
+  assert.equal(isIgnored("src/local-only.ts"), false, "a personal rule is not the repo's");
+  assert.deepEqual(walked(makeExtractorIo(root), "src"), ["src/a.ts", "src/local-only.ts"]);
+});
+
+test("CR-307: io.read refuses an ignored file with its own code; an ignored import target does not exist for the extractors that resolve imports", (t) => {
+  const root = scratch({ "src/a.ts": "a", "dist/gen.ts": "g", ".gitignore": "dist/\n" });
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  git(root, "init", "-q");
+  const io = makeExtractorIo(root);
+  const r = io.read("dist/gen.ts");
+  assert.equal(r.ok, false);
+  assert.equal(r.code, "ignored");
+  assert.match(r.reason, /dist\/gen\.ts is gitignored — not source, not read/);
+  assert.equal(io.read("src/a.ts").ok, true);
+  assert.equal(io.isIgnored("dist/gen.ts"), true);
+});
+
+test("CR-307/CR-320: supabase migrations, a react-router routes module, a FastAPI file root and a Next.js middleware file under an ignore rule are not source", async (t) => {
+  const { derive: supabase } = await import("../src/extractors/supabase/index.mjs");
+  const { derive: reactRouter } = await import("../src/extractors/react-router/index.mjs");
+  const root = scratch({
+    "db/migrations/001_a.sql": "create table public.a (id int);\n",
+    "db/migrations/002_local.sql": "create table public.local_only (id int);\n",
+    "vendored/migrations/001_v.sql": "create table public.vendored (id int);\n",
+    "web/src/routes.tsx": 'import { Home } from "./Home";\nimport { Gen } from "./gen/Gen";\nexport const routes = [{ path: "/", element: <Home /> }, { path: "/gen", element: <Gen /> }];\n',
+    "web/src/Home.tsx": "export function Home() { return null }\n",
+    "web/src/gen/Gen.tsx": 'export function Gen() { supabase.from("secret_table"); return null }\n',
+    "api/main.py": "from fastapi import FastAPI\napp = FastAPI()\n@app.get('/a')\ndef a(): ...\n",
+    "api/generated.py": "from fastapi import FastAPI\napp = FastAPI()\n@app.get('/generated')\ndef g(): ...\n",
+    "src/app/page.tsx": "export default function P() { return null }\n",
+    "src/app/api/x/route.ts": "export async function GET() {}\n",
+    "src/middleware.ts": 'export const config = { matcher: ["/api/:path*"] };\n',
+    ".gitignore": "db/migrations/002_local.sql\nvendored/\nweb/src/gen/\napi/generated.py\nsrc/middleware.ts\n",
+  });
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  git(root, "init", "-q");
+  const io = () => makeExtractorIo(root, "t");
+  const sb = supabase({ repoRoot: root, options: { migrationNamespaces: [{ name: "db", dir: "db/migrations" }, { name: "v", dir: "vendored/migrations" }] }, io: io() });
+  assert.deepEqual(sb.records.filter((r) => r.kind === "table").map((r) => r.id).sort(), ["table:db/public.a"]);
+  assert.ok(sb.diagnostics.some((d) => /vendored\/migrations is gitignored — not source/.test(d)), sb.diagnostics.join("\n"));
+  const rr = reactRouter({ repoRoot: root, options: { routesFile: "web/src/routes.tsx" }, io: io() });
+  assert.ok(!JSON.stringify(rr.records).includes("secret_table"), "an ignored module's refs never reach a record");
+  assert.ok(rr.diagnostics.some((d) => /web\/src\/gen\/Gen\.tsx is gitignored — not source/.test(d)), rr.diagnostics.join("\n"));
+  const py = fastapi({ repoRoot: root, options: { roots: ["api/main.py", "api/generated.py"] }, io: io() });
+  assert.deepEqual(py.records.map((r) => r.id), ["route:/a"]);
+  assert.ok(py.diagnostics.some((d) => /api\/generated\.py is gitignored — not source, not read/.test(d)));
+  const next = nextjs({ repoRoot: root, options: { appDir: "src/app", middlewarePath: "src/middleware.ts" }, io: io() });
+  const route = next.records.find((r) => r.id === "route:/api/x");
+  assert.ok(route);
+  assert.equal(route.facts.auth, "public", "an ignored middleware file sets no auth: the route stays public");
+  assert.ok(next.diagnostics.some((d) => /src\/middleware\.ts is gitignored — not source, no middleware auth derived/.test(d)), next.diagnostics.join("\n"));
+});
+
+test("CR-309: when git is present but cannot answer, the predicate carries the reason and derive prints it as a WARNING; a non-repository stays silent", (t) => {
+  const root = scratch({ "src/a.ts": "a" });
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  assert.equal(gitIgnoredPredicate(root).error, null, "not a repository: no warning");
+  git(root, "init", "-q");
+  // A corrupt index is the simplest failure to stage: `git ls-files` reads
+  // the index and refuses, and that is not "not a repository".
+  git(root, "add", "src/a.ts");
+  writeFileSync(join(root, ".git", "index"), "garbage");
+  const p = gitIgnoredPredicate(root);
+  assert.equal(p.source, "none");
+  assert.match(p.error ?? "", /git ls-files could not list the ignored paths/, "a failure that is not 'not a repository' is said");
+  assert.equal(p(".claude/worktrees/x"), true, "the built-in veto still holds");
+});

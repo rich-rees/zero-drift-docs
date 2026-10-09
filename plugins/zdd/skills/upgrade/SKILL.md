@@ -28,9 +28,20 @@ Run every command from the adopter's repo root. A repo with no
 node "$PLUGIN/scripts/bootstrap.mjs" release-status
 ```
 
-It names the newest release tag, the repo's lock, and the release this
-session runs. (It reads the marketplace's tags over the network; if that
-fails, say so and continue at step 2 with the running release.)
+It names the newest release tag, the repo's lock, the release this session
+runs, and the catalogue this machine holds — and, when the lock trails, says
+which of two routes applies. (It reads the marketplace's tags over the
+network; if that fails, say so and continue at step 2 with the running
+release.) Relay its line in plain words: the lock is what the repo asks
+every developer to run; the catalogue is this machine's downloaded copy of
+ZDD's release list, which a restart moves to the lock; the running release
+is what loaded when this session started.
+
+- **The lock trails and the line says "no restart"** (this session already
+  runs the newest release and the catalogue is there): ask **"Move this
+  repo's lock to vX.Y.Z?"**; on yes run `upgrade --to=vX.Y.Z` (add `--lock`
+  when there was no lock), relay its ledger, and **carry straight on to step
+  2 in this session**.
 
 - **A newer release exists, in Claude Code:** tell the user what it is, link
   its release notes as printed, and ask **"Move this repo to vX.Y.Z?"** — or,

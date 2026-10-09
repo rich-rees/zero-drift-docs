@@ -278,14 +278,18 @@ export async function deriveRecords({ repoRoot, config }) {
   // What git ignores is never source (pick 1): asked once, shared by every
   // extractor's io.
   const ignored = gitIgnoredPredicate(repoRoot);
-  for (const { name, options } of selection.extractors) {
+  if (ignored.error) warnings.push(`WARNING: ${ignored.error}`);
+  for (const { name, options, legacyName } of selection.extractors) {
     const extractor = await loadExtractor(name, repoRoot, config);
     if (typeof extractor.derive !== "function") fail(`Extractor '${name}' exports no derive()`);
     let out;
     try {
       // A fresh io per extractor: one shared walk budget each, so a greedy
       // extractor cannot starve the next one (decision 0010).
-      out = extractor.derive({ repoRoot, options, io: makeExtractorIo(repoRoot, name, { ignored }) });
+      // `legacyName`: the retired name the config used (2.3: `services`), so
+      // the extractor can keep the old record kind until "upgrade ZDD"
+      // renames the key — an engine-only adopter sees nothing move (CR-302).
+      out = extractor.derive({ repoRoot, options, io: makeExtractorIo(repoRoot, name, { ignored }), ...(legacyName ? { legacyName } : {}) });
     } catch (e) {
       fail(`Extractor '${name}' failed: ${e.message}`);
     }

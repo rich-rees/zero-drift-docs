@@ -875,7 +875,9 @@ export function scanApiCalls(text, context = text) {
 // ---------------------------------------------------------------------------
 // derive(ctx) — the extractor contract
 // ---------------------------------------------------------------------------
-export function derive({ repoRoot, options }) {
+export function derive({ repoRoot, options, io }) {
+  // A gitignored file is not source (CAS-103 pick 1): never read, never "exists".
+  const isIgnored = io?.isIgnored ?? (() => false);
   const diagnostics = [];
   const { routesFile: routesOpt = "src/routes.tsx", srcAliasRoot: aliasOpt, subscribeCalls = [] } = options;
   if (!Array.isArray(subscribeCalls) || subscribeCalls.some((h) => typeof h !== "string")) throw new Error("react-router: 'subscribeCalls' must be an array of call names");
@@ -894,7 +896,7 @@ export function derive({ repoRoot, options }) {
   const reported = new Set();
   const readSource = (rel) => {
     const abs = join(realRoot, rel);
-    const why = !regularFileInside(realRoot, abs) ? "is not a regular file inside the repo (a symlink, a directory, or missing)" : lstatSync(abs).size > MAX_SOURCE_BYTES ? `is over ${MAX_SOURCE_BYTES / 1024} KiB` : null;
+    const why = isIgnored(rel) ? "is gitignored — not source" : !regularFileInside(realRoot, abs) ? "is not a regular file inside the repo (a symlink, a directory, or missing)" : lstatSync(abs).size > MAX_SOURCE_BYTES ? `is over ${MAX_SOURCE_BYTES / 1024} KiB` : null;
     if (why) {
       if (!reported.has(rel)) diagnostics.push(`${rel} ${why} — not read`);
       reported.add(rel);
@@ -902,7 +904,7 @@ export function derive({ repoRoot, options }) {
     }
     return readFileSync(abs, "utf8");
   };
-  const exists = (rel) => regularFileInside(realRoot, join(realRoot, rel));
+  const exists = (rel) => !isIgnored(rel) && regularFileInside(realRoot, join(realRoot, rel));
   const resolveImport = (fromRel, source) => {
     const base = source.startsWith("@/") ? posix.join(srcAliasRoot, source.slice(2)) : posix.normalize(posix.join(posix.dirname(fromRel), source));
     if (base.startsWith("../") || base === "..") return null;

@@ -1,7 +1,7 @@
 // The `io` an extractor is handed: derive({ repoRoot, options, io }) (CAS-65,
 // decision 0010). A local extractor lives in the adopter's repo and runs under
 // `npx`, so it cannot import the engine's helpers; the engine passes them in.
-// Two operations, both repo-relative and both refusing to leave the repo
+// Three operations, all repo-relative, the reads refusing to leave the repo
 // physically — the rules the built-ins learned the hard way (CAS-63 CR-001,
 // CR-013, CR-026):
 //
@@ -13,8 +13,12 @@
 //          "too-large"    over the per-file cap (1 MiB; maxBytes may lower it)
 //          "over-budget"  this io has already read its total (64 MiB)
 //          "unreadable"   present, but the read failed (permissions, I/O)
-//        Only "missing" means absence; every other refusal is worth a
-//        diagnostic, and an extractor must never treat one as greenfield.
+//          "ignored"      git ignores the path (or it is .claude/worktrees):
+//                         not source, so not read — the same thing a clean
+//                         clone would say (CAS-103 pick 1, CR-307)
+//        Only "missing" and "ignored" mean absence (CI has neither); every
+//        other refusal is worth a diagnostic, and an extractor must never
+//        treat one as greenfield.
 //
 //   io.isIgnored(rel)
 //     -> true when git ignores the path, or it is `.claude/worktrees` (never
@@ -119,6 +123,7 @@ export function makeExtractorIo(repoRoot, label = "extractor", { maxEntries = IO
     const cap = Math.min(Number.isFinite(maxBytes) && maxBytes >= 0 ? maxBytes : IO_MAX_READ_BYTES, IO_MAX_READ_BYTES);
     const refuse = (code, reason) => ({ ok: false, code, reason: `${clean} ${reason}` });
     if (!realRoot) return refuse("missing", "is missing");
+    if (isIgnored(clean)) return refuse("ignored", "is gitignored — not source, not read");
     const abs = join(realRoot, clean);
     let st;
     try {

@@ -2,9 +2,14 @@
 // (Resend, Sentry, Salesforce, Google Places): CAS-97, ZDD 2.1, decision
 // 0020; renamed from `services` in 2.3 (CAS-103 pick 3) because "services"
 // read as a code service layer. The old name is an alias for one release
-// (derive's registry and config.mjs route it here); "upgrade ZDD" renames
-// the config key. A service is DECLARED in config with the markers that
-// reveal it; the engine ships no vendor list:
+// (derive's registry and config.mjs route it here, passing `legacyName`),
+// and under the alias the records keep the OLD kind, ids and folder
+// (`service`, `service:<slug>`, metadata/service/): nothing in an adopter's
+// generated artifacts moves until "upgrade ZDD" renames the config key, and
+// then it moves once, listed in the upgrade notes — so the rename is a
+// minor, not a metadata-contract break (slice 1 review CR-302). A service
+// is DECLARED in config with the markers that reveal it; the engine ships
+// no vendor list:
 //   { "name": "Sentry", "imports": ["sentry_sdk", "@sentry/react"], "env": ["SENTRY_"] }
 // The extractor scans source for an import of a marker package (Python
 // `import x` / `from x import`, JS `import … from "x"` / `require("x")`) and
@@ -43,6 +48,7 @@ import { repoRelative } from "../../lib/paths.mjs";
 
 export const FACTS_KEY_ORDER = {
   "external-service": ["markers", "usedBy", "edges"],
+  service: ["markers", "usedBy", "edges"], // the pre-2.3 kind, emitted under the alias
 };
 export const MAX_SOURCE_BYTES = 1024 * 1024;
 const DEFAULT_EXTENSIONS = [".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"];
@@ -84,23 +90,25 @@ const importMatches = (spec, marker) => spec === marker || spec.startsWith(`${ma
 const envPrefixOf = (name) => name.replace(PUBLIC_PREFIXES, "").split("_")[0];
 const slug = (name) => name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
-export function derive({ repoRoot, options, io }) {
+export function derive({ repoRoot, options, io, legacyName }) {
   void repoRoot;
   const diagnostics = [];
   const warnings = [];
+  const kind = legacyName === "services" ? "service" : "external-service";
+  const label = legacyName === "services" ? "services" : "external-services";
   const services = options.services ?? [];
-  if (!Array.isArray(services)) throw new Error("external-services.services must be an array");
+  if (!Array.isArray(services)) throw new Error(`${label}.services must be an array`);
   const declared = services.map((s, i) => {
-    if (!s || typeof s !== "object" || typeof s.name !== "string" || !s.name.trim()) throw new Error(`external-services.services[${i}] must have a name`);
+    if (!s || typeof s !== "object" || typeof s.name !== "string" || !s.name.trim()) throw new Error(`${label}.services[${i}] must have a name`);
     const imports = s.imports ?? [];
     const env = s.env ?? [];
-    if (!Array.isArray(imports) || imports.some((x) => typeof x !== "string") || !Array.isArray(env) || env.some((x) => typeof x !== "string")) throw new Error(`external-services.services[${i}] (${s.name}): imports and env must be arrays of strings`);
-    if (!imports.length && !env.length) throw new Error(`external-services.services[${i}] (${s.name}): declare at least one import or env marker`);
+    if (!Array.isArray(imports) || imports.some((x) => typeof x !== "string") || !Array.isArray(env) || env.some((x) => typeof x !== "string")) throw new Error(`${label}.services[${i}] (${s.name}): imports and env must be arrays of strings`);
+    if (!imports.length && !env.length) throw new Error(`${label}.services[${i}] (${s.name}): declare at least one import or env marker`);
     return { name: s.name.trim(), imports, env: env.map((e) => e.toUpperCase()) };
   });
   const names = new Set();
   for (const s of declared) {
-    if (names.has(slug(s.name))) throw new Error(`external-services.services: '${s.name}' is declared twice`);
+    if (names.has(slug(s.name))) throw new Error(`${label}.services: '${s.name}' is declared twice`);
     names.add(slug(s.name));
   }
   const ignore = new Set([...BUILT_IN_IGNORE, ...(options.ignore ?? []).map((p) => String(p).toUpperCase().replace(/_$/, ""))]);
@@ -170,8 +178,8 @@ export function derive({ repoRoot, options, io }) {
     const resource = [...h.importSites].sort()[0] ?? [...h.envSites].sort()[0];
     const at = usedBy.map((f) => `?at:${f}`);
     records.push({
-      kind: "external-service",
-      id: `external-service:${slug(s.name)}`,
+      kind,
+      id: `${kind}:${slug(s.name)}`,
       title: s.name,
       description: "",
       resource: [resource],
@@ -184,7 +192,7 @@ export function derive({ repoRoot, options, io }) {
   for (const [prefix, c] of [...candidates].sort(([a], [b]) => (a < b ? -1 : 1))) {
     const names = [...c.names].sort();
     const where = [...c.files].sort();
-    warnings.push(`${names.join(", ")} read in ${where.join(", ")} matches no declared service — add { "name": "…", "env": ["${prefix}_"] } to extractorOptions["external-services"].services, or "${prefix}" to its ignore list`);
+    warnings.push(`${names.join(", ")} read in ${where.join(", ")} matches no declared service — add { "name": "…", "env": ["${prefix}_"] } to extractorOptions["${label}"].services, or "${prefix}" to its ignore list`);
   }
   if (!declared.length) diagnostics.push("no services declared — nothing to inventory (candidates are still reported)");
   return { records, diagnostics, warnings };

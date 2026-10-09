@@ -25,6 +25,9 @@
 import { readFileSync, realpathSync, existsSync } from "node:fs";
 import { resolve, isAbsolute, dirname, relative, join } from "node:path";
 import { adopterRoot, readConfig, artifactPaths, resolveInside, samePath, isUnder, FENCE_TOOLS, REMOTE_OR_DEVICE } from "./lib/repo.mjs";
+// ZDD's own instructions file (2.3): plugin-owned, rewritten by "upgrade
+// ZDD", fenced like the generated artifacts but with its own reason.
+const INSTRUCTIONS_NAME = "instructions.md";
 
 // hooks.json's matcher is the union of these three (CR-077).
 const EDIT_TOOLS = new Set(FENCE_TOOLS.edit);
@@ -250,6 +253,7 @@ function main() {
     { rel: paths.adrIndex, kind: "file" },
     { rel: paths.blessingIndex, kind: "file" },
     { rel: paths.humanIndex, kind: "file" },
+    { rel: paths.bundleDir && paths.bundleDir !== "." ? `${paths.bundleDir}/${INSTRUCTIONS_NAME}` : null, kind: "file", owned: true },
   ]) {
     if (!g.rel) continue; // no safe location for this key (CR-075)
     try {
@@ -302,10 +306,14 @@ function main() {
   }
   if (!target) return 0;
 
-  const reason =
-    `ZDD fence: ${target} is a generated artifact — never hand-edit it. ` +
-    `Run the ZDD update ritual ("update ZDD" / the \`update\` skill) to regenerate it ` +
-    `(zdd-engine derive + render). To lift the fence for this repo set "hooks": { "fence": false } in zdd/config.json.`;
+  const owned = generated.find((g) => g.rel === target)?.owned === true;
+  const reason = owned
+    ? `ZDD fence: ${target} is ZDD's own instructions file, rewritten by "upgrade ZDD" — never hand-edit it. ` +
+      `A rule of your own goes in CLAUDE.md (everything there outside ZDD's one import line is yours); a ZDD defect goes to https://github.com/rich-rees/zero-drift-docs/issues. ` +
+      `To lift the fence for this repo set "hooks": { "fence": false } in zdd/config.json.`
+    : `ZDD fence: ${target} is a generated artifact — never hand-edit it. ` +
+      `Run the ZDD update ritual ("update ZDD" / the \`update\` skill) to regenerate it ` +
+      `(zdd-engine derive + render). To lift the fence for this repo set "hooks": { "fence": false } in zdd/config.json.`;
   // The block is the JSON PreToolUse deny reply on stdout with exit 0 — the
   // shape both hosts document AND honour (decision 0007). Exit 2 + stderr was
   // observed to fail open in Codex 0.145.0 (hook "Failed", edit applied). The

@@ -1,6 +1,6 @@
 # 0020 — Jobs come from committed run manifests; services from declared markers; environment variable names are read from source, values never
 
-**Date:** 2026-10-08 · **Status:** accepted · **Origin:** CAS-97 (ZDD 2.1), from the grill on 2026-10-08, against Cascade's housekeeping sweep and outbound worker (Railway services) and its Sentry and Resend dependencies.
+**Date:** 2026-10-08 · **Status:** accepted · **Origin:** CAS-97 (ZDD 2.1), from the grill on 2026-10-08, against Cascade's housekeeping sweep and outbound worker (Railway services) and its Sentry and Resend dependencies. **Superseded, in part, by [0023](0023-external-services-not-services-a-rename-that-moves-nothing-until-the-key-moves.md)** (2026-10-09): the extractor is `external-services` and the record kind `external-service`; how they are declared and read is unchanged.
 
 ## Context
 

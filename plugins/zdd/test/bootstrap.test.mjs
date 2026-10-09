@@ -290,9 +290,12 @@ test("apply on the FastAPI+Supabase fixture with all defaults: config, owned wor
   assert.ok(wf.includes(OWNER), "workflow carries the ownership line");
   assert.ok(!existsSync(join(repo, ".githooks", "pre-push")), "pre-push not written when CI accepted");
 
+  // 2.3 (CAS-103): CLAUDE.md carries one import line; the text lives in zdd/instructions.md.
   const claude = readFileSync(join(repo, "CLAUDE.md"), "utf8");
-  assert.ok(claude.startsWith("<!-- zdd:begin -->\n"), "exact begin marker");
-  assert.ok(claude.includes('"load ZDD"') && claude.includes('"update ZDD"'), "leads with the spoken verbs");
+  assert.ok(claude.trimEnd().endsWith("@zdd/instructions.md"), "the import line, and nothing of ZDD's text, in CLAUDE.md");
+  assert.ok(!claude.includes("<!-- zdd:begin -->"), "no markers in CLAUDE.md");
+  const instructions = readFileSync(join(repo, "zdd", "instructions.md"), "utf8");
+  assert.ok(instructions.includes('"load ZDD"') && instructions.includes('"update ZDD"'), "leads with the spoken verbs");
   assert.ok(!existsSync(join(repo, "AGENTS.md")), "AGENTS.md only for Codex users");
 
   const adr = readFileSync(join(repo, "zdd", "adr", "0001-adopt-zero-drift-docs.md"), "utf8");
@@ -569,16 +572,17 @@ test("pre-push: an existing hook manager's core.hooksPath is left alone; a free 
   assert.ok(j2.notes.some((n) => n.includes("core.hooksPath .githooks")));
 });
 
-test("Codex user: AGENTS.md carries the same block as CLAUDE.md, leading with the verbs; CRLF files keep CRLF", () => {
+test("Codex user: AGENTS.md carries the instructions as a marked block (Codex has no import), CLAUDE.md the one import line; CRLF files keep CRLF", () => {
   const repo = fresh("codex");
   writeFileSync(join(repo, "CLAUDE.md"), "# My repo\r\n\r\nSome rules.\r\n");
   bootstrap(repo, ["apply", `--answers=${answersFile("codex", { codex: true })}`]);
   const claude = readFileSync(join(repo, "CLAUDE.md"), "utf8");
   const agents = readFileSync(join(repo, "AGENTS.md"), "utf8");
-  assert.ok(claude.startsWith("# My repo\r\n\r\nSome rules.\r\n"), "existing CLAUDE.md content kept, block appended");
+  assert.ok(claude.startsWith("# My repo\r\n\r\nSome rules.\r\n"), "existing CLAUDE.md content kept, the line appended");
   assert.ok(!/[^\r]\n/.test(claude), "no bare LF introduced into a CRLF file");
-  const block = (s) => s.replace(/\r\n/g, "\n").slice(s.replace(/\r\n/g, "\n").indexOf("<!-- zdd:begin -->"));
-  assert.equal(block(claude), block(agents));
+  assert.ok(claude.trimEnd().endsWith("@zdd/instructions.md"));
+  const body = readFileSync(join(PLUGIN, "templates", "instructions.md"), "utf8").trimEnd();
+  assert.ok(agents.startsWith("<!-- zdd:begin -->\n") && agents.includes(body) && agents.trimEnd().endsWith("<!-- zdd:end -->"), "the block is the instructions");
   const verbs = agents.indexOf('"load ZDD"');
   assert.ok(verbs !== -1 && verbs < agents.indexOf("Never hand-edit"), "verbs lead the block");
 });
@@ -618,8 +622,8 @@ test("upgrade replaces the pre-0.4 section only when it IS the v0.3.1 snippet mo
   writeFileSync(join(stock, "CLAUDE.md"), "# Repo\r\n\r\n" + reflowed + "## After\r\n\r\nkeep\r\n");
   const j1 = JSON.parse(bootstrap(stock, ["upgrade", "--json"]));
   const c1 = readFileSync(join(stock, "CLAUDE.md"), "utf8");
-  assert.ok(!c1.includes("/zdd:orient") && c1.includes("<!-- zdd:begin -->") && c1.includes("## After\r\n\r\nkeep"), c1);
-  assert.ok(j1.notes.some((n) => n.includes("replaced the pre-0.4 snippet")), JSON.stringify(j1.notes));
+  assert.ok(!c1.includes("/zdd:orient") && c1.includes("@zdd/instructions.md") && !c1.includes("<!-- zdd:begin -->") && c1.includes("## After\r\n\r\nkeep"), c1);
+  assert.ok(j1.notes.some((n) => n.includes("replaced the pre-0.4 snippet with the import line")), JSON.stringify(j1.notes));
 
   const edited = fresh("legacy-edited");
   mkdirSync(join(edited, "zdd"));
@@ -631,7 +635,7 @@ test("upgrade replaces the pre-0.4 section only when it IS the v0.3.1 snippet mo
   const c2 = readFileSync(join(edited, "CLAUDE.md"), "utf8");
   assert.ok(c2.startsWith(before), "the section with the adopter's line is kept verbatim");
   assert.ok(c2.includes("House rule") && c2.includes("/zdd:orient"), "nothing of the adopter's text is lost");
-  assert.ok(c2.includes("<!-- zdd:begin -->"), "the marked block is appended instead");
+  assert.ok(c2.includes("@zdd/instructions.md"), "the import line is appended instead");
   assert.ok(j2.notes.some((n) => n.includes("CLAUDE.md") && n.includes("legacy section left in place")), JSON.stringify(j2.notes));
 });
 
@@ -680,7 +684,8 @@ test("upgrade a v0.3.1 repo: adapter → extractors, every owned file rewritten 
   assert.ok(readFileSync(join(repo, ".github", "workflows", "zdd.yml"), "utf8").includes(`@rich-rees/zdd-engine@${PLUGIN_VERSION}`));
   assert.ok(readFileSync(join(repo, ".githooks", "pre-push"), "utf8").includes(`@rich-rees/zdd-engine@${PLUGIN_VERSION}`));
   const claude = readFileSync(join(repo, "CLAUDE.md"), "utf8");
-  assert.ok(claude.includes("<!-- zdd:begin -->") && !claude.includes("/zdd:orient") && claude.includes("## Other section\n\nkeep me"), claude);
+  assert.ok(claude.includes("@zdd/instructions.md") && !claude.includes("/zdd:orient") && claude.includes("## Other section\n\nkeep me"), claude);
+  assert.ok(existsSync(join(repo, "zdd", "instructions.md")), "the instructions file is written by the upgrade");
 
   assert.deepEqual(CANARY.map((p) => hashTree(join(repo, "zdd", p))), untouched, "curated + generated untouched");
   assert.deepEqual(json.wrote, [], "second upgrade is a no-op");
@@ -702,7 +707,7 @@ test("upgrade leaves alone what it does not own: a customised legacy section, an
   const j = JSON.parse(bootstrap(repo, ["upgrade", "--json"]));
   const claude = readFileSync(join(repo, "CLAUDE.md"), "utf8");
   assert.ok(claude.startsWith(custom.trimEnd()), "customised section kept verbatim");
-  assert.ok(claude.includes("<!-- zdd:begin -->"), "fresh block appended instead");
+  assert.ok(claude.includes("@zdd/instructions.md"), "the import line appended instead");
   assert.equal(readFileSync(join(repo, ".githooks", "pre-push"), "utf8"), hook, "unmarked hook untouched");
   assert.ok(j.kept.some((k) => k.startsWith(".githooks/pre-push") && k.includes("not managed")));
 
@@ -801,8 +806,8 @@ test("apply writes docs/agents/domain.md pointing Pocock's skills at ZDD's gloss
   assert.match(doc, /`zdd\/adr-index\.md`/);
   assert.match(doc, /GLOSSARY\.md/, "names the root file the skills would otherwise read or create");
   assert.ok(!/<[A-Z_]+>/.test(doc), `unfilled placeholder in: ${doc}`);
-  const claude = readFileSync(join(repo, "CLAUDE.md"), "utf8");
-  assert.match(claude, /docs\/agents\/domain\.md/, "the instruction block is how the skills find the file");
+  const instructions = readFileSync(join(repo, "zdd", "instructions.md"), "utf8");
+  assert.match(instructions, /docs\/agents\/domain\.md/, "ZDD's instructions are how the skills find the file");
 });
 
 test("docs/agents/domain.md honours paths.* from zdd/config.json", () => {

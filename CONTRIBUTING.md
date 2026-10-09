@@ -74,7 +74,7 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
   comments and strings masked, so a commented-out declaration never becomes a
   record.
 - Each **record** has: `kind` (`route` | `table` | `surface` | `function` |
-  `bucket` | `module` | `component` | `job` | `service` | …), `id`, `title`, a one-sentence `description`
+  `bucket` | `module` | `component` | `job` | `external-service` | …), `id`, `title`, a one-sentence `description`
   *where mechanically extractable*, repo-relative POSIX `resource` path(s),
   `refs` (outbound references discovered by static scan), `facts` (convention-
   specific key–values), and `filename` (the metadata file, unique per kind).

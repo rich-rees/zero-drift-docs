@@ -66,8 +66,10 @@ export function run(args) {
   const isObject = claimsCfg !== null && typeof claimsCfg === "object" && !Array.isArray(claimsCfg);
   const unknownKey = isObject ? Object.keys(claimsCfg).find((k) => !CLAIMS_KEYS.includes(k)) : undefined;
   const allow = isObject ? claimsCfg.allowUnclaimed : undefined;
-  // `service` in strictKinds is read as `external-service` for one release (2.3 rename, CAS-103 pick 3).
-  const strictKinds = isObject && Array.isArray(claimsCfg.strictKinds) ? claimsCfg.strictKinds.map((k) => (k === "service" ? "external-service" : k)) : isObject ? claimsCfg.strictKinds : undefined;
+  // `service` and `external-service` are both real kinds for one release (2.3
+  // rename, CAS-103 pick 3): which one a repo emits follows its config key,
+  // and "upgrade ZDD" moves both the key and this list together.
+  const strictKinds = isObject ? claimsCfg.strictKinds : undefined;
   const badKind = Array.isArray(strictKinds) ? strictKinds.find((k) => typeof k !== "string" || !OPT_IN_CLAIMABLE_KINDS.includes(k)) : undefined;
   const claimsError =
     !isObject ? "'claims' must be an object"

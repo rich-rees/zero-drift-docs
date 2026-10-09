@@ -194,7 +194,7 @@ export function scaffold(root, rawAnswers) {
 
   // The fields this run edits must already have the engine's shape, or be
   // absent — never "normalised" into something else (CAS-65 CR-002).
-  if (config.adapter !== undefined) throw new Error("zdd/config.json still uses the pre-1.0 'adapter' — run zdd:bootstrap --upgrade first");
+  if (config.adapter !== undefined) throw new Error("zdd/config.json still uses the pre-1.0 'adapter' — say \"upgrade ZDD\" first");
   if (config.extractors !== undefined && (!Array.isArray(config.extractors) || !config.extractors.every((x) => typeof x === "string"))) {
     throw new Error("zdd/config.json 'extractors' is not a list of names — fix it first; the scaffold never replaces what it cannot read");
   }
@@ -402,7 +402,7 @@ export function scaffold(root, rawAnswers) {
     ledger.notes.push("'generic' is still listed in extractors — it emits nothing; remove it now that a real extractor runs");
   }
   const older = olderThan(next.engine, IO_SINCE);
-  if (older === true) ledger.notes.push(`zdd/config.json pins engine ${next.engine}; this extractor needs ${IO_SINCE} or later and will stop derive until then — run zdd:bootstrap --upgrade`);
+  if (older === true) ledger.notes.push(`zdd/config.json pins engine ${next.engine}; this extractor needs ${IO_SINCE} or later and will stop derive until then — say "upgrade ZDD"`);
   else if (older === null) ledger.notes.push(`zdd/config.json's engine pin (${printable(String(next.engine))}) is not a version this can compare — this extractor needs ${IO_SINCE} or later`);
   // Every root, judged without following links (CAS-65 CR-042).
   for (const r of a.roots) {

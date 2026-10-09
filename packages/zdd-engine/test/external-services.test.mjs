@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync, rmSync, mkdtempSync, cpSync } from "node:fs";
+import { readFileSync, writeFileSync, rmSync, mkdtempSync, cpSync, existsSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -115,13 +115,26 @@ test("2.3 alias (CAS-103 pick 3): a config that still says `services` runs the s
   const run = (args) => spawnSync(process.execPath, [BIN, ...args], { cwd: repo, encoding: "utf8" });
   const d = run(["derive"]);
   assert.equal(d.status, 0, d.stderr);
-  assert.match(d.stdout, /2 external-services/);
+  // CR-302: under the old name the records keep the old kind, ids and folder —
+  // nothing in the adopter's artifacts moves until "upgrade ZDD" renames the key.
+  assert.match(d.stdout, /1 routes, 2 services/);
   assert.match(d.stderr, /\[config\] extractor 'services' is now 'external-services' \(ZDD 2\.3\) — "upgrade ZDD" renames it/);
-  assert.ok(readFileSync(join(repo, "zdd", "metadata", "external-service", "sentry.json"), "utf8").includes('"external-service:sentry"'));
+  assert.ok(readFileSync(join(repo, "zdd", "metadata", "service", "sentry.json"), "utf8").includes('"service:sentry"'));
+  assert.ok(!existsSync(join(repo, "zdd", "metadata", "external-service")), "no new folder under the alias");
   const lint = run(["lint"]);
-  assert.equal(lint.status, 1, "strictKinds ['service'] is read as ['external-service']: the unclaimed Resend record now FAILS strict claims");
-  assert.match(lint.stderr + lint.stdout, /external-service:resend is unclaimed/);
+  assert.equal(lint.status, 1, "strictKinds ['service'] governs the `service` records the alias emits: the unclaimed Resend record FAILS strict claims");
+  assert.match(lint.stderr + lint.stdout, /service:resend is unclaimed/);
   assert.doesNotMatch(lint.stderr + lint.stdout, /'claims\.strictKinds' lists 'service'/, "the old kind name is not refused");
+  // CR-306: the options are validated under the key they are read from; both keys at once is a conflict.
+  writeFileSync(cfgPath, JSON.stringify({ ...old, extractorOptions: { ...old.extractorOptions, "external-services": "bad" } }));
+  const conflict = run(["derive"]);
+  assert.equal(conflict.status, 1);
+  assert.match(conflict.stderr, /extractorOptions has both 'services' and 'external-services' — they are one extractor; keep 'external-services'/);
+  writeFileSync(cfgPath, JSON.stringify({ ...old, extractorOptions: { fastapi: old.extractorOptions.fastapi, "external-services": "bad" } }));
+  const malformed = run(["derive"]);
+  assert.equal(malformed.status, 1);
+  assert.match(malformed.stderr, /'extractorOptions\.external-services' must be an object, got "bad"/);
+  writeFileSync(cfgPath, JSON.stringify(old));
   writeFileSync(cfgPath, JSON.stringify({ ...old, extractors: ["fastapi", "services", "external-services"] }));
   const both = run(["derive"]);
   assert.equal(both.status, 1);

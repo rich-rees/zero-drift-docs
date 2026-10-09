@@ -53,6 +53,7 @@ const KIND_DISPLAY = {
   job: "Job",
   component: "UI Component",
   "external-service": "External Service",
+  service: "External Service", // the pre-2.3 kind, while a config still says `services`
 };
 
 // Edge verbs (decision 0016) -> how a body and the agent index say them.

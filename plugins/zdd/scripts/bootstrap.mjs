@@ -76,6 +76,18 @@ import {
 const TEMPLATES = join(PLUGIN_ROOT, "templates");
 const SNIPPET_BEGIN = "<!-- zdd:begin -->";
 const SNIPPET_END = "<!-- zdd:end -->";
+// ZDD's instructions live in a file of their own (2.3, CAS-103 C10): ZDD owns
+// `<bundleDir>/instructions.md` and rewrites it on every upgrade; the
+// adopter's CLAUDE.md carries ONE line, Claude Code's `@path` import, which
+// inlines the file at session start — so the rules stay always-loaded, and
+// everything else in CLAUDE.md is the adopter's by definition. Codex has no
+// import directive (its AGENTS.md loader concatenates plain Markdown), so
+// AGENTS.md keeps a managed copy between the zdd:begin / zdd:end markers.
+export const INSTRUCTIONS_NAME = "instructions.md";
+export const instructionsRel = (bundleDir) => `${bundleDir}/${INSTRUCTIONS_NAME}`;
+export const importLine = (bundleDir) => `@${instructionsRel(bundleDir)}`;
+export const IMPORT_COMMENT = "<!-- Zero-Drift Docs: the line below loads ZDD's instructions into every session. ZDD owns that file and rewrites it on upgrade; everything else in this file is yours. -->";
+const IMPORT_LINE_RE = /^@\S+\/instructions\.md\r?$/m;
 const LEGACY_SNIPPET_HEADING = "## Documentation — Zero-Drift Docs (ZDD)";
 // The v0.3.1 snippet's fingerprint. Replacement needs the whole section to
 // equal the v0.3.1 snippet modulo whitespace (CR-080, isLegacySnippet below);
@@ -736,8 +748,17 @@ const slug = (s) =>
 
 const yamlScalar = (s) => JSON.stringify(s); // a JSON string is a valid YAML double-quoted scalar
 
+// The instructions body (templates/instructions.md); the two shapes it is
+// written in: the file itself (a header comment, then the body) and the
+// AGENTS.md block (markers around a header and the body).
+export function instructionsBody() {
+  return readFileSync(join(TEMPLATES, "instructions.md"), "utf8");
+}
+export function instructionsFileText() {
+  return `<!-- ${OWNER_MARK}: "upgrade ZDD" rewrites this whole file. Never hand-edit it; your own rules belong in CLAUDE.md, which ZDD never edits after install. -->\n` + instructionsBody();
+}
 function snippetText() {
-  return readFileSync(join(TEMPLATES, "claude-md-snippet.md"), "utf8");
+  return `${SNIPPET_BEGIN}\n<!-- ${OWNER_MARK}: "upgrade ZDD" rewrites everything between the zdd:begin and zdd:end markers. Codex has no file import, so this is a copy of zdd/instructions.md. -->\n` + instructionsBody().trimEnd() + `\n${SNIPPET_END}\n`;
 }
 // Ownership is the HEADER — the mark within the first three lines — not the
 // phrase anywhere in the file (CR-006).
@@ -831,6 +852,74 @@ function writeSnippet(ledger, file) {
   else if (!ledger.create(file, text)) return;
   ledger.notes.push(`${file}: ${how} the ZDD instruction block`);
   if (note) ledger.notes.push(`${file}: ${note}`);
+}
+
+// The one line CLAUDE.md carries (2.3). Cases: the line is there (nothing to
+// do); a marked block (the one-time migration: the block becomes the line);
+// the v0.3.1 unmarked snippet (same); nothing (append); malformed markers
+// (refuse, as upsertSnippet does). Line endings follow the file.
+export function upsertImport(existing, line) {
+  const crlf = /\r\n/.test(existing);
+  const norm = (s) => (crlf ? s.replace(/\r?\n/g, "\r\n") : s);
+  const body = norm(`${IMPORT_COMMENT}\n${line}\n`);
+  if (existing.split(/\r?\n/).some((l) => l === line)) return { text: existing, changed: false, how: "present" };
+  if (!existing) return { text: body, changed: true, how: "created" };
+  const nb = count(existing, SNIPPET_BEGIN);
+  const ne = count(existing, SNIPPET_END);
+  if (nb || ne || existing.includes(SNIPPET_BEGIN) || existing.includes(SNIPPET_END)) {
+    const b = indexOfMarker(existing, SNIPPET_BEGIN);
+    const e = indexOfMarker(existing, SNIPPET_END);
+    const stray = existing.split(SNIPPET_BEGIN).length - 1 !== 1 || existing.split(SNIPPET_END).length - 1 !== 1;
+    if (nb !== 1 || ne !== 1 || e < b || stray) return { text: existing, changed: false, how: "refused: the zdd:begin / zdd:end markers are not exactly one well-formed pair — fix them by hand" };
+    // The old comment line inside the block (if any) goes with the block.
+    const next = existing.slice(0, b) + body.trimEnd() + existing.slice(e + SNIPPET_END.length);
+    return { text: next, changed: true, how: "replaced the ZDD block with the import line" };
+  }
+  const h = existing.indexOf(LEGACY_SNIPPET_HEADING);
+  let legacyKept = false;
+  if (h !== -1) {
+    const after = existing.indexOf("\n## ", h + LEGACY_SNIPPET_HEADING.length);
+    const end = after === -1 ? existing.length : after + 1;
+    const section = existing.slice(h, end);
+    if (isLegacySnippet(section)) return { text: existing.slice(0, h) + body + existing.slice(end), changed: true, how: "replaced the pre-0.4 snippet with the import line" };
+    legacyKept = LEGACY_FINGERPRINT.every((f) => section.includes(f));
+  }
+  const sep = existing.endsWith("\n") ? (/\r?\n\r?\n$/.test(existing) ? "" : norm("\n")) : norm("\n\n");
+  return {
+    text: existing + sep + body,
+    changed: true,
+    how: "appended",
+    note: legacyKept ? `legacy section left in place: the "${LEGACY_SNIPPET_HEADING}" section differs from the v0.3.1 snippet, so it is yours — fold what you want into your own text and delete the rest by hand` : undefined,
+  };
+}
+function writeImport(ledger, file, bundleDir) {
+  const existing = ledger.exists(file) ? ledger.read(file) : "";
+  const { text, changed, how, note } = upsertImport(existing, importLine(bundleDir));
+  if (!changed) {
+    ledger.kept.push(how === "present" ? `${file} (loads ${instructionsRel(bundleDir)})` : file);
+    if (how.startsWith("refused")) ledger.notes.push(`${file}: ${how}`);
+    return;
+  }
+  if (existing) ledger.overwrite(file, text);
+  else if (!ledger.create(file, text)) return;
+  ledger.notes.push(`${file}: ${how} — one line, \`${importLine(bundleDir)}\`, loads ZDD's instructions into every session; the rest of ${file} is yours and ZDD never edits it again`);
+  if (note) ledger.notes.push(`${file}: ${note}`);
+}
+// ZDD's own instructions file: written at install, rewritten on every upgrade
+// to this release's text, never hand-edited (the fence refuses).
+function writeInstructions(ledger, config) {
+  const rel = instructionsRel(artifactPaths(config, { lenient: true }).bundleDir);
+  const text = instructionsFileText();
+  if (ledger.exists(rel)) {
+    if (ledger.read(rel) === text) ledger.kept.push(rel);
+    else {
+      ledger.overwrite(rel, text);
+      ledger.notes.push(`${rel}: rewritten to this release's instructions — ZDD's file, never hand-edited; your own rules live in CLAUDE.md`);
+    }
+    return rel;
+  }
+  if (ledger.create(rel, text)) ledger.notes.push(`${rel}: written — ZDD's instructions for every session, loaded by one line in CLAUDE.md (and copied into AGENTS.md for Codex, which has no file import)`);
+  return rel;
 }
 
 // docs/agents/domain.md (CAS-93): Matt Pocock's skills (1.3+) read a root
@@ -1012,13 +1101,21 @@ export const gitattributesLine = (bundleDir) => `${bundleDir}/** text eol=lf`;
 export const GITATTRIBUTES_LINE = gitattributesLine("zdd");
 function writeGitattributes(ledger, config) {
   const raw = config?.paths?.bundleDir;
-  if (raw === "." || raw === "./" || raw === "") {
+  const normalised = typeof raw === "string" ? raw.replace(/\\/g, "/").replace(/\/+/g, "/").replace(/^\.\//, "").replace(/\/$/, "") : raw;
+  if (raw !== undefined && (normalised === "." || normalised === "")) {
     ledger.notes.push(".gitattributes: not written — paths.bundleDir is the repo root, so a `./**` rule would touch every file; add `text eol=lf` rules for the generated artifacts by hand");
     return;
   }
-  const line = gitattributesLine(artifactPaths(config, { lenient: true }).bundleDir);
+  const bundleDir = artifactPaths(config, { lenient: true }).bundleDir;
+  // A .gitattributes pattern reads `[`, `]`, `*`, `?`, `#`, `!`, `\` and a
+  // space as syntax: a folder holding one would pin something else (CR-313).
+  if (/[\[\]*?#!\\\s]/.test(bundleDir)) {
+    ledger.notes.push(`.gitattributes: not written — paths.bundleDir '${bundleDir}' holds a character .gitattributes reads as pattern syntax; add a \`text eol=lf\` rule for it by hand`);
+    return;
+  }
+  const line = gitattributesLine(bundleDir);
   const file = ".gitattributes";
-  const note = `${file}: zdd/ checked out and committed with LF line endings (${line}) — the engine writes LF; without this a Windows checkout with core.autocrlf shows every generated file as modified`;
+  const note = `${file}: ${bundleDir}/ checked out and committed with LF line endings (${line}) — the engine writes LF; without this a Windows checkout with core.autocrlf shows every generated file as modified`;
   if (!ledger.exists(file)) {
     if (ledger.create(file, line + "\n")) ledger.notes.push(note);
     return;
@@ -1248,7 +1345,8 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
     } else ledger.skipped.push(".githooks/pre-push (declined)");
   }
 
-  writeSnippet(ledger, "CLAUDE.md");
+  writeInstructions(ledger, config);
+  writeImport(ledger, "CLAUDE.md", paths.bundleDir);
   // An AGENTS.md that already carries the block is refreshed on a repair
   // apply with no codex answer (CAS-103 finding 9: the ledger said "not
   // using Codex" about a file it had just refreshed).
@@ -1328,9 +1426,9 @@ function ledgerOut(l) {
 // change; `drop` (ids from the plan's duplicates) removes adopter sections the
 // block now covers, on the user's word; `to` (a tag newer than this plugin)
 // moves only the lock — the rest waits for that release's own upgrade.
-export function upgrade(root, { lock = false, plan = false, drop = null, to = null, remote } = {}) {
+export function upgrade(root, { lock = false, plan = false, drop = null, to = null, remote, home } = {}) {
   const version = pluginVersion();
-  if (to !== null) return moveLockOnly(root, version, to, { plan, lock, remote });
+  if (to !== null) return moveLockOnly(root, version, to, { plan, lock, remote, home });
   const cfg = readConfig(root);
   if (cfg.state === "absent") throw new Error(`no zdd/config.json under ${root} — nothing to upgrade (run bootstrap without --upgrade to adopt)`);
   if (cfg.state === "invalid") throw new Error(`${cfg.error} — fix it by hand; upgrade never rewrites a config it cannot read`);
@@ -1430,19 +1528,29 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
       if (gate?.how === "added") ledger.notes.push(`${rel}: the lint step now runs \`lint --merge\` (2.0) — the merge gate fails while the branch's pattern plan exists`);
     } else ledger.kept.push(rel);
   }
-  if (renamed.length) {
+  // Links in the map move whenever any still point at a renamed kind's folder
+  // (CR-305): a repo whose config was renamed by hand gets them too.
+  {
     const mapDir = artifactPaths(config, { lenient: true }).mapDir;
-    for (const rel of migrateMapLinks(ledger, mapDir)) ledger.notes.push(`${rel}: links to metadata/service/ now point at metadata/external-service/ (2.3 rename) — the next derive moves the records there`);
-    if (existsSync(ledger.abs(`${mapDir}/services`))) ledger.notes.push(`${mapDir}/services/ is your hand-written folder for third-party systems — ZDD now calls them external services and a fresh install names the folder external-services/; rename it if you like (git mv), it is never renamed for you`);
+    const links = migrateMapLinks(ledger, mapDir);
+    for (const rel of links.touched) ledger.notes.push(`${rel}: links to metadata/service/ now point at metadata/external-service/ (2.3 rename) — the next derive moves the records there`);
+    for (const what of links.skipped) ledger.notes.push(`${mapDir}: ${what} was not read for old metadata/service/ links — check it by hand`);
+    if (renamed.length && existsSync(ledger.abs(`${mapDir}/services`))) ledger.notes.push(`${mapDir}/services/ is your hand-written folder for third-party systems — ZDD now calls them external services and a fresh install names the folder external-services/; rename it if you like (git mv), it is never renamed for you`);
   }
-  for (const file of ["CLAUDE.md", "AGENTS.md"]) {
-    if (!ledger.exists(file)) continue;
-    const cur = ledger.read(file);
-    if (!cur.includes(SNIPPET_BEGIN) && !cur.includes(SNIPPET_END) && !cur.includes(LEGACY_SNIPPET_HEADING)) {
-      ledger.kept.push(`${file} (no ZDD block to refresh)`);
-      continue;
+  const upgradePaths = artifactPaths(config, { lenient: true });
+  writeInstructions(ledger, config);
+  if (ledger.exists("CLAUDE.md")) {
+    const cur = ledger.read("CLAUDE.md");
+    if (IMPORT_LINE_RE.test(cur) || cur.includes(SNIPPET_BEGIN) || cur.includes(SNIPPET_END) || cur.includes(LEGACY_SNIPPET_HEADING)) writeImport(ledger, "CLAUDE.md", upgradePaths.bundleDir);
+    else {
+      ledger.kept.push("CLAUDE.md (no ZDD block or import line to refresh)");
+      ledger.notes.push(`CLAUDE.md does not load ${instructionsRel(upgradePaths.bundleDir)} — add the line \`${importLine(upgradePaths.bundleDir)}\` by hand, or run a repair apply, which adds it`);
     }
-    writeSnippet(ledger, file);
+  }
+  if (ledger.exists("AGENTS.md")) {
+    const cur = ledger.read("AGENTS.md");
+    if (!cur.includes(SNIPPET_BEGIN) && !cur.includes(SNIPPET_END) && !cur.includes(LEGACY_SNIPPET_HEADING)) ledger.kept.push("AGENTS.md (no ZDD block to refresh)");
+    else writeSnippet(ledger, "AGENTS.md");
   }
   // Adopter text outside the block that the block now covers (CAS-101):
   // named with its lines, removed only by --drop, after the block refresh so
@@ -1455,6 +1563,10 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
   writeGitattributes(ledger, config);
   writeDomainDoc(ledger, artifactPaths(config, { lenient: true }));
   writePluginSettings(ledger, version, { mode: "upgrade", lock });
+  // Names a release retired, still in the adopter's own text (CAS-103 7, C9):
+  // the plan greps for each and lists every hit with its replacement.
+  const retired = findRetiredNames(ledger, { oldEngine: fromEngine && fromEngine !== version ? fromEngine : null, metadataRel: artifactPaths(config, { lenient: true }).metadataDir });
+  for (const r of retired) ledger.notes.push(r);
   if (stopUnset) ledger.notes.push('hooks.stop is not set (new in 1.1: the Stop hook prompts for the curated half once per session) — it stays OFF until answered: run bootstrap apply with {"optIns":{"stop":true}} (repair mode, keeps every other choice), or add "stop": true inside the existing "hooks" object by hand');
   const ctx = { root, config, version, paths: artifactPaths(config, { lenient: true }) };
   for (const [release, notes] of Object.entries(UPGRADE_NOTES)) {
@@ -1467,7 +1579,7 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
       ledger.notes.push(`${release}: this release's note could not read zdd/config.json's shape — see the upgrade skill's "Upgrading to" section for it`);
     }
   }
-  ledger.notes.push("curated artifacts (glossary, ADRs, map, metadata) untouched — upgrade never writes them");
+  ledger.notes.push("curated artifacts (glossary, ADRs, map pages, metadata) untouched — upgrade never writes them, save one mechanical rewrite named above: a map link to a record whose kind a release renamed");
   ledger.notes.push("if the engine pin moved: run `derive` and `render`, then `lint`, and commit the regenerated artifacts in the same PR");
   return { version, plan, ...ledgerOut(ledger), duplicates };
 }
@@ -1487,34 +1599,42 @@ const OPT_IN_EXTRACTORS = ["components", "expo-router", "jobs", "external-servic
 const RENAMED_EXTRACTORS = { services: "external-services" };
 const RENAMED_KINDS = { service: "external-service" };
 function migrateRenames(config, changes) {
-  if (Array.isArray(config.extractors)) {
-    for (const [old, now] of Object.entries(RENAMED_EXTRACTORS)) {
-      const i = config.extractors.indexOf(old);
-      if (i === -1) continue;
-      if (config.extractors.includes(now)) config.extractors.splice(i, 1);
-      else config.extractors[i] = now;
+  // Each step on its own (CR-305): a half-migrated config — the new extractor
+  // name beside the old options key, or the old strict kind — is finished
+  // whichever part is left.
+  for (const [old, now] of Object.entries(RENAMED_EXTRACTORS)) {
+    if (Array.isArray(config.extractors) && config.extractors.includes(old)) {
+      // Every occurrence (CR-317): a duplicated old name collapses to one new one.
+      const rest = config.extractors.filter((n) => n !== old);
+      const at = config.extractors.indexOf(old);
+      config.extractors = rest.includes(now) ? rest : [...rest.slice(0, at), now, ...rest.slice(at)];
       changes.push(`extractor "${old}" → "${now}" (2.3: the records are third-party systems, not a code service layer)`);
-      if (isPlainObject(config.extractorOptions) && Object.hasOwn(config.extractorOptions, old)) {
-        // Keep the adopter's key order: the new key where the old one sat.
-        const next = {};
-        for (const [k, v] of Object.entries(config.extractorOptions)) {
-          if (k === old) {
-            if (!Object.hasOwn(config.extractorOptions, now)) next[now] = v;
-          } else next[k] = v;
-        }
-        config.extractorOptions = next;
-        changes.push(`extractorOptions.${old} → extractorOptions["${now}"]`);
+    }
+    if (isPlainObject(config.extractorOptions) && Object.hasOwn(config.extractorOptions, old)) {
+      // Keep the adopter's key order: the new key where the old one sat.
+      const next = {};
+      for (const [k, v] of Object.entries(config.extractorOptions)) {
+        if (k === old) {
+          if (!Object.hasOwn(config.extractorOptions, now)) next[now] = v;
+        } else next[k] = v;
       }
+      config.extractorOptions = next;
+      changes.push(`extractorOptions.${old} → extractorOptions["${now}"]`);
     }
   }
-  if (isPlainObject(config.claims) && Array.isArray(config.claims.strictKinds)) {
-    const kinds = config.claims.strictKinds;
+  if (isPlainObject(config.claims)) {
     for (const [old, now] of Object.entries(RENAMED_KINDS)) {
-      const i = kinds.indexOf(old);
-      if (i === -1) continue;
-      if (kinds.includes(now)) kinds.splice(i, 1);
-      else kinds[i] = now;
-      changes.push(`claims.strictKinds "${old}" → "${now}"`);
+      if (Array.isArray(config.claims.strictKinds) && config.claims.strictKinds.includes(old)) {
+        const at = config.claims.strictKinds.indexOf(old);
+        const rest = config.claims.strictKinds.filter((k) => k !== old);
+        config.claims.strictKinds = rest.includes(now) ? rest : [...rest.slice(0, at), now, ...rest.slice(at)];
+        changes.push(`claims.strictKinds "${old}" → "${now}"`);
+      }
+      // The allow-list names records by id; the ids move with the kind (CR-304).
+      if (Array.isArray(config.claims.allowUnclaimed) && config.claims.allowUnclaimed.some((id) => typeof id === "string" && id.startsWith(`${old}:`))) {
+        config.claims.allowUnclaimed = config.claims.allowUnclaimed.map((id) => (typeof id === "string" && id.startsWith(`${old}:`) ? `${now}:${id.slice(old.length + 1)}` : id));
+        changes.push(`claims.allowUnclaimed "${old}:…" ids → "${now}:…"`);
+      }
     }
   }
 }
@@ -1523,17 +1643,23 @@ function migrateRenames(config, changes) {
 // mechanical pointer at a generated file, never the adopter's prose — the
 // old folder is gone after the next derive, and a link the render cannot
 // resolve blocks it.
+const MAP_WALK_DEPTH = 16; // the render's own bound (lib/walk-markdown.mjs)
 function migrateMapLinks(ledger, mapDir) {
   const abs = ledger.abs(mapDir);
-  if (!existsSync(abs)) return [];
+  if (!existsSync(abs)) return { touched: [], skipped: [] };
   const touched = [];
+  const skipped = [];
   const files = [];
   const rec = (dir, depth) => {
-    if (depth > 6) return;
+    if (depth > MAP_WALK_DEPTH) {
+      skipped.push(`${posixify(relative(ledger.root, dir))}/ (deeper than ${MAP_WALK_DEPTH} folders)`);
+      return;
+    }
     let names;
     try {
       names = readdirSync(dir).sort();
     } catch {
+      skipped.push(`${posixify(relative(ledger.root, dir))}/ (unreadable)`);
       return;
     }
     for (const name of names) {
@@ -1542,9 +1668,11 @@ function migrateMapLinks(ledger, mapDir) {
       try {
         st = lstatSync(p);
       } catch {
+        skipped.push(`${posixify(relative(ledger.root, p))} (unreadable)`);
         continue;
       }
-      if (st.isDirectory()) rec(p, depth + 1);
+      if (st.isSymbolicLink()) skipped.push(`${posixify(relative(ledger.root, p))} (a symlink — never followed)`);
+      else if (st.isDirectory()) rec(p, depth + 1);
       else if (st.isFile() && /\.md$/i.test(name)) files.push(p);
     }
   };
@@ -1554,14 +1682,16 @@ function migrateMapLinks(ledger, mapDir) {
     const text = ledger.read(rel);
     let next = text;
     for (const [old, now] of Object.entries(RENAMED_KINDS)) {
-      next = next.replace(new RegExp(`(\\]\\([^)\\s]*/)${old}/([^)/\\s]+\\.json\\))`, "g"), `$1${now}/$2`);
+      // A link destination as the render reads it: `](dest)` or `](<dest>)`,
+      // with an optional `#fragment` — the kind is the folder before the file.
+      next = next.replace(new RegExp(`(\\]\\(<?[^)<>\\s]*/)${old}/([^)<>/\\s#]+\\.json(?:#[^)<>\\s]*)?>?\\))`, "g"), `$1${now}/$2`);
     }
     if (next !== text) {
       ledger.overwrite(rel, next);
       touched.push(rel);
     }
   }
-  return touched;
+  return { touched, skipped };
 }
 export const UPGRADE_NOTES = {
   "1.1.0": ({ version }) => [
@@ -1610,7 +1740,7 @@ export const UPGRADE_NOTES = {
       );
     }
     if (config.claims?.strict === true && config.claims.strictKinds === undefined) {
-      notes.push("2.1 adds claims.strictKinds: strict governs the new kinds (component, job, service) only where listed, so switching an opt-in extractor on never turns lint red by itself (decision 0017)");
+      notes.push("2.1 adds claims.strictKinds: strict governs the new kinds (component, job, external-service — spelt service before 2.3) only where listed, so switching an opt-in extractor on never turns lint red by itself (decision 0017)");
     }
     notes.push(
       "2.1 corrects a `*` in a scanned url: it no longer matches a fixed route segment (`/health`), so refs drop wherever a wildcard had reached one — expect a `derive --check` diff on the pin bump, and lint names the calls it could not place",
@@ -1647,10 +1777,99 @@ export function compareVersions(a, b) {
 // check runs in CI", a title's "smoke-test the ZDD plugin") is not a rule the
 // block duplicates (found by the CAS-101 smoke). The document's title (its
 // first heading, at level 1) is never named.
-const ZDD_VERB = /\b(?:load|update|upgrade) ZDD\b|choose patterns/i;
-const ZDD_MENTION = /\bZDD\b|zero[- ]drift|\bzdd\/|zdd-engine|agent-index|blessing-index/gi;
+// The rules ZDD's instructions state (CAS-103 finding 4, C8): the finder
+// reads the adopter's own text — outside the import line or the block — one
+// paragraph or bullet at a time, and names every unit that speaks to one of
+// these rules, with what ZDD now says beside it. The skill then reads the two
+// side by side ("same, different, or contradicting") and the user decides;
+// `--drop` removes that unit, never a whole section. A passing mention of
+// ZDD ("a tiny app used to smoke-test the ZDD plugin") matches no rule. A
+// test keeps every rule's `says` true to templates/instructions.md.
+export const INSTRUCTION_RULES = [
+  { id: "load", match: /\bload ZDD\b/i, says: '"load ZDD" before designing or building in an area: read the glossary whole, the ADR index whole and the ADRs the task cites, say what you loaded, then read the code fresh' },
+  { id: "patterns", match: /\bchoose patterns\b|\bblessing-index\b|\bpatterns-plan\b/i, says: '"choose patterns" once the design is settled, before any code: check for existing code to reuse first, then the blessings that match, and commit zdd/patterns-plan.md' },
+  { id: "update", match: /\bupdate ZDD\b/i, says: '"update ZDD" before finishing a unit of work: curate what the change touched, reconcile the pattern plan, regenerate, commit with the code; never handed to a subagent' },
+  { id: "upgrade", match: /\bupgrade ZDD\b|\bbootstrap\s+--upgrade\b/i, says: '"upgrade ZDD" moves the repo to a newer release and shows every change before writing it' },
+  { id: "skew", match: /\b(?:release|engine[- ]skew|skew|mismatch) line\b|release mismatch|first line of (?:your|the) reply/i, says: "a release or engine-skew line is the first line of the reply, verbatim, and is fixed before the task — the fix depends on the case (machine behind the lock: the commands printed; branch behind main: merge main; repo behind the newest release: upgrade ZDD, by choice)" },
+  { id: "generated", match: /hand-edit|\bzdd\/(?:metadata|graph\.json|agent-index\.md|adr-index\.md|blessing-index\.md|human-index\.html)\b|generated artifacts?\b/i, says: "the generated artifacts (zdd/metadata/, graph.json, the agent, ADR and blessing indexes, the human index) and zdd/instructions.md are never hand-edited" },
+  { id: "merge", match: /(?:merge|rebase)[^.\n]*\b(?:deriv|render|regenerat|generated|conflict)/i, says: "a merge conflict in a generated file: take either side, finish and commit the merge, then regenerate with \"update ZDD\" and commit that; on a rebase the same per replayed commit, regenerating once at the end" },
+  { id: "install", match: /plugin (?:install|update) (?:zdd|mattpocock-skills)|skills are missing|zdd@zero-drift-docs|mattpocock-skills@/i, says: "if ZDD's skills are missing: from the repo's folder, claude plugin install mattpocock-skills@zero-drift-docs --scope project, then claude plugin install zdd@zero-drift-docs --scope project, then restart; this repo switches other copies of Matt Pocock's skills off on purpose" },
+  { id: "grill", match: /\bgrill\b/i, says: "grill is optional: a design interview that writes glossary terms and ADRs as they crystallize; without Matt Pocock's skills, plan mode plus \"update ZDD\"" },
+  { id: "findings", match: /zero-drift-docs\/issues|\bZDD defect\b/i, says: "a ZDD defect goes to ZDD's issues page, labelled finding, proposed to the developer first" },
+];
 const talksZdd = (heading, own) => new RegExp(ZDD_MENTION.source, "i").test(heading) || ZDD_VERB.test(own) || (own.match(ZDD_MENTION) ?? []).length >= 2;
 export function findDuplicates(text) {
+  return findRuleUnits(text);
+}
+// Units of the adopter's own text — a paragraph, or a bullet with its
+// indented continuation — outside the block and the import lines, that
+// speak to a rule. Nothing is reported unless the file carries the import
+// line or exactly one well-formed block: with broken markers the run cannot
+// say where ZDD's text ends and the adopter's begins (CR-002).
+export function findRuleUnits(text) {
+  const lines = text.split(/\r?\n/);
+  const hasImport = IMPORT_LINE_RE.test(text);
+  const nb = count(text, SNIPPET_BEGIN);
+  const ne = count(text, SNIPPET_END);
+  const wellFormed = nb === 1 && ne === 1 && indexOfMarker(text, SNIPPET_BEGIN) < indexOfMarker(text, SNIPPET_END) && text.split(SNIPPET_BEGIN).length === 2 && text.split(SNIPPET_END).length === 2;
+  if (!hasImport && !wellFormed) return [];
+  if (nb || ne || text.includes(SNIPPET_BEGIN) || text.includes(SNIPPET_END)) if (!wellFormed) return [];
+  const out = [];
+  let inBlock = false;
+  let inFence = false;
+  let heading = "(top)";
+  let unit = null; // { from, to, lines }
+  const flush = () => {
+    if (!unit) return;
+    const body = unit.lines.join("\n");
+    const rules = INSTRUCTION_RULES.filter((r) => r.match.test(body)).map((r) => r.id);
+    if (rules.length) out.push({ heading, from: unit.from, to: unit.to, text: body, rules });
+    unit = null;
+  };
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const t = line.trim();
+    if (t === SNIPPET_BEGIN) {
+      flush();
+      inBlock = true;
+      continue;
+    }
+    if (t === SNIPPET_END) {
+      inBlock = false;
+      continue;
+    }
+    if (inBlock) continue;
+    if (/^```/.test(t)) {
+      flush();
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
+    if (t === "" || t === IMPORT_COMMENT || /^@\S+\/instructions\.md$/.test(t)) {
+      flush();
+      continue;
+    }
+    if (/^#{1,6}\s/.test(t)) {
+      flush();
+      heading = t;
+      continue;
+    }
+    const bullet = /^(?:[-*+]|\d+[.)])\s/.test(t);
+    const continuation = /^\s/.test(line);
+    if (unit && (bullet || (!continuation && unit.bullet))) flush();
+    if (!unit) unit = { from: i + 1, to: i + 1, lines: [line], bullet };
+    else {
+      unit.to = i + 1;
+      unit.lines.push(line);
+    }
+  }
+  flush();
+  return out;
+}
+// The pre-2.3 section finder, kept for its tests' sake and for nothing else.
+const ZDD_VERB = /\b(?:load|update|upgrade) ZDD\b|choose patterns/i;
+const ZDD_MENTION = /\bZDD\b|zero[- ]drift|\bzdd\/|zdd-engine|agent-index|blessing-index/gi;
+export function findDuplicateSections(text) {
   const lines = text.split(/\r?\n/);
   // Only beside exactly one well-formed block (CR-002): with no block nothing
   // covers the section, and with a lone, doubled or reversed marker the
@@ -1710,15 +1929,111 @@ function findAllDuplicates(ledger) {
   return all;
 }
 function dropSections(ledger, chosen) {
+  const isHeading = (l) => /^#{1,6}\s/.test(l.trim());
+  const isBoundary = (l) => {
+    const t = l.trim();
+    return isHeading(l) || t === SNIPPET_BEGIN || t === IMPORT_COMMENT || /^@\S+\/instructions\.md$/.test(t);
+  };
   for (const file of new Set(chosen.map((d) => d.file))) {
     const text = ledger.read(file);
     const eol = /\r\n/.test(text) ? "\r\n" : "\n";
     const lines = text.split(/\r?\n/);
     const mine = chosen.filter((d) => d.file === file).sort((x, y) => y.from - x.from);
-    for (const d of mine) lines.splice(d.from - 1, d.to - d.from + 1);
+    const notes = [];
+    for (const d of mine) {
+      let start = d.from - 1;
+      let end = d.to;
+      while (end < lines.length && lines[end].trim() === "") end++;
+      // The unit was all its section held: the heading, left empty, goes too.
+      let h = start - 1;
+      while (h >= 0 && lines[h].trim() === "") h--;
+      const headingWent = h >= 0 && isHeading(lines[h]) && (end >= lines.length || isBoundary(lines[end]));
+      if (headingWent) start = h;
+      lines.splice(start, end - start);
+      // Exactly one blank line between what remains.
+      if (start > 0 && start < lines.length && lines[start - 1].trim() === "" && lines[start].trim() === "") lines.splice(start, 1);
+      notes.unshift(`${file}: removed ${lineRange(d)} under "${d.heading}" (${brief(d.text)})${headingWent ? ", and the heading it was all of" : ""}, on the user's word — ZDD's instructions now carry it`);
+    }
     ledger.overwrite(file, lines.join(eol));
-    for (const d of mine.reverse()) ledger.notes.push(`${file}: removed "${d.heading}" (lines ${d.from}–${d.to}), on the user's word — the ZDD block now carries it`);
+    ledger.notes.push(...notes);
   }
+}
+const lineRange = (d) => (d.from === d.to ? `line ${d.from}` : `lines ${d.from}–${d.to}`);
+const brief = (s) => {
+  const one = s.replace(/\s+/g, " ").trim();
+  return one.length > 90 ? one.slice(0, 87) + "…" : one;
+};
+// Names a release retired (CAS-103 7, C9). Every upgrade greps the adopter's
+// instruction files and docs for each one and lists the hits with the
+// replacement; the old engine pin, when it moved this run, is looked for too
+// (DiO keeps its own lock test). Advisory, bounded, never a failure.
+export const RETIRED_NAMES = [
+  { since: "2.2.0", find: /\bzdd:bootstrap --upgrade\b|\bbootstrap --upgrade\b/g, now: '"upgrade ZDD" (the upgrade skill)' },
+  { since: "2.3.0", find: /\bextractorOptions\.services\b|\bmetadata\/service\/|"services"(?=\s*[,\]])/g, now: "the `external-services` extractor and `metadata/external-service/` (the 2.3 rename)" },
+  { since: "2.3.0", find: /<!-- zdd:begin -->/g, now: "one import line, `@zdd/instructions.md`, in CLAUDE.md (AGENTS.md keeps the block for Codex)", skip: ["AGENTS.md"] },
+];
+const RETIRED_SCAN_EXT = /\.(md|ya?ml|json|mjs|cjs|js|ts|sh|ps1|toml|txt)$/i;
+const RETIRED_SKIP_FILES = /(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|CHANGELOG\.md)$/i;
+const MAX_RETIRED_FILES = 3000;
+const MAX_RETIRED_NOTES = 20;
+const RETIRED_SKIP_DIRS = new Set(["node_modules", ".git", ".next", "dist", "build", "coverage", ".venv", "venv", "__pycache__", ".expo"]);
+export function findRetiredNames(ledger, { oldEngine = null, metadataRel = "zdd/metadata" } = {}) {
+  const rules = [...RETIRED_NAMES];
+  if (oldEngine && /^\d+\.\d+\.\d+$/.test(oldEngine)) {
+    rules.push({ since: "this upgrade", find: new RegExp(`\\bv?${oldEngine.replace(/\./g, "\\.")}\\b`, "g"), now: `the new release (${pluginVersion()}) — your repo may hold the version somewhere ZDD does not write (a lock test, a setup guide)`, skip: [".claude/settings.json", "zdd/config.json", ".github/workflows/zdd.yml", ".githooks/pre-push"] });
+  }
+  const written = new Set(ledger.wrote);
+  const hits = [];
+  let seen = 0;
+  const rec = (dir, depth) => {
+    if (depth > 6 || hits.length > MAX_RETIRED_NOTES) return;
+    let names;
+    try {
+      names = readdirSync(dir).sort();
+    } catch {
+      return;
+    }
+    for (const name of names) {
+      if (++seen > MAX_RETIRED_FILES) return;
+      const p = join(dir, name);
+      let st;
+      try {
+        st = lstatSync(p);
+      } catch {
+        continue;
+      }
+      const rel = posixify(relative(ledger.root, p));
+      if (st.isDirectory()) {
+        // zdd/ is scanned (ADRs and the map can name a retired thing); its
+        // generated metadata, dependencies, build output and other dot
+        // folders are not.
+        const dotOk = [".claude", ".github", ".githooks"].includes(name);
+        const skip = RETIRED_SKIP_DIRS.has(name) || (name.startsWith(".") && !dotOk) || rel === metadataRel;
+        if (!skip) rec(p, depth + 1);
+        continue;
+      }
+      if (!st.isFile() || st.size > MAX_SCAN_BYTES || !RETIRED_SCAN_EXT.test(name) || RETIRED_SKIP_FILES.test(rel) || written.has(rel)) continue;
+      if (rel.endsWith(`/${INSTRUCTIONS_NAME}`) || rel === INSTRUCTIONS_NAME) continue;
+      let text;
+      try {
+        text = ledger.read(rel);
+      } catch {
+        continue;
+      }
+      const lines = text.split(/\r?\n/);
+      for (const r of rules) {
+        if (r.skip?.includes(rel)) continue;
+        lines.forEach((line, i) => {
+          r.find.lastIndex = 0;
+          const m = r.find.exec(line);
+          if (m) hits.push(`${rel}:${i + 1} still says \`${m[0]}\` — since ${r.since} that is ${r.now}`);
+        });
+      }
+    }
+  };
+  rec(ledger.root, 0);
+  if (hits.length > MAX_RETIRED_NOTES) return [...hits.slice(0, MAX_RETIRED_NOTES), `…and ${hits.length - MAX_RETIRED_NOTES} more retired names — grep for them`];
+  return hits;
 }
 function parseDrop(drop) {
   if (drop === null || drop === undefined || drop === false) return [];
@@ -1780,7 +2095,7 @@ function remoteTags(remote = `https://github.com/${MARKETPLACE_REPO}.git`) {
 // marketplace's repository has (CR-003), never below this plugin or the
 // repo's current lock; an absent lock is written only with --lock (CR-008);
 // --plan writes nothing.
-function moveLockOnly(root, version, to, { plan = false, lock = false, remote } = {}) {
+function moveLockOnly(root, version, to, { plan = false, lock = false, remote, home } = {}) {
   if (!RELEASE_TAG.test(String(to))) throw new Error("--to must be a release tag, vX.Y.Z");
   if (compareVersions(to, version) < 0) throw new Error(`--to ${to} is older than this plugin (${version}) — upgrade never moves a lock backwards`);
   const ledger = new Ledger(root, { dryRun: plan });
@@ -1820,10 +2135,22 @@ function moveLockOnly(root, version, to, { plan = false, lock = false, remote } 
     ledger.overwrite(SETTINGS_FILE, text);
     ledger.notes.push(`${SETTINGS_FILE}: ${was ? `lock moved ${was.slice(0, 40)} → ${to}` : `locked this repo to ZDD ${to}`} (auto-update off) — nothing else changes in this run`);
   }
+  // Where this machine already is (CAS-103 C3, CR-314): running the target
+  // with the catalogue there too, the rest of the upgrade is this session's.
+  let catalogue = null;
+  try {
+    const ref = JSON.parse(readFileSync(join(pluginsDir(home), "known_marketplaces.json"), "utf8"))?.[MARKETPLACE]?.source?.ref;
+    if (typeof ref === "string") catalogue = ref;
+  } catch {
+    /* no catalogue */
+  }
+  const ready = to === `v${version}` && catalogue === to;
   ledger.notes.push(
-    `next: restart Claude Code; the first line of the new session names the commands that move this machine to ${to} — run them and restart again; then say "upgrade ZDD" again: that run is ${to}'s own, and shows the rest of the changes before writing them`,
+    ready
+      ? `next: this session already runs ${to} and the catalogue on this machine is at ${to} — no restart: say "upgrade ZDD" again now (or carry straight on to its plan), and that run shows the rest of the changes before writing them`
+      : `next: restart Claude Code; the first line of the new session names the commands that move this machine to ${to} — run them and restart again; then say "upgrade ZDD" again: that run is ${to}'s own, and shows the rest of the changes before writing them`,
   );
-  return { version, plan, to, ...ledgerOut(ledger), duplicates: [] };
+  return { version, plan, to, ready, ...ledgerOut(ledger), duplicates: [] };
 }
 
 // ---------------------------------------------------------------------------
@@ -1866,6 +2193,9 @@ function narratePocock(p) {
   // other one back on.
   const off = p.hits.filter((x) => x.enabled === false);
   const install = `\`claude plugin install ${ZDD_PLUGIN_ID} --scope project\` from this repo's folder (Claude Code)`;
+  if (p.unreadableSettings && p.hits.some((x) => x.where === "pluginCache" && x.enabled === null)) {
+    return `mattpocock-skills: a copy is cached, but ${p.unreadableSettings} could not be read as JSON, so whether it is switched on here is unknown — fix that file, then run detect again.`;
+  }
   if (off.length) {
     return (
       `mattpocock-skills: NOT installed as ZDD's pinned copy (${ours}); a copy is present but switched off here: ${off.map((x) => `${x.id} ${x.version ?? "?"}`).join(", ")}. ` +
@@ -1914,7 +2244,10 @@ export function narrateUpgrade(r) {
   for (const f of r.kept) out.push(`  kept    ${f}`);
   for (const n of r.notes) out.push(`  note    ${n}`);
   for (const d of r.duplicates ?? []) {
-    out.push(`  outside the ZDD block: [${d.id}] ${d.file} lines ${d.from}–${d.to} "${d.heading}" — read it against the block; remove it only on the user's word (--drop=${d.id})`);
+    const says = (d.rules ?? []).map((id) => INSTRUCTION_RULES.find((x) => x.id === id)?.says).filter(Boolean);
+    out.push(`  your text, ${d.file} ${lineRange(d)} under "${d.heading}": ${brief(d.text)}`);
+    for (const s of says) out.push(`      ZDD now says: ${s}`);
+    out.push(`      → read the two together: same, different, or contradicting? Keep it, change it by hand, or remove it on the user's word (--drop=${d.id})`);
   }
   return out.map(printable).join("\n");
 }
@@ -1954,7 +2287,7 @@ if (process.argv[1] && posixify(process.argv[1]).endsWith("/scripts/bootstrap.mj
     } else if (cmd === "upgrade") {
       const to = flags.to === undefined ? null : String(flags.to);
       const remote = typeof flags.remote === "string" ? flags.remote : undefined;
-      const r = upgrade(root, { lock: flags.lock === true, plan: flags.plan === true, drop: flags.drop ?? null, to, remote });
+      const r = upgrade(root, { lock: flags.lock === true, plan: flags.plan === true, drop: flags.drop ?? null, to, remote, home: flags.home });
       process.stdout.write(flags.json ? JSON.stringify(r, null, 2) + "\n" : narrateUpgrade(r) + "\n");
     } else if (cmd === "release-status") {
       const s = releaseStatus(root, typeof flags.remote === "string" ? flags.remote : undefined, flags.home);
