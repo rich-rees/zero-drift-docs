@@ -77,7 +77,8 @@ first, which that workflow now refuses)
    real adopter given (a throwaway copy; never pushed).
 3. Tag the merge commit `vX.Y.Z` and push the tag. The workflow refuses a tag
    that is not on `main`, proves the pins, runs both suites, publishes the
-   engine (secret `NPM_TOKEN`), waits until the version is fetchable, and
+   engine (no secret: npm trusts this workflow by name, set up once on the
+   package's npmjs.com settings), waits until the version is fetchable, and
    creates the GitHub release marked **Latest** with the Versioning entry as
    its notes. A failed run after the publish is rerun as it is: a version
    already on npm from this commit is resumed, not refused.

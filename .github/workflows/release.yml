@@ -7,9 +7,11 @@
 # once more on the tagged commit, and refuses a tag whose version is already
 # on npm.
 #
-# One secret: NPM_TOKEN, an npm automation token for @rich-rees with publish
-# rights to @rich-rees/zdd-engine (Settings → Secrets → Actions). The GitHub
-# release uses the job's own GITHUB_TOKEN. No other credential anywhere.
+# No secret anywhere: npm trusts this workflow directly (npm "trusted
+# publishing", OpenID Connect) — on npmjs.com the package names GitHub
+# Actions, rich-rees/zero-drift-docs and release.yml as its publisher, and
+# the job proves its identity with the short-lived token `id-token: write`
+# grants. The GitHub release uses the job's own GITHUB_TOKEN.
 #
 # The release notes are the README's Versioning entry for the tag (its text,
 # plus the two install lines), so the notes and the README cannot disagree.
@@ -75,11 +77,11 @@ jobs:
             echo "published=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Publish the engine
+      - name: Publish the engine (trusted publishing: no token)
         if: steps.npm.outputs.published == 'false'
-        run: cd packages/zdd-engine && npm publish --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          npm install -g npm@latest   # trusted publishing needs npm 11.5+
+          cd packages/zdd-engine && npm publish --access public --provenance
 
       - name: Published and fetchable from outside the repo
         run: |
