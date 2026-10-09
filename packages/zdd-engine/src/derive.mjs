@@ -25,6 +25,7 @@ import { loadConfig, resolveExtractors } from "./lib/config.mjs";
 import { resolveRefs } from "./lib/resolve-refs.mjs";
 import { insideRepo } from "./lib/paths.mjs";
 import { makeExtractorIo } from "./lib/extractor-io.mjs";
+import { gitIgnoredPredicate } from "./lib/ignored.mjs";
 
 const EXTRACTORS = {
   supabase: "./extractors/supabase/index.mjs",
@@ -268,6 +269,9 @@ export async function deriveRecords({ repoRoot, config }) {
   const configDiagnostics = selection.diagnostics;
   let records = [];
   const factsOrder = {};
+  // What git ignores is never source (pick 1): asked once, shared by every
+  // extractor's io.
+  const ignored = gitIgnoredPredicate(repoRoot);
   for (const { name, options } of selection.extractors) {
     const extractor = await loadExtractor(name, repoRoot, config);
     if (typeof extractor.derive !== "function") fail(`Extractor '${name}' exports no derive()`);
@@ -275,7 +279,7 @@ export async function deriveRecords({ repoRoot, config }) {
     try {
       // A fresh io per extractor: one shared walk budget each, so a greedy
       // extractor cannot starve the next one (decision 0010).
-      out = extractor.derive({ repoRoot, options, io: makeExtractorIo(repoRoot, name) });
+      out = extractor.derive({ repoRoot, options, io: makeExtractorIo(repoRoot, name, { ignored }) });
     } catch (e) {
       fail(`Extractor '${name}' failed: ${e.message}`);
     }

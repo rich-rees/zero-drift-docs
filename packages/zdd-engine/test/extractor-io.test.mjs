@@ -183,7 +183,7 @@ test("1.3.0 CR-038: a directory link is never followed on any platform — a jun
 test("io is frozen: an extractor cannot swap read or walk for the next one", () => {
   const io = makeExtractorIo(PKG);
   assert.ok(Object.isFrozen(io));
-  assert.deepEqual(Object.keys(io).sort(), ["read", "walk"]);
+  assert.deepEqual(Object.keys(io).sort(), ["isIgnored", "read", "walk"]); // isIgnored: 2.3.0, pick 1
 });
 
 test("POSIX: symlinks are never followed — a linked file, a file under a linked directory, a linked walk root", { skip: !POSIX && "symlinks need privileges on Windows" }, (t) => {
