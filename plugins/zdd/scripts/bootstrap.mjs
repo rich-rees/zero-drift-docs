@@ -70,6 +70,7 @@ import {
   MARKETPLACE,
   MARKETPLACE_REPO,
   isOurDeclaration,
+  pluginsDir,
 } from "./lib/repo.mjs";
 
 const TEMPLATES = join(PLUGIN_ROOT, "templates");
@@ -987,16 +988,50 @@ function pinEngine(text, version) {
 // re-pinned by upgrade, never rewritten, so the step is migrated in place: a
 // `run:` line invoking the pinned engine's bare `lint` gains the flag. A
 // workflow whose lint step has another shape is reported, not guessed at.
+// The step is matched by `lint` followed by anything (CAS-103 finding 5):
+// DiO's `lint ${{ … && '--tempstate' || '' }}` was reported "not found".
+// --merge goes right after `lint`, ahead of whatever follows.
 export function mergeGate(text) {
-  const re = /^(\s*(?:-\s+)?run:\s*npx -y "\$ZDD_ENGINE" lint)[ \t]*(\r?)$/m;
+  const re = /^(\s*(?:-\s+)?run:\s*npx -y "\$ZDD_ENGINE" lint)\b([^\r\n]*?)[ \t]*(\r?)$/m;
   if (/\blint --merge\b/.test(text)) return { text, how: "present" };
   if (!re.test(text)) return { text, how: "absent" };
-  return { text: text.replace(re, "$1 --merge$2"), how: "added" };
+  return { text: text.replace(re, (_m, head, rest, cr) => `${head} --merge${rest}${cr}`), how: "added" };
 }
 const workflowText = (version) => pinEngine(readFileSync(join(TEMPLATES, "zdd.yml"), "utf8"), version);
 const prePushText = (version) => pinEngine(readFileSync(join(TEMPLATES, "pre-push"), "utf8"), version);
 
 const hasGit = (root) => existsSync(join(root, ".git"));
+
+// .gitattributes (CAS-103 C15): derive and render write LF, and on a
+// Windows checkout with core.autocrlf=true git showed ~49 generated files
+// "modified" by line ending alone — a frightening diff for a plain user.
+// One rule pins the bundle to LF on checkout and commit, so what the engine
+// writes is what git expects. One line, appended to an existing file (its
+// own line ending kept), never written for a bundle at the repo root.
+export const gitattributesLine = (bundleDir) => `${bundleDir}/** text eol=lf`;
+export const GITATTRIBUTES_LINE = gitattributesLine("zdd");
+function writeGitattributes(ledger, config) {
+  const raw = config?.paths?.bundleDir;
+  if (raw === "." || raw === "./" || raw === "") {
+    ledger.notes.push(".gitattributes: not written — paths.bundleDir is the repo root, so a `./**` rule would touch every file; add `text eol=lf` rules for the generated artifacts by hand");
+    return;
+  }
+  const line = gitattributesLine(artifactPaths(config, { lenient: true }).bundleDir);
+  const file = ".gitattributes";
+  const note = `${file}: zdd/ checked out and committed with LF line endings (${line}) — the engine writes LF; without this a Windows checkout with core.autocrlf shows every generated file as modified`;
+  if (!ledger.exists(file)) {
+    if (ledger.create(file, line + "\n")) ledger.notes.push(note);
+    return;
+  }
+  const text = ledger.read(file);
+  if (text.split(/\r?\n/).some((l) => l.trim() === line)) {
+    ledger.kept.push(file);
+    return;
+  }
+  const eol = /\r\n/.test(text) ? "\r\n" : "\n";
+  ledger.overwrite(file, text + (text === "" || /\r?\n$/.test(text) ? "" : eol) + line + eol);
+  ledger.notes.push(note);
+}
 
 // core.hooksPath: set it only when unset or already ours; an adopter's own
 // hook manager (Husky, pre-commit, …) is never displaced (CR-007).
@@ -1211,8 +1246,13 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
   }
 
   writeSnippet(ledger, "CLAUDE.md");
-  if (answers.codex) writeSnippet(ledger, "AGENTS.md");
-  else ledger.skipped.push("AGENTS.md (not using Codex)");
+  // An AGENTS.md that already carries the block is refreshed on a repair
+  // apply with no codex answer (CAS-103 finding 9: the ledger said "not
+  // using Codex" about a file it had just refreshed).
+  const codex = answers.codex ?? Boolean(existingConfig && ledger.exists("AGENTS.md") && ledger.read("AGENTS.md").includes(SNIPPET_BEGIN));
+  if (codex) writeSnippet(ledger, "AGENTS.md");
+  else ledger.skipped.push('AGENTS.md (not using Codex — answer "codex": true to add the block there too)');
+  writeGitattributes(ledger, config);
   writeDomainDoc(ledger, paths);
   writePluginSettings(ledger, version);
 
@@ -1401,6 +1441,7 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
     dropSections(ledger, duplicates.filter((d) => dropIds.includes(d.id)));
     duplicates = findAllDuplicates(ledger);
   }
+  writeGitattributes(ledger, config);
   writeDomainDoc(ledger, artifactPaths(config, { lenient: true }));
   writePluginSettings(ledger, version, { mode: "upgrade", lock });
   if (stopUnset) ledger.notes.push('hooks.stop is not set (new in 1.1: the Stop hook prompts for the curated half once per session) — it stays OFF until answered: run bootstrap apply with {"optIns":{"stop":true}} (repair mode, keeps every other choice), or add "stop": true inside the existing "hooks" object by hand');
@@ -1609,7 +1650,12 @@ export function newestTag(lsRemote) {
   }
   return best;
 }
-export function releaseStatus(root, remote = `https://github.com/${MARKETPLACE_REPO}.git`) {
+// Four facts (CAS-103 C3, C4): the newest release tag, the repo's lock, the
+// release this session runs, and the catalogue this machine holds
+// (known_marketplaces.json, the thing a restart moves). `ready` says the
+// running release and the catalogue are both already at the newest, so a
+// lock move can go straight on to the plan in the same session, no restart.
+export function releaseStatus(root, remote = `https://github.com/${MARKETPLACE_REPO}.git`, home) {
   const running = pluginVersion();
   let lock = null;
   try {
@@ -1619,9 +1665,19 @@ export function releaseStatus(root, remote = `https://github.com/${MARKETPLACE_R
   } catch {
     /* no settings: no lock */
   }
+  let catalogue = null;
+  try {
+    const ref = JSON.parse(readFileSync(join(pluginsDir(home), "known_marketplaces.json"), "utf8"))?.[MARKETPLACE]?.source?.ref;
+    if (typeof ref === "string") catalogue = ref;
+  } catch {
+    /* no catalogue: Codex, or a machine that never fetched one */
+  }
   const out = remoteTags(remote);
   const newest = newestTag(out);
-  return { lock, running, newest, newer: newest !== null && compareVersions(newest, running) > 0 };
+  const newer = newest !== null && compareVersions(newest, running) > 0;
+  const lockBehind = lock !== null && RELEASE_TAG.test(lock) && compareVersions(lock, running) < 0;
+  const ready = newest !== null && !newer && newest === `v${running}` && catalogue === newest;
+  return { lock, running, newest, catalogue, newer, lockBehind, ready };
 }
 function remoteTags(remote = `https://github.com/${MARKETPLACE_REPO}.git`) {
   return execFileSync("git", ["ls-remote", "--tags", "--refs", remote], { encoding: "utf8", timeout: 30000, stdio: ["ignore", "pipe", "pipe"] });
@@ -1705,9 +1761,26 @@ export function narrateDetect(d, pocock) {
 
 function narratePocock(p) {
   const pin = pocockPin();
-  if (p.installed) return `mattpocock-skills: installed (${p.hits[0].where}: ${p.hits[0].path}) — \`grill\` will run the real interview. ZDD pins ${pin.plugin} ${pin.version} (${pin.plugin}@${pin.marketplace}); this repo's .claude/settings.json keeps any other copy off here.`;
+  const ours = `${pin.plugin}@${pin.marketplace}`;
+  if (p.installed) {
+    const h = p.hits.find((x) => x.enabled !== false);
+    const detail = h.id ? `${h.where}: ${h.path}; ${h.id} ${h.version ?? "?"}, switched on here` : `${h.where}: ${h.path}`;
+    return `mattpocock-skills: installed (${detail}) — \`grill\` will run the real interview. ZDD pins ${pin.plugin} ${pin.version} (${ours}); this repo's .claude/settings.json keeps any other copy off here.`;
+  }
+  // A copy is cached but this repo switches it off (finding 9): grill will
+  // not find it, and the fix is ZDD's own pinned copy, never switching the
+  // other one back on.
+  const off = p.hits.filter((x) => x.enabled === false);
+  const install = `\`claude plugin install ${ZDD_PLUGIN_ID} --scope project\` from this repo's folder (Claude Code)`;
+  if (off.length) {
+    return (
+      `mattpocock-skills: NOT installed as ZDD's pinned copy (${ours}); a copy is present but switched off here: ${off.map((x) => `${x.id} ${x.version ?? "?"}`).join(", ")}. ` +
+      `This repo switches other copies off on purpose — ZDD brings the one release it is tested with: ${install} installs ${ours} ${pin.version} beside zdd; then restart. ` +
+      "Until then `grill` cannot run, so work decisions out in plan mode and let \"update ZDD\" capture them."
+    );
+  }
   return (
-    `mattpocock-skills: NOT installed. Installing zdd brings it: \`/plugin install ${ZDD_PLUGIN_ID}\` (Claude Code) installs ${pin.plugin}@${pin.marketplace}, ` +
+    `mattpocock-skills: NOT installed. Installing zdd brings it: ${install} installs ${ours}, ` +
     `the ${pin.version} release this ZDD release is tested with, beside it — so a missing copy means zdd was loaded another way (a --plugin-dir, a copied folder); run that install. ` +
     "Your glossary and ADRs will only be as good as the design sessions that fill them, and `grill` (the design interview that writes them as it goes) needs Matt Pocock's skills. " +
     "Without it, work decisions out in plan mode and let \"update ZDD\" capture them."
@@ -1755,8 +1828,15 @@ export function narrateUpgrade(r) {
 export function narrateReleaseStatus(s) {
   if (!s.newest) return "No ZDD release tag found on the marketplace's repository.";
   const lock = s.lock ? `this repo locks ${s.lock}` : "this repo has no lock";
-  if (s.newer) return `ZDD ${s.newest} is out; ${lock} and this session runs ${s.running}. Release notes: https://github.com/${MARKETPLACE_REPO}/releases/tag/${s.newest}`;
-  return `ZDD ${s.running} is the newest release; ${lock}.`;
+  const catalogue = `the catalogue on this machine is at ${s.catalogue ?? "no recorded ref"}`;
+  if (s.newer) return `ZDD ${s.newest} is out; ${lock} and this session runs ${s.running}; ${catalogue}. Release notes: https://github.com/${MARKETPLACE_REPO}/releases/tag/${s.newest}`;
+  let line = `ZDD ${s.running} is the newest release; ${lock}; this session runs ${s.running}; ${catalogue}.`;
+  if (s.lockBehind || !s.lock) {
+    line += s.ready
+      ? ` this session already runs the newest release and the catalogue is there too: move the lock with \`upgrade --to=${s.newest}\` and go straight on to step 2 in this session — no restart`
+      : ` moving the lock needs a restart afterwards: the catalogue follows the lock on restart, then the update commands the first line of the next session names, then a second restart`;
+  }
+  return line;
 }
 
 // ---------------------------------------------------------------------------
@@ -1783,7 +1863,7 @@ if (process.argv[1] && posixify(process.argv[1]).endsWith("/scripts/bootstrap.mj
       const r = upgrade(root, { lock: flags.lock === true, plan: flags.plan === true, drop: flags.drop ?? null, to, remote });
       process.stdout.write(flags.json ? JSON.stringify(r, null, 2) + "\n" : narrateUpgrade(r) + "\n");
     } else if (cmd === "release-status") {
-      const s = releaseStatus(root, typeof flags.remote === "string" ? flags.remote : undefined);
+      const s = releaseStatus(root, typeof flags.remote === "string" ? flags.remote : undefined, flags.home);
       process.stdout.write(flags.json ? JSON.stringify(s) + "\n" : printable(narrateReleaseStatus(s)) + "\n");
     } else {
       process.stderr.write("Usage: bootstrap.mjs <detect|apply --answers=<file>|upgrade [--plan] [--lock] [--drop=<ids>] [--to=vX.Y.Z]|release-status [--remote=<url>]> [--root=<dir>] [--date=YYYY-MM-DD] [--home=<dir>] [--json]\n");

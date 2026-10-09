@@ -390,13 +390,74 @@ export function pocockLocations(root, home) {
   };
 }
 
+// A hit in the plugin cache is one installed COPY of the plugin —
+// `cache/<marketplace>/<plugin>/<version>/…` — and a copy that this repo's
+// settings switch off is not what grill will run (CAS-103 finding 9: the
+// switched-off official copy was reported "installed"). Every cache copy is
+// named with its id, version and whether it is switched on here; a plain
+// skill copy (a user, Codex or project skill) has no id and is simply there.
+// `installed` means a copy grill can use is present; `pinned` that it is
+// ZDD's own pinned copy.
 export function findPocock(root, home) {
   const loc = pocockLocations(root, home);
+  const pin = pocockPin();
+  const ours = `${pin.plugin}@${pin.marketplace}`;
+  const enabled = effectiveEnabled(root, home);
   const hits = [];
-  for (const key of ["userSkill", "codexSkill", "projectSkill"]) if (existsSync(loc[key])) hits.push({ where: key, path: loc[key] });
-  const found = findUnder(loc.pluginCache, ["domain-modeling", "SKILL.md"], 8);
-  if (found) hits.push({ where: "pluginCache", path: found });
-  return { installed: hits.length > 0, hits, searched: Object.values(loc) };
+  for (const key of ["userSkill", "codexSkill", "projectSkill"]) if (existsSync(loc[key])) hits.push({ where: key, path: loc[key], id: null, version: null, enabled: null });
+  for (const path of findAllUnder(loc.pluginCache, ["domain-modeling", "SKILL.md"], 8)) {
+    const [marketplace, plugin, version] = relative(loc.pluginCache, path).split(sep);
+    const id = marketplace && plugin && SAFE_ID.test(`${plugin}@${marketplace}`) ? `${plugin}@${marketplace}` : null;
+    hits.push({ where: "pluginCache", path, id, version: id && typeof version === "string" ? version : null, enabled: id ? enabled.get(id) ?? true : null });
+  }
+  const usable = hits.filter((h) => h.enabled !== false);
+  return { installed: usable.length > 0, pinned: usable.some((h) => h.id === ours), hits, searched: Object.values(loc) };
+}
+// enabledPlugins, merged across the three settings files Claude Code reads
+// (lowest precedence first). A plugin no file names is on.
+function effectiveEnabled(root, home) {
+  const out = new Map();
+  for (const s of settingsSources(root, home)) {
+    const j = readJsonObject(s.path);
+    if (!j || !isObject(j.enabledPlugins)) continue;
+    for (const [id, v] of Object.entries(j.enabledPlugins)) if (typeof v === "boolean" && SAFE_ID.test(id)) out.set(id, v);
+  }
+  return out;
+}
+// Every `<dir>/…/<tail>` under dir, sorted, bounded by depth and by the
+// number of directories visited (a plugin cache holds every version of every
+// plugin; a session start must not stall in it).
+const MAX_CACHE_DIRS = 2000;
+function findAllUnder(dir, tail, depth) {
+  const out = [];
+  let visited = 0;
+  const rec = (d, left) => {
+    if (left < 0 || ++visited > MAX_CACHE_DIRS) return;
+    const direct = join(d, ...tail);
+    if (existsSync(direct)) {
+      out.push(direct);
+      return;
+    }
+    let entries;
+    try {
+      entries = readdirSync(d).sort();
+    } catch {
+      return;
+    }
+    for (const name of entries) {
+      if (name === "node_modules") continue;
+      const p = join(d, name);
+      let isDir = false;
+      try {
+        isDir = statSync(p).isDirectory();
+      } catch {
+        continue;
+      }
+      if (isDir) rec(p, left - 1);
+    }
+  };
+  if (existsSync(dir)) rec(dir, depth);
+  return out;
 }
 
 function findUnder(dir, tail, depth) {

@@ -236,9 +236,10 @@ test("release-status reads the lock, the running plugin and the newest tag on th
   for (const t of ["v2.1.1", "v9.0.0", "v9.0.1-rc.1"]) git("tag", t);
   const repo = adopted("status", { settings: { extraKnownMarketplaces: LOCK("v2.1.1") } });
   const s = runJson(repo, ["release-status", `--remote=${remote}`]);
-  assert.deepEqual(s, { lock: "v2.1.1", running: VERSION, newest: "v9.0.0", newer: true });
+  // CAS-103 C3/C4: the catalogue (none in this home) and whether the lock trails the running release.
+  assert.deepEqual(s, { lock: "v2.1.1", running: VERSION, newest: "v9.0.0", catalogue: null, newer: true, lockBehind: true, ready: false });
   const text = run(repo, ["release-status", `--remote=${remote}`]);
-  assert.match(text, /ZDD v9\.0\.0 is out; this repo locks v2\.1\.1 and this session runs \d+\.\d+\.\d+/, text);
+  assert.match(text, /ZDD v9\.0\.0 is out; this repo locks v2\.1\.1 and this session runs \d+\.\d+\.\d+; the catalogue on this machine is at no recorded ref/, text);
 });
 
 // A local repo with release tags stands in for the marketplace's GitHub repo.
