@@ -104,7 +104,7 @@ test("CLI: the warning prints on a plain derive (no --verbose); derive and rende
   assert.match(d2.stdout, /3 external-services/);
 });
 
-test("2.3 alias (CAS-103 pick 3): a config that still says `services` runs the same extractor, with one diagnostic naming the rename; both names at once is refused; old strictKinds `service` is read as `external-service`", (t) => {
+test("2.3 alias (CAS-103 pick 3, decision 0023): a config that still says `services` runs the same extractor and keeps the old kind, ids and folder, with one diagnostic naming the rename; both names at once is refused; strictKinds `service` governs the old kind", (t) => {
   const repo = mkdtempSync(join(tmpdir(), "zdd-svc-alias-"));
   t.after(() => rmSync(repo, { recursive: true, force: true }));
   cpSync(FIXTURE, repo, { recursive: true });
@@ -139,4 +139,34 @@ test("2.3 alias (CAS-103 pick 3): a config that still says `services` runs the s
   const both = run(["derive"]);
   assert.equal(both.status, 1);
   assert.match(both.stderr, /lists both 'services' and 'external-services' — they are one extractor/);
+});
+
+test("CR-424/CR-425: the symmetric half-migration (new extractor name, old options key) keeps the declarations; the alias renders — legacy map links resolve, the node type is External Service, no service-to-service edge", (t) => {
+  const repo = mkdtempSync(join(tmpdir(), "zdd-svc-alias2-"));
+  t.after(() => rmSync(repo, { recursive: true, force: true }));
+  cpSync(FIXTURE, repo, { recursive: true });
+  const cfgPath = join(repo, "zdd", "config.json");
+  const fresh = JSON.parse(readFileSync(cfgPath, "utf8"));
+  const run = (args) => spawnSync(process.execPath, [BIN, ...args], { cwd: repo, encoding: "utf8" });
+  // New name in the list, options still under the old key: the declarations are read, not replaced with {}.
+  writeFileSync(cfgPath, JSON.stringify({ ...fresh, extractors: ["fastapi", "external-services"], extractorOptions: { fastapi: fresh.extractorOptions.fastapi, services: fresh.extractorOptions["external-services"] } }));
+  const d = run(["derive"]);
+  assert.equal(d.status, 0, d.stderr);
+  assert.match(d.stdout, /2 external-services/);
+  assert.match(d.stderr, /matches no declared service — add .* to extractorOptions\["external-services"\]\.services/, "the warning names the key as the config should spell it");
+  // The alias end to end: old records, old map links, rendered.
+  writeFileSync(cfgPath, JSON.stringify({ ...fresh, extractors: ["fastapi", "services"], extractorOptions: { fastapi: fresh.extractorOptions.fastapi, services: fresh.extractorOptions["external-services"] } }));
+  const page = join(repo, "zdd", "map", "external-services", "sentry.md");
+  writeFileSync(page, readFileSync(page, "utf8").replace("metadata/external-service/sentry.json", "metadata/service/sentry.json"));
+  assert.equal(run(["derive"]).status, 0);
+  assert.ok(existsSync(join(repo, "zdd", "metadata", "service", "sentry.json")));
+  const r = run(["render"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(run(["render", "--check"]).status, 0);
+  const graph = JSON.parse(readFileSync(join(repo, "zdd", "graph.json"), "utf8"));
+  const sentry = graph.nodes.find((n) => n.id === "metadata/service/sentry");
+  assert.equal(sentry.type, "External Service");
+  assert.ok(graph.edges.some((e) => e.source === "map/external-services/sentry" && e.target === sentry.id), "the legacy map link resolves");
+  assert.ok(!graph.edges.some((e) => e.source.startsWith("metadata/service/") && e.target.startsWith("metadata/service/")), "no service-to-service edge");
+  assert.match(readFileSync(join(repo, "zdd", "agent-index.md"), "utf8"), /\(metadata\/service\/sentry\.json\)/, "the index links the old folder");
 });

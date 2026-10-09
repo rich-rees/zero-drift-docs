@@ -235,3 +235,107 @@ test("retired names in the adopter's own text are listed with their replacement 
   assert.doesNotMatch(retired, /package-lock|node_modules|zdd\/instructions\.md|AGENTS\.md/, retired);
   assert.doesNotMatch(retired, /\.claude\/settings\.json|zdd\/config\.json/, "files this run rewrites are not reported");
 });
+
+// --- slice 2+3 review: CR-401, 402, 409, 410, 412, 413, 416, 417, 426 ----------------
+
+test("CR-401: a file of the adopter's at ZDD's name is never overwritten — kept, named, and the import line waits", () => {
+  const repo = adopted("own-instructions", { claude: "# Repo\n" });
+  writeFileSync(join(repo, "zdd", "instructions.md"), "# My own notes\n\nNot ZDD's.\n");
+  const json = runJson(repo, ["upgrade"]);
+  assert.equal(read(repo, "zdd/instructions.md"), "# My own notes\n\nNot ZDD's.\n");
+  assert.ok(!json.wrote.includes("zdd/instructions.md"));
+  assert.ok(json.kept.includes("zdd/instructions.md (yours — not ZDD's file)"), json.kept.join("\n"));
+  assert.ok(json.notes.some((n) => /zdd\/instructions\.md: a file of yours sits where ZDD writes its instructions/.test(n)), json.notes.join("\n"));
+  assert.equal(read(repo, "CLAUDE.md"), "# Repo\n", "no import line points at a file that is not ZDD's");
+  const fresh = adopted("own-instructions-apply");
+  writeFileSync(join(fresh, "zdd", "instructions.md"), "mine\n");
+  const j2 = runJson(fresh, ["apply", `--answers=${answers("own1", {})}`]);
+  assert.equal(read(fresh, "zdd/instructions.md"), "mine\n");
+  assert.ok(j2.skipped.some((s) => /^CLAUDE\.md \(the import line waits/.test(s)), j2.skipped.join("\n"));
+});
+
+test("CR-402: both options keys with different contents stop the upgrade before any write; equal ones collapse", () => {
+  const repo = adopted("both-keys", { engine: "2.2.1" });
+  const write = (opts) => writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify({ extractors: ["external-services"], engine: "2.2.1", extractorOptions: opts }) + "\n");
+  write({ services: { services: [{ name: "Sentry", env: ["SENTRY_"] }] }, "external-services": { services: [{ name: "Resend", env: ["RESEND_"] }] } });
+  const before = read(repo, "zdd/config.json");
+  assert.match(fails(repo, ["upgrade"]), /has both extractorOptions\.services and extractorOptions\["external-services"\] with different contents — merge them by hand/);
+  assert.equal(read(repo, "zdd/config.json"), before, "nothing written");
+  write({ services: { services: [{ name: "Sentry", env: ["SENTRY_"] }] }, "external-services": { services: [{ name: "Sentry", env: ["SENTRY_"] }] } });
+  runJson(repo, ["upgrade"]);
+  assert.deepEqual(Object.keys(JSON.parse(read(repo, "zdd/config.json")).extractorOptions), ["external-services"]);
+});
+
+test("CR-409: the import line beside a leftover block — the block is removed; beside malformed markers — refused and said", () => {
+  const leftover = adopted("leftover", { claude: `# R\n\n${IMPORT_COMMENT}\n${LINE}\n\n${BEGIN}\nold rules\n${END}\n\n## Mine\n\nkeep\n` });
+  const json = runJson(leftover, ["upgrade"]);
+  assert.equal(read(leftover, "CLAUDE.md"), `# R\n\n${IMPORT_COMMENT}\n${LINE}\n\n## Mine\n\nkeep\n`);
+  assert.ok(json.notes.some((n) => /CLAUDE\.md: removed the leftover ZDD block; the import line already loads the instructions/.test(n)), json.notes.join("\n"));
+  const bad = adopted("bad-markers", { claude: `${LINE}\n${BEGIN}\nx\n${BEGIN}\ny\n${END}\n` });
+  const j2 = runJson(bad, ["upgrade"]);
+  assert.ok(j2.notes.some((n) => /CLAUDE\.md: refused: the zdd:begin \/ zdd:end markers are not exactly one well-formed pair/.test(n)), j2.notes.join("\n"));
+  assert.equal(read(bad, "CLAUDE.md"), `${LINE}\n${BEGIN}\nx\n${BEGIN}\ny\n${END}\n`);
+});
+
+test("CR-410: the map-link rewrite touches only destinations that resolve under the metadata folder — a URL, another tree's service folder and a code block's text stay", () => {
+  const repo = adopted("links-scope", { engine: "2.2.1" });
+  writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify({ extractors: ["services"], engine: "2.2.1" }) + "\n");
+  mkdirSync(join(repo, "zdd", "map", "features"), { recursive: true });
+  const page = [
+    "- [S](../../metadata/service/sentry.json)",
+    "- [U](https://api.example.com/service/schema.json)",
+    "- [P](//cdn.example.com/service/x.json)",
+    "- [D](../../../docs/service/notes.json)",
+    "- [R](/zdd/metadata/service/resend.json)",
+    "",
+  ].join("\n");
+  writeFileSync(join(repo, "zdd", "map", "features", "a.md"), page);
+  runJson(repo, ["upgrade"]);
+  assert.equal(
+    read(repo, "zdd/map/features/a.md"),
+    page.replace("../../metadata/service/sentry.json", "../../metadata/external-service/sentry.json").replace("/zdd/metadata/service/resend.json", "/zdd/metadata/external-service/resend.json"),
+  );
+});
+
+test("CR-412: the instructions name the adopter's configured paths, not zdd/ by default", () => {
+  const repo = adopted("custom-paths", { config: { paths: { bundleDir: "docs/zdd", glossary: "docs/zdd/words.md", adrDir: "docs/zdd/adr", mapDir: "docs/zdd/map", metadataDir: "docs/zdd/inventory", agentIndex: "docs/zdd/agent-index.md", adrIndex: "docs/zdd/adr-index.md", blessingIndex: "docs/zdd/blessing-index.md", patternsPlan: "docs/zdd/plan.md", humanIndex: "docs/zdd/human-index.html", graph: "docs/zdd/graph.json" } }, claude: "# R\n", agents: `${BEGIN}\nx\n${END}\n` });
+  runJson(repo, ["upgrade"]);
+  const text = read(repo, "docs/zdd/instructions.md");
+  assert.match(text, /`docs\/zdd\/words\.md` whole, `docs\/zdd\/adr-index\.md` whole/);
+  assert.match(text, /commit `docs\/zdd\/plan\.md`/);
+  assert.match(text, /`docs\/zdd\/inventory\/`, `docs\/zdd\/graph\.json`/);
+  assert.match(text, /or this file \(`docs\/zdd\/instructions\.md`\)/);
+  assert.doesNotMatch(text, /`zdd\/(glossary|metadata|patterns-plan|graph)/);
+  assert.ok(!/<[A-Z_]+>/.test(text), `unfilled placeholder in: ${text}`);
+  assert.equal(read(repo, "CLAUDE.md"), "# R\n", "an upgrade never adds the line to a CLAUDE.md with no ZDD text — it says so; a repair apply adds it");
+  runJson(repo, ["apply", `--answers=${answers("cp1", {})}`]);
+  assert.equal(read(repo, "CLAUDE.md"), "# R\n\n" + IMPORT_COMMENT + "\n@docs/zdd/instructions.md\n");
+  const agents = read(repo, "AGENTS.md");
+  assert.match(agents, /so this is a copy of docs\/zdd\/instructions\.md/);
+  assert.match(agents, /`docs\/zdd\/words\.md` whole/);
+  // A bundle at the repo root is refused by the plugin's own path rule (artifactPaths: never the checkout itself), so there is no root-level instructions file to fence (CR-411: declined for that reason; the writer and the fence still handle "." defensively).
+});
+
+test("CR-426: the AGENTS.md block is exactly the markers, the header and the instructions body — byte for byte", () => {
+  const repo = adopted("agents-exact", { agents: `${BEGIN}\nold\n${END}\n\n## Theirs\n\nkeep\n` });
+  runJson(repo, ["upgrade"]);
+  const expected = `${BEGIN}\n<!-- Managed by Zero-Drift Docs (zdd): "upgrade ZDD" rewrites everything between the zdd:begin and zdd:end markers. Codex has no file import, so this is a copy of zdd/instructions.md. -->\n${instructionsBody().trimEnd()}\n${END}\n\n## Theirs\n\nkeep\n`;
+  assert.equal(read(repo, "AGENTS.md"), expected);
+});
+
+test("CR-416/417: the sweep reports the old strict kind and old record ids, scans git's tracked files, and says when it was cut short", () => {
+  const repo = adopted("sweep-git", { engine: "2.2.1", claude: `${IMPORT_COMMENT}\n${LINE}\n` });
+  mkdirSync(join(repo, "docs"), { recursive: true });
+  writeFileSync(join(repo, "docs", "claims.md"), 'Our strict list: claims.strictKinds: ["service"].\nAllow service:resend.\n');
+  mkdirSync(join(repo, "build"), { recursive: true });
+  writeFileSync(join(repo, "build", "out.md"), "zdd:bootstrap --upgrade\n");
+  writeFileSync(join(repo, ".gitignore"), "build/\n");
+  execFileSync("git", ["init", "-q"], { cwd: repo });
+  execFileSync("git", ["add", "-A"], { cwd: repo });
+  const json = runJson(repo, ["upgrade"]);
+  const notes = json.notes.filter((n) => / still says /.test(n)).join("\n");
+  assert.match(notes, /docs\/claims\.md:1 still says `strictKinds: \["service"` — since 2\.3\.0 that is the strict kind `external-service`/, notes);
+  assert.match(notes, /docs\/claims\.md:2 still says `service:resend`/, notes);
+  assert.doesNotMatch(notes, /build\/out\.md/, "an ignored folder is not swept when git lists the files");
+  assert.ok(!json.notes.some((n) => /sweep for retired names was cut short/.test(n)));
+});

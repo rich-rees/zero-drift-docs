@@ -215,7 +215,12 @@ function shellTarget(command, cwd, hit) {
     } else if (WRITE_VERB.test(verb) || sedInPlace || (isGit && GIT_WRITE_SUBVERB.test(sub))) {
       candidates.push(...operands, ...literals(), ...targetDirs);
     } else if (INTERPRETER.test(verb) && WRITE_API.test(simple)) {
-      candidates.push(...operands, ...literals());
+      // Only the path a write API is CALLED WITH is a candidate (CAS-103
+      // finding 17): a one-liner that merely mentions a generated path in a
+      // string it writes elsewhere is a write to that elsewhere. The target
+      // is the first path-like literal in the call's arguments — the last
+      // for a copy or a rename, whose destination comes second.
+      candidates.push(...operands, ...writeApiTargets(simple));
     }
     for (const c of candidates) {
       const t = hit(c, cwd, { ancestor: destructive });
@@ -223,6 +228,41 @@ function shellTarget(command, cwd, hit) {
     }
   }
   return null;
+}
+
+// The path-like literals a write API is called with. A call with
+// parentheses yields its argument list; a PowerShell writer or a bare
+// `rename`/`unlink` takes the rest of the simple command. copy/move/rename
+// name their destination last; everything else names its target first.
+const WRITE_API_GLOBAL = new RegExp(WRITE_API.source, "gi");
+const PATH_LITERAL = /['"]([^'"]*[\\/][^'"]*)['"]/g;
+function writeApiTargets(simple) {
+  const out = [];
+  let m;
+  while ((m = WRITE_API_GLOBAL.exec(simple))) {
+    const name = m[0];
+    let i = m.index + name.length;
+    // `open('x','w'` matched into its own arguments: back up to the paren.
+    const paren = name.indexOf("(");
+    if (paren !== -1) i = m.index + paren;
+    while (i < simple.length && /\s/.test(simple[i])) i++;
+    let span;
+    if (simple[i] === "(") {
+      let depth = 0;
+      let j = i;
+      for (; j < simple.length; j++) {
+        if (simple[j] === "(") depth++;
+        else if (simple[j] === ")" && --depth === 0) break;
+      }
+      span = simple.slice(i + 1, j);
+    } else span = simple.slice(i);
+    const paths = [...span.matchAll(PATH_LITERAL)].map((x) => x[1]);
+    if (!paths.length) continue;
+    const destinationLast = /^(copyFile|rename|shutil\.(move|copy)|Move-Item|Copy-Item)/i.test(name.replace(/^.*?(?=copyFile|rename|shutil|Move|Copy)/, ""));
+    out.push(destinationLast ? paths[paths.length - 1] : paths[0]);
+  }
+  WRITE_API_GLOBAL.lastIndex = 0;
+  return out;
 }
 
 function main() {
@@ -253,7 +293,8 @@ function main() {
     { rel: paths.adrIndex, kind: "file" },
     { rel: paths.blessingIndex, kind: "file" },
     { rel: paths.humanIndex, kind: "file" },
-    { rel: paths.bundleDir && paths.bundleDir !== "." ? `${paths.bundleDir}/${INSTRUCTIONS_NAME}` : null, kind: "file", owned: true },
+    { rel: /\.md$/i.test(paths.agentIndex ?? "") ? paths.agentIndex.replace(/\.md$/i, "") : null, kind: "dir" }, // the two-level index's area folder (2.3)
+    { rel: !paths.bundleDir || paths.bundleDir === "." ? INSTRUCTIONS_NAME : `${paths.bundleDir}/${INSTRUCTIONS_NAME}`, kind: "file", owned: true },
   ]) {
     if (!g.rel) continue; // no safe location for this key (CR-075)
     try {

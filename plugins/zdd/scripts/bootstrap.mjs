@@ -60,7 +60,7 @@
 //   }
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, lstatSync, chmodSync, openSync, writeSync, closeSync } from "node:fs";
-import { join, dirname, basename, relative } from "node:path";
+import { join, dirname, basename, relative, posix } from "node:path";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { request as httpRequest } from "node:http";
@@ -98,7 +98,8 @@ const SNIPPET_END = "<!-- zdd:end -->";
 // import directive (its AGENTS.md loader concatenates plain Markdown), so
 // AGENTS.md keeps a managed copy between the zdd:begin / zdd:end markers.
 export const INSTRUCTIONS_NAME = "instructions.md";
-export const instructionsRel = (bundleDir) => `${bundleDir}/${INSTRUCTIONS_NAME}`;
+// A bundle at the repo root puts the file at the root too (CR-411).
+export const instructionsRel = (bundleDir) => (!bundleDir || bundleDir === "." ? INSTRUCTIONS_NAME : `${bundleDir}/${INSTRUCTIONS_NAME}`);
 export const importLine = (bundleDir) => `@${instructionsRel(bundleDir)}`;
 export const IMPORT_COMMENT = "<!-- Zero-Drift Docs: the line below loads ZDD's instructions into every session. ZDD owns that file and rewrites it on upgrade; everything else in this file is yours. -->";
 const IMPORT_LINE_RE = /^@\S+\/instructions\.md\r?$/m;
@@ -789,14 +790,28 @@ const yamlScalar = (s) => JSON.stringify(s); // a JSON string is a valid YAML do
 // The instructions body (templates/instructions.md); the two shapes it is
 // written in: the file itself (a header comment, then the body) and the
 // AGENTS.md block (markers around a header and the body).
-export function instructionsBody() {
-  return readFileSync(join(TEMPLATES, "instructions.md"), "utf8");
+// The template names the artifacts by placeholder (`<GLOSSARY>` …), filled
+// from the adopter's configured paths (CR-412): a repo that moved its
+// glossary is told where its glossary is. No argument: the defaults.
+export function instructionsBody(paths = artifactPaths({})) {
+  const p = { ...artifactPaths({}), ...paths };
+  return readFileSync(join(TEMPLATES, "instructions.md"), "utf8")
+    .replaceAll("<GLOSSARY>", p.glossary)
+    .replaceAll("<ADR_INDEX>", p.adrIndex)
+    .replaceAll("<BLESSING_INDEX>", p.blessingIndex)
+    .replaceAll("<PATTERNS_PLAN>", p.patternsPlan)
+    .replaceAll("<METADATA_DIR>", p.metadataDir)
+    .replaceAll("<GRAPH>", p.graph)
+    .replaceAll("<AGENT_INDEX>", p.agentIndex)
+    .replaceAll("<HUMAN_INDEX>", p.humanIndex)
+    .replaceAll("<BUNDLE_DIR>", p.bundleDir === "." ? "." : p.bundleDir)
+    .replaceAll("<INSTRUCTIONS>", instructionsRel(p.bundleDir));
 }
-export function instructionsFileText() {
-  return `<!-- ${OWNER_MARK}: "upgrade ZDD" rewrites this whole file. Never hand-edit it; your own rules belong in CLAUDE.md, which ZDD never edits after install. -->\n` + instructionsBody();
+export function instructionsFileText(paths) {
+  return `<!-- ${OWNER_MARK}: "upgrade ZDD" rewrites this whole file. Never hand-edit it; your own rules belong in CLAUDE.md, which ZDD never edits after install. -->\n` + instructionsBody(paths);
 }
-function snippetText() {
-  return `${SNIPPET_BEGIN}\n<!-- ${OWNER_MARK}: "upgrade ZDD" rewrites everything between the zdd:begin and zdd:end markers. Codex has no file import, so this is a copy of zdd/instructions.md. -->\n` + instructionsBody().trimEnd() + `\n${SNIPPET_END}\n`;
+function snippetText(paths) {
+  return `${SNIPPET_BEGIN}\n<!-- ${OWNER_MARK}: "upgrade ZDD" rewrites everything between the zdd:begin and zdd:end markers. Codex has no file import, so this is a copy of ${instructionsRel((paths ?? artifactPaths({})).bundleDir)}. -->\n` + instructionsBody(paths).trimEnd() + `\n${SNIPPET_END}\n`;
 }
 // Ownership is the HEADER — the mark within the first three lines — not the
 // phrase anywhere in the file (CR-006).
@@ -878,9 +893,9 @@ export function upsertSnippet(existing, snippet) {
   };
 }
 
-function writeSnippet(ledger, file) {
+function writeSnippet(ledger, file, paths) {
   const existing = ledger.exists(file) ? ledger.read(file) : "";
-  const { text, changed, how, note } = upsertSnippet(existing, snippetText());
+  const { text, changed, how, note } = upsertSnippet(existing, snippetText(paths));
   if (!changed) {
     ledger.kept.push(file);
     if (how.startsWith("refused")) ledger.notes.push(`${file}: ${how}`);
@@ -900,19 +915,23 @@ export function upsertImport(existing, line) {
   const crlf = /\r\n/.test(existing);
   const norm = (s) => (crlf ? s.replace(/\r?\n/g, "\r\n") : s);
   const body = norm(`${IMPORT_COMMENT}\n${line}\n`);
-  if (existing.split(/\r?\n/).some((l) => l === line)) return { text: existing, changed: false, how: "present" };
+  const present = existing.split(/\r?\n/).some((l) => l === line);
   if (!existing) return { text: body, changed: true, how: "created" };
   const nb = count(existing, SNIPPET_BEGIN);
   const ne = count(existing, SNIPPET_END);
   if (nb || ne || existing.includes(SNIPPET_BEGIN) || existing.includes(SNIPPET_END)) {
+    // Markers are judged before the import line (CR-409): a block left beside
+    // the line is migrated away, and a malformed one is reported, either way.
     const b = indexOfMarker(existing, SNIPPET_BEGIN);
     const e = indexOfMarker(existing, SNIPPET_END);
     const stray = existing.split(SNIPPET_BEGIN).length - 1 !== 1 || existing.split(SNIPPET_END).length - 1 !== 1;
     if (nb !== 1 || ne !== 1 || e < b || stray) return { text: existing, changed: false, how: "refused: the zdd:begin / zdd:end markers are not exactly one well-formed pair — fix them by hand" };
-    // The old comment line inside the block (if any) goes with the block.
-    const next = existing.slice(0, b) + body.trimEnd() + existing.slice(e + SNIPPET_END.length);
-    return { text: next, changed: true, how: "replaced the ZDD block with the import line" };
+    const replacement = present ? "" : body.trimEnd();
+    let next = existing.slice(0, b) + replacement + existing.slice(e + SNIPPET_END.length);
+    if (present) next = next.replace(/(\r?\n){3,}/g, crlf ? "\r\n\r\n" : "\n\n");
+    return { text: next, changed: true, how: present ? "removed the leftover ZDD block; the import line already loads the instructions" : "replaced the ZDD block with the import line" };
   }
+  if (present) return { text: existing, changed: false, how: "present" };
   const h = existing.indexOf(LEGACY_SNIPPET_HEADING);
   let legacyKept = false;
   if (h !== -1) {
@@ -946,11 +965,18 @@ function writeImport(ledger, file, bundleDir) {
 // ZDD's own instructions file: written at install, rewritten on every upgrade
 // to this release's text, never hand-edited (the fence refuses).
 function writeInstructions(ledger, config) {
-  const rel = instructionsRel(artifactPaths(config, { lenient: true }).bundleDir);
-  const text = instructionsFileText();
+  const paths = artifactPaths(config, { lenient: true });
+  const rel = instructionsRel(paths.bundleDir);
+  const text = instructionsFileText(paths);
   if (ledger.exists(rel)) {
-    if (ledger.read(rel) === text) ledger.kept.push(rel);
-    else {
+    const cur = ledger.read(rel);
+    if (cur === text) ledger.kept.push(rel);
+    else if (!isOwned(cur)) {
+      // A file of the adopter's at ZDD's name (CR-401): never overwritten.
+      ledger.kept.push(`${rel} (yours — not ZDD's file)`);
+      ledger.notes.push(`${rel}: a file of yours sits where ZDD writes its instructions, and it carries no "${OWNER_MARK}" header, so it was left untouched — move it (and any import line in CLAUDE.md that loads it) and run again, or set paths.bundleDir elsewhere; until then ZDD's instructions are not installed`);
+      return null;
+    } else {
       ledger.overwrite(rel, text);
       ledger.notes.push(`${rel}: rewritten to this release's instructions — ZDD's file, never hand-edited; your own rules live in CLAUDE.md`);
     }
@@ -1393,13 +1419,14 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
     } else ledger.skipped.push(".githooks/pre-push (declined)");
   }
 
-  writeInstructions(ledger, config);
-  writeImport(ledger, "CLAUDE.md", paths.bundleDir);
+  const instructionsWritten = writeInstructions(ledger, config) !== null;
+  if (instructionsWritten) writeImport(ledger, "CLAUDE.md", paths.bundleDir);
+  else ledger.skipped.push("CLAUDE.md (the import line waits until ZDD's instructions file can be written)");
   // An AGENTS.md that already carries the block is refreshed on a repair
   // apply with no codex answer (CAS-103 finding 9: the ledger said "not
   // using Codex" about a file it had just refreshed).
   const codex = answers.codex ?? Boolean(existingConfig && ledger.exists("AGENTS.md") && ledger.read("AGENTS.md").includes(SNIPPET_BEGIN));
-  if (codex) writeSnippet(ledger, "AGENTS.md");
+  if (codex) writeSnippet(ledger, "AGENTS.md", paths);
   else ledger.skipped.push('AGENTS.md (not using Codex — answer "codex": true to add the block there too)');
   writeGitattributes(ledger, config);
   writeDomainDoc(ledger, paths);
@@ -1582,14 +1609,14 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
   // (CR-305): a repo whose config was renamed by hand gets them too.
   {
     const mapDir = artifactPaths(config, { lenient: true }).mapDir;
-    const links = migrateMapLinks(ledger, mapDir);
+    const links = migrateMapLinks(ledger, mapDir, artifactPaths(config, { lenient: true }).metadataDir);
     for (const rel of links.touched) ledger.notes.push(`${rel}: links to metadata/service/ now point at metadata/external-service/ (2.3 rename) — the next derive moves the records there`);
     for (const what of links.skipped) ledger.notes.push(`${mapDir}: ${what} was not read for old metadata/service/ links — check it by hand`);
     if (renamed.length && existsSync(ledger.abs(`${mapDir}/services`))) ledger.notes.push(`${mapDir}/services/ is your hand-written folder for third-party systems — ZDD now calls them external services and a fresh install names the folder external-services/; rename it if you like (git mv), it is never renamed for you`);
   }
   const upgradePaths = artifactPaths(config, { lenient: true });
-  writeInstructions(ledger, config);
-  if (ledger.exists("CLAUDE.md")) {
+  const instructionsOk = writeInstructions(ledger, config) !== null;
+  if (instructionsOk && ledger.exists("CLAUDE.md")) {
     const cur = ledger.read("CLAUDE.md");
     if (IMPORT_LINE_RE.test(cur) || cur.includes(SNIPPET_BEGIN) || cur.includes(SNIPPET_END) || cur.includes(LEGACY_SNIPPET_HEADING)) writeImport(ledger, "CLAUDE.md", upgradePaths.bundleDir);
     else {
@@ -1600,7 +1627,7 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
   if (ledger.exists("AGENTS.md")) {
     const cur = ledger.read("AGENTS.md");
     if (!cur.includes(SNIPPET_BEGIN) && !cur.includes(SNIPPET_END) && !cur.includes(LEGACY_SNIPPET_HEADING)) ledger.kept.push("AGENTS.md (no ZDD block to refresh)");
-    else writeSnippet(ledger, "AGENTS.md");
+    else writeSnippet(ledger, "AGENTS.md", upgradePaths);
   }
   // Adopter text outside the block that the block now covers (CAS-101):
   // named with its lines, removed only by --drop, after the block refresh so
@@ -1661,6 +1688,11 @@ function migrateRenames(config, changes) {
       changes.push(`extractor "${old}" → "${now}" (2.3: the records are third-party systems, not a code service layer)`);
     }
     if (isPlainObject(config.extractorOptions) && Object.hasOwn(config.extractorOptions, old)) {
+      // Both keys with different contents is a conflict the engine refuses;
+      // upgrade must not pick one silently (CR-402).
+      if (Object.hasOwn(config.extractorOptions, now) && JSON.stringify(config.extractorOptions[old]) !== JSON.stringify(config.extractorOptions[now])) {
+        throw new Error(`zdd/config.json has both extractorOptions.${old} and extractorOptions["${now}"] with different contents — merge them by hand into "${now}" (they are one extractor), then run the upgrade again; nothing was written`);
+      }
       // Keep the adopter's key order: the new key where the old one sat.
       const next = {};
       for (const [k, v] of Object.entries(config.extractorOptions)) {
@@ -1694,13 +1726,19 @@ function migrateRenames(config, changes) {
 // old folder is gone after the next derive, and a link the render cannot
 // resolve blocks it.
 const MAP_WALK_DEPTH = 16; // the render's own bound (lib/walk-markdown.mjs)
-function migrateMapLinks(ledger, mapDir) {
+const MAP_WALK_ENTRIES = 20_000; // and its entry budget
+function migrateMapLinks(ledger, mapDir, metadataDir = "zdd/metadata") {
   const abs = ledger.abs(mapDir);
   if (!existsSync(abs)) return { touched: [], skipped: [] };
   const touched = [];
   const skipped = [];
   const files = [];
+  let entries = 0;
   const rec = (dir, depth) => {
+    if (++entries > MAP_WALK_ENTRIES) {
+      if (entries === MAP_WALK_ENTRIES + 1) skipped.push(`${mapDir}/ (more than ${MAP_WALK_ENTRIES} entries — the rest was not read)`);
+      return;
+    }
     if (depth > MAP_WALK_DEPTH) {
       skipped.push(`${posixify(relative(ledger.root, dir))}/ (deeper than ${MAP_WALK_DEPTH} folders)`);
       return;
@@ -1727,14 +1765,35 @@ function migrateMapLinks(ledger, mapDir) {
     }
   };
   rec(abs, 0);
+  const metaPrefix = metadataDir.replace(/\/+$/, "");
   for (const p of files) {
     const rel = posixify(relative(ledger.root, p));
+    let st;
+    try {
+      st = lstatSync(p);
+    } catch {
+      continue;
+    }
+    if (st.size > MAX_SCAN_BYTES) {
+      skipped.push(`${rel} (over ${MAX_SCAN_BYTES / 1024} KiB — not read)`);
+      continue;
+    }
     const text = ledger.read(rel);
+    const pageDir = posix.dirname(rel);
     let next = text;
     for (const [old, now] of Object.entries(RENAMED_KINDS)) {
       // A link destination as the render reads it: `](dest)` or `](<dest>)`,
-      // with an optional `#fragment` — the kind is the folder before the file.
-      next = next.replace(new RegExp(`(\\]\\(<?[^)<>\\s]*/)${old}/([^)<>/\\s#]+\\.json(?:#[^)<>\\s]*)?>?\\))`, "g"), `$1${now}/$2`);
+      // with an optional `#fragment`. Rewritten only when the destination,
+      // resolved from the page, lands under <metadataDir>/<old>/ (CR-410): a
+      // URL, or some other tree that happens to hold a `service/` folder,
+      // is the adopter's prose and stays.
+      next = next.replace(new RegExp(`\\]\\((<?)([^)<>\\s]*/${old}/[^)<>/\\s#]+\\.json)((?:#[^)<>\\s]*)?)(>?)\\)`, "g"), (whole, lt, dest, frag, gt) => {
+        if (/^[a-z][a-z0-9+.-]*:/i.test(dest) || dest.startsWith("//")) return whole;
+        const resolved = dest.startsWith("/") ? dest.replace(/^\/+/, "") : posix.normalize(posix.join(pageDir, dest));
+        if (!(resolved === `${metaPrefix}/${old}` || resolved.startsWith(`${metaPrefix}/${old}/`)) && !(dest.startsWith("/") && (resolved.startsWith(`${metaPrefix.split("/").pop()}/${old}/`) || resolved.startsWith(`${old}/`)))) return whole;
+        const moved = dest.replace(new RegExp(`/${old}/([^/]+\\.json)$`), `/${now}/$1`);
+        return `](${lt}${moved}${frag}${gt})`;
+      });
     }
     if (next !== text) {
       ledger.overwrite(rel, next);
@@ -1889,7 +1948,7 @@ export function findRuleUnits(text) {
       continue;
     }
     if (inBlock) continue;
-    if (/^```/.test(t)) {
+    if (/^(`{3,}|~{3,})/.test(t)) {
       flush();
       inFence = !inFence;
       continue;
@@ -2020,6 +2079,7 @@ const brief = (s) => {
 export const RETIRED_NAMES = [
   { since: "2.2.0", find: /\bzdd:bootstrap --upgrade\b|\bbootstrap --upgrade\b/g, now: '"upgrade ZDD" (the upgrade skill)' },
   { since: "2.3.0", find: /\bextractorOptions\.services\b|\bmetadata\/service\/|"services"(?=\s*[,\]])/g, now: "the `external-services` extractor and `metadata/external-service/` (the 2.3 rename)" },
+  { since: "2.3.0", find: /\bstrictKinds\b[^\n\]]*"service"|\bservice:[a-z0-9][a-z0-9-]*\b/g, now: "the strict kind `external-service` and `external-service:<id>` ids (the 2.3 rename)" },
   { since: "2.3.0", find: /<!-- zdd:begin -->/g, now: "one import line, `@zdd/instructions.md`, in CLAUDE.md (AGENTS.md keeps the block for Codex)", skip: ["AGENTS.md"] },
 ];
 const RETIRED_SCAN_EXT = /\.(md|ya?ml|json|mjs|cjs|js|ts|sh|ps1|toml|txt)$/i;
@@ -2027,16 +2087,35 @@ const RETIRED_SKIP_FILES = /(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock
 const MAX_RETIRED_FILES = 3000;
 const MAX_RETIRED_NOTES = 20;
 const RETIRED_SKIP_DIRS = new Set(["node_modules", ".git", ".next", "dist", "build", "coverage", ".venv", "venv", "__pycache__", ".expo"]);
-export function findRetiredNames(ledger, { oldEngine = null, metadataRel = "zdd/metadata" } = {}) {
-  const rules = [...RETIRED_NAMES];
-  if (oldEngine && /^\d+\.\d+\.\d+$/.test(oldEngine)) {
-    rules.push({ since: "this upgrade", find: new RegExp(`\\bv?${oldEngine.replace(/\./g, "\\.")}\\b`, "g"), now: `the new release (${pluginVersion()}) — your repo may hold the version somewhere ZDD does not write (a lock test, a setup guide)`, skip: [".claude/settings.json", "zdd/config.json", ".github/workflows/zdd.yml", ".githooks/pre-push"] });
+// The files swept: git's tracked list where git can answer (deterministic,
+// honours the repo's ignores, never starved by build output — CR-417), else
+// a bounded walk that says when it was cut short.
+function sweepList(ledger, metadataRel) {
+  const out = [];
+  let truncated = false;
+  if (hasGit(ledger.root)) {
+    try {
+      const listed = execFileSync("git", ["ls-files", "-z", "--full-name"], { cwd: ledger.root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 30_000, maxBuffer: 64 * 1024 * 1024 }).split("\0").filter(Boolean);
+      for (const rel of listed) {
+        if (!RETIRED_SCAN_EXT.test(rel) || RETIRED_SKIP_FILES.test(rel) || rel === metadataRel || rel.startsWith(`${metadataRel}/`)) continue;
+        if (rel.split("/").some((seg) => RETIRED_SKIP_DIRS.has(seg))) continue;
+        out.push(rel);
+        if (out.length > MAX_RETIRED_FILES) {
+          truncated = true;
+          break;
+        }
+      }
+      return { files: out, truncated, source: "git" };
+    } catch {
+      /* fall through to the walk */
+    }
   }
-  const written = new Set(ledger.wrote);
-  const hits = [];
   let seen = 0;
   const rec = (dir, depth) => {
-    if (depth > 6 || hits.length > MAX_RETIRED_NOTES) return;
+    if (depth > 6 || truncated) {
+      if (depth > 6) truncated = true;
+      return;
+    }
     let names;
     try {
       names = readdirSync(dir).sort();
@@ -2044,7 +2123,10 @@ export function findRetiredNames(ledger, { oldEngine = null, metadataRel = "zdd/
       return;
     }
     for (const name of names) {
-      if (++seen > MAX_RETIRED_FILES) return;
+      if (++seen > MAX_RETIRED_FILES) {
+        truncated = true;
+        return;
+      }
       const p = join(dir, name);
       let st;
       try {
@@ -2054,36 +2136,53 @@ export function findRetiredNames(ledger, { oldEngine = null, metadataRel = "zdd/
       }
       const rel = posixify(relative(ledger.root, p));
       if (st.isDirectory()) {
-        // zdd/ is scanned (ADRs and the map can name a retired thing); its
-        // generated metadata, dependencies, build output and other dot
-        // folders are not.
         const dotOk = [".claude", ".github", ".githooks"].includes(name);
-        const skip = RETIRED_SKIP_DIRS.has(name) || (name.startsWith(".") && !dotOk) || rel === metadataRel;
-        if (!skip) rec(p, depth + 1);
+        if (!(RETIRED_SKIP_DIRS.has(name) || (name.startsWith(".") && !dotOk) || rel === metadataRel)) rec(p, depth + 1);
         continue;
       }
-      if (!st.isFile() || st.size > MAX_SCAN_BYTES || !RETIRED_SCAN_EXT.test(name) || RETIRED_SKIP_FILES.test(rel) || written.has(rel)) continue;
-      if (rel.endsWith(`/${INSTRUCTIONS_NAME}`) || rel === INSTRUCTIONS_NAME) continue;
-      let text;
-      try {
-        text = ledger.read(rel);
-      } catch {
-        continue;
-      }
-      const lines = text.split(/\r?\n/);
-      for (const r of rules) {
-        if (r.skip?.includes(rel)) continue;
-        lines.forEach((line, i) => {
-          r.find.lastIndex = 0;
-          const m = r.find.exec(line);
-          if (m) hits.push(`${rel}:${i + 1} still says \`${m[0]}\` — since ${r.since} that is ${r.now}`);
-        });
-      }
+      if (st.isFile() && RETIRED_SCAN_EXT.test(name) && !RETIRED_SKIP_FILES.test(rel)) out.push(rel);
     }
   };
   rec(ledger.root, 0);
-  if (hits.length > MAX_RETIRED_NOTES) return [...hits.slice(0, MAX_RETIRED_NOTES), `…and ${hits.length - MAX_RETIRED_NOTES} more retired names — grep for them`];
-  return hits;
+  return { files: out, truncated, source: "walk" };
+}
+export function findRetiredNames(ledger, { oldEngine = null, metadataRel = "zdd/metadata" } = {}) {
+  const rules = [...RETIRED_NAMES];
+  if (oldEngine && /^\d+\.\d+\.\d+$/.test(oldEngine)) {
+    rules.push({ since: "this upgrade", find: new RegExp(`\\bv?${oldEngine.replace(/\./g, "\\.")}\\b`, "g"), now: `the new release (${pluginVersion()}) — your repo may hold the version somewhere ZDD does not write (a lock test, a setup guide)`, skip: [".claude/settings.json", "zdd/config.json", ".github/workflows/zdd.yml", ".githooks/pre-push"] });
+  }
+  const written = new Set(ledger.wrote);
+  const hits = [];
+  const list = sweepList(ledger, metadataRel);
+  for (const rel of list.files) {
+    if (hits.length > MAX_RETIRED_NOTES) break;
+    if (written.has(rel) || rel.endsWith(`/${INSTRUCTIONS_NAME}`) || rel === INSTRUCTIONS_NAME) continue;
+    let st;
+    try {
+      st = lstatSync(ledger.abs(rel));
+    } catch {
+      continue;
+    }
+    if (!st.isFile() || st.size > MAX_SCAN_BYTES) continue;
+    let text;
+    try {
+      text = ledger.read(rel);
+    } catch {
+      continue;
+    }
+    const lines = text.split(/\r?\n/);
+    for (const r of rules) {
+      if (r.skip?.includes(rel)) continue;
+      lines.forEach((line, i) => {
+        r.find.lastIndex = 0;
+        const m = r.find.exec(line);
+        if (m) hits.push(`${rel}:${i + 1} still says \`${m[0]}\` — since ${r.since} that is ${r.now}`);
+      });
+    }
+  }
+  const out = hits.length > MAX_RETIRED_NOTES ? [...hits.slice(0, MAX_RETIRED_NOTES), `…and ${hits.length - MAX_RETIRED_NOTES} more retired names — grep for them`] : hits;
+  if (list.truncated) out.push(`the sweep for retired names was cut short (more than ${MAX_RETIRED_FILES} files${list.source === "walk" ? ", or deeper than 6 folders" : ""}) — grep for the retired names yourself`);
+  return out;
 }
 function parseDrop(drop) {
   if (drop === null || drop === undefined || drop === false) return [];
@@ -2218,6 +2317,9 @@ export function narrateDetect(d, pocock) {
     out.push("Mode: GREENFIELD — no source to read. Ask for the intended stack and configure extractors ahead of the code.");
   } else {
     out.push(`Mode: EXISTING codebase (${d.sourceFiles} source files). Proposed extractors, with the evidence:`);
+  }
+  if (d.host) out.push(`Hosted on: ${d.host.kind === "none" ? "no remote yet (the GitHub default stands; ask where it will live)" : `${d.host.kind} (${d.host.remote})`}${d.host.kind !== "github" && d.host.kind !== "none" ? " — the CI workflow ZDD ships runs only on GitHub Actions; the merge gate is three commands for your own pipeline" : ""}`);
+  if (d.mode !== "greenfield") {
     for (const p of d.proposals) {
       out.push(`  - ${p.name}`);
       for (const e of p.evidence) out.push(`      evidence: ${e}`);
@@ -2281,9 +2383,10 @@ export function narrateApply(r) {
   for (const f of r.skipped) out.push(`  skipped ${f}`);
   for (const n of r.notes) out.push(`  note    ${n}`);
   out.push("");
-  out.push("Next, run the engine (the skill does this): derive, then the mapping session, then render.");
+  out.push("Next, run the engine (the skill does this): derive, render and lint, then the one mapping session, then render again.");
   out.push(`  npx -y ${ENGINE_PACKAGE}@${r.version} derive`);
   out.push(`  npx -y ${ENGINE_PACKAGE}@${r.version} render`);
+  out.push(`  npx -y ${ENGINE_PACKAGE}@${r.version} lint`);
   out.push("");
   if (r.optIns.ci) {
     out.push("One step only you can do: in branch protection, require the `zdd` check to pass and require branches to be up to date before merging. Now stale generated artifacts cannot merge.");
@@ -2501,7 +2604,7 @@ export function narrateUpgrade(r) {
     const says = (d.rules ?? []).map((id) => INSTRUCTION_RULES.find((x) => x.id === id)?.says).filter(Boolean);
     out.push(`  your text, ${d.file} ${lineRange(d)} under "${d.heading}": ${brief(d.text)}`);
     for (const s of says) out.push(`      ZDD now says: ${s}`);
-    out.push(`      → read the two together: same, different, or contradicting? Keep it, change it by hand, or remove it on the user's word (--drop=${d.id})`);
+    out.push(`      → read the two together: same, different, or contradicting? Keep it, change it by hand, or remove this whole paragraph or bullet on the user's word (--drop=${d.id})`);
   }
   return out.map(printable).join("\n");
 }

@@ -103,15 +103,21 @@ export function derive({ repoRoot, options, io, legacyName }) {
     const imports = s.imports ?? [];
     const env = s.env ?? [];
     if (!Array.isArray(imports) || imports.some((x) => typeof x !== "string") || !Array.isArray(env) || env.some((x) => typeof x !== "string")) throw new Error(`${label}.services[${i}] (${s.name}): imports and env must be arrays of strings`);
-    if (!imports.length && !env.length) throw new Error(`${label}.services[${i}] (${s.name}): declare at least one import or env marker`);
-    return { name: s.name.trim(), imports, env: env.map((e) => e.toUpperCase()) };
+    // A blank marker would match everything (an empty env prefix is a prefix
+    // of every name): dropped with a diagnostic, never matched (CR-405).
+    const cleanImports = imports.map((x) => x.trim()).filter(Boolean);
+    const cleanEnv = env.map((x) => x.trim().toUpperCase()).filter(Boolean);
+    if (cleanImports.length !== imports.length || cleanEnv.length !== env.length) diagnostics.push(`${label}.services[${i}] (${s.name}): a blank marker was ignored — a marker is a package name or an env-name prefix`);
+    if (!cleanImports.length && !cleanEnv.length) throw new Error(`${label}.services[${i}] (${s.name}): declare at least one import or env marker`);
+    if (!slug(s.name)) throw new Error(`${label}.services[${i}]: the name '${s.name}' holds no letters or digits to name a record by`);
+    return { name: s.name.trim(), imports: cleanImports, env: cleanEnv };
   });
   const names = new Set();
   for (const s of declared) {
     if (names.has(slug(s.name))) throw new Error(`${label}.services: '${s.name}' is declared twice`);
     names.add(slug(s.name));
   }
-  const ignore = new Set([...BUILT_IN_IGNORE, ...(options.ignore ?? []).map((p) => String(p).toUpperCase().replace(/_$/, ""))]);
+  const ignore = new Set([...BUILT_IN_IGNORE, ...(options.ignore ?? []).map((p) => String(p).trim().toUpperCase().replace(/_$/, "")).filter(Boolean)]);
   const roots = (options.roots ?? ["."]).map((r) => repoRelative(r, "external-services.roots"));
   const extensions = options.extensions ?? DEFAULT_EXTENSIONS;
   if (!Array.isArray(extensions) || extensions.some((e) => typeof e !== "string")) throw new Error("external-services.extensions must be an array of strings");

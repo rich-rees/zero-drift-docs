@@ -222,7 +222,11 @@ export function blessingShape(text) {
   const question = q && q[1].length <= QUESTION_MAX && !/[.!]\s+[A-Z]/.test(q[1]) ? q[1] : null;
   const b = /\bbecause\b[^.;—]*/i.exec(visible);
   const because = b ? b[0].trim().replace(/[,\s]+$/, "") : null;
-  return { visible, question, because, length: visible.length };
+  // A blessing is a pointer to existing code to start from (CAS-103 pick 4):
+  // a markdown link (a metadata record, a file) or a code span naming a path
+  // or a file. A rule with nothing to point at is not one.
+  const exemplar = /\]\(/.test(text) || /`[^`\n]*[\/.][^`\n]*`/.test(text);
+  return { visible, question, because, exemplar, length: visible.length };
 }
 
 // The forward stamps an ADR body carries: a LINE that opens with

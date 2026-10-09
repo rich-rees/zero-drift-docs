@@ -110,8 +110,9 @@ describe; on a greenfield repo it asks for the intended stack and configures the
 extractors ahead of the code. Then it offers the opt-ins as yes/no with defaults
 on and **writes** them — the session-start auto-load, the generated-artifact
 fence, the Stop prompt for the curated half, the CI workflow (or, if you decline
-CI, a pre-push hook), the instruction
-block in `CLAUDE.md` (and `AGENTS.md` for Codex) — plus an empty `zdd/` and one
+CI, a pre-push hook), ZDD's instructions in `zdd/instructions.md` with the
+one line in `CLAUDE.md` that loads them (a copy between markers in `AGENTS.md`
+for Codex) — plus an empty `zdd/` and one
 seeded **ADR-0001** recording *your* decision to adopt ZDD: the corpus's first
 entry *and* a worked example of the format. Branch protection is the one step it
 prints instead of doing. Idempotent; and "upgrade ZDD" (the same script) is the
@@ -125,7 +126,7 @@ Contents: seven skills (`bootstrap`, `load`, `patterns`, `update`, `upgrade`, `g
 shared authoring guide, three hooks (auto-load, fence, Stop prompt), the runbook
 and scaffold scripts, the engine + composed
 extractors + viewers (`packages/zdd-engine`, also the npm package
-`@rich-rees/zdd-engine`), and templates (instruction block, CI workflow, pre-push
+`@rich-rees/zdd-engine`), and templates (ZDD's instructions, CI workflow, pre-push
 hook, config schema + example, the seed ADR-0001, and the extractor scaffold).
 
 ### What ZDD reads, per stack
@@ -232,8 +233,9 @@ Then run **`bootstrap`** in the repo. Codex has no dependency mechanism, so
 install [Matt Pocock's skills](https://github.com/mattpocock/skills) yourself,
 at the release named in `plugins/zdd/pocock.json`.
 
-Bootstrap detects the stack, writes `zdd/`, the config, the opt-ins, the
-instruction block and the **release lock** (the repo pinned to this ZDD
+Bootstrap detects the stack, writes `zdd/`, the config, the opt-ins, ZDD's
+instructions file (and the one line in `CLAUDE.md` that loads it) and the
+**release lock** (the repo pinned to this ZDD
 release — [decision 0021](docs/decisions/0021-bootstrap-locks-the-release-by-default.md)),
 runs the first derive and render, and leaves you one step — below.
 
@@ -300,8 +302,9 @@ is a choice you make. Say **"upgrade ZDD"**: it checks for a newer release and,
 on your yes, moves the repo's lock — then you restart, run the commands the
 session's first line names, restart again, and say "upgrade ZDD" once more.
 That second run is the new release's own: it shows every file it will change
-(config, engine pins, the instruction block, the lock), names any text in your
-`CLAUDE.md` / `AGENTS.md` that the new block now covers, asks once, writes,
+(config, engine pins, `zdd/instructions.md`, the lock), names any paragraph
+in your `CLAUDE.md` / `AGENTS.md` that speaks to a rule ZDD's instructions now
+state — with what ZDD says beside it — asks one question at a time, writes,
 regenerates, and lists what to commit — one PR. After it merges, each
 teammate's next session prints the commands that move their machine.
 
@@ -341,7 +344,7 @@ plugins/zdd/
   skills/extractor/upstream.md      # the registry and fork tiers
   skills/authoring.md               # shared curated-docs authoring discipline
   templates/
-    claude-md-snippet.md            # the instruction block (CLAUDE.md / AGENTS.md)
+    instructions.md                 # ZDD's instructions: zdd/instructions.md, loaded by one line in CLAUDE.md; a block in AGENTS.md
     zdd.yml  pre-push               # CI check / local hook
     config.schema.json  config.example.json
     extractor/                      # the scaffold: module, test file, one comment/string mask per syntax
@@ -368,7 +371,7 @@ saying no to a row is a visible choice, not a fork.
 
 | Component | Solo, conventional stack | Team, or large / unconventional repo |
 |---|---|---|
-| Instruction block in `CLAUDE.md` / `AGENTS.md` | **Required.** This is the product at solo scale. | Required. |
+| ZDD's instructions (`zdd/instructions.md`, one import line in `CLAUDE.md`; a block in `AGENTS.md`) | **Required.** This is the product at solo scale. | Required. |
 | ADRs with the three-part test | **Required.** Solo devs forget their own reasoning within a quarter. | Required. |
 | Constraint comments at the site | Required, and probably already happening. | Required. |
 | Glossary | Start it the first time you correct a word. | **Required.** This is where vocabulary drift actually begins. |

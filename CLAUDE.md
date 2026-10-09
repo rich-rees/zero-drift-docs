@@ -57,8 +57,10 @@ already holds, so a red suite names what was forgotten.
       release check reads). *(test, per feature)*
 - [ ] `UPGRADE_NOTES` in `scripts/bootstrap.mjs` has an entry for this minor,
       and `skills/upgrade/SKILL.md` an "Upgrading to X.Y" section. *(test)*
-- [ ] The instruction block (`templates/claude-md-snippet.md`) reviewed
-      against the skills that shipped; it names every skill. *(test)*
+- [ ] ZDD's instructions (`templates/instructions.md` — written to the
+      adopter's `zdd/instructions.md`, loaded by one import line in
+      `CLAUDE.md`, copied into `AGENTS.md` for Codex) reviewed against the
+      skills that shipped; they name every skill. *(test)*
 - [ ] README: status, roadmap entry, Versioning entry. *(test)* CONTRIBUTING
       status. *(test)*
 - [ ] Adopter impact stated in the Versioning entry: what moves in their
@@ -94,7 +96,8 @@ drives `bootstrap.mjs upgrade`) — plus `bootstrap` (the runbook), the optional
 `grill`, and `extractor` (scaffold a local extractor — decision 0010). The runbook's writer is
 `plugins/zdd/scripts/bootstrap.mjs`: the skill asks, the script detects and
 writes, and it is the only writer of *adopter-owned* files — config, skeleton,
-opt-ins, the instruction block (decision 0003) — save one:
+opt-ins, ZDD's instructions file and the one line that loads it (decisions
+0003 and 0024) — save one:
 `scripts/scaffold-extractor.mjs`, which writes a local extractor's skeleton and
 its config lines by bootstrap's rules (exclusive create, never overwrite,
 the same `Ledger` report). The engine's `derive` /

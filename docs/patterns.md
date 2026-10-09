@@ -178,13 +178,14 @@ Apps touched: api, web (app-level blessings read in full)
 | A blessing that does not open with a trigger question | `lint` | **fails** (it would be invisible in the index) |
 | A blessing citing a fully superseded or missing ADR | `lint` | **fails** (unchanged since 1.1) |
 | A blessing with no reason (no ADR, no "because …") | `lint` | warning |
+| A blessing that points at no code (no link, no path in backticks) | `lint` | warning (2.3: a blessing is a pointer to reusable code; a rule belongs in its ADR) |
 | A blessing over 300 visible characters | `lint` | warning |
 | The blessing index out of date, hand-edited or missing | `render --check` | **fails** |
 | The pattern plan exists | `lint --merge` (CI) | **fails** |
 | The pattern plan exists | `lint` (local, pre-push) | warning: the branch must stay pushable mid-build |
 | A hand edit to the blessing index | the fence (opt-in) | refused, naming `update` |
 
-The CI template runs `lint --merge`. `bootstrap --upgrade` adds the flag to an
+The CI template runs `lint --merge`. "upgrade ZDD" adds the flag to an
 owned workflow's lint step and names a workflow of any other shape for you to
 edit by hand.
 
@@ -193,6 +194,14 @@ edit by hand.
 Full rules are in [`authoring.md`](../plugins/zdd/skills/authoring.md). In
 short:
 
+- **A pointer to reusable code first** (2.3, CAS-103): a blessing answers a
+  recurring *kind* of work with the existing code to start from and reuse —
+  a shared helper or base layer before a pattern to imitate — plus the one
+  trap it refuses. "Adding an upload? Start from `lib/media-upload-client.ts`
+  (`uploadMedia`) — reuse or extend it before writing new upload code … never
+  through a Vercel function (ADR-0098)." A rule with no code to point at is an
+  ADR and a code comment, not a blessing; a kind of work with no exemplar yet
+  is a candidate, minted once the code exists.
 - **Open with the trigger question.** The first sentence is the question the
   blessing answers, ending in `?`, phrased as the moment someone would reach
   for the pattern: "Adding an endpoint?", "A status that ends a record for
@@ -236,11 +245,14 @@ the spoken verbs and the merge gate.
 
 ## Adopting it in an existing repo
 
-Run `bootstrap --upgrade`, then:
+Say "upgrade ZDD", then:
 
 1. `render`, and commit `zdd/blessing-index.md` in the upgrade PR.
-2. `lint`: every blessing it fails for having no trigger question gets one,
-   written by the developer. Upgrade never rewrites the map.
+2. `lint`: every blessing it fails for having no trigger question gets one.
+   Propose them as **one reviewable file** — each blessing with the question
+   it would answer, one line each — approved by the developer in one pass
+   (2.3: never one question per blessing; PressPlay had 62 at once). Upgrade
+   never rewrites the map.
 3. Optionally, take a pass over the length and reason warnings.
 
 From the next unit of work on, say "choose patterns" once the design is

@@ -925,6 +925,7 @@ export function derive({ repoRoot, options, io }) {
         continue; // nothing at this spelling
       }
       if (st.isDirectory()) continue; // `./admin` -> admin/index.ts comes later in the list
+      if (isIgnored(candidate)) continue; // nothing at this spelling in a clean clone (CR-408): never final, never a shadow
       // "As spelled" is final only when the spelling carries an extension: an
       // extensionless entry named `data` (a file or a link) is not what
       // `./data` means, and must not shadow `data.tsx` (CR-033).
@@ -981,6 +982,7 @@ export function derive({ repoRoot, options, io }) {
     }
     throw new Error(`react-router: routesFile '${routesFile}' does not exist, but its folder '${dir}' does — a renamed or misspelt routes file would drop every surface record; fix extractorOptions.react-router.routesFile`);
   }
+  if (isIgnored(routesFile)) throw new Error(`react-router: routesFile '${routesFile}' is gitignored — not source; every surface record hangs on it, so derive stops rather than write them away (un-ignore it, or point extractorOptions.react-router.routesFile at the real one)`);
   // A routes file that exists but cannot be read (over the cap) would derive
   // zero surfaces as if the tree were empty — the same loss (CAS-65 CR-015).
   const text = readSource(routesFile);

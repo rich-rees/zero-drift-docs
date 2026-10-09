@@ -92,9 +92,13 @@ kill a pattern, change it, or create one the plan never saw.
    - **new pattern, candidate blessing** — did it survive, and is its
      exemplar in the diff? Then **mint it**: one list item under
      `# Blessings` in the slice it belongs to (an app's concept when it is
-     cross-cutting), in the shape [authoring.md](../authoring.md) gives —
-     trigger question first, exemplar linked, refusal named, reason given (an
-     ADR, or "because …"). Otherwise **drop it**, and record why.
+     cross-cutting), in the shape [authoring.md](../authoring.md) gives and
+     passing its test — trigger question first, naming a *kind* of work;
+     **a pointer to existing, reusable code** (a shared helper or base
+     layer before a pattern to imitate); the one trap it refuses; the
+     reason (an ADR, or "because …"). A candidate whose substance is a
+     rule with no code to point at becomes an ADR and a code comment at the
+     site instead. Otherwise **drop it**, and record why.
    - **no blessing applies** — nothing to do, unless the build ended up
      copying something; then treat that as precedent.
 2. **Offer unblessed precedent.** Every precedent the plan declared, and any

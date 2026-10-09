@@ -21,7 +21,7 @@
 // cannot change the outputs. Repos that want no git dependency at all set
 // config `render.storeChanges: false`.
 
-import { readFileSync, writeFileSync, readdirSync, lstatSync, realpathSync, existsSync, renameSync, rmSync } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync, lstatSync, realpathSync, existsSync, renameSync, rmSync, mkdirSync } from "node:fs";
 import { insideRepo, repoRelative } from "./lib/paths.mjs";
 import { join, dirname, resolve, relative } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -31,6 +31,7 @@ import { changedTerms, parseNameStatus } from "./lib/store-changes.mjs";
 import { refreshOriginBase } from "./lib/fetch-freshness.mjs";
 import { buildAdrIndex } from "./lib/adr-index.mjs";
 import { buildBlessingIndex } from "./lib/blessing-index.mjs";
+import { slugify } from "./lib/slug.mjs";
 import { loadConfig, resolveViewer, resolveNonAreaTags, validateRepoBase, absentStoreNotes } from "./lib/config.mjs";
 import { loadViewer, DEFAULT_VIEWER } from "./viewers/index.mjs";
 
@@ -38,7 +39,7 @@ import { loadViewer, DEFAULT_VIEWER } from "./viewers/index.mjs";
 // paths, the bundle folder node ids are relative to (the zdd/ folder), the
 // display name, the GitHub base URL for source links, and the base branch.
 let REPO, CONFIG, PATHS, BUNDLE, SEMANTIC, DERIVED, OUT_HTML, OUT_INDEX, OUT_ADR_INDEX, OUT_BLESSING_INDEX, OUT_GRAPH;
-let BUNDLE_NAME, REPO_BASE, BASE_BRANCH, VIEWER, NON_AREA_TAGS;
+let BUNDLE_NAME, REPO_BASE, BASE_BRANCH, VIEWER, NON_AREA_TAGS, AGENT_INDEX;
 
 // Record kind -> the graph's display type. These names are the graph
 // vocabulary viewers key on (lanes, palettes, legends); map concepts bring
@@ -546,8 +547,17 @@ function buildGraph(concepts) {
 // Pointer order IS the curation: a feature's `resource` paths first, then its
 // outbound links in document order, capped at 5.
 // ---------------------------------------------------------------------------
-function buildAgentIndex(concepts, features, adrs) {
+// `levels` (config agentIndex.levels, CAS-103 pick 5): 1 (default) lists
+// every feature section in the one file; 2 lists the AREAS first — one line
+// per area with its features' names and a link to `<agent-index>/<area>.md`,
+// which holds that area's feature sections — so a large repo's index stays
+// within budget and every feature is one hop away. An area is a feature's
+// first tag that is not a nonAreaTag; an untagged feature is "Other". The
+// bytes at one level are exactly the pre-2.3 bytes.
+function buildAgentIndex(concepts, features, adrs, { levels = 1, areaDir = "" } = {}) {
   const byId = new Map(concepts.map((c) => [c.id, c]));
+  const NON_AREA = new Set(NON_AREA_TAGS);
+  const areaOf = (f) => (Array.isArray(f.tags) ? f.tags.find((t) => !NON_AREA.has(t)) : undefined) ?? "Other";
   // A concept's file: a metadata record is JSON, a map page is markdown —
   // the External services list linked a service record as `.md` (CAS-99).
   // Read from the concept's layer, never its path: `paths.metadataDir` moves
@@ -575,24 +585,50 @@ function buildAgentIndex(concepts, features, adrs) {
   );
   lines.push("");
 
-  for (const f of features) {
-    lines.push(`## ${f.title}`);
-    lines.push("");
-    if (f.description) lines.push(f.description, "");
+  // One feature's section. `up` is the path from the file being written to
+  // the bundle folder: "" for the index itself, "../" for an area file.
+  const featureSection = (f, up) => {
+    const out = [`## ${f.title}`, ""];
+    if (f.description) out.push(f.description, "");
     // Hrefs are relative to this file (zdd/) so they resolve on GitHub; repo
     // resources climb out with ../.
     const pointers = [];
-    if (f.resource) pointers.push({ label: f.resource, href: `../${f.resource}`, desc: "" });
+    if (f.resource) pointers.push({ label: f.resource, href: `${up}../${f.resource}`, desc: "" });
     for (const target of f.linksTo) {
       if (pointers.length >= 5) break;
       const t = byId.get(target);
       if (!t) continue;
-      pointers.push({ label: t.title, href: hrefOf(target), desc: brief(t.description, t.title) });
+      pointers.push({ label: t.title, href: `${up}${hrefOf(target)}`, desc: brief(t.description, t.title) });
     }
     for (const p of pointers.slice(0, 5)) {
-      lines.push(`- [${p.label}](${p.href})${p.desc ? ` — ${p.desc}` : ""}`);
+      out.push(`- [${p.label}](${p.href})${p.desc ? ` — ${p.desc}` : ""}`);
+    }
+    out.push("");
+    return out;
+  };
+  const areaFiles = new Map(); // slug -> text
+  if (levels === 2) {
+    const groups = new Map();
+    for (const f of features) {
+      const area = areaOf(f);
+      if (!groups.has(area)) groups.set(area, []);
+      groups.get(area).push(f);
+    }
+    const areas = [...groups.keys()].sort((a, b) => (a === "Other" ? 1 : b === "Other" ? -1 : a < b ? -1 : 1));
+    lines.push("## Areas", "");
+    for (const area of areas) {
+      const fs = groups.get(area);
+      const slug = slugify(area.toLowerCase());
+      const names = fs.map((f) => f.title);
+      const shown = names.length > 8 ? `${names.slice(0, 8).join(", ")}, …` : names.join(", ");
+      lines.push(`- [${area}](${areaDir}/${slug}.md) — ${fs.length} feature${fs.length === 1 ? "" : "s"}: ${shown}`);
+      const body = [`# ${BUNDLE_NAME} — ${area}`, "", `One area of [the agent index](../${PATHS.agentIndex.split("/").pop()}). Generated by \`zdd-engine render\` — do not edit.`, ""];
+      for (const f of fs) body.push(...featureSection(f, "../"));
+      areaFiles.set(slug, linkifyAdrCitations(body.join("\n"), adrs, (file) => `../adr/${file}`));
     }
     lines.push("");
+  } else {
+    for (const f of features) lines.push(...featureSection(f, ""));
   }
 
   const tail = (title, types) => {
@@ -620,7 +656,24 @@ function buildAgentIndex(concepts, features, adrs) {
   lines.push("");
   // Bare ADR citations become links — hrefs are relative to the bundle folder
   // so they resolve on GitHub, like resource pointers.
-  return linkifyAdrCitations(lines.join("\n"), adrs, (file) => `adr/${file}`);
+  const text = linkifyAdrCitations(lines.join("\n"), adrs, (file) => `adr/${file}`);
+  return levels === 2 ? { text, areaFiles } : text;
+}
+// The index's area folder: the index file's name without its extension, as a
+// sibling folder (`zdd/agent-index.md` -> `zdd/agent-index/`).
+export const agentIndexAreaDir = (agentIndexRel) => agentIndexRel.replace(/\.md$/i, "");
+// agentIndex.levels and agentIndex.budgetTokens (CAS-103 pick 5): explicit
+// settings, never guessed — the index's shape changes only when the config
+// says so, so `render --check` never moves without a visible cause.
+export function resolveAgentIndexOptions(config) {
+  const a = config.agentIndex;
+  if (a === undefined) return { levels: 1, budget: 2000 };
+  if (!a || typeof a !== "object" || Array.isArray(a)) return { error: "'agentIndex' must be an object" };
+  const levels = a.levels === undefined ? 1 : a.levels;
+  if (levels !== 1 && levels !== 2) return { error: "'agentIndex.levels' must be 1 (every feature in one file) or 2 (areas first, then one file per area)" };
+  const budget = a.budgetTokens === undefined ? 2000 : a.budgetTokens;
+  if (!Number.isInteger(budget) || budget < 200) return { error: "'agentIndex.budgetTokens' must be a whole number of at least 200 (the default is 2000)" };
+  return { levels, budget };
 }
 
 // ---------------------------------------------------------------------------
@@ -642,7 +695,9 @@ async function render() {
     process.exit(1);
   }
   const graphJson = JSON.stringify(graph, null, 2) + "\n";
-  const agentIndex = buildAgentIndex(concepts, features, docs.adrs);
+  const built = buildAgentIndex(concepts, features, docs.adrs, { levels: AGENT_INDEX.levels, areaDir: agentIndexAreaDir(PATHS.agentIndex).split("/").pop() });
+  const agentIndex = typeof built === "string" ? built : built.text;
+  const areaFiles = typeof built === "string" ? new Map() : built.areaFiles;
   // ADR index (DIO-180, ADR-0035): the always-load-whole orientation summary of
   // the ADR corpus — one line per ADR, so full bodies are drill-in-when-cited.
   const adrIndex = buildAdrIndex(docs.adrs);
@@ -653,10 +708,11 @@ async function render() {
   // ~4 chars/token; the budget is a warning, not a gate — the fix is trimming
   // semantic link lists, which is a judgment call (spec §4).
   const approxTokens = Math.round(agentIndex.length / 4);
-  if (approxTokens > 2000) {
-    console.error(`WARNING: agent index ≈${approxTokens} tokens (budget ~2000) — trim semantic feature links`);
+  if (approxTokens > AGENT_INDEX.budget) {
+    const fix = AGENT_INDEX.levels === 2 ? "trim the features' pointer lists, or raise agentIndex.budgetTokens in zdd/config.json" : 'raise agentIndex.budgetTokens in zdd/config.json, set agentIndex.levels to 2 (areas first, then one file per area, each feature one hop away), or link each feature\'s entry points only';
+    console.error(`WARNING: agent index ≈${approxTokens} tokens (budget ${AGENT_INDEX.budget}) — ${fix}`);
   }
-  return { html, graphJson, agentIndex, adrIndex, blessingIndex, counts: { blessings, concepts: concepts.length, edges: graph.edges.length, features: features.length, adrs: docs.adrs.length } };
+  return { html, graphJson, agentIndex, areaFiles, adrIndex, blessingIndex, counts: { blessings, concepts: concepts.length, edges: graph.edges.length, features: features.length, adrs: docs.adrs.length } };
 }
 
 export async function run(args) {
@@ -692,6 +748,11 @@ export async function run(args) {
   }
   NON_AREA_TAGS = nonArea.tags;
   for (const d of nonArea.diagnostics) console.error(d);
+  AGENT_INDEX = resolveAgentIndexOptions(CONFIG);
+  if (AGENT_INDEX.error) {
+    console.error(AGENT_INDEX.error);
+    process.exit(1);
+  }
   // A missing store dir renders as empty; name it when the bundle is
   // otherwise populated, so a typo is not mistaken for greenfield (CR-068/099).
   for (const note of absentStoreNotes(REPO, PATHS, ["adrDir", "mapDir", "metadataDir"])) console.error(note);
@@ -704,7 +765,7 @@ export async function run(args) {
     process.exit(1);
   }
 
-  const { html, graphJson, agentIndex, adrIndex, blessingIndex, counts } = await render();
+  const { html, graphJson, agentIndex, areaFiles, adrIndex, blessingIndex, counts } = await render();
   const norm = (s) => s.replace(/\r\n/g, "\n");
   const outputs = [
     ["graph.json", OUT_GRAPH, graphJson],
@@ -713,6 +774,17 @@ export async function run(args) {
     ["adr-index.md", OUT_ADR_INDEX, adrIndex],
     ["blessing-index.md", OUT_BLESSING_INDEX, blessingIndex],
   ];
+  // The area files (agentIndex.levels 2) live in a sibling folder of the
+  // index; a file there that this render did not produce is stale, so the
+  // folder is checked and pruned whole, like derive's metadata folder.
+  const areaDirAbs = resolve(REPO, agentIndexAreaDir(PATHS.agentIndex));
+  const areaLabel = `${agentIndexAreaDir(PATHS.agentIndex).split("/").pop()}/`;
+  for (const [slug, text] of [...areaFiles].sort(([a], [b]) => (a < b ? -1 : 1))) outputs.push([`${areaLabel}${slug}.md`, join(areaDirAbs, `${slug}.md`), text]);
+  const areaExtras = () => {
+    if (!existsSync(areaDirAbs)) return [];
+    const produced = new Set([...areaFiles.keys()].map((s) => `${s}.md`));
+    return readdirSync(areaDirAbs).filter((f) => f.endsWith(".md") && !produced.has(f));
+  };
   if (args.includes("--check")) {
     const stale = [];
     for (const [label, path, content] of outputs) {
@@ -722,6 +794,7 @@ export async function run(args) {
         stale.push(label);
       }
     }
+    for (const extra of areaExtras()) stale.push(`${areaLabel}${extra} (stale: no such area)`);
     if (stale.length) {
       console.error(
         `${stale.join(" + ")} out of sync with semantic map + metadata inputs.\n` +
@@ -738,6 +811,7 @@ export async function run(args) {
     // POSIX and a replace on Windows.
     const staged = [];
     try {
+      if (areaFiles.size) mkdirSync(areaDirAbs, { recursive: true });
       for (const [, path] of outputs) safeOutputPath(path);
       for (const [label, path, content] of outputs) {
         const tmp = `${path}.${process.pid}.tmp`;
@@ -751,6 +825,9 @@ export async function run(args) {
       // Ceiling: five renames are not one transaction — a crash between them
       // leaves a mixed generation, which the next `render --check` reports as stale.
       for (const [tmp, path] of staged) renameSync(tmp, path);
+      // Stale area files go; an empty folder (levels back to 1) goes too.
+      for (const extra of areaExtras()) rmSync(join(areaDirAbs, extra), { force: true });
+      if (existsSync(areaDirAbs) && !readdirSync(areaDirAbs).length) rmSync(areaDirAbs, { recursive: true, force: true });
     } catch (e) {
       for (const [tmp] of staged) rmSync(tmp, { force: true });
       console.error(e.message);

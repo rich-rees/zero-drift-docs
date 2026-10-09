@@ -432,8 +432,9 @@ export function findPocock(root, home) {
     const [marketplace, plugin, version] = relative(loc.pluginCache, path).split(sep);
     const id = marketplace && plugin && SAFE_ID.test(`${plugin}@${marketplace}`) ? `${plugin}@${marketplace}` : null;
     if (!id) continue;
-    // Unknown when a settings file could not be read: never "on" by default then.
-    const on = unreadable ? (enabled.has(id) ? enabled.get(id) : null) : (enabled.get(id) ?? true);
+    // Unknown whenever a settings file could not be read (CR-413): a file
+    // that takes precedence may say anything, so no lower one decides.
+    const on = unreadable ? null : (enabled.get(id) ?? true);
     hits.push({ where: "pluginCache", path, id, version: typeof version === "string" ? version : null, enabled: on });
   }
   const usable = hits.filter((h) => h.enabled !== false && !(h.where === "pluginCache" && h.enabled === null));
