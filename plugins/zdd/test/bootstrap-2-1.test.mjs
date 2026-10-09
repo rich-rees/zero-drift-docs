@@ -46,7 +46,7 @@ test("components fixture: components at the two .tsx roots and the mobile app, e
   assert.deepEqual(json.apps.map((a) => [a.name, a.extractor]), [["Mobile (Expo)", "expo-router (proposed above)"], ["Web (React)", "react-router (proposed above)"]]);
 });
 
-test("jobs fixture: jobs from the package scripts, the Procfile and the Railway file, with the mode caveat; supabase beside it", (t) => {
+test("jobs fixture: jobs from the Procfile and the Railway file (a package script only where one of them runs it), with the mode caveat; supabase beside it", (t) => {
   const json = detect(fresh(t, "fixture-jobs"));
   assert.deepEqual(json.proposals.map((p) => p.name), ["supabase", "jobs"]);
   const jobs = named(json, "jobs");

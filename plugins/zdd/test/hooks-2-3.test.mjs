@@ -131,3 +131,25 @@ test("17: the fence judges the write's target — a one-liner writing a scratch 
     assert.match(r.stdout, /"permissionDecision":"deny"/, `should refuse: ${command}`);
   }
 });
+
+test("CR-512: a receiver-style write or delete (Path(x).write_text, .unlink) names its target before the call; a generated file at the repo root is a bare name and still a target", () => {
+  const repo = mkRepo();
+  const fence = (command, env = {}) => spawnSync(process.execPath, [FENCE], { input: JSON.stringify({ tool_name: "Bash", tool_input: { command } }), encoding: "utf8", env: { ...process.env, CLAUDE_PROJECT_DIR: repo, ...env }, cwd: repo });
+  const refused = [
+    "python -c \"from pathlib import Path; Path('zdd/graph.json').write_text('x')\"",
+    "python -c \"from pathlib import Path; Path('zdd/graph.json').write_bytes(b'x')\"",
+    "python -c \"from pathlib import Path; Path('zdd/graph.json').unlink()\"",
+    "python -c \"from pathlib import Path; Path('x.json').rename('zdd/graph.json')\"",
+  ];
+  for (const command of refused) assert.match(fence(command).stdout, /"permissionDecision":"deny"/, `should refuse: ${command}`);
+  const passes = [
+    "python -c \"from pathlib import Path; Path('scratch/notes.md').write_text('see zdd/graph.json')\"",
+    "python -c \"from pathlib import Path; Path('zdd/graph.json').read_text()\"",
+  ];
+  for (const command of passes) assert.equal(fence(command).stdout, "", `should pass: ${command}`);
+  // A generated file configured at the repo root.
+  writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], hooks: { fence: true }, paths: { graph: "graph.json" } }));
+  assert.match(fence("node -e \"require('fs').writeFileSync('graph.json','{}')\"").stdout, /"permissionDecision":"deny"/);
+  assert.match(fence("python -c \"open('graph.json','w').write('x')\"").stdout, /"permissionDecision":"deny"/);
+  assert.equal(fence("node -e \"require('fs').writeFileSync('notes.json','{}')\"").stdout, "");
+});

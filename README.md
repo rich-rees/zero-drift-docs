@@ -13,7 +13,7 @@ CI, makes drift in the machine-generated ones **un-mergeable**.
 
 ## What ZDD does, in two lines
 
-ZDD does two things: **load** and **update**. You can do both by hand with any
+At its core ZDD does two things: **load** and **update** (bootstrap sets a repo up, and upgrade moves it to a newer release). You can do both by hand with any
 coding agent — read the glossary and decisions before you build, curate and
 regenerate the docs before you finish. It is only truly *zero*-drift on the
 runbook's defaults, which include a CI check that refuses to merge stale
@@ -240,7 +240,7 @@ reviewable file, never one question per item.
 from [the releases page](https://github.com/rich-rees/zero-drift-docs/releases)):
 
 ```
-claude plugin marketplace add rich-rees/zero-drift-docs@v2.2.1 --scope project
+claude plugin marketplace add rich-rees/zero-drift-docs@v2.3.0 --scope project
 claude plugin install zdd@zero-drift-docs --scope project
 ```
 
@@ -358,8 +358,8 @@ by hand once:
 
 1. In `.claude/settings.json`, set
    `extraKnownMarketplaces["zero-drift-docs"].source.ref` to the new tag
-   (`"v2.2.1"`). No lock there? Add the marketplace from the repo's folder with
-   `claude plugin marketplace add rich-rees/zero-drift-docs@v2.2.1 --scope project`.
+   (`"v2.3.0"`). No lock there? Add the marketplace from the repo's folder with
+   `claude plugin marketplace add rich-rees/zero-drift-docs@v2.3.0 --scope project`.
 2. Restart Claude Code. The session's first line names the commands that move
    your machine (on a machine where the marketplace was ever added without a
    scope, that includes `claude plugin marketplace remove zero-drift-docs

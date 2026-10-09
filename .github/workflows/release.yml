@@ -11,8 +11,13 @@
 # rights to @rich-rees/zdd-engine (Settings → Secrets → Actions). The GitHub
 # release uses the job's own GITHUB_TOKEN. No other credential anywhere.
 #
-# The release notes are the README's Versioning entry for the tag, lifted
-# verbatim, so the notes and the README cannot disagree.
+# The release notes are the README's Versioning entry for the tag (its text,
+# plus the two install lines), so the notes and the README cannot disagree.
+#
+# A tag publishes only from main (CR-502): the tagged commit must be reachable
+# from main, or nothing runs. A rerun after a publish that succeeded resumes
+# (CR-514): a version already on npm whose gitHead is this very commit is
+# taken as published, and the release steps carry on.
 
 name: release
 
@@ -38,6 +43,13 @@ jobs:
           node-version: "22"
           registry-url: "https://registry.npmjs.org"
 
+      - name: The tagged commit is on main
+        run: |
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" origin/main; then
+            echo "${GITHUB_REF_NAME} points at ${GITHUB_SHA}, which is not on main — a release is tagged on the merge commit; delete the tag and tag main"; exit 1
+          fi
+
       - name: The tag names the version every pin names
         run: node scripts/release-check.mjs "${GITHUB_REF_NAME}"
 
@@ -47,14 +59,24 @@ jobs:
       - name: Plugin tests
         run: node --test "plugins/zdd/test/*.test.mjs"
 
-      - name: Not already on npm
+      - name: Not already on npm — unless by this very commit (a rerun resumes)
+        id: npm
         run: |
           V="${GITHUB_REF_NAME#v}"
           if npm view "@rich-rees/zdd-engine@${V}" version >/dev/null 2>&1; then
-            echo "@rich-rees/zdd-engine@${V} is already published — a tag is immutable; bump the version instead"; exit 1
+            HEAD="$(npm view "@rich-rees/zdd-engine@${V}" gitHead 2>/dev/null || true)"
+            if [ "${HEAD}" = "${GITHUB_SHA}" ]; then
+              echo "@rich-rees/zdd-engine@${V} is already published from this commit — resuming after the publish"
+              echo "published=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "@rich-rees/zdd-engine@${V} is already published from ${HEAD:-an unknown commit} — a version is immutable; bump the version instead"; exit 1
+            fi
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Publish the engine
+        if: steps.npm.outputs.published == 'false'
         run: cd packages/zdd-engine && npm publish --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -74,4 +96,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           node scripts/release-notes.mjs "${GITHUB_REF_NAME}" > /tmp/notes.md
-          gh release create "${GITHUB_REF_NAME}" --title "${GITHUB_REF_NAME}" --notes-file /tmp/notes.md --latest
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            echo "release ${GITHUB_REF_NAME} already exists — left as it is"
+          else
+            gh release create "${GITHUB_REF_NAME}" --title "${GITHUB_REF_NAME}" --notes-file /tmp/notes.md --latest
+          fi

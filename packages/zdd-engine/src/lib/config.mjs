@@ -15,7 +15,7 @@ import { existsSync, openSync, readSync, closeSync } from "node:fs";
 
 const MAX_CONFIG_BYTES = 1024 * 1024; // the plugin's cap too (plugins/zdd/scripts/lib/repo.mjs)
 import { dirname, join, resolve, relative } from "node:path";
-import { repoRelative, overlaps } from "./paths.mjs";
+import { repoRelative, overlaps, agentIndexAreaDir } from "./paths.mjs";
 
 export const DEFAULT_PATHS = {
   glossary: "zdd/glossary.md",
@@ -122,6 +122,14 @@ export function validatePathLayout(paths, configRel) {
     for (const key of [...INPUT_KEYS, "config"]) {
       if (overlaps(paths[OUTPUT_KEYS[i]], value(key))) return clash(OUTPUT_KEYS[i], key, outputWhy);
     }
+  }
+  // The agent index's area folder is pruned like metadataDir (agentIndex.levels
+  // 2), so it is a dedicated folder too: never a store, the config, or another
+  // output (CR-501). It follows the index's name, so the error names the index.
+  const areaDir = agentIndexAreaDir(paths.agentIndex);
+  const areaWhy = `the agent index's area folder '${areaDir}/' (its name, as a folder — agentIndex.levels 2 writes there and prunes it) must be a dedicated folder`;
+  for (const key of [...INPUT_KEYS, ...OUTPUT_KEYS.filter((k) => k !== "agentIndex"), "config"]) {
+    if (overlaps(areaDir, value(key))) return `paths.agentIndex '${paths.agentIndex}' overlaps ${label(key)} '${value(key)}' — ${areaWhy}`;
   }
   return null;
 }

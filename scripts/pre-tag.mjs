@@ -62,7 +62,8 @@ for (const adopter of adopters) {
     ok = run(`${label}: derive`, process.execPath, [ENGINE, "derive", `--root=${copy}`], copy) && ok;
     ok = run(`${label}: render`, process.execPath, [ENGINE, "render", `--root=${copy}`], copy) && ok;
     ok = run(`${label}: lint`, process.execPath, [ENGINE, "lint", `--root=${copy}`], copy) && ok;
-    const leaked = spawnSync("git", ["grep", "-l", "planted.ts", "--", "zdd"], { cwd: copy, encoding: "utf8" });
+    // --untracked: a record the derive just minted is not yet in the index (CR-515).
+    const leaked = spawnSync("git", ["grep", "-l", "--untracked", "planted.ts", "--", "zdd"], { cwd: copy, encoding: "utf8" });
     if (leaked.status === 0) {
       console.log(`FAILED  ${label}: the planted worktree file reached a generated artifact:\n${leaked.stdout}`);
       ok = false;
@@ -74,5 +75,6 @@ for (const adopter of adopters) {
     rmSync(copy, { recursive: true, force: true });
   }
 }
+if (!adopters.length) console.log("\n(no adopter checkout was given: the pins and both suites were checked, no real repo was upgraded — CI's dry run on the three scenario fixtures is the only adopter proof)");
 console.log(allOk ? `\nready to tag ${tag}` : `\nNOT ready to tag ${tag}: fix the FAILED steps above`);
 process.exit(allOk ? 0 : 1);

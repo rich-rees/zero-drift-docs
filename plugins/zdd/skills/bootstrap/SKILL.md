@@ -134,8 +134,10 @@ step 3), and whether Matt Pocock's skills are installed (used in step 7):
      — early, built against a fixture — or stays map-only until that folder
      exists). Four more proposals carry their own evidence (ZDD 2.1):
      `components` (the `.tsx`/`.jsx` roots), `expo-router` (an `app/` folder
-     with a `_layout` file), `jobs` (package scripts, a Procfile or a Railway
-     file that run a process) and `external-services` (environment names
+     with a `_layout` file), `jobs` (background work: a Procfile, Railway, Compose,
+     Vercel or Cloudflare file that runs or schedules a process, pg_cron in a
+     migration, a queue in source — a package script counts only when one of
+     those runs it) and `external-services` (environment names
      read in source — `RESEND_API_KEY` — grouped by prefix into one
      third-party system each, with any import whose package matches).
      **External services are guessed by name:** show each and ask the person

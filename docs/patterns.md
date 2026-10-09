@@ -221,7 +221,7 @@ short:
 - Adding an endpoint? Copy [POST /api/things](/metadata/route/things.json),
   per ADR-0012 — never inline the auth check.                         ✓
 - Naming a migration? Prefix it with the ticket id, because two branches
-  minting the same number merge without a conflict — never a sequence. ✓
+  minting the same number merge without a conflict — never a sequence. ✓ (a warning: no code to start from — right for a naming rule)
 - Copy POST /api/things for new endpoints, per ADR-0012.              ✗ no question: lint fails
 - Adding an endpoint? Copy POST /api/things.                          ⚠ passes, with a warning: no reason
 ```

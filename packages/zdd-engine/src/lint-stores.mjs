@@ -346,7 +346,7 @@ for (const name of ["GLOSSARY.md", "CONTEXT.md"]) {
   if (!present) continue;
   console.error(
     `WARNING: ${name} at the repo root beside ${paths.glossary} — Matt Pocock's skills read and create a root ${name === "CONTEXT.md" ? "CONTEXT.md (GLOSSARY.md since 1.3)" : "GLOSSARY.md"} unless docs/agents/domain.md points them at ZDD's glossary; ` +
-      `fold its terms into ${paths.glossary} and delete it (bootstrap --upgrade writes docs/agents/domain.md when it is missing)`,
+      `fold its terms into ${paths.glossary} and delete it ("upgrade ZDD" writes docs/agents/domain.md when it is missing)`,
   );
 }
 

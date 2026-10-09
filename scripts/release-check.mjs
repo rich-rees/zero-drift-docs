@@ -40,8 +40,12 @@ for (const skill of readdirSync(join(ROOT, "plugins/zdd/skills"), { withFileType
   const text = read(`plugins/zdd/skills/${skill.name}/SKILL.md`);
   for (const m of text.matchAll(/@rich-rees\/zdd-engine@(\S+?)\s/g)) expect(`plugins/zdd/skills/${skill.name}/SKILL.md npx pin`, m[1]);
 }
-const status = /\*\*Status: (\d+\.\d+\.\d+)\.\*\*/.exec(read("README.md"));
+const readme = read("README.md");
+const status = /\*\*Status: (\d+\.\d+\.\d+)\.\*\*/.exec(readme);
 expect("README.md status line", status ? status[1] : null);
+// Every tag the README tells a reader to install (`…zero-drift-docs@vX.Y.Z`)
+// is this one, so the install command cannot name the previous release (CR-522).
+for (const m of readme.matchAll(/zero-drift-docs@v(\d+\.\d+\.\d+)/g)) expect("README.md install tag", m[1]);
 
 if (problems.length) {
   console.error(`The tag ${tag} does not match every pin:\n  ${problems.join("\n  ")}`);

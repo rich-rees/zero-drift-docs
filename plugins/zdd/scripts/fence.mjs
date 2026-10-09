@@ -235,12 +235,24 @@ function shellTarget(command, cwd, hit) {
 // `rename`/`unlink` takes the rest of the simple command. copy/move/rename
 // name their destination last; everything else names its target first.
 const WRITE_API_GLOBAL = new RegExp(WRITE_API.source, "gi");
-const PATH_LITERAL = /['"]([^'"]*[\\/][^'"]*)['"]/g;
+// Any quoted literal: a generated file at the repo root is a bare name
+// (`graph.json`), and `hit` decides whether a literal is a target (CR-512).
+const PATH_LITERAL = /['"]([^'"]+)['"]/g;
+// A method on a receiver — `Path('zdd/graph.json').write_text('x')`,
+// `.unlink()` — names its target BEFORE the call: the last quoted literal
+// in the receiver expression (CR-512).
+const RECEIVER_API = /^(write_text|write_bytes|unlink|rmdir|touch|rename|replace)$/i;
 function writeApiTargets(simple) {
   const out = [];
   let m;
   while ((m = WRITE_API_GLOBAL.exec(simple))) {
     const name = m[0];
+    if (RECEIVER_API.test(name) && simple[m.index - 1] === ".") {
+      const receiver = simple.slice(0, m.index - 1);
+      const seg = receiver.slice(receiver.lastIndexOf(";") + 1);
+      const paths = [...seg.matchAll(PATH_LITERAL)].map((x) => x[1]);
+      if (paths.length) out.push(paths[paths.length - 1]);
+    }
     let i = m.index + name.length;
     // `open('x','w'` matched into its own arguments: back up to the paren.
     const paren = name.indexOf("(");
@@ -258,8 +270,15 @@ function writeApiTargets(simple) {
     } else span = simple.slice(i);
     const paths = [...span.matchAll(PATH_LITERAL)].map((x) => x[1]);
     if (!paths.length) continue;
-    const destinationLast = /^(copyFile|rename|shutil\.(move|copy)|Move-Item|Copy-Item)/i.test(name.replace(/^.*?(?=copyFile|rename|shutil|Move|Copy)/, ""));
-    out.push(destinationLast ? paths[paths.length - 1] : paths[0]);
+    const api = name.replace(/^.*?(?=copyFile|rename|shutil|Move|Copy)/, "");
+    const destinationLast = /^(copyFile|rename|shutil\.(move|copy)|Move-Item|Copy-Item)/i.test(api);
+    // A rename or a move changes its source as well as its destination; a
+    // copy changes its destination only (copying a generated file out is a read).
+    const sourceToo = /^(rename|shutil\.move|Move-Item)/i.test(api);
+    if (destinationLast) {
+      out.push(paths[paths.length - 1]);
+      if (sourceToo && paths.length > 1) out.push(paths[0]);
+    } else out.push(paths[0]);
   }
   WRITE_API_GLOBAL.lastIndex = 0;
   return out;
