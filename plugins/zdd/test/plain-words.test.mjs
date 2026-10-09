@@ -193,7 +193,7 @@ test("estimate: greenfield, young and mature are told apart by source and histor
   const e2 = runJson(mature, ["estimate"]);
   assert.equal(e2.scenario, "mature");
   assert.ok(e2.ageMonths >= 60);
-  assert.match(run(mature, ["estimate"]), /^A mature codebase: 400 source files/m);
+  assert.match(run(mature, ["estimate"]), /^A mature codebase: 400 source files, 2 commits over about 6 years/m);
 });
 
 // --- pick 2: every file bootstrap writes is explained ---------------------------------

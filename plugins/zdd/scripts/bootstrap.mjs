@@ -2388,8 +2388,14 @@ function narratePocock(p) {
   const pin = pocockPin();
   const ours = `${pin.plugin}@${pin.marketplace}`;
   if (p.installed) {
-    const h = p.hits.find((x) => x.enabled !== false);
+    // ZDD's pinned copy first (the one bootstrap switches on); another copy
+    // that happens to be on here is said as such, because bootstrap switches
+    // it off and `grill` then needs the pinned one (Sadies dry run, 2.3).
+    const h = p.hits.find((x) => x.id === ours && x.enabled !== false) ?? p.hits.find((x) => x.enabled !== false);
     const detail = h.id ? `${h.where}: ${h.path}; ${h.id} ${h.version ?? "?"}, switched on here` : `${h.where}: ${h.path}`;
+    if (h.id && h.id !== ours && !p.pinned) {
+      return `mattpocock-skills: a copy is on here (${detail}), but it is not ZDD's pinned one (${ours} ${pin.version}), and bootstrap switches other copies off in this repo so the pinned one loads — install it: \`claude plugin install ${ZDD_PLUGIN_ID} --scope project\` from this repo's folder, then restart; until then \`grill\` would run the other copy.`;
+    }
     return `mattpocock-skills: installed (${detail}) — \`grill\` will run the real interview. ZDD pins ${pin.plugin} ${pin.version} (${ours}); this repo's .claude/settings.json keeps any other copy off here.`;
   }
   // A copy is cached but this repo switches it off (finding 9): grill will
@@ -2628,7 +2634,8 @@ export function narrateEstimate(e) {
   if (e.scenario === "greenfield") out.push("Greenfield: no source to read yet. ZDD sets up an empty zdd/ folder; every task's \"update ZDD\" fills it, and nothing is asked up front beyond the intended stack.");
   else {
     const label = e.scenario === "young" ? "A young app" : "A mature codebase";
-    out.push(`${label}: ${e.sourceFiles} source files, ${e.commits} commits over about ${e.ageMonths} months${e.contributors > 1 ? `, ${e.contributors} people` : ""}.`);
+    const age = e.ageMonths === 0 ? "less than a month" : e.ageMonths === 1 ? "about a month" : e.ageMonths >= 24 ? `about ${Math.round(e.ageMonths / 12)} years` : `about ${e.ageMonths} months`;
+    out.push(`${label}: ${e.sourceFiles} source files, ${e.commits} commit${e.commits === 1 ? "" : "s"} over ${age}${e.contributors > 1 ? `, ${e.contributors} people` : ""}.`);
     out.push("On day one the inventory (derive) is complete with no questions; one mapping session proposes the feature groupings and asks only where the evidence is thin; the unclaimed list is a to-do list, not a gate. Decisions are never reconstructed by default: glossary terms, decisions and blessings arrive as each task's \"update ZDD\" touches them, so the docs fill in where the team works.");
     out.push(`The backfill, if you want it, is ${e.backfill.total} of your review time:`);
     out.push(`  glossary — ${e.backfill.glossary}`);
