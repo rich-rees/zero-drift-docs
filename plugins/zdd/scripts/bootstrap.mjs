@@ -1853,9 +1853,15 @@ function migrateMapLinks(ledger, mapDir, metadataDir = "zdd/metadata") {
       // is the adopter's prose and stays.
       next = next.replace(new RegExp(`\\]\\((<?)([^)<>\\s]*/${old}/[^)<>/\\s#]+\\.json)((?:#[^)<>\\s]*)?)(>?)\\)`, "g"), (whole, lt, dest, frag, gt) => {
         if (/^[a-z][a-z0-9+.-]*:/i.test(dest) || dest.startsWith("//")) return whole;
-        // Root-relative is repo-root-relative (`/zdd/metadata/service/x.json`),
-        // and nothing looser (verify CR-428): `/service/x.json` is prose.
-        const resolved = dest.startsWith("/") ? posix.normalize(dest.replace(/^\/+/, "")) : posix.normalize(posix.join(pageDir, dest));
+        // A leading `/` is BUNDLE-relative — `/metadata/service/x.json` is
+        // how the render reads it (lib/map-links.mjs: `join(bundleDir,
+        // target)`), and how every adopter's map writes it — never
+        // repo-root-relative (CAS-105: 2.3's rewrite read it as
+        // `metadata/service/…` from the repo root, matched nothing, and
+        // Cascade's dry run went red on the records the links no longer
+        // claimed). `/service/x.json` is still prose (CR-428).
+        const bundle = posix.dirname(metaPrefix);
+        const resolved = dest.startsWith("/") ? posix.normalize(posix.join(bundle === "." ? "" : bundle, dest.replace(/^\/+/, ""))) : posix.normalize(posix.join(pageDir, dest));
         if (!(resolved === `${metaPrefix}/${old}` || resolved.startsWith(`${metaPrefix}/${old}/`))) return whole;
         const moved = dest.replace(new RegExp(`/${old}/([^/]+\\.json)$`), `/${now}/$1`);
         return `](${lt}${moved}${frag}${gt})`;

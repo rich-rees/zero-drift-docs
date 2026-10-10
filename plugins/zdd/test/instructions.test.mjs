@@ -286,15 +286,19 @@ test("CR-410: the map-link rewrite touches only destinations that resolve under 
     "- [U](https://api.example.com/service/schema.json)",
     "- [P](//cdn.example.com/service/x.json)",
     "- [D](../../../docs/service/notes.json)",
-    "- [R](/zdd/metadata/service/resend.json)",
+    "- [R](/metadata/service/resend.json)",
+    "- [Z](/zdd/metadata/service/zed.json)",
     "- [X](/service/loose.json)",
     "",
   ].join("\n");
   writeFileSync(join(repo, "zdd", "map", "features", "a.md"), page);
   runJson(repo, ["upgrade"]);
+  // A leading `/` is bundle-relative, as the render reads it (CAS-105: Cascade's
+  // map writes every link that way, and 2.3's rewrite missed them all); so
+  // `/zdd/metadata/…` resolves outside the bundle and is prose.
   assert.equal(
     read(repo, "zdd/map/features/a.md"),
-    page.replace("../../metadata/service/sentry.json", "../../metadata/external-service/sentry.json").replace("/zdd/metadata/service/resend.json", "/zdd/metadata/external-service/resend.json"),
+    page.replace("../../metadata/service/sentry.json", "../../metadata/external-service/sentry.json").replace("/metadata/service/resend.json", "/metadata/external-service/resend.json"),
   );
 });
 
@@ -345,14 +349,14 @@ test("CR-518: the map-link rewrite leaves a fenced code block as written — a r
   const repo = adopted("links-fenced", { engine: "2.2.1" });
   writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify({ extractors: ["services"], engine: "2.2.1" }) + "\n");
   mkdirSync(join(repo, "zdd", "map", "features"), { recursive: true });
-  const page = ["- [S](../../metadata/service/sentry.json)", "", "```markdown", "- [S](../../metadata/service/sentry.json)", "```", "", "~~~", "[R](/zdd/metadata/service/resend.json)", "~~~", "- [R](/zdd/metadata/service/resend.json)", ""].join("\n");
+  const page = ["- [S](../../metadata/service/sentry.json)", "", "```markdown", "- [S](../../metadata/service/sentry.json)", "```", "", "~~~", "[R](/metadata/service/resend.json)", "~~~", "- [R](/metadata/service/resend.json)", ""].join("\n");
   writeFileSync(join(repo, "zdd", "map", "features", "a.md"), page);
   runJson(repo, ["upgrade"]);
   const lines = read(repo, "zdd/map/features/a.md").split("\n");
   assert.equal(lines[0], "- [S](../../metadata/service/external-service/sentry.json)".replace("service/external-service", "external-service"));
   assert.equal(lines[3], "- [S](../../metadata/service/sentry.json)", "inside the fence: untouched");
-  assert.equal(lines[7], "[R](/zdd/metadata/service/resend.json)", "inside a ~~~ fence: untouched");
-  assert.equal(lines[9], "- [R](/zdd/metadata/external-service/resend.json)");
+  assert.equal(lines[7], "[R](/metadata/service/resend.json)", "inside a ~~~ fence: untouched");
+  assert.equal(lines[9], "- [R](/metadata/external-service/resend.json)");
 });
 
 test("CR-519: an adopter rooted below the git root is swept by names relative to the adopter, so its files are found", () => {
