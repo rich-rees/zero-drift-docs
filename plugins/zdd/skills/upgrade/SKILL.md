@@ -267,6 +267,27 @@ https://github.com/rich-rees/zero-drift-docs/issues, labelled `finding`.
   one-time hand step moves the lock (edit the ref, restart, run the commands
   the session-start line names, restart), then "upgrade ZDD" runs from step 2.
 
+## Upgrading to 2.4 (the ZDD record)
+
+- **Say it when ZDD changes a decision.** `zdd/instructions.md` (rewritten
+  by this run) now asks the agent to print one `ZDD: …` line, at the moment
+  and without stopping, whenever an artifact *turned* or *confirmed* a
+  decision or showed code to *reuse* — with what would otherwise have
+  happened. Reading is never a use, and nothing is said when nothing was
+  used.
+- **The ZDD record.** "update ZDD" writes those lines into the update
+  commit's message as a `ZDD record:` with five sections (`glossary`,
+  `adrs`, `blessings`, `map`, `comments`) in plain sentences; the `Pattern
+  record:` it replaces is still read, as the blessings section. A squash
+  merge loses the record; a merge commit keeps it.
+- **The tally.** `zdd-engine tally [--since <ref|date>] [--json]` counts,
+  per section, how often an artifact turned, confirmed, was reused or
+  stored, then names the ADRs, glossary terms and blessings in the stores
+  that no record ever named.
+- **`lint --merge` warns, never fails,** on a record it cannot fully read.
+  No config-schema or metadata-contract change; `derive --check` and
+  `render --check` do not move on the bump.
+
 ## Upgrading to 2.3 (plain words, the instructions file, external services)
 
 - **The instructions file.** ZDD's rules move out of the marked block in

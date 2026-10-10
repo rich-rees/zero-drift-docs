@@ -15,6 +15,7 @@ npx @rich-rees/zdd-engine derive [--check] [--verbose]
 npx @rich-rees/zdd-engine render [--check]
 npx @rich-rees/zdd-engine lint [--merge] [--tempstate]
 npx @rich-rees/zdd-engine freshness [--base <ref>]
+npx @rich-rees/zdd-engine tally [--since <ref|date>] [--json]
 ```
 
 - **derive** — run the configured extractors over the repo and write
@@ -44,10 +45,26 @@ npx @rich-rees/zdd-engine freshness [--base <ref>]
   unclaimed); the unclaimed count sits in the human index header. With
   `claims.strict` both become failures; `claims.allowUnclaimed` exempts
   named records from the unclaimed check only, never from a double claim.
+  With `--merge` it also reads the branch's commits since the base and
+  **warns** (never fails) on a **ZDD record** the tally cannot fully read:
+  a missing section, an unknown verb, a `turned` or `confirmed` line that
+  does not say what would otherwise have happened. Shape only; absence of a
+  record is never a warning.
 - **freshness** — advisory (always exits 0): semantic-map concepts whose code a
   diff touches without updating the concept — the `resource:` path, and the
   source behind every metadata record the concept links to. Markdown on
   stdout, made for `$GITHUB_STEP_SUMMARY`.
+- **tally** — the evidence over time (always exits 0): reads every
+  `ZDD record:` (and the 2.0–2.3 `Pattern record:`, as the blessings
+  section) out of the current branch's git history and prints, per section
+  (`glossary`, `adrs`, `blessings`, `map`, `comments`), how often an
+  artifact `turned` a decision, `confirmed` one, was `reused` (map only) or
+  `stored`; then the ADRs, glossary terms and blessings in the stores as
+  they are now that no record in the range ever named; then every commit
+  whose record had a shape problem, with why. `--since <ref>` bounds the
+  range to `<ref>..HEAD`; a value that is not a commit is handed to git as
+  a date. `--json` prints the same as one object, for a host harness to
+  copy. Deterministic: no dates of its own, no judgment.
 
 Every command locates the repo by walking up from the working directory to the
 first folder holding `zdd/config.json` (override with `--root=<dir>` /

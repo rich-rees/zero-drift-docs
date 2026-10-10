@@ -41,7 +41,7 @@ skill that carries it.
 |---|---|---|---|
 | Before designing | **"load ZDD"** (`load`) | glossary, ADR index, cited ADRs, agent index | nothing; it declares what it loaded and points at the next step |
 | Design settled, before code | **"choose patterns"** (`patterns`) | blessing index, matching blessings, agent index and metadata | `zdd/patterns-plan.md` |
-| Before finishing | **"update ZDD"** (`update`) | the plan, the final diff | curated artifacts, new blessings, regenerated artifacts, the pattern record in the commit message; deletes the plan |
+| Before finishing | **"update ZDD"** (`update`) | the plan, the final diff | curated artifacts, new blessings, regenerated artifacts, the ZDD record in the commit message (its `blessings` section is the reconciled plan); deletes the plan |
 
 **Load** says what exists. The **design** (a grilling session, plan mode, a
 spec) says what we want. **Choose patterns** needs both, so it runs after the
@@ -124,7 +124,7 @@ choose patterns ──► zdd/patterns-plan.md committed on the branch
                     ├─ mint the candidates that survived (into the map)
                     ├─ record the dropped ones, and why
                     ├─ offer unblessed precedent (minted on the developer's word)
-                    ├─ write "Pattern record:" into the update commit's message
+                    ├─ write the "ZDD record:" (its blessings section) into the update commit's message
                     └─ git rm the plan in that same commit
         │
         ▼
@@ -136,10 +136,12 @@ choose patterns ──► zdd/patterns-plan.md committed on the branch
 - **Propose at plan, decide at update.** The build can kill a pattern, change
   it, or create one the plan never saw. So blessings are **minted at
   update**, against the code as it will merge, never at plan time.
-- **The record lives in the update commit's message**, one line per piece:
-  `followed`, `departed … because`, `minted … exemplar <path>`,
+- **The record lives in the update commit's message**, as the `blessings`
+  section of the ZDD record (2.4, decisions 0027–0029; `Pattern record:`
+  before that), one plain-sentence line per piece opening with its verb:
+  `followed`, `departed … because`, `minted … pointing at <path>`,
   `dropped candidate … because`, `precedent … minted | declined`,
-  `no blessing applied`.
+  `no blessing applied`. `zdd-engine tally` counts them over history.
 - **The plan is deleted in the update commit, never at merge.** A merge runs
   no code. If the plan were left for the merge, it would land on the base
   branch.
