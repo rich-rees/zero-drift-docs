@@ -41,6 +41,19 @@ const ISO_DATE = /^((?:19[7-9]\d|20\d\d)-\d{2}-\d{2})(?:[T ](\d{2}:\d{2}(?::\d{2
 export function isoSince(value) {
   const m = ISO_DATE.exec(String(value).trim());
   if (!m) return null;
+  // The shape is not enough (CR-018): February 30th and 25:99 match it and
+  // git reads them as it pleases. The calendar and the clock are checked.
+  const [y, mo, d] = m[1].split("-").map(Number);
+  if (mo < 1 || mo > 12 || d < 1 || d > new Date(Date.UTC(y, mo, 0)).getUTCDate()) return null;
+  if (m[2]) {
+    const [h, mi, s] = m[2].split(":").map(Number);
+    if (h > 23 || mi > 59 || (s ?? 0) > 59) return null;
+  }
+  if (m[3] && m[3] !== "Z") {
+    const oh = Number(m[3].slice(1, 3));
+    const om = Number(m[3].slice(-2));
+    if (oh > 14 || om > 59) return null;
+  }
   return `${m[1]}T${m[2] ?? "00:00:00"}${m[3] ?? "Z"}`;
 }
 
