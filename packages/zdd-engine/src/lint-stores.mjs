@@ -53,9 +53,38 @@ import { parseFrontmatter } from "./lib/frontmatter.mjs";
 import { extractBlessings, forwardStamps, blessingShape, BLESSING_LENGTH_BUDGET } from "./lib/map-links.mjs";
 import { walkMarkdown, readBounded, MAX_STORE_FILE_BYTES } from "./lib/walk-markdown.mjs";
 import { unclaimedRecords, CLAIMABLE_KINDS, OPT_IN_CLAIMABLE_KINDS } from "./lib/claims.mjs";
+import { recordsInLog } from "./lib/zdd-record.mjs";
+
+// The commits this branch adds over the base (origin/<baseBranch>, then
+// <baseBranch>), each with its ZDD record parsed: { commits } or { note }.
+// The base resolution mirrors check-freshness.mjs.
+export function recordCheck(repoRoot, baseBranch) {
+  const git = (a) => execFileSync("git", a, { cwd: repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 60_000, maxBuffer: 64 * 1024 * 1024 });
+  try {
+    git(["rev-parse", "--show-toplevel"]);
+  } catch {
+    return { note: "no git checkout here" };
+  }
+  let base = null;
+  for (const ref of [`origin/${baseBranch}`, baseBranch]) {
+    try {
+      git(["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]);
+      base = ref;
+      break;
+    } catch {
+      /* next */
+    }
+  }
+  if (!base) return { note: `no base to read commits against (tried origin/${baseBranch}, ${baseBranch})` };
+  try {
+    return { base, commits: recordsInLog(git(["log", "--format=%H%x1f%B%x1e", `${base}..HEAD`])) };
+  } catch {
+    return { note: `git log ${base}..HEAD failed (an unborn branch, or unrelated histories?)` };
+  }
+}
 
 export function run(args) {
-  const { repoRoot: REPO, config, paths, bundleDir } = loadConfig(args);
+  const { repoRoot: REPO, config, paths, bundleDir, baseBranch } = loadConfig(args);
   // `claims` (CAS-65, decision 0012): opt-in strict mode. Checked before
   // any lint runs, so a malformed block is the one thing reported.
   // Only an ABSENT block defaults: `null` or a misspelt key is an error,
@@ -257,6 +286,25 @@ if (planPresent && args.includes("--merge")) {
   );
 } else if (planPresent) {
   console.error(`WARNING: ${paths.patternsPlan} is on this branch — "update ZDD" reconciles and deletes it; CI (lint --merge) fails while it exists`);
+}
+
+// ---- 3c. The ZDD record (decision 0029) ----
+// With --merge only: every commit on this branch since the base that carries
+// a `ZDD record:` (or legacy `Pattern record:`) is checked for SHAPE — the
+// five sections in order, known verbs, `reused` under map only, a `turned`
+// or `confirmed` that says what would otherwise have happened. WARNINGS,
+// never failures: a commit message cannot be fixed without a rewrite, and
+// the tier for "wrong but not broken" is a warning (decision 0009). Absence
+// of a record is never a warning — a branch with no update commit yet is
+// normal. Where git cannot answer, one line says so and the check skips.
+if (args.includes("--merge")) {
+  const found = recordCheck(REPO, baseBranch);
+  if (found.note) console.error(`NOTE: ZDD record check skipped — ${found.note}`);
+  for (const c of found.commits ?? []) {
+    if (!c.record || !c.record.problems.length) continue;
+    console.error(`WARNING: ${c.hash.slice(0, 7)} "${printable(c.subject).slice(0, 60)}" carries a ZDD record the tally cannot fully read (shape only; the sentence's truth is the reviewer's):`);
+    for (const p of c.record.problems) console.error(`  ${p}`);
+  }
 }
 
 // ---- 4. Claims: unclaimed and double-claimed records ----
