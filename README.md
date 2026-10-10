@@ -4,7 +4,7 @@ A documentation architecture for repos built by **human + agent pairs**. ZDD kee
 seven documentation artifacts *at most one unit of work behind the code* — and, with
 CI, makes drift in the machine-generated ones **un-mergeable**.
 
-> **Status: 2.3.0.** The plugin installs in Claude Code
+> **Status: 2.4.0.** The plugin installs in Claude Code
 > and in Codex from this one repo; `bootstrap` detects your stack (or grills
 > for it on a greenfield repo), proposes extractors with evidence, and *writes*
 > the opt-ins; the engine (`packages/zdd-engine`, npm `@rich-rees/zdd-engine`)
@@ -240,7 +240,7 @@ reviewable file, never one question per item.
 from [the releases page](https://github.com/rich-rees/zero-drift-docs/releases)):
 
 ```
-claude plugin marketplace add rich-rees/zero-drift-docs@v2.3.0 --scope project
+claude plugin marketplace add rich-rees/zero-drift-docs@v2.4.0 --scope project
 claude plugin install zdd@zero-drift-docs --scope project
 ```
 
@@ -365,8 +365,8 @@ by hand once:
 
 1. In `.claude/settings.json`, set
    `extraKnownMarketplaces["zero-drift-docs"].source.ref` to the new tag
-   (`"v2.3.0"`). No lock there? Add the marketplace from the repo's folder with
-   `claude plugin marketplace add rich-rees/zero-drift-docs@v2.3.0 --scope project`.
+   (`"v2.4.0"`). No lock there? Add the marketplace from the repo's folder with
+   `claude plugin marketplace add rich-rees/zero-drift-docs@v2.4.0 --scope project`.
 2. Restart Claude Code. The session's first line names the commands that move
    your machine (on a machine where the marketplace was ever added without a
    scope, that includes `claude plugin marketplace remove zero-drift-docs
@@ -440,6 +440,11 @@ saying no to a row is a visible choice, not a fork.
 
 ## Roadmap
 
+- [x] **2.4.0** — the ZDD record: the agent says, at the moment, when an
+      artifact turned or confirmed a decision or showed code to reuse;
+      "update ZDD" writes those lines into the commit's message in five
+      sections; `zdd-engine tally` counts them over history and names what
+      no record ever named *(2026-10-10, CAS-105)*.
 - [x] **2.3.0** — the plain-words install and upgrade, ZDD's instructions in
       a file of their own, external services, work-shaped blessings,
       background work, the two-level index, and the first-run findings from
@@ -677,6 +682,33 @@ warning can say "behind".
   was scrubbed finds the profile from its transcript). No config, contract or
   artifact change; the bump moves the engine pins and the release lock.
 
+- **`2.4.0` — the ZDD record.** A minor: a new engine command, a new
+  *warning* in `lint --merge`, and a rewritten `zdd/instructions.md` that
+  "upgrade ZDD" replaces; no config-schema or metadata-contract change and
+  no new generated file. **What moves on the bump**: nothing in
+  `derive --check` or `render --check`; `zdd/instructions.md` and the pins.
+  - *Say it when ZDD changes a decision*
+    ([decision 0027](docs/decisions/0027-a-use-is-a-decision-turned-or-confirmed-said-at-the-moment-never-a-gate.md)):
+    a use is the moment an artifact *turned* a decision, *confirmed* one, or
+    showed code to *reuse*; reading never is. The agent prints one `ZDD: …`
+    line then, with what would otherwise have happened, and carries on — no
+    stop, no question. `load` declares with the same prefix and claims no
+    benefit.
+  - *The ZDD record*
+    ([decision 0028](docs/decisions/0028-the-zdd-record-lives-in-the-update-commit-message-five-sections-in-plain-sentences.md)):
+    "update ZDD" writes those lines into the update commit's message under
+    `ZDD record:` — five sections (`glossary`, `adrs`, `blessings`, `map`,
+    `comments`), fixed verbs, plain sentences. It replaces `Pattern record:`,
+    which is still read as the blessings section. A host harness copies it
+    out of the message; a squash merge loses it.
+  - *The tally and its lint*
+    ([decision 0029](docs/decisions/0029-the-tally-reads-git-and-the-stores-and-a-malformed-record-warns-never-fails.md)):
+    `zdd-engine tally [--since <ref|date>] [--json]` counts turned,
+    confirmed, reused and stored per section over the branch's history, then
+    names the ADRs, glossary terms and blessings in the stores that no record
+    ever named, and every commit whose record it could not fully read.
+    `lint --merge` warns, never fails, on such a record; a branch with no
+    update commit is never warned.
 - **`2.3.0` — the plain-words install and upgrade.** A minor: every change
   below is additive, opt-in, or migrated for you by "upgrade ZDD". **What
   moves on the bump**, so you know what to expect in `derive --check` and
