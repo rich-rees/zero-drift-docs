@@ -81,9 +81,14 @@ names; the `zdd/…` names apply only where a key is absent.
 3. **Drill into the ADR bodies your task cites** — plus the glossary entries for
    the prompt's terms, and the agent-index sections for the feature you're
    touching.
-4. **Declare your selection aloud.** State what you loaded and why, e.g.
-   *"Loading ZDD: glossary + ADR index + ADR-0007/0009 — cited by the task."* A
-   wrong selection is then visible immediately.
+4. **Declare your selection aloud**, on one line with the `ZDD:` prefix
+   every ZDD line in a session carries, e.g.
+   *"ZDD: loaded glossary, ADR index, ADR-0007, ADR-0009 — cited by the
+   task."* A wrong selection is then visible immediately. Loading is a
+   **read, never a use**: this line claims no benefit and goes into no
+   record. A use is said later, at the moment an artifact turns or confirms
+   a decision (`ZDD: ADR-0009 turned — …`, see `zdd/instructions.md`), and
+   "update ZDD" writes those into the ZDD record.
 5. **Read the code fresh.** The artifacts orient you; they never replace reading
    the source. Where prose and code disagree, the code wins — and the prose is a
    ritual finding to fix (see `update`).

@@ -246,7 +246,10 @@ apply"):
    it reads the glossary and the decisions before building ("load ZDD"); it
    checks for existing code to reuse and the blessings before writing code
    ("choose patterns"); it records terms, decisions and map changes and
-   regenerates the inventory before finishing ("update ZDD"); it never
+   regenerates the inventory before finishing ("update ZDD"); it says, at
+   the moment and without stopping, when one of those artifacts turned or
+   confirmed a decision, and "update ZDD" writes those lines into the
+   commit's message as the ZDD record; it never
    hand-edits a generated file; it puts a release line first in its reply
    and fixes it before the task; and it knows the install commands to tell
    a new developer. For Codex users, `AGENTS.md` holds a copy of the same
@@ -285,14 +288,14 @@ is written into the host's settings.
 
 ## Step 5 — the engine, then the one mapping session
 
-1. **Derive** — `npx -y @rich-rees/zdd-engine@2.3.0 derive`. "This reads the
+1. **Derive** — `npx -y @rich-rees/zdd-engine@2.4.0 derive`. "This reads the
    code and writes the inventory." On a greenfield repo it writes nothing and
    passes; that is correct.
-2. **Render** — `npx -y @rich-rees/zdd-engine@2.3.0 render`. "This writes the
+2. **Render** — `npx -y @rich-rees/zdd-engine@2.4.0 render`. "This writes the
    indexes from the inventory and the map." Commit the generated artifacts
    (`zdd/graph.json`, the agent, ADR and blessing indexes, the human index);
    never edit them.
-3. **Lint** — `npx -y @rich-rees/zdd-engine@2.3.0 lint`. The same blocking
+3. **Lint** — `npx -y @rich-rees/zdd-engine@2.4.0 lint`. The same blocking
    check CI runs: ADR numbering, supersession symmetry, and every blessing's
    citation and trigger question. A failure here is fixed now, not discovered
    on the first PR. It also prints the **unclaimed records** — on day one
