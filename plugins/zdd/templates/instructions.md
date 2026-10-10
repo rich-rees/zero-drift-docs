@@ -29,8 +29,8 @@ or showed code to *reuse*; reading is never a use. Print one line then and carry
 — no stop, no question — saying what you would otherwise have done: `ZDD: ADR-0015
 turned — I was about to read jobs straight from the database; the app goes through
 /api/jobs`. "update ZDD" writes these as the **ZDD record** (sections `glossary`,
-`adrs`, `blessings`, `map`, `comments`; `turned` / `confirmed` / `reused` / `stored`
-lines in plain sentences, or `- none`) into the update commit's message;
+`adrs`, `blessings`, `map`, `comments`; `turned` / `confirmed` / `reused` (map
+only) / `stored` lines in plain sentences, or `- none`) into the update commit's message;
 `zdd-engine tally` counts them over the repo's history.
 
 **A release or engine-skew line** from ZDD's session-start checks (or `load`)

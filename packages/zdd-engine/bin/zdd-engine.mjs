@@ -7,7 +7,7 @@
 //
 //   zdd-engine derive [--check] [--verbose]   codebase metadata from source
 //   zdd-engine render [--check]               agent index + ADR index + human index
-//   zdd-engine lint [--tempstate]             deterministic store lints
+//   zdd-engine lint [--merge] [--tempstate]   deterministic store lints
 //   zdd-engine freshness [--base <ref>]       advisory semantic-map staleness nudge
 //   zdd-engine tally [--since <ref|date>] [--json]  the ZDD record, counted over git history
 
@@ -26,7 +26,7 @@ if (!cmd || !(cmd in COMMANDS)) {
       `Commands:\n` +
       `  derive     generate codebase metadata (--check: verify instead of write)\n` +
       `  render     generate agent-index.md, adr-index.md, human-index.html (--check)\n` +
-      `  lint       deterministic curated-store lints (--tempstate: also forbid TEMPSTATE.md)\n` +
+      `  lint       deterministic curated-store lints (--merge: the CI gate — the pattern plan fails, a malformed ZDD record warns; --tempstate: also forbid TEMPSTATE.md)\n` +
       `  freshness  advisory semantic-map staleness report (--base <ref>)\n` +
       `  tally      the ZDD record counted over git history (--since <ref|date>, --json)\n\n` +
       `Common options: --root=<repo-root> --config=<path-to-config.json>`,

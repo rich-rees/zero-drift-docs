@@ -23,7 +23,7 @@ now parse it (decision 0029) and a host harness will copy it out.
    ```
    ZDD record:
    glossary:
-   - confirmed: the glossary says an "offer" is a bid on a job, so the new table is called offers, not bids
+   - confirmed: the glossary says an "offer" is a bid on a job, so the new table is called offers rather than bids
    - stored: added the term "stall" (a job that stopped reporting progress)
    adrs:
    - turned: ADR-0015 says the app never reads the database directly; I was about to query jobs from Supabase and went through /api/jobs instead

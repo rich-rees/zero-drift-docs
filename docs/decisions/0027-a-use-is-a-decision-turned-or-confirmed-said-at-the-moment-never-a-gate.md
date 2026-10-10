@@ -22,8 +22,10 @@ case for ZDD as a plugin.
    turned it to Y) and **confirmed** (the session was going to do Y; the
    artifact said yes). Each use names the thing (a term, an ADR number, a
    blessing's question, a path) and carries the counterfactual in the same
-   sentence: what would otherwise have happened. **A line with no
-   counterfactual is a read and does not count.** That rule, not a gate, is
+   sentence: what would otherwise have happened, in those words (*would*,
+   *about to*, *instead*, *otherwise*, *rather than*; a bare *not* or
+   *changed* is how any summary of an ADR reads, and is not one). **A line
+   with no counterfactual is a read and does not count.** That rule, not a gate, is
    the guard against the agent grading its own usefulness. Loading is never
    a use: `load`'s declaration gains the `ZDD:` prefix (`ZDD: loaded …`) so
    every ZDD utterance scans alike, and the instructions say plainly that it
