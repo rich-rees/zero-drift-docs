@@ -1853,9 +1853,15 @@ function migrateMapLinks(ledger, mapDir, metadataDir = "zdd/metadata") {
       // is the adopter's prose and stays.
       next = next.replace(new RegExp(`\\]\\((<?)([^)<>\\s]*/${old}/[^)<>/\\s#]+\\.json)((?:#[^)<>\\s]*)?)(>?)\\)`, "g"), (whole, lt, dest, frag, gt) => {
         if (/^[a-z][a-z0-9+.-]*:/i.test(dest) || dest.startsWith("//")) return whole;
-        // Root-relative is repo-root-relative (`/zdd/metadata/service/x.json`),
-        // and nothing looser (verify CR-428): `/service/x.json` is prose.
-        const resolved = dest.startsWith("/") ? posix.normalize(dest.replace(/^\/+/, "")) : posix.normalize(posix.join(pageDir, dest));
+        // A leading `/` is BUNDLE-relative — `/metadata/service/x.json` is
+        // how the render reads it (lib/map-links.mjs: `join(bundleDir,
+        // target)`), and how every adopter's map writes it — never
+        // repo-root-relative (CAS-105: 2.3's rewrite read it as
+        // `metadata/service/…` from the repo root, matched nothing, and
+        // Cascade's dry run went red on the records the links no longer
+        // claimed). `/service/x.json` is still prose (CR-428).
+        const bundle = posix.dirname(metaPrefix);
+        const resolved = dest.startsWith("/") ? posix.normalize(posix.join(bundle === "." ? "" : bundle, dest.replace(/^\/+/, ""))) : posix.normalize(posix.join(pageDir, dest));
         if (!(resolved === `${metaPrefix}/${old}` || resolved.startsWith(`${metaPrefix}/${old}/`))) return whole;
         const moved = dest.replace(new RegExp(`/${old}/([^/]+\\.json)$`), `/${now}/$1`);
         return `](${lt}${moved}${frag}${gt})`;
@@ -1950,6 +1956,11 @@ export const UPGRADE_NOTES = {
     notes.push("2.3 writes .gitattributes (zdd/ pinned to LF) and runs a preflight (Node 20+, npx, git, github.com, the npm registry, the pinned engine) before an install or an upgrade; the CI workflow is offered only on GitHub — elsewhere the merge gate is three commands for your own pipeline");
     return notes;
   },
+  "2.4.0": ({ paths }) => [
+    `2.4 adds the ZDD record (decisions 0027–0029): the instructions file (${paths.bundleDir === "." ? "instructions.md" : `${paths.bundleDir}/instructions.md`}, rewritten by this run) now asks the agent to say one \`ZDD: …\` line, at the moment and without stopping, whenever an artifact turned or confirmed a decision or showed code to reuse — and "update ZDD" writes those lines into the update commit's message as a \`ZDD record:\` with five sections (glossary, adrs, blessings, map, comments) in plain sentences. The \`Pattern record:\` it replaces is still read as the blessings section`,
+    "2.4 adds `zdd-engine tally [--since <ref|date>] [--json]`: per section, how often an artifact turned, confirmed, was reused or stored, over the branch's history, then the ADRs, glossary terms and blessings in the stores that no record ever named — the evidence of what ZDD buys this repo. A squash merge loses the record unless the merger keeps the message; a merge commit keeps it",
+    "2.4 makes `lint --merge` (the CI step) WARN, never fail, on a record the tally cannot fully read — a missing section, an unknown verb, a `turned` or `confirmed` that does not say what would otherwise have happened; a branch with no update commit is never warned. No config-schema or metadata-contract change; derive and render bytes do not move on the bump",
+  ],
 };
 
 export function compareVersions(a, b) {
@@ -1991,6 +2002,7 @@ export const INSTRUCTION_RULES = [
   { id: "install", match: /plugin (?:install|update) (?:zdd|mattpocock-skills)|skills are missing|zdd@zero-drift-docs|mattpocock-skills@/i, says: "if ZDD's skills are missing: from the repo's folder, claude plugin install mattpocock-skills@zero-drift-docs --scope project, then claude plugin install zdd@zero-drift-docs --scope project, then restart; this repo switches other copies of Matt Pocock's skills off on purpose" },
   { id: "grill", match: /\bgrill\b/i, says: "grill is optional: a design interview that writes glossary terms and ADRs as they crystallize; without Matt Pocock's skills, plan mode plus \"update ZDD\"" },
   { id: "findings", match: /zero-drift-docs\/issues|\bZDD defect\b/i, says: "a ZDD defect goes to ZDD's issues page, labelled finding, proposed to the developer first" },
+  { id: "record", match: /\bZDD record\b|\bPattern record\b|\bzdd-engine tally\b/i, says: "when a ZDD artifact turns or confirms a decision, or shows code to reuse, say one `ZDD: …` line at the moment with what would otherwise have happened, and carry on; \"update ZDD\" writes those lines as the ZDD record (five sections, plain sentences) into the update commit's message, which `zdd-engine tally` counts over history" },
 ];
 const talksZdd = (heading, own) => new RegExp(ZDD_MENTION.source, "i").test(heading) || ZDD_VERB.test(own) || (own.match(ZDD_MENTION) ?? []).length >= 2;
 export function findDuplicates(text) {
