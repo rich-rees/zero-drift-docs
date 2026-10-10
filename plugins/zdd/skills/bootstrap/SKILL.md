@@ -246,7 +246,10 @@ apply"):
    it reads the glossary and the decisions before building ("load ZDD"); it
    checks for existing code to reuse and the blessings before writing code
    ("choose patterns"); it records terms, decisions and map changes and
-   regenerates the inventory before finishing ("update ZDD"); it never
+   regenerates the inventory before finishing ("update ZDD"); it says, at
+   the moment and without stopping, when one of those artifacts turned or
+   confirmed a decision, and "update ZDD" writes those lines into the
+   commit's message as the ZDD record; it never
    hand-edits a generated file; it puts a release line first in its reply
    and fixes it before the task; and it knows the install commands to tell
    a new developer. For Codex users, `AGENTS.md` holds a copy of the same

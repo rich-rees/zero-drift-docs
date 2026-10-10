@@ -49,7 +49,7 @@ npx @rich-rees/zdd-engine tally [--since <ref|date>] [--json]
   **warns** (never fails) on a **ZDD record** the tally cannot fully read:
   a missing section, an unknown verb, a `turned` or `confirmed` line that
   does not say what would otherwise have happened. Shape only; absence of a
-  record is never a warning.
+  record is never a warning, and a refused line is left out of the tally.
 - **freshness** — advisory (always exits 0): semantic-map concepts whose code a
   diff touches without updating the concept — the `resource:` path, and the
   source behind every metadata record the concept links to. Markdown on
@@ -61,10 +61,15 @@ npx @rich-rees/zdd-engine tally [--since <ref|date>] [--json]
   artifact `turned` a decision, `confirmed` one, was `reused` (map only) or
   `stored`; then the ADRs, glossary terms and blessings in the stores as
   they are now that no record in the range ever named; then every commit
-  whose record had a shape problem, with why. `--since <ref>` bounds the
-  range to `<ref>..HEAD`; a value that is not a commit is handed to git as
-  a date. `--json` prints the same as one object, for a host harness to
-  copy. Deterministic: no dates of its own, no judgment.
+  whose record had a shape problem (such a line is left out of the counts;
+  the rest of its record still counts), and every store it could not read
+  in full. `--since <ref>` bounds the range to `<ref>..HEAD`; a value that
+  is not a commit must be an ISO date (`2026-09-01`, `2026-09-01T09:00Z`,
+  year 1970–2099), read as UTC when it carries no offset, so the range is
+  the same on every machine; git's looser date words (`yesterday`) are
+  refused. `--json` prints the same as one object, for a host harness to
+  copy. Deterministic: same history, stores and arguments in, same bytes
+  out; no dates of its own, no judgment.
 
 Every command locates the repo by walking up from the working directory to the
 first folder holding `zdd/config.json` (override with `--root=<dir>` /

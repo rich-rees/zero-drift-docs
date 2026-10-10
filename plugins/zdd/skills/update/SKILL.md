@@ -98,7 +98,7 @@ a section has nothing**:
 ```
 ZDD record:
 glossary:
-- confirmed: the glossary says an "offer" is a bid on a job, so the new table is called offers, not bids
+- confirmed: the glossary says an "offer" is a bid on a job, so the new table is called offers rather than bids
 - stored: added the term "stall" (a job that stopped reporting progress)
 adrs:
 - turned: ADR-0015 says the app never reads the database directly; I was about to query jobs from Supabase and went through /api/jobs instead
@@ -109,7 +109,7 @@ map:
 - reused: save_thing() in src/db.py already saves and logs a change, so I did not write a new helper
 - stored: the offers feature page now lists the /offers route and the offers table as its own
 comments:
-- turned: the comment at src/api/jobs.ts:42 says the upstream call must not be retried, so I kept the single call
+- turned: the comment at src/api/jobs.ts:42 says the upstream call must not be retried, so I kept the single call instead of adding a retry loop
 - stored: wrote a why-comment at src/api/offers.ts:17 explaining the 24-hour expiry
 ```
 
@@ -122,17 +122,22 @@ comments:
   ZDD's docs can follow: name the thing by something they can open (a term,
   an ADR number, a blessing's question, a path), then what happened to the
   decision. A `turned` or `confirmed` line says what would otherwise have
-  happened; a `stored` line says what was written and, in a few words, what
-  it means.
-- **The map section** takes the plan's *Reuse* lines as `reused`, and a
-  slice added or extended as `stored`; the generated metadata gets no lines
-  of its own.
+  happened, in those words — *would*, *about to*, *instead*, *otherwise*,
+  *rather than*; a `stored` line says what was written and, in a few words,
+  what it means.
+- **The map section** takes each reuse once: the `ZDD: map reused` line
+  said during "choose patterns" and the plan's *Reuse* line for the same
+  code are one `reused` line here, never two. A slice added or extended is
+  `stored`; the generated metadata gets no lines of its own.
 - **`zdd-engine tally`** reads these out of git history and reports, per
   section, the counts and the ADRs, terms and blessings no record has ever
   named. CI's `lint --merge` warns (never fails) on a record it cannot fully
-  read: a missing section, an unknown verb, a `turned` with no
-  counterfactual. The verbs are what is counted; keep them exact.
-- **A squash merge loses the record**; a merge commit keeps it.
+  read: a missing or empty section, an unknown verb, a `turned` or
+  `confirmed` with no counterfactual. A refused line is left out of the
+  tally; the rest of the record still counts. The verbs are what is counted;
+  keep them exact.
+- **A squash merge loses the record** unless the merger keeps the message;
+  a merge commit keeps it.
 
 ## Reconciling the pattern plan
 

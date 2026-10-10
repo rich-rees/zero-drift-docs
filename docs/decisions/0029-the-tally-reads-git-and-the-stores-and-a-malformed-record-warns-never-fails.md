@@ -21,8 +21,16 @@ drops a commit out of the counts with no one told.
    over the update commits in range, then **the ADRs, glossary terms and
    blessings in the current stores that no record in the range ever
    named**. Comments and the map have no item list to check against, so
-   they get counts only. The tally names every commit it skipped and why.
-   `--json` is the shape a host copies into its own tracker.
+   they get counts only. A line the shape refuses (a `turned` with no
+   counterfactual, a verb in the wrong section) is a read, not a use
+   (decision 0027): the tally names it, by commit and why, and leaves it
+   out of the counts and the naming; the rest of its record still counts,
+   so one typo never erases a commit. `--json` is the shape a host copies
+   into its own tracker. A `--since` that is not a commit must be an ISO
+   date (year 1970–2099), read as UTC when it carries no offset: git's
+   looser date grammar takes `garbage` and a year past 2099 as no filter
+   at all, and a bare date as the machine's midnight, which is not the
+   same bytes on every machine.
 2. **The denominator comes from the stores, not from the record.** The
    tally reads the ADR index, the glossary and the blessing index as they
    are now. No `loaded:` line is written: it would depend on a session
@@ -30,9 +38,11 @@ drops a commit out of the counts with no one told.
    specific ADR nobody cites. Reading the stores is deterministic and names
    them.
 3. **`lint --merge` reads the branch's commits since the base and warns**
-   on a malformed record: a section missing or out of order, a verb it does
-   not know, `reused` outside `map`, a `turned` or `confirmed` whose sentence
-   carries no counterfactual sense. **Warn only, never fail**, in the tier
+   on a malformed record: a section missing, empty or out of order, a verb
+   it does not know, `reused` outside `map`, `- none` beside lines, a
+   `turned` or `confirmed` whose sentence carries no counterfactual
+   construction (*would*, *about to*, *instead*, *otherwise*, *rather
+   than*). **Warn only, never fail**, in the tier
    decision 0009 set. It checks shape; whether a sentence is true stays with
    the reviewer. A branch with no update commit yet is normal, so absence of
    a record is never a warning. A plain `lint` does not read git at all.
