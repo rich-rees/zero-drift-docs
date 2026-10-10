@@ -138,7 +138,9 @@ test("isoSince: a bare date is UTC midnight, a time without an offset is UTC, an
   assert.equal(isoSince("2026-09-01"), "2026-09-01T00:00:00Z");
   assert.equal(isoSince("2026-09-01T09:00"), "2026-09-01T09:00Z");
   assert.equal(isoSince("2026-09-01 09:00:30+01:00"), "2026-09-01T09:00:30+01:00");
-  for (const x of ["", "yesterday", "2026-9-1", "2026-09-01T9", "v2.3.0"]) assert.equal(isoSince(x), null, x);
+  for (const x of ["", "yesterday", "2026-9-1", "2026-09-01T9", "v2.3.0", "2026-02-30", "2026-13-01", "2026-00-10", "2026-01-01T25:99Z", "2026-01-01T10:00:60", "2026-01-01T10:00+15:00", "2026-01-01T10:00+01:60"]) assert.equal(isoSince(x), null, x);
+  assert.equal(isoSince("2024-02-29"), "2024-02-29T00:00:00Z", "a leap day exists");
+  assert.equal(isoSince("2023-02-29"), null, "and only in a leap year");
 });
 
 test("tally: deterministic — two runs, identical bytes and exit codes", () => {
