@@ -1,6 +1,6 @@
 ---
 name: update
-description: "\"update ZDD\" — the Zero-Drift Docs finish ritual. Curate the changed artifacts (glossary, ADRs, code comments, semantic map), reconcile the branch's pattern plan (mint the blessings that survived, record the rest in the commit message, delete the plan), regenerate the codebase metadata and the indexes, and commit everything in the PR so docs and code merge atomically. Use before finishing any unit of work (a PR is one instantiation) in a repo that uses ZDD; triggers on \"update ZDD\"."
+description: "\"update ZDD\" — the Zero-Drift Docs finish ritual. Curate the changed artifacts (glossary, ADRs, code comments, semantic map), reconcile the branch's pattern plan (mint the blessings that survived, record the rest, delete the plan), regenerate the codebase metadata and the indexes, write the ZDD record (what each artifact turned, confirmed, supplied for reuse, or stored) into the commit's message, and commit everything in the PR so docs and code merge atomically. Use before finishing any unit of work (a PR is one instantiation) in a repo that uses ZDD; triggers on \"update ZDD\"."
 ---
 
 # zdd:update — the finish ritual
@@ -32,10 +32,10 @@ Run this as the definition of done for every unit of work — the spoken form is
    The plan file (`paths.patternsPlan`, default `zdd/patterns-plan.md`) was
    written by "choose patterns" before the build. Judge it against the code
    *as it will merge*, mint the blessings that survived, and write the
-   **pattern record** you will put in the commit message (step 6); then
-   `git rm` the plan, so lint in step 5 runs without it. No plan
-   on the branch: say so in one line, and still read the diff for a new
-   pattern or a copied precedent worth a blessing.
+   `blessings` section of the **ZDD record** you will put in the commit
+   message (step 6); then `git rm` the plan, so lint in step 5 runs without
+   it. No plan on the branch: say so in one line, and still read the diff
+   for a new pattern or a copied precedent worth a blessing.
 3. **Run the deriver.** Regenerates the codebase metadata from source:
    ```
    npx -y @rich-rees/zdd-engine@2.3.0 derive
@@ -73,10 +73,66 @@ Run this as the definition of done for every unit of work — the spoken form is
    ```
    npx -y @rich-rees/zdd-engine@2.3.0 lint
    ```
-6. **Commit all of it in the PR.** Code and docs merge atomically; the doc delta
-   is reviewed alongside the code delta. **This commit carries the plan file's
-   deletion** (staged in step 2) **and the pattern record in its message.**
-   CI's `lint --merge` fails while the plan exists.
+6. **Write the ZDD record and commit all of it in the PR.** Code and docs
+   merge atomically; the doc delta is reviewed alongside the code delta.
+   **This commit carries the plan file's deletion** (staged in step 2) **and
+   the ZDD record in its message** — see [below](#the-zdd-record). CI's
+   `lint --merge` fails while the plan exists, and warns on a record it
+   cannot fully read.
+
+## The ZDD record
+
+The record (decisions 0027–0029) is how ZDD builds evidence of which
+artifacts earn their place. It gathers the `ZDD: …` lines the session said
+during the work — each the moment an artifact **turned** a decision (you
+were about to do one thing; it sent you another way), **confirmed** one (you
+were going to do it; the artifact said yes), or showed code to **reuse** —
+plus what this unit of work **stored** in each artifact. Reading is never a
+use: a line that does not say what would otherwise have happened is a read,
+and is left out.
+
+Write it under a `ZDD record:` heading in the update commit's message, in
+this shape — **five sections, always all five, in this order; `- none` when
+a section has nothing**:
+
+```
+ZDD record:
+glossary:
+- confirmed: the glossary says an "offer" is a bid on a job, so the new table is called offers, not bids
+- stored: added the term "stall" (a job that stopped reporting progress)
+adrs:
+- turned: ADR-0015 says the app never reads the database directly; I was about to query jobs from Supabase and went through /api/jobs instead
+blessings:
+- followed: "How do I add a scheduled job?" (jobs slice) for the stall sweeper
+- minted: "How do I expose a table over the API?" (api slice), pointing at src/api/offers.ts
+map:
+- reused: save_thing() in src/db.py already saves and logs a change, so I did not write a new helper
+- stored: the offers feature page now lists the /offers route and the offers table as its own
+comments:
+- turned: the comment at src/api/jobs.ts:42 says the upstream call must not be retried, so I kept the single call
+- stored: wrote a why-comment at src/api/offers.ts:17 explaining the 24-hour expiry
+```
+
+- **The verb is fixed, the sentence is a person's.** Every line opens with
+  one verb — `turned`, `confirmed`, `stored` in any section; `reused` under
+  `map` only (the agent index and the codebase metadata are credited
+  through the map); under `blessings` the verbs from reconciling the plan
+  (`followed`, `departed`, `minted`, `dropped candidate`, `precedent`, `no
+  blessing applied`). After it, one sentence a reviewer who has never read
+  ZDD's docs can follow: name the thing by something they can open (a term,
+  an ADR number, a blessing's question, a path), then what happened to the
+  decision. A `turned` or `confirmed` line says what would otherwise have
+  happened; a `stored` line says what was written and, in a few words, what
+  it means.
+- **The map section** takes the plan's *Reuse* lines as `reused`, and a
+  slice added or extended as `stored`; the generated metadata gets no lines
+  of its own.
+- **`zdd-engine tally`** reads these out of git history and reports, per
+  section, the counts and the ADRs, terms and blessings no record has ever
+  named. CI's `lint --merge` warns (never fails) on a record it cannot fully
+  read: a missing section, an unknown verb, a `turned` with no
+  counterfactual. The verbs are what is counted; keep them exact.
+- **A squash merge loses the record**; a merge commit keeps it.
 
 ## Reconciling the pattern plan
 
@@ -105,16 +161,16 @@ kill a pattern, change it, or create one the plan never saw.
    the diff shows the build copied without declaring, is offered to the
    developer as a candidate blessing. **Mint it only on their word** — a
    precedent the session merely copied is not yet a decision.
-3. **Write the record** into the update commit's message, under a
-   `Pattern record:` heading, one line per piece:
+3. **Write the `blessings` section** of the ZDD record (the shape
+   [above](#the-zdd-record)), one line per piece, in plain sentences:
 
    ```
-   Pattern record:
-   - followed: <slice>: <trigger question> — <piece>
-   - departed: <slice>: <trigger question> — <piece> — because …
-   - minted: <slice>: <trigger question> — exemplar <path>
-   - dropped candidate: <question> — because …
-   - precedent: <path> — minted as <slice>: <question> | declined — because …
+   blessings:
+   - followed: "<trigger question>" (<slice>) for <piece>
+   - departed: "<trigger question>" (<slice>) for <piece>, because …
+   - minted: "<trigger question>" (<slice>), pointing at <path>
+   - dropped candidate: "<question>", because …
+   - precedent: <path>, minted as "<question>" (<slice>) | declined, because …
    - no blessing applied: <piece>
    ```
 
@@ -128,11 +184,14 @@ and the first record from git history — the plan is in the parent of the
 commit that deleted it (`git log --diff-filter=D -1 --format=%H -- <plan path>`,
 then `git show <that>^:<plan path>` and `git log -1 --format=%B <that>`).
 Reconcile the new diff against them and write an **amended record**
-(`Pattern record (amended):`, only what changed) into the new update commit.
+(`ZDD record (amended):`, the same five sections, only what changed) into
+the new update commit.
 
 A host harness may carry the plan and the record further — a build manifest
-that states the plan, a build summary that reports followed, departed and
-minted. The record in the commit message is the one ZDD relies on.
+that states the plan, a build summary that carries the ZDD record. It copies
+the record **out of the commit message**, never the other way round: the
+message is the one source ZDD's tally relies on. (Before 2.4 the record was
+`Pattern record:`, blessings only; the tally still reads that heading.)
 
 ## Notes
 
