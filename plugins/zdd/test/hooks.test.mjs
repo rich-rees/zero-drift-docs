@@ -226,6 +226,18 @@ test("fence blocks write-shaped shell over generated paths in the common spellin
   }
 });
 
+test("CAS-107 (#24): taking a side of a conflicted generated file is still refused, and the reason gives the regenerate-mid-merge route; any other refusal does not", () => {
+  for (const command of ["git checkout --theirs -- zdd/human-index.html", "git checkout --ours zdd/agent-index.md", "git restore --theirs zdd/graph.json"]) {
+    const r = fence("Bash", { command });
+    blocked(r, command);
+    const reason = JSON.parse(r.stdout).hookSpecificOutput.permissionDecisionReason;
+    assert.match(reason, /do not check out a side: with the merge open run derive then render \(they overwrite it\), git add the bundle, commit the merge, then render once more/, command);
+  }
+  const plain = fence("Bash", { command: "git checkout -- zdd/graph.json" });
+  blocked(plain, "plain checkout");
+  assert.doesNotMatch(JSON.parse(plain.stdout).hookSpecificOutput.permissionDecisionReason, /check out a side/);
+});
+
 test("fence allows reads, copies FROM generated files, and curated writes", () => {
   for (const command of ["cat zdd/agent-index.md", "cp zdd/graph.json /tmp/debug.json", "cp zdd/graph.json ../elsewhere.json", "grep foo zdd/adr-index.md", "ls zdd/metadata", "echo x > zdd/glossary.md", "git status"]) {
     silent(fence("Bash", { command }), command);

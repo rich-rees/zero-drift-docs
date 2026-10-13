@@ -181,7 +181,7 @@ test("mature codebase: an Express API, a React Router web app, a Python archiver
   assert.deepEqual(grepArtifacts(repo, "planted"), []);
 });
 
-test("hosted off GitHub: no workflow is written, the three commands are printed, the pre-push hook is the fallback; a merge conflict in a generated file: take either side, regenerate, the check passes", () => {
+test("hosted off GitHub: no workflow is written, the three commands are printed, the pre-push hook is the fallback; a merge conflict in a generated file: regenerate mid-merge, commit, render once more, the check passes", () => {
   const repo = scenario("young-app", { remote: "https://gitlab.com/example/app.git" });
   const json = bootstrapJson(repo, ["apply", `--answers=${answers("gl", {})}`]);
   assert.ok(!json.wrote.includes(".github/workflows/zdd.yml"));
@@ -211,14 +211,20 @@ test("hosted off GitHub: no workflow is written, the three commands are printed,
   assert.match(merge.stdout + merge.stderr, /CONFLICT/, merge.stdout + merge.stderr);
   const conflicted = git(repo, "diff", "--name-only", "--diff-filter=U").split("\n").filter(Boolean);
   assert.ok(conflicted.includes("zdd/agent-index.md"), conflicted.join(","));
-  // The instructions' recipe: take either side of a generated file, finish the merge, regenerate.
-  for (const f of conflicted) {
-    git(repo, "checkout", "--theirs", "--", f);
-    git(repo, "add", f);
-  }
+  // The instructions' recipe (CAS-107, #24): no checkout of a side — the
+  // fence refuses one on a generated file. With the merge open, derive and
+  // render overwrite the conflicted files; add the bundle, commit the merge;
+  // render once more, since the merge commit moves the merge-base.
+  assert.equal(engine(repo, ["derive"]).status, 0);
+  const mid = engine(repo, ["render"]);
+  assert.equal(mid.status, 0, mid.stderr);
+  for (const f of conflicted) assert.doesNotMatch(readFileSync(join(repo, f), "utf8"), /^<<<<<<< /m, `${f} still carries conflict markers`);
+  git(repo, "add", "zdd");
   git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "merge a");
-  assert.notEqual(engine(repo, ["render", "--check"]).status, 0, "stale until regenerated");
   assert.equal(engine(repo, ["render"]).status, 0);
+  git(repo, "add", "zdd");
+  spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "render after the merge"], { cwd: repo, encoding: "utf8" });
+  assert.equal(engine(repo, ["derive", "--check"]).status, 0);
   assert.equal(engine(repo, ["render", "--check"]).status, 0);
   assert.match(readFileSync(join(repo, "zdd", "agent-index.md"), "utf8"), /## Orders[\s\S]*## Menu|## Menu[\s\S]*## Orders/);
 });

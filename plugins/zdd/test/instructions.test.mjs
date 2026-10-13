@@ -91,7 +91,10 @@ test("the instructions carry the rules the findings asked for (13, C11, C12, C13
   const body = instructionsBody();
   assert.match(body, /claude plugin install mattpocock-skills@zero-drift-docs --scope project.*then.*claude plugin install zdd@zero-drift-docs --scope project/s, "13: both commands, Pocock first");
   assert.match(body, /branch is behind main[\s\S]*merge main/, "C11: the skew cases");
-  assert.match(body, /git checkout --theirs -- <file>[\s\S]*git add <file>[\s\S]*rebase/, "C12: the merge steps and rebase");
+  assert.match(body, /merge open, run `derive` then\s+`render`[\s\S]*`git add` the bundle and commit the merge; then `render` once\s+more[\s\S]*merge-base[\s\S]*rebase/, "C12 as CAS-107 left it: regenerate mid-merge, commit, render once more, and rebase");
+  assert.doesNotMatch(body, /git checkout --theirs/, "CAS-107 (#24): the fence refuses a checkout of a generated file, so the instructions never ask for one");
+  assert.match(body, /`zdd\/agent-index\/` when it has two levels/, "CAS-107 (DiO 4): the two-level index's folder is generated too");
+  assert.match(body, /Two ADRs with one number[\s\S]*next free number[\s\S]*every citation/, "CAS-107 finding 6: the renumber route");
   assert.match(body, /check for existing code to reuse/, "C13: reuse first");
   assert.match(body, /mint the blessings that survived, record the rest in the commit\s+message, delete the plan/, "C13: reconcile, spelled out");
   assert.match(body, /built on Matt\s+Pocock's skills/, "C14: why");

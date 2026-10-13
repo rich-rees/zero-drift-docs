@@ -52,6 +52,8 @@ const DESTRUCTIVE = /^(rm|rmdir|rd|del|erase|unlink|remove-item|ri)$/i;
 // separately); `git` by sub-verb.
 const WRITE_VERB = /^(mv|move-item|mi|move|rename-item|rni|ren|rename|tee|truncate|dd|touch|set-content|sc|out-file|add-content|ac|clear-content|clc|new-item|ni)$/i;
 const GIT_WRITE_SUBVERB = /^(checkout|restore|clean|rm|mv)$/i;
+// `git checkout --theirs` / `git restore --ours` — taking a side of a conflict.
+const SIDE_CHECKOUT = /\bgit\b[^;&|\n]*\b(?:checkout|restore)\b[^;&|\n]*\s--(?:theirs|ours)\b/i;
 // Script-language one-liners can write anything they name — but they read
 // far more often than they write, so a path literal in one is a candidate
 // only when a write API is named alongside it (CR-074). `>` inside the script
@@ -373,7 +375,13 @@ function main() {
       `To lift the fence for this repo set "hooks": { "fence": false } in zdd/config.json.`
     : `ZDD fence: ${target} is a generated artifact — never hand-edit it. ` +
       `Run the ZDD update ritual ("update ZDD" / the \`update\` skill) to regenerate it ` +
-      `(zdd-engine derive + render). To lift the fence for this repo set "hooks": { "fence": false } in zdd/config.json.`;
+      `(zdd-engine derive + render). ` +
+      // Taking a side of a conflicted generated file (CAS-107, #24): the
+      // instructions' route never checks one out, so say it here too.
+      (SHELL_TOOLS.has(tool) && SIDE_CHECKOUT.test(str(args.command))
+        ? `For a merge conflict in a generated file, do not check out a side: with the merge open run derive then render (they overwrite it), git add the bundle, commit the merge, then render once more and commit (the human index reads the merge-base, which the merge moved). `
+        : "") +
+      `To lift the fence for this repo set "hooks": { "fence": false } in zdd/config.json.`;
   // The block is the JSON PreToolUse deny reply on stdout with exit 0 — the
   // shape both hosts document AND honour (decision 0007). Exit 2 + stderr was
   // observed to fail open in Codex 0.145.0 (hook "Failed", edit applied). The
