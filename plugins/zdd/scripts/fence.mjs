@@ -241,10 +241,12 @@ function shellTarget(command, cwd, hit) {
       // for a copy or a rename, whose destination comes second.
       candidates.push(...operands, ...writeApiTargets(simple));
     }
-    for (const c of candidates) {
-      // Against `-C`'s folder only: `git -C other checkout -- zdd/graph.json`
-      // writes other/zdd/graph.json, not ours (CR-024).
-      const t = hit(c, base, { ancestor: destructive });
+    for (const [i, c] of candidates.entries()) {
+      // A redirect is the shell's, so it resolves where the shell stands
+      // (`git -C other status > zdd/graph.json` writes ours, CR-025); git's
+      // own operands resolve against `-C`'s folder only (`git -C other
+      // checkout -- zdd/graph.json` writes other/zdd/graph.json, CR-024).
+      const t = hit(c, i < redirects.length ? cwd : base, { ancestor: destructive });
       if (t) return t;
     }
   }
