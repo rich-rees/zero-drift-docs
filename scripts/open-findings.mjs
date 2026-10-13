@@ -6,7 +6,9 @@
 // recommends a release train when the rule says so — any blocker, ten or
 // more findings, or the oldest past thirty days. Silent when `gh` is not
 // installed, not logged in, or offline: it is advisory, and a session start
-// must never wait on the network for long.
+// must never wait on the network for long. The list it counts is ZDD's
+// only backlog, and a release starts from it (CLAUDE.md, "Findings are the
+// backlog").
 //
 //   node scripts/open-findings.mjs            # one line, or nothing
 //
