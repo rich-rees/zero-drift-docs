@@ -246,7 +246,7 @@ test("2.4.1 CR-006: git's global options before the subcommand do not hide a wri
     "git -C zdd checkout -- graph.json",
     "git -C zdd rm -r metadata",
   ]) blocked(fence("Bash", { command }), command);
-  for (const command of ["git -C . status", "git --no-pager log -- zdd/graph.json", "git -C zdd diff graph.json"]) silent(fence("Bash", { command }), command);
+  for (const command of ["git -C . status", "git --no-pager log -- zdd/graph.json", "git -C zdd diff graph.json", "git -C other checkout -- zdd/graph.json"]) silent(fence("Bash", { command }), command);
 });
 
 test("2.4.1 CR-005: the two-level index's area folder is fenced for any index name — `.md`, another extension, none — as the engine names it", () => {

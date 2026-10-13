@@ -242,7 +242,9 @@ function shellTarget(command, cwd, hit) {
       candidates.push(...operands, ...writeApiTargets(simple));
     }
     for (const c of candidates) {
-      const t = hit(c, base, { ancestor: destructive }) ?? (base !== cwd ? hit(c, cwd, { ancestor: destructive }) : null);
+      // Against `-C`'s folder only: `git -C other checkout -- zdd/graph.json`
+      // writes other/zdd/graph.json, not ours (CR-024).
+      const t = hit(c, base, { ancestor: destructive });
       if (t) return t;
     }
   }
