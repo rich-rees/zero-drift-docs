@@ -149,13 +149,15 @@ const numOf = (f) => f.slice(0, 4);
 // conflict (different filenames), silently yielding two ADRs with one number —
 // and number is what citations and the supersession lint key on. First PR to
 // merge keeps the number; the later branch renumbers when it syncs master.
+// Which file that branch added is the branch's to know, never the sort
+// order's (CAS-107 CR-001): both are named and neither is picked.
 const seenNum = new Map();
 for (const file of adrFiles) {
   const n = numOf(file);
   if (seenNum.has(n)) {
     problems.push(
-      `${file}: duplicate ADR number ${n} (also ${seenNum.get(n)}) — a parallel ` +
-        `branch merged first; renumber this file (and its citations) to the next free number`,
+      `duplicate ADR number ${n}: ${seenNum.get(n)} and ${file} — two branches each minted it; ` +
+        `the ADR the later-merged branch added takes the next free number (rename it, retitle it, rewrite its citations), the other keeps ${n}`,
     );
   } else {
     seenNum.set(n, file);

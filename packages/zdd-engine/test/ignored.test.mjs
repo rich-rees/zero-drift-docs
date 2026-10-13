@@ -244,7 +244,8 @@ test("CR-423: an ignored import target does not exist for the components extract
   assert.ok(!JSON.stringify(c.records).includes("web/src/gen/Gen.tsx"), "no edge into it either");
   const j = jobs({ repoRoot: root, options: {}, io: makeExtractorIo(root, "jobs") });
   assert.deepEqual(j.records, [], "a job whose file exists only as ignored build output resolves to no file");
-  assert.ok(j.diagnostics.some((d) => /'worker' runs dist\/worker\.mjs, which resolves to no file/.test(d)), j.diagnostics.join("\n"));
+  // Since CAS-107 said on every derive, as a warning naming the build output.
+  assert.ok(j.warnings.some((w) => /'worker' runs dist\/worker\.mjs, which is not a file in the repo \(build output\?\)/.test(w)), j.warnings.join("\n"));
 });
 
 test("CR-408: a Next.js wrapper page does not take an ignored component as its resource; a React Router import never resolves to an ignored candidate that would shadow a tracked one", async (t) => {

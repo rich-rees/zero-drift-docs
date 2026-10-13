@@ -38,7 +38,7 @@ test("the update skill's example ZDD record parses with the engine's parser: eve
 });
 
 test("the blessings shape the reconciler writes uses only the engine's blessing verbs, and parses when placed in a full record", () => {
-  const shape = fence(UPDATE, 'blessings:\n   - followed: "<trigger question>"');
+  const shape = fence(UPDATE, 'blessings:\n   - followed: the ZDD blessing "<trigger question>"');
   const verbs = [...shape.matchAll(/^- ([a-z ]+?):/gm)].map((m) => m[1]);
   assert.deepEqual(verbs, BLESSING_VERBS, "the six verbs, in the skill's order");
   const full = "x\n\nZDD record:\nglossary:\n- none\nadrs:\n- none\n" + shape.replace(/<[^>]+>|…/g, "thing") + "map:\n- none\ncomments:\n- none\n";
@@ -55,7 +55,7 @@ test("the instructions file carries the say-it rule in the record's words, and i
   for (const s of SECTIONS) assert.ok(INSTRUCTIONS.includes(`\`${s}\``), `instructions name the ${s} section`);
   assert.match(INSTRUCTIONS, /zdd-engine tally/);
   // The example line, as an adrs entry, is a turned line with a counterfactual.
-  const m = INSTRUCTIONS.match(/`ZDD: ADR-0015\s+turned — ([^`]+)`/);
+  const m = INSTRUCTIONS.match(/`ZDD: the ZDD ADR-0015\s+turned this — ([^`]+)`/);
   assert.ok(m, "the instructions show an example line");
   const r = parseRecord(`x\n\nZDD record:\nglossary:\n- none\nadrs:\n- turned: ADR-0015 ${m[1].replace(/\s+/g, " ")}\nblessings:\n- none\nmap:\n- none\ncomments:\n- none\n`);
   assert.deepEqual(r.problems, []);
@@ -66,7 +66,8 @@ test("the instructions file carries the say-it rule in the record's words, and i
 
 test("load declares with the ZDD: prefix and claims no benefit; patterns says the reuse line; update's description names the record", () => {
   const load = read("skills", "load", "SKILL.md");
-  assert.match(load, /ZDD: loaded glossary/);
+  assert.match(load, /ZDD: loaded the ZDD glossary/);
+  assert.match(load, /Name every artifact as ZDD.s/, "CAS-107 finding 5");
   assert.match(load, /read, never a use/);
   const patterns = read("skills", "patterns", "SKILL.md");
   assert.match(patterns, /ZDD: map reused — /);
