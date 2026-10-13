@@ -245,6 +245,7 @@ test("2.4.1 CR-006: git's global options before the subcommand do not hide a wri
     "git -c core.autocrlf=false checkout -- zdd/graph.json",
     "git -C zdd checkout -- graph.json",
     "git -C zdd rm -r metadata",
+    "git -C other status > zdd/graph.json", // CR-025: a redirect is the shell's, resolved where the shell stands
   ]) blocked(fence("Bash", { command }), command);
   for (const command of ["git -C . status", "git --no-pager log -- zdd/graph.json", "git -C zdd diff graph.json", "git -C other checkout -- zdd/graph.json"]) silent(fence("Bash", { command }), command);
 });
