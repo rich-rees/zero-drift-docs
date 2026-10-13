@@ -38,12 +38,12 @@ Run this as the definition of done for every unit of work — the spoken form is
    for a new pattern or a copied precedent worth a blessing.
 3. **Run the deriver.** Regenerates the codebase metadata from source:
    ```
-   npx -y @rich-rees/zdd-engine@2.4.0 derive
+   npx -y @rich-rees/zdd-engine@2.4.1 derive
    ```
 4. **Run the renderer.** Rebuilds the graph artifact (`zdd/graph.json`), the
    agent index, the ADR index, the blessing index, and the human index:
    ```
-   npx -y @rich-rees/zdd-engine@2.4.0 render
+   npx -y @rich-rees/zdd-engine@2.4.1 render
    ```
 5. **Lint the stores.** Supersession symmetry, blessing citations and every
    blessing's trigger question (blocking); a blessing with no reason or over
@@ -51,15 +51,31 @@ Run this as the definition of done for every unit of work — the spoken form is
    and the **claims**: every route, table, function and surface no feature
    slice links, and any record two slices claim. Read the list against the
    diff — a record this unit of work added or changed belongs in exactly one
-   slice now. Three more lines can appear (ZDD 2.1), all warnings: **API
+   slice now. Four more lines can appear (ZDD 2.1 and 2.4.1), all warnings: **API
    calls lint could not place** (a `${variable}` segment matches only a
    route parameter — type the variable as a union of literals, or the edge
-   stays missing); **jobs with no stated mode** (commit a Railway file or
-   set `extractorOptions.jobs.modes`); and, from `derive`, **an environment
-   name no declared service covers** (add the service to
+   stays missing); **jobs with no stated mode** (set
+   `extractorOptions.jobs.modes`, or `mode` on a `jobs.entries` line; a
+   Railway file states only a schedule — its `cronSchedule` makes a job
+   scheduled — and Railway applies that file over its dashboard, so never
+   commit one just to state a mode); and, from `derive`, **an environment name no declared
+   service covers** (add the service to
    `extractorOptions["external-services"].services`, or its prefix to
-   `ignore`). Each
-   names the file; fix it in this unit of work where the diff caused it.
+   `ignore`) and **a job whose start command names no file in the repo**
+   (build output: name its source file in `extractorOptions.jobs.entries`,
+   as the warning shows). Each names the file; fix it in this unit of work
+   where the diff caused it.
+   - **A duplicate ADR number** fails lint after a merge from main: a
+     parallel branch minted the same number and merged first. This branch
+     renumbers: take the next free number, rename the ADR file, change the
+     number in its title, and rewrite every citation of it — supersedes /
+     superseded-by stamps, glossary and map links, code comments — then
+     regenerate. Search for `ADR-<old number>` and the old filename before
+     and after, so none is left. A `ZDD record` this branch already
+     committed is never rewritten (no history rewrite): this update commit
+     carries a `ZDD record (amended):` whose `adrs` section has the line
+     `- stored: renumbered the ZDD ADR <old> to <new>, so the earlier record
+     lines citing <old> mean <new>`.
    - `claims.strict` off (the default): the lists are warnings, and the rest
      is the backlog a repo carries from adoption.
    - `claims.strict` on (check `zdd/config.json`): each is a **failure**,
@@ -71,7 +87,7 @@ Run this as the definition of done for every unit of work — the spoken form is
      its kind; otherwise it is a warning, so that
      switching an extractor on never turns a green lint red by itself.
    ```
-   npx -y @rich-rees/zdd-engine@2.4.0 lint
+   npx -y @rich-rees/zdd-engine@2.4.1 lint
    ```
 6. **Write the ZDD record and commit all of it in the PR.** Code and docs
    merge atomically; the doc delta is reviewed alongside the code delta.
@@ -98,19 +114,19 @@ a section has nothing**:
 ```
 ZDD record:
 glossary:
-- confirmed: the glossary says an "offer" is a bid on a job, so the new table is called offers rather than bids
-- stored: added the term "stall" (a job that stopped reporting progress)
+- confirmed: the ZDD glossary says an "offer" is a bid on a job, so the new table is called offers rather than bids
+- stored: added the term "stall" (a job that stopped reporting progress) to the ZDD glossary
 adrs:
-- turned: ADR-0015 says the app never reads the database directly; I was about to query jobs from Supabase and went through /api/jobs instead
+- turned: ZDD ADR-0015 says the app never reads the database directly; I was about to query jobs from Supabase and went through /api/jobs instead
 blessings:
-- followed: "How do I add a scheduled job?" (jobs slice) for the stall sweeper
-- minted: "How do I expose a table over the API?" (api slice), pointing at src/api/offers.ts
+- followed: the ZDD blessing "How do I add a scheduled job?" (jobs slice) for the stall sweeper
+- minted: the ZDD blessing "How do I expose a table over the API?" (api slice), pointing at src/api/offers.ts
 map:
-- reused: save_thing() in src/db.py already saves and logs a change, so I did not write a new helper
-- stored: the offers feature page now lists the /offers route and the offers table as its own
+- reused: ZDD's codebase metadata showed save_thing() in src/db.py already saves and logs a change, so I did not write a new helper
+- stored: the ZDD map's offers feature page now lists the /offers route and the offers table as its own
 comments:
-- turned: the comment at src/api/jobs.ts:42 says the upstream call must not be retried, so I kept the single call instead of adding a retry loop
-- stored: wrote a why-comment at src/api/offers.ts:17 explaining the 24-hour expiry
+- turned: the ZDD-kept comment at src/api/jobs.ts:42 says the upstream call must not be retried, so I kept the single call instead of adding a retry loop
+- stored: wrote a ZDD-kept why-comment at src/api/offers.ts:17 explaining the 24-hour expiry
 ```
 
 - **The verb is fixed, the sentence is a person's.** Every line opens with
@@ -119,7 +135,9 @@ comments:
   through the map); under `blessings` the verbs from reconciling the plan
   (`followed`, `departed`, `minted`, `dropped candidate`, `precedent`, `no
   blessing applied`). After it, one sentence a reviewer who has never read
-  ZDD's docs can follow: name the thing by something they can open (a term,
+  ZDD's docs can follow: name the thing as ZDD's ("the ZDD glossary", "ZDD
+  ADR-0015", "the ZDD blessing", "ZDD's codebase metadata", "the ZDD map", "a
+  ZDD-kept comment") by something they can open (a term,
   an ADR number, a blessing's question, a path), then what happened to the
   decision. A `turned` or `confirmed` line says what would otherwise have
   happened, in those words — *would*, *about to*, *instead*, *otherwise*,
@@ -171,9 +189,9 @@ kill a pattern, change it, or create one the plan never saw.
 
    ```
    blessings:
-   - followed: "<trigger question>" (<slice>) for <piece>
-   - departed: "<trigger question>" (<slice>) for <piece>, because …
-   - minted: "<trigger question>" (<slice>), pointing at <path>
+   - followed: the ZDD blessing "<trigger question>" (<slice>) for <piece>
+   - departed: the ZDD blessing "<trigger question>" (<slice>) for <piece>, because …
+   - minted: the ZDD blessing "<trigger question>" (<slice>), pointing at <path>
    - dropped candidate: "<question>", because …
    - precedent: <path>, minted as "<question>" (<slice>) | declined, because …
    - no blessing applied: <piece>
@@ -203,7 +221,8 @@ message is the one source ZDD's tally relies on. (Before 2.4 the record was
 - The ritual is **diff-anchored, not memory-anchored** — a fresh session can run
   it from the PR diff, the touched code, and the artifacts checkpointed en route.
 - **Never hand-edit the generated artifacts** (`zdd/metadata/`, `zdd/graph.json`,
-  the agent, ADR and blessing indexes, the human index) — regenerate. The fence hook (if opted in)
+  the agent index and its area folder when it has two levels, the ADR and
+  blessing indexes, the human index; at the paths `zdd/config.json` sets) — regenerate. The fence hook (if opted in)
   refuses the edit; the CI check (if wired) fails otherwise.
 - Read back any working file (`TEMPSTATE.md`) and delete it before merge —
   durable residue moves to an artifact first. The pattern plan is one such

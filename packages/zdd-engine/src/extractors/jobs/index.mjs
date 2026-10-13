@@ -588,6 +588,7 @@ export function derive({ repoRoot, options, io }) {
   // (sorted manifests) with a diagnostic.
   const records = [];
   const byName = new Map();
+  const unresolved = [];
   for (const c of merged) {
     if (byName.has(c.name)) {
       // A queue named like the process that consumes it (a Procfile's
@@ -614,7 +615,9 @@ export function derive({ repoRoot, options, io }) {
     if (c.parsed) {
       file = resolveTarget(c.dir, c.parsed);
       if (!file) {
-        diagnostics.push(`${c.manifest}: '${c.name}' runs ${c.parsed.kind === "file" ? c.parsed.target : `module ${c.parsed.target}`}, which resolves to no file under ${c.dir} — skipped`);
+        // Said once: as a warning below, or as a diagnostic when another
+        // declaration of the name made the record (CR-023).
+        unresolved.push({ c, runs: c.parsed.kind === "file" ? c.parsed.target : `module ${c.parsed.target}` });
         continue;
       }
     }
@@ -656,5 +659,25 @@ export function derive({ repoRoot, options, io }) {
     });
   }
   records.sort((a, b) => (a.id < b.id ? -1 : 1));
-  return { records, diagnostics };
+  // A declared process whose command names no file in the repo (2.4.1,
+  // the first adopter's `node apps/upload-worker/dist/server.js`: build output, never
+  // committed) is left off the map — said on every derive, never guessed at,
+  // unless another declaration of the same name made the record.
+  const warnings = [];
+  for (const { c, runs } of unresolved) {
+    if (byName.has(c.name)) {
+      diagnostics.push(`${c.manifest}: '${c.name}' runs ${runs}, which resolves to no file under ${c.dir} — skipped (${byName.get(c.name)} declares it)`);
+      continue;
+    }
+    const config = c.source === "config";
+    warnings.push(
+      `${c.manifest}: '${c.name}' runs ${runs}, which is not a file in the repo (build output?) — the job is not on the map. ` +
+        (config
+          ? "Point this entry's file or module at the source file"
+          : // The same folder and command make the manifest this entry's
+            // deployment record (its schedule and file join the job).
+            `Name its source file in extractorOptions.jobs.entries: ${JSON.stringify({ name: c.name, file: "<the source file>", ...(c.dir === "." ? {} : { cwd: c.dir }), command: c.command }).replace(/,"/g, ', "').replace(/":/g, '": ')}`),
+    );
+  }
+  return { records, diagnostics, warnings };
 }

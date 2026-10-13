@@ -83,12 +83,18 @@ names; the `zdd/…` names apply only where a key is absent.
    touching.
 4. **Declare your selection aloud**, on one line with the `ZDD:` prefix
    every ZDD line in a session carries, e.g.
-   *"ZDD: loaded glossary, ADR index, ADR-0007, ADR-0009 — cited by the
-   task."* A wrong selection is then visible immediately. Loading is a
-   **read, never a use**: this line claims no benefit and goes into no
-   record. A use is said later, at the moment an artifact turns or confirms
-   a decision (`ZDD: ADR-0009 turned — …`, see `zdd/instructions.md`), and
-   "update ZDD" writes those into the ZDD record.
+   *"ZDD: loaded the ZDD glossary, the ZDD ADR index, ZDD ADR-0007 and
+   ADR-0009 — cited by the task."* A wrong selection is then visible
+   immediately. Loading is a **read, never a use**: this line claims no
+   benefit and goes into no record. A use is said later, at the moment an
+   artifact turns or confirms a decision (`ZDD: the ZDD ADR-0009 turned
+   this — …`, see `zdd/instructions.md`), and "update ZDD" writes those into
+   the ZDD record. **Name every artifact as ZDD's** — "ZDD blessing", "ZDD
+   ADR", "the ZDD glossary", "the ZDD map", "ZDD's codebase metadata", "a
+   ZDD-kept code comment" — there and whenever you act on one ("I've found a
+   ZDD blessing for uploading a file, so I'll read its exemplar to see if it
+   can be reused"), so the person reading along can tell the decision came
+   from ZDD rather than from your own judgement.
 5. **Read the code fresh.** The artifacts orient you; they never replace reading
    the source. Where prose and code disagree, the code wins — and the prose is a
    ritual finding to fix (see `update`).
