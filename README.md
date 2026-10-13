@@ -4,7 +4,7 @@ A documentation architecture for repos built by **human + agent pairs**. ZDD kee
 seven documentation artifacts *at most one unit of work behind the code* — and, with
 CI, makes drift in the machine-generated ones **un-mergeable**.
 
-> **Status: 2.4.0.** The plugin installs in Claude Code
+> **Status: 2.4.1.** The plugin installs in Claude Code
 > and in Codex from this one repo; `bootstrap` detects your stack (or grills
 > for it on a greenfield repo), proposes extractors with evidence, and *writes*
 > the opt-ins; the engine (`packages/zdd-engine`, npm `@rich-rees/zdd-engine`)
@@ -143,6 +143,16 @@ hook, config schema + example, the seed ADR-0001, and the extractor scaffold).
 | External services | `external-services` (`services` before 2.3) | declared markers — a package import, an env-name prefix (names only, never values); **depends on** from the files that carry a marker — never a file that reaches the provider through a settings object; undeclared candidates warned about on every derive |
 | Realtime | *(in `react-router` / `nextjs`)* | a page's Supabase Realtime subscription — `.on('postgres_changes', { table })` or a helper you name — as a **subscribes** edge |
 
+**A Railway file is read by Railway too.** The `jobs` extractor learns a
+Railway service's start command and schedule from a committed
+`railway.toml` / `railway.json`, but Railway applies that file as well — its
+values override the dashboard — and Railway is retiring the format (old
+files work until 2026-12-01; its Infrastructure as Code replaces them).
+Commit one only if you mean Railway to apply it; otherwise keep it matching
+what the dashboard runs, as a statement for the map. A start command that
+names build output (`node dist/server.js`) is not a file in the repo: derive
+warns, and a `jobs.entries` line in config names the source file.
+
 Vue, Svelte and Angular are not read: write a local extractor with the
 `extractor` skill (below) and, once it is proven on a real repo, lift it in.
 
@@ -240,7 +250,7 @@ reviewable file, never one question per item.
 from [the releases page](https://github.com/rich-rees/zero-drift-docs/releases)):
 
 ```
-claude plugin marketplace add rich-rees/zero-drift-docs@v2.4.0 --scope project
+claude plugin marketplace add rich-rees/zero-drift-docs@v2.4.1 --scope project
 claude plugin install zdd@zero-drift-docs --scope project
 ```
 
@@ -365,8 +375,8 @@ by hand once:
 
 1. In `.claude/settings.json`, set
    `extraKnownMarketplaces["zero-drift-docs"].source.ref` to the new tag
-   (`"v2.4.0"`). No lock there? Add the marketplace from the repo's folder with
-   `claude plugin marketplace add rich-rees/zero-drift-docs@v2.4.0 --scope project`.
+   (`"v2.4.1"`). No lock there? Add the marketplace from the repo's folder with
+   `claude plugin marketplace add rich-rees/zero-drift-docs@v2.4.1 --scope project`.
 2. Restart Claude Code. The session's first line names the commands that move
    your machine (on a machine where the marketplace was ever added without a
    scope, that includes `claude plugin marketplace remove zero-drift-docs
@@ -440,6 +450,10 @@ saying no to a row is a visible choice, not a fork.
 
 ## Roadmap
 
+- [x] **2.4.1** — the findings from Cascade's and DiO's moves to 2.4.0:
+      ZDD named in every use line, generated-file conflicts regenerated
+      mid-merge, the duplicate-ADR-number lint tested and its renumber
+      written down, and a quieter, fuller upgrade *(CAS-107)*.
 - [x] **2.4.0** — the ZDD record: the agent says, at the moment, when an
       artifact turned or confirmed a decision or showed code to reuse;
       "update ZDD" writes those lines into the commit's message in five
@@ -751,6 +765,29 @@ warning can say "behind".
     `lint --merge` warns, never fails, on such a record, and a refused line
     is left out of the tally; a branch with no update commit is never
     warned.
+- **`2.4.1` — findings from the 2.4.0 adoptions.** A patch: no
+  config-schema or metadata-contract change, no new command or generated
+  file. **What moves on the bump**: nothing in `derive --check` or
+  `render --check`; "upgrade ZDD" rewrites `zdd/instructions.md` (and the
+  `AGENTS.md` copy), the pins, and an owned workflow's pre-2.2 header.
+  - *ZDD named*: every `ZDD: …` line, and every moment the agent finds or
+    creates an artifact, names it as ZDD's ("ZDD blessing", "ZDD ADR", "the
+    ZDD glossary"), so a reader can tell the decision came from ZDD.
+  - *Merge conflicts in generated files*: regenerate mid-merge — derive,
+    render, `git add`, commit the merge — then render once more, since the
+    human index reads the merge-base. The instructions no longer say to
+    check out a side, which the fence refuses; its refusal now names this
+    route (issue #24).
+  - *Duplicate ADR numbers*: the lint has failed on them since the engine
+    was extracted; it is now tested, and the instructions say how the later
+    branch renumbers.
+  - *Upgrade*: the text pass asks only about rules changed since the repo's
+    pin (each rule carries the release that last changed it); every upgrade
+    offers an opt-in extractor whose evidence it finds; a lint step passing
+    `--merge` under its own condition is kept and named, never rewritten.
+  - *Background work*: a start command naming build output warns on every
+    derive with the `jobs.entries` remedy; the README says a committed
+    Railway file is applied by Railway too.
 
 ## Contributing
 

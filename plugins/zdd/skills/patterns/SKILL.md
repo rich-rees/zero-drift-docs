@@ -62,9 +62,12 @@ exists. The agent index and metadata paths are the ones `load` used.
    metadata (`zdd/metadata/`: functions, routes, modules, tables) for
    something that already does it, then grep the code. A function to reuse is
    a line in the plan, so duplicated logic is caught as well as a wrong
-   pattern. **Say it at the moment** (`ZDD: map reused — save_thing() in
-   src/db.py already saves and logs a change, so no new helper`): that is
-   the one use the inventory gets credit for. The plan's *Reuse* line below
+   pattern. **Say it at the moment** (`ZDD: map reused — ZDD's codebase
+   metadata shows save_thing() in src/db.py already saves and logs a change,
+   so no new helper`): that is the one use the inventory gets credit for.
+   Name blessings the same way as you open them ("I've found a ZDD blessing
+   for uploading a file, so I'll read its exemplar") and when you propose
+   one ("I'm going to create a ZDD blessing here for …"). The plan's *Reuse* line below
    is the same reuse written down; "update ZDD" carries it into the ZDD
    record's `map` section as one `reused` line (decision 0027).
 5. **Name any unblessed precedent.** Existing code you intend to copy that no

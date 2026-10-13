@@ -126,7 +126,7 @@ It writes nothing. Walk the person through it in plain words, in this order:
 4. **Their own text that speaks to a ZDD rule.** The plan lists every
    paragraph or bullet in `CLAUDE.md` / `AGENTS.md`, outside ZDD's line or
    block, that speaks to one of ZDD's rules — never a whole section — and
-   prints **what ZDD now says** beside it. The unit is the whole paragraph
+   prints **what ZDD now says** beside it — only for the rules ZDD changed since the repo's pin, so text already read against an unchanged rule is not asked about again (2.4.1). The unit is the whole paragraph
    or bullet, shown in full: that is what `--drop` removes. For each one,
    read the two together and tell the person, in plain words: **same** (it
    says what ZDD's instructions already say — safe to remove, their call),
@@ -174,7 +174,7 @@ notes match the plan's.
 Work through every note that asks something, one question at a time, each
 recorded by the script, never by hand (the remaining questions of about 5):
 
-- **An opt-in extractor offered with evidence** (2.1): say what the person
+- **An opt-in extractor offered with evidence** (every upgrade, since 2.4.1: one that is off but whose evidence detection finds): say what the person
   would see ("the map would show which code depends on Sentry and Resend"),
   show the evidence and ask. On yes, a repair apply with the extractor added
   — `apply --answers=<file>` where the file is `{ "extractors": [<current…>,
@@ -205,9 +205,9 @@ node "$PLUGIN/scripts/bootstrap.mjs" preflight
 Then, with the engine this plugin pins:
 
 ```
-npx -y @rich-rees/zdd-engine@2.4.0 derive
-npx -y @rich-rees/zdd-engine@2.4.0 render
-npx -y @rich-rees/zdd-engine@2.4.0 lint
+npx -y @rich-rees/zdd-engine@2.4.1 derive
+npx -y @rich-rees/zdd-engine@2.4.1 render
+npx -y @rich-rees/zdd-engine@2.4.1 lint
 ```
 
 Show what moved in the generated artifacts and say why, from the notes (a
@@ -310,4 +310,24 @@ https://github.com/rich-rees/zero-drift-docs/issues, labelled `finding`.
   that no record ever named.
 - **`lint --merge` warns, never fails,** on a record it cannot fully read.
   No config-schema or metadata-contract change; `derive --check` and
+  `render --check` do not move on the bump.
+
+### Upgrading to 2.4.1 (findings from the 2.4.0 adoptions)
+
+- **ZDD is named.** `zdd/instructions.md` (rewritten by this run) asks the
+  agent to name each artifact as ZDD's — "ZDD blessing", "ZDD ADR", "the ZDD
+  glossary" — in every `ZDD: …` line and whenever it finds or creates one,
+  so a reader can tell the decision came from ZDD.
+- **Merge conflicts in generated files** are regenerated mid-merge: derive,
+  render, `git add`, commit the merge, then render once more and commit.
+  Never a checked-out side — the fence refuses that, and now says this
+  route. **Two ADRs with one number** are renumbered by the later branch.
+- **Upgrade itself**: an owned workflow's old header comment is rewritten;
+  a lint step that passes `--merge` under its own condition is kept and
+  named; every upgrade offers an opt-in extractor whose evidence it finds;
+  the text pass asks only about rules this release changed.
+- **Background work**: a start command naming build output warns on every
+  derive with the `jobs.entries` remedy. A committed Railway file is read by
+  Railway too — commit one only if Railway should apply it.
+- No config-schema or metadata-contract change; `derive --check` and
   `render --check` do not move on the bump.
