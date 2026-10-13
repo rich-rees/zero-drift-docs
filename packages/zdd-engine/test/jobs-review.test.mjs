@@ -66,11 +66,11 @@ test("CR-507: only a cron under the top-level on.schedule is a schedule; a `- cr
   assert.deepEqual(scanWorkflow('name: Q\n"on":\n  schedule:\n    - cron: "5 5 * * *"\n'), { crons: ["5 5 * * *"], name: "Q" });
 });
 
-test("CR-508: a command whose target is a folder is not a job (skipped with the diagnostic); a file is", (t) => {
+test("CR-508: a command whose target is a folder is not a job (skipped, and said — since 2.4.1 as a warning on every derive); a file is", (t) => {
   const root = scratch(t, { Procfile: "worker: node worker.mjs\nreal: node real.mjs\n", "worker.mjs/index.mjs": "export {};\n", "real.mjs": "export {};\n" });
   const out = jobs(root);
   assert.deepEqual(out.records.map((r) => r.id), ["job:real"]);
-  assert.ok(out.diagnostics.some((d) => /'worker' runs worker\.mjs, which resolves to no file/.test(d)), out.diagnostics.join("\n"));
+  assert.ok(out.warnings.some((w) => /^Procfile: 'worker' runs worker\.mjs, which is not a file in the repo/.test(w)), out.warnings.join("\n"));
 });
 
 test("CR-509: a Railway file merges into the job that runs its command from the same folder, never into another app's job with the same command", (t) => {

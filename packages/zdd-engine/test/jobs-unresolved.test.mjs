@@ -46,6 +46,26 @@ test("derive: a start command naming build output WARNS on a plain derive with t
   assert.throws(() => readFileSync(join(repo, "zdd", "metadata", "job", "upload-worker.json")), "no record is guessed");
 });
 
+test("derive --verbose: the unresolved job is said once, as the warning, not again as a diagnostic (CR-023)", (t) => {
+  const repo = mkRepo(t);
+  const d = run(repo, ["derive", "--verbose"]);
+  assert.equal(d.status, 0, d.stderr);
+  assert.equal((d.stderr.match(/upload-worker/g) ?? []).length > 0, true, d.stderr);
+  assert.doesNotMatch(d.stderr, /'upload-worker' runs dist\/server\.js, which resolves to no file/, d.stderr);
+  assert.equal((d.stderr.match(/'upload-worker' runs dist\/server\.js/g) ?? []).length, 1, d.stderr);
+});
+
+test("derive: a jobs.entries line whose own file is missing warns to point the entry at the source file (CR-019)", (t) => {
+  const repo = mkRepo(t);
+  const cfgPath = join(repo, "zdd", "config.json");
+  const cfg = JSON.parse(readFileSync(cfgPath, "utf8"));
+  cfg.extractorOptions.jobs.entries = [{ name: "ghost", file: "src/ghost.ts", cwd: "apps/upload-worker", mode: "worker" }];
+  writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + "\n");
+  const d = run(repo, ["derive"]);
+  assert.equal(d.status, 0, d.stderr);
+  assert.match(d.stderr, /WARNING \[jobs\]: zdd\/config\.json: 'ghost' runs src\/ghost\.ts, which is not a file in the repo \(build output\?\) — the job is not on the map\. Point this entry's file or module at the source file/, d.stderr);
+});
+
 test("derive: with the entry in config, the Railway file joins that job and the warning goes", (t) => {
   const repo = mkRepo(t);
   const cfgPath = join(repo, "zdd", "config.json");

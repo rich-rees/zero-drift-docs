@@ -615,9 +615,9 @@ export function derive({ repoRoot, options, io }) {
     if (c.parsed) {
       file = resolveTarget(c.dir, c.parsed);
       if (!file) {
-        const runs = c.parsed.kind === "file" ? c.parsed.target : `module ${c.parsed.target}`;
-        diagnostics.push(`${c.manifest}: '${c.name}' runs ${runs}, which resolves to no file under ${c.dir} — skipped`);
-        unresolved.push({ c, runs });
+        // Said once: as a warning below, or as a diagnostic when another
+        // declaration of the name made the record (CR-023).
+        unresolved.push({ c, runs: c.parsed.kind === "file" ? c.parsed.target : `module ${c.parsed.target}` });
         continue;
       }
     }
@@ -665,7 +665,10 @@ export function derive({ repoRoot, options, io }) {
   // unless another declaration of the same name made the record.
   const warnings = [];
   for (const { c, runs } of unresolved) {
-    if (byName.has(c.name)) continue;
+    if (byName.has(c.name)) {
+      diagnostics.push(`${c.manifest}: '${c.name}' runs ${runs}, which resolves to no file under ${c.dir} — skipped (${byName.get(c.name)} declares it)`);
+      continue;
+    }
     const config = c.source === "config";
     warnings.push(
       `${c.manifest}: '${c.name}' runs ${runs}, which is not a file in the repo (build output?) — the job is not on the map. ` +

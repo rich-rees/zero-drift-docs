@@ -221,9 +221,11 @@ test("hosted off GitHub: no workflow is written, the three commands are printed,
   for (const f of conflicted) assert.doesNotMatch(readFileSync(join(repo, f), "utf8"), /^<<<<<<< /m, `${f} still carries conflict markers`);
   git(repo, "add", "zdd");
   git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "merge a");
+  // The second render is needed (CR-010): the merge commit moved the merge-base.
+  assert.notEqual(engine(repo, ["render", "--check"]).status, 0, "stale until rendered once more after the merge commit");
   assert.equal(engine(repo, ["render"]).status, 0);
   git(repo, "add", "zdd");
-  spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "render after the merge"], { cwd: repo, encoding: "utf8" });
+  git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "render after the merge");
   assert.equal(engine(repo, ["derive", "--check"]).status, 0);
   assert.equal(engine(repo, ["render", "--check"]).status, 0);
   assert.match(readFileSync(join(repo, "zdd", "agent-index.md"), "utf8"), /## Orders[\s\S]*## Menu|## Menu[\s\S]*## Orders/);

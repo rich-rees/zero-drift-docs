@@ -51,13 +51,14 @@ Run this as the definition of done for every unit of work — the spoken form is
    and the **claims**: every route, table, function and surface no feature
    slice links, and any record two slices claim. Read the list against the
    diff — a record this unit of work added or changed belongs in exactly one
-   slice now. Three more lines can appear (ZDD 2.1), all warnings: **API
+   slice now. Four more lines can appear (ZDD 2.1 and 2.4.1), all warnings: **API
    calls lint could not place** (a `${variable}` segment matches only a
    route parameter — type the variable as a union of literals, or the edge
    stays missing); **jobs with no stated mode** (set
-   `extractorOptions.jobs.modes` — a Railway file states a mode too, but
-   Railway applies that file over its dashboard, so commit one only if
-   Railway should); and, from `derive`, **an environment name no declared
+   `extractorOptions.jobs.modes`, or `mode` on a `jobs.entries` line; a
+   Railway file states only a schedule — its `cronSchedule` makes a job
+   scheduled — and Railway applies that file over its dashboard, so never
+   commit one just to state a mode); and, from `derive`, **an environment name no declared
    service covers** (add the service to
    `extractorOptions["external-services"].services`, or its prefix to
    `ignore`) and **a job whose start command names no file in the repo**
@@ -68,10 +69,13 @@ Run this as the definition of done for every unit of work — the spoken form is
      parallel branch minted the same number and merged first. This branch
      renumbers: take the next free number, rename the ADR file, change the
      number in its title, and rewrite every citation of it — supersedes /
-     superseded-by stamps, glossary and map links, code comments, and
-     `ZDD record` lines in this branch's commits still to come — then
+     superseded-by stamps, glossary and map links, code comments — then
      regenerate. Search for `ADR-<old number>` and the old filename before
-     and after, so none is left.
+     and after, so none is left. A `ZDD record` this branch already
+     committed is never rewritten (no history rewrite): this update commit
+     carries a `ZDD record (amended):` whose `adrs` section has the line
+     `- stored: renumbered the ZDD ADR <old> to <new>, so the earlier record
+     lines citing <old> mean <new>`.
    - `claims.strict` off (the default): the lists are warnings, and the rest
      is the backlog a repo carries from adoption.
    - `claims.strict` on (check `zdd/config.json`): each is a **failure**,
@@ -217,7 +221,8 @@ message is the one source ZDD's tally relies on. (Before 2.4 the record was
 - The ritual is **diff-anchored, not memory-anchored** — a fresh session can run
   it from the PR diff, the touched code, and the artifacts checkpointed en route.
 - **Never hand-edit the generated artifacts** (`zdd/metadata/`, `zdd/graph.json`,
-  the agent, ADR and blessing indexes, the human index) — regenerate. The fence hook (if opted in)
+  the agent index and its area folder when it has two levels, the ADR and
+  blessing indexes, the human index; at the paths `zdd/config.json` sets) — regenerate. The fence hook (if opted in)
   refuses the edit; the CI check (if wired) fails otherwise.
 - Read back any working file (`TEMPSTATE.md`) and delete it before merge —
   durable residue moves to an artifact first. The pattern plan is one such

@@ -14,7 +14,7 @@ import { dirname, resolve, join } from "node:path";
 import { tmpdir, homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
-import { UPGRADE_NOTES, newestTag, INSTRUCTION_RULES, compareVersions } from "../scripts/bootstrap.mjs";
+import { UPGRADE_NOTES, newestTag, INSTRUCTION_RULES, compareVersions, ruleChangedSince, mergeGate, IMPORT_COMMENT } from "../scripts/bootstrap.mjs";
 
 const PLUGIN = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SCRIPT = join(PLUGIN, "scripts", "bootstrap.mjs");
@@ -263,6 +263,54 @@ test("2.4.1, finding 3: an upgrade lists only the units speaking to a rule chang
   assert.ok(text.includes("ZDD now says: the generated artifacts"), text);
 });
 
+test("2.4.1 CR-011, CR-013, CR-014: from 2.4.0, the changed rules catch the adopter's wording in any order — the area folder, conflicts-before-merge, an old `ZDD:` line", () => {
+  const claude = [
+    "# Project", "", IMPORT_COMMENT, "@zdd/instructions.md", "", "## Ours", "",
+    "Edit files under `zdd/agent-index/` when an area changes.", "",
+    "For conflicts in generated files, take theirs before finishing the merge.", "",
+    "Say `ZDD: ADR-0015 turned — I almost queried the database` whenever an ADR redirects you.", "",
+    "Push to main; the ZDD check runs in CI.", "",
+  ].join("\n");
+  const repo = adopted("dupes-wording", { claude, engine: "2.4.0", settings: { extraKnownMarketplaces: LOCK("v2.4.0") } });
+  const plan = runJson(repo, ["upgrade", "--plan"]);
+  assert.deepEqual(plan.duplicates.map((d) => [d.from, d.rules]), [[8, ["generated"]], [10, ["merge"]], [12, ["record"]]], JSON.stringify(plan.duplicates));
+});
+
+test("2.4.1 CR-012: no engine pin, or one that is not a version, reads the adopter's text against every rule", () => {
+  for (const engine of [null, "latest"]) {
+    const repo = adopted(`dupes-nopin-${engine}`, { claude: CLAUDE_WITH_DUPES, engine });
+    const plan = runJson(repo, ["upgrade", "--plan"]);
+    assert.deepEqual(plan.duplicates.map((d) => [d.heading, d.rules]), [["## Loading ZDD", ["load", "generated"]], ["### Docs", ["update"]]], String(engine));
+  }
+});
+
+test("2.4.1 CR-008: a prerelease or build pin is read by its core; a prerelease comes before its release", () => {
+  const rule = { since: "2.4.0" };
+  assert.equal(ruleChangedSince(rule, "2.4.0"), false);
+  assert.equal(ruleChangedSince(rule, "2.4.0+local"), false, "build metadata is the release");
+  assert.equal(ruleChangedSince(rule, "2.4.0-rc.1"), true, "a prerelease is before 2.4.0");
+  assert.equal(ruleChangedSince(rule, "2.4.1-rc.1"), false);
+  assert.equal(ruleChangedSince(rule, "2.3.9"), true);
+  assert.equal(ruleChangedSince(rule, "next"), true, "not a version: read everything");
+  assert.equal(ruleChangedSince(rule, null), true);
+});
+
+test("2.4.1 CR-007: a YAML comment is never a merge gate — `# lint --merge` above a bare step, or `lint # TODO: add --merge` — the step gains --merge; a quoted --merge in an expression stays the team's", () => {
+  const above = mergeGate('# Previous command: lint --merge\n- run: npx -y "$ZDD_ENGINE" lint\n');
+  assert.equal(above.how, "added");
+  assert.ok(above.text.includes('- run: npx -y "$ZDD_ENGINE" lint --merge\n'), above.text);
+  const trailing = mergeGate('- run: npx -y "$ZDD_ENGINE" lint # TODO: add --merge\n');
+  assert.equal(trailing.how, "added");
+  assert.ok(trailing.text.includes('lint --merge # TODO: add --merge'), trailing.text);
+  assert.equal(mergeGate("- run: npx -y \"$ZDD_ENGINE\" lint ${{ github.event.pull_request.draft && '' || '--merge' }}\n").how, "conditional");
+  assert.equal(mergeGate('- run: npx -y "$ZDD_ENGINE" lint --merge # gate\n').how, "present");
+});
+
+test("2.4.1 CR-020: the opt-in offer is quiet for an extractor already on", () => {
+  const repo = adopted("detect-on", { fixture: "fixture-jobs", extractors: ["supabase", "jobs"], engine: "2.2.1", settings: { extraKnownMarketplaces: LOCK("v2.2.1") } });
+  assert.doesNotMatch(runJson(repo, ["upgrade", "--plan"]).notes.join("\n"), /offers the opt-in extractor `jobs`/);
+});
+
 test("2.4.1, finding 3: each rule's `since` is a release no later than this plugin, and moves with what the rule says — change `says`, then bump `since` and this table together", () => {
   const PINNED = {
     load: "2.4.0", patterns: "2.3.0", update: "2.4.0", upgrade: "2.3.0", skew: "2.3.0", generated: "2.4.1",
@@ -279,7 +327,7 @@ test("2.4.1, finding 3: each rule's `since` is a release no later than this plug
   assert.deepEqual(Object.keys(SAYS_SHA).sort(), Object.keys(PINNED).sort());
   const SAYS_PINNED = {
     load: "f5ab5c09cab0", patterns: "ce86483b2454", update: "0143764c1f10", upgrade: "1f328adcb3f1", skew: "c0a3cd59c82f", generated: "d342fc5876db",
-    merge: "52c697625ade", renumber: "14bee2c44864", install: "df690ac41ed2", grill: "474fe1670736", findings: "85cf9aed5169", record: "3767c173ae7e",
+    merge: "98d4b51c843c", renumber: "d1f96292c08e", install: "df690ac41ed2", grill: "474fe1670736", findings: "85cf9aed5169", record: "3767c173ae7e",
   };
   assert.deepEqual(SAYS_SHA, SAYS_PINNED, "a rule's `says` changed — bump its `since` to this release, then copy the new hashes here");
 });
