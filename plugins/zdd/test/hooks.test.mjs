@@ -238,6 +238,30 @@ test("CAS-107 (#24): taking a side of a conflicted generated file is still refus
   assert.doesNotMatch(JSON.parse(plain.stdout).hookSpecificOutput.permissionDecisionReason, /check out a side/);
 });
 
+test("CAS-107 CR-006: git's global options before the subcommand do not hide a write — `git -C`, `--no-pager`, `-c k=v`; `-C` moves where the operand resolves; a read stays allowed", () => {
+  for (const command of [
+    "git -C . checkout --theirs -- zdd/graph.json",
+    "git --no-pager restore --ours zdd/agent-index.md",
+    "git -c core.autocrlf=false checkout -- zdd/graph.json",
+    "git -C zdd checkout -- graph.json",
+    "git -C zdd rm -r metadata",
+  ]) blocked(fence("Bash", { command }), command);
+  for (const command of ["git -C . status", "git --no-pager log -- zdd/graph.json", "git -C zdd diff graph.json"]) silent(fence("Bash", { command }), command);
+});
+
+test("CAS-107 CR-005: the two-level index's area folder is fenced for any index name — `.md`, another extension, none — as the engine names it", () => {
+  for (const [agentIndex, areaFile] of [
+    ["zdd/agent-index.md", "zdd/agent-index/payments.md"],
+    ["docs/context.txt", "docs/context/payments.md"],
+    ["docs/context", "docs/context-areas/payments.md"],
+  ]) {
+    setConfig({ extractors: ["generic"], hooks: { fence: true }, agentIndex: { levels: 2 }, paths: { agentIndex } });
+    blocked(fence("Write", { file_path: join(repo, ...areaFile.split("/")) }), areaFile);
+    blocked(fence("Bash", { command: `echo x > ${areaFile}` }), `shell: ${areaFile}`);
+  }
+  setConfig(VALID);
+});
+
 test("fence allows reads, copies FROM generated files, and curated writes", () => {
   for (const command of ["cat zdd/agent-index.md", "cp zdd/graph.json /tmp/debug.json", "cp zdd/graph.json ../elsewhere.json", "grep foo zdd/adr-index.md", "ls zdd/metadata", "echo x > zdd/glossary.md", "git status"]) {
     silent(fence("Bash", { command }), command);

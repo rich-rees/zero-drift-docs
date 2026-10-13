@@ -25,14 +25,16 @@ const mkRepo = (t) => {
 };
 const lint = (repo) => spawnSync(process.execPath, [BIN, "lint"], { cwd: repo, encoding: "utf8" });
 
-test("lint: two ADR files sharing a number FAIL, naming the later file, the other, and the renumber", (t) => {
+test("lint: two ADR files sharing a number FAIL, naming both and the renumber, never picking one by sort order (CR-001)", (t) => {
   const repo = mkRepo(t);
+  // Sorts BEFORE the established 0002-things-…: the order says nothing about which branch added it.
   writeFileSync(join(repo, "zdd", "adr", "0002-a-parallel-branch-decision.md"), "# ADR-0002: A parallel branch decision\n\nStatus: accepted\n");
   const r = lint(repo);
   assert.equal(r.status, 1, r.stdout + r.stderr);
   const out = r.stdout + r.stderr;
-  assert.match(out, /0002-things-replace-widgets\.md: duplicate ADR number 0002 \(also 0002-a-parallel-branch-decision\.md\)/, out);
-  assert.match(out, /renumber this file \(and its citations\) to the next free number/, out);
+  assert.match(out, /duplicate ADR number 0002: 0002-a-parallel-branch-decision\.md and 0002-things-replace-widgets\.md — two branches each minted it/, out);
+  assert.match(out, /the ADR the later-merged branch added takes the next free number \(rename it, retitle it, rewrite its citations\), the other keeps 0002/, out);
+  assert.doesNotMatch(out, /renumber this file/, "no file is singled out");
 });
 
 test("lint: distinct numbers pass", (t) => {

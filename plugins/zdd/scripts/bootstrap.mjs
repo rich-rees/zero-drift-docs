@@ -85,6 +85,7 @@ import {
   MARKETPLACE_REPO,
   isOurDeclaration,
   pluginsDir,
+  agentIndexAreaDir,
 } from "./lib/repo.mjs";
 
 const TEMPLATES = join(PLUGIN_ROOT, "templates");
@@ -821,7 +822,7 @@ export function instructionsBody(paths = artifactPaths({})) {
     .replaceAll("<GRAPH>", lit(p.graph))
     // The two-level index's area folder (CAS-107, DiO's DIO-336): named as
     // the engine names it — the index path without its extension.
-    .replaceAll("<AGENT_INDEX_DIR>", lit(p.agentIndex.replace(/\.[^./\\]+$/, "") === p.agentIndex ? `${p.agentIndex}-areas` : p.agentIndex.replace(/\.[^./\\]+$/, "")))
+    .replaceAll("<AGENT_INDEX_DIR>", lit(agentIndexAreaDir(p.agentIndex)))
     .replaceAll("<AGENT_INDEX>", lit(p.agentIndex))
     .replaceAll("<HUMAN_INDEX>", lit(p.humanIndex))
     .replaceAll("<BUNDLE_DIR>", lit(p.bundleDir === "." ? "." : p.bundleDir))
@@ -1164,16 +1165,31 @@ function pinEngine(text, version) {
 // The step is matched by `lint` followed by anything (CAS-103 finding 5):
 // DiO's `lint ${{ … && '--tempstate' || '' }}` was reported "not found".
 // --merge goes right after `lint`, ahead of whatever follows.
+// A line up to its YAML comment: a `#` that opens the line or follows
+// whitespace, outside quotes.
+function stripYamlComment(line) {
+  let quote = null;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (quote) {
+      if (ch === quote) quote = null;
+    } else if (ch === "'" || ch === '"') quote = ch;
+    else if (ch === "#" && (i === 0 || /\s/.test(line[i - 1]))) return line.slice(0, i);
+  }
+  return line;
+}
 // A step that already passes --merge somewhere after `lint` — DiO's
 // `lint ${{ (dispatch || ready PR) && '--tempstate --merge' || '' }}`, a gate
 // armed only where the team wants it (CAS-107) — is the team's own shape:
 // left as written and named, never made unconditional.
+// A YAML comment never counts (CR-007): `# lint --merge` above a bare step,
+// or `lint # TODO: add --merge`, is no gate.
 export function mergeGate(text) {
   const re = /^(\s*(?:-\s+)?run:\s*npx -y "\$ZDD_ENGINE" lint)\b([^\r\n]*?)[ \t]*(\r?)$/m;
-  if (/\blint --merge\b/.test(text)) return { text, how: "present" };
+  if (text.split(/\r?\n/).some((l) => /\blint --merge\b/.test(stripYamlComment(l)))) return { text, how: "present" };
   const m = text.match(re);
   if (!m) return { text, how: "absent" };
-  if (/--merge\b/.test(m[2])) return { text, how: "conditional" };
+  if (/--merge\b/.test(stripYamlComment(m[2]))) return { text, how: "conditional" };
   return { text: text.replace(re, (_m, head, rest, cr) => `${head} --merge${rest}${cr}`), how: "added" };
 }
 // The header lines of an owned workflow are ZDD's, though upgrade only
@@ -2005,7 +2021,7 @@ export const UPGRADE_NOTES = {
   // 2.4.1 (CAS-107): the findings from Cascade's and DiO's moves to 2.4.0.
   "2.4.1": ({ paths, config }) => {
     const notes = [
-      `2.4.1 rewrites the instructions file (${instructionsRel(paths.bundleDir)}): every \`ZDD: …\` line, and every moment the agent finds or creates an artifact, names it as ZDD's ("ZDD blessing", "ZDD ADR", "the ZDD glossary"); a merge conflict in a generated file is regenerated mid-merge (derive, render, add, commit the merge, then render once more) — never a checked-out side, which the fence refuses; two ADRs with one number are renumbered by the later branch. The text pass below now asks only about rules this release changed`,
+      `2.4.1 rewrites the instructions file (${instructionsRel(paths.bundleDir)}): every \`ZDD: …\` line, and every moment the agent finds or creates an artifact, names it as ZDD's ("ZDD blessing", "ZDD ADR", "the ZDD glossary"); a merge conflict in a generated file is regenerated mid-merge (derive, render, add, commit the merge, then render once more) — never a checked-out side, which the fence refuses; two ADRs with one number are renumbered by the later branch. The text pass below now asks only about rules changed since this repo's engine pin (decision 0030)`,
       "2.4.1: a declared background job whose start command names a file not in the repo (build output, e.g. `node dist/server.js`) now WARNS on every derive with the `jobs.entries` remedy, instead of being skipped silently. No config-schema or metadata-contract change; derive and render bytes do not move on the bump",
     ];
     if (extractorsOn(config).has("jobs")) {
@@ -2055,13 +2071,13 @@ export const INSTRUCTION_RULES = [
   { id: "update", since: "2.4.0", match: /\bupdate ZDD\b/i, says: '"update ZDD" before finishing a unit of work: curate what the change touched, reconcile the pattern plan, regenerate, commit with the code; never handed to a subagent' },
   { id: "upgrade", since: "2.3.0", match: /\bupgrade ZDD\b|\bbootstrap\s+--upgrade\b/i, says: '"upgrade ZDD" moves the repo to a newer release and shows every change before writing it' },
   { id: "skew", since: "2.3.0", match: /\b(?:release|engine[- ]skew|skew|mismatch) line\b|release mismatch|first line of (?:your|the) reply/i, says: "a release or engine-skew line is the first line of the reply, verbatim, and is fixed before the task — the fix depends on the case (machine behind the lock: the commands printed; branch behind main: merge main; repo behind the newest release: upgrade ZDD, by choice)" },
-  { id: "generated", since: "2.4.1", match: /hand-edit|\bzdd\/(?:metadata|graph\.json|agent-index\.md|adr-index\.md|blessing-index\.md|human-index\.html)\b|generated artifacts?\b/i, says: "the generated artifacts (zdd/metadata/, graph.json, the agent index and its area folder when it has two levels, the ADR and blessing indexes, the human index) and zdd/instructions.md are never hand-edited" },
-  { id: "merge", since: "2.4.1", match: /(?:merge|rebase)[^.\n]*\b(?:deriv|render|regenerat|generated|conflict)/i, says: "a merge conflict in a generated file is never resolved by hand nor by checking out a side: with the merge open, derive then render (they overwrite it), git add, commit the merge, then render once more and commit (the changed-on-this-branch section reads the merge-base); on a rebase the same per replayed commit, rendering once more at the end" },
-  { id: "renumber", since: "2.4.1", match: /\bduplicate ADR number\b|\brenumber\b|\btwo ADRs (?:with|sharing) (?:one|a|the same) number\b/i, says: "two ADRs with one number fail lint: the first to merge keeps it; the later branch takes the next free number, renames its file, and rewrites every citation (supersession stamps, glossary and map links, code comments, ZDD record lines), then regenerates" },
+  { id: "generated", since: "2.4.1", match: /hand-edit|\bzdd\/(?:metadata|graph\.json|agent-index\.md|adr-index\.md|blessing-index\.md|human-index\.html)\b|\bzdd\/agent-index\/|generated artifacts?\b/i, says: "the generated artifacts (zdd/metadata/, graph.json, the agent index and its area folder when it has two levels, the ADR and blessing indexes, the human index) and zdd/instructions.md are never hand-edited" },
+  { id: "merge", since: "2.4.1", match: /(?:merge|rebase)[^.\n]*\b(?:deriv|render|regenerat|generated|conflict)|\b(?:conflict|generated)[^.\n]*\b(?:merge|rebase)/i, says: "a merge conflict in a generated file is never resolved by hand nor by checking out a side: with the merge open, derive then render (they overwrite it), git add, commit the merge, then render once more and commit (the changed-on-this-branch section reads the merge-base); on a rebase, at each stop derive, render, git add, git rebase --continue, then render once more at the end and commit" },
+  { id: "renumber", since: "2.4.1", match: /\bduplicate ADR number\b|\brenumber\b|\btwo ADRs (?:with|sharing) (?:one|a|the same) number\b/i, says: "two ADRs with one number fail lint: the first to merge keeps it; the later branch takes the next free number, renames its file, and rewrites every citation (supersession stamps, glossary and map links, code comments; a ZDD record already committed gets an amended record line), then regenerates" },
   { id: "install", since: "2.3.0", match: /plugin (?:install|update) (?:zdd|mattpocock-skills)|skills are missing|zdd@zero-drift-docs|mattpocock-skills@/i, says: "if ZDD's skills are missing: from the repo's folder, claude plugin install mattpocock-skills@zero-drift-docs --scope project, then claude plugin install zdd@zero-drift-docs --scope project, then restart; this repo switches other copies of Matt Pocock's skills off on purpose" },
   { id: "grill", since: "2.3.0", match: /\bgrill\b/i, says: "grill is optional: a design interview that writes glossary terms and ADRs as they crystallize; without Matt Pocock's skills, plan mode plus \"update ZDD\"" },
   { id: "findings", since: "2.3.0", match: /zero-drift-docs\/issues|\bZDD defect\b/i, says: "a ZDD defect goes to ZDD's issues page, labelled finding, proposed to the developer first" },
-  { id: "record", since: "2.4.1", match: /\bZDD record\b|\bPattern record\b|\bzdd-engine tally\b/i, says: "when a ZDD artifact turns or confirms a decision, or shows code to reuse, say one `ZDD: …` line at the moment with what would otherwise have happened, and carry on; name the artifact as ZDD's (\"ZDD blessing\", \"ZDD ADR\", \"the ZDD glossary\") there and whenever you find or create one; \"update ZDD\" writes those lines as the ZDD record (five sections, plain sentences) into the update commit's message, which `zdd-engine tally` counts over history" },
+  { id: "record", since: "2.4.1", match: /\bZDD record\b|\bPattern record\b|\bzdd-engine tally\b|`ZDD: |\bZDD: \S+ (?:turned|confirmed|reused)\b/i, says: "when a ZDD artifact turns or confirms a decision, or shows code to reuse, say one `ZDD: …` line at the moment with what would otherwise have happened, and carry on; name the artifact as ZDD's (\"ZDD blessing\", \"ZDD ADR\", \"the ZDD glossary\") there and whenever you find or create one; \"update ZDD\" writes those lines as the ZDD record (five sections, plain sentences) into the update commit's message, which `zdd-engine tally` counts over history" },
 ];
 const talksZdd = (heading, own) => new RegExp(ZDD_MENTION.source, "i").test(heading) || ZDD_VERB.test(own) || (own.match(ZDD_MENTION) ?? []).length >= 2;
 export function findDuplicates(text) {
@@ -2178,12 +2194,18 @@ export function findDuplicateSections(text) {
 // (CR-014): the user approves a section as and where the plan showed it, and
 // a section edited or moved since no longer answers to the id.
 // Only the rules changed since the repo's engine pin (`from`) are read again;
-// no pin, or one that is not a version, reads them all.
+// no pin, or one that is not a version, reads them all. A prerelease or
+// build pin (`2.4.0-rc.1`, `2.4.0+local` — the schema allows both) is read by
+// its X.Y.Z core, a prerelease as BEFORE that release, so a rule changed in
+// 2.4.0 is still read from 2.4.0-rc.1 (CR-008).
+export function ruleChangedSince(rule, from) {
+  const v = typeof from === "string" ? /^(\d+\.\d+\.\d+)(-[^+]*)?(\+.*)?$/.exec(from) : null;
+  if (!v || !rule) return true;
+  const cmp = compareVersions(rule.since, v[1]);
+  return cmp > 0 || (cmp === 0 && v[2] !== undefined);
+}
 function findAllDuplicates(ledger, from = null) {
-  const changed = (id) => {
-    const rule = INSTRUCTION_RULES.find((x) => x.id === id);
-    return !(typeof from === "string" && /^\d+\.\d+\.\d+$/.test(from) && rule && compareVersions(rule.since, from) <= 0);
-  };
+  const changed = (id) => ruleChangedSince(INSTRUCTION_RULES.find((x) => x.id === id), from);
   const all = [];
   for (const file of ["CLAUDE.md", "AGENTS.md"]) {
     if (!ledger.exists(file)) continue;

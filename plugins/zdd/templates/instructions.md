@@ -48,11 +48,12 @@ sentences, or `- none`) into the update commit's message; `zdd-engine tally` cou
 `<HUMAN_INDEX>` — or this file (`<INSTRUCTIONS>`). A merge conflict in a generated file is
 never resolved by hand, nor by checking out a side: with the merge open, run `derive` then
 `render` (they overwrite it), `git add` the bundle and commit the merge; then `render` once
-more and commit, as the human index reads the merge-base, which the merge moved. On a
-rebase, the same per replayed commit. The drift check fails otherwise, and it fails while
-`<PATTERNS_PLAN>` exists. **Two ADRs with one number** (parallel branches) fail `lint`: the
-later branch takes the next free number — its file, its title and every citation
-(supersession stamps, glossary and map links, code comments, ZDD record lines) — then regenerates.
+more and commit, as the human index reads the merge-base, which the merge moved. On a rebase,
+at each stop: `derive`, `render`, `git add` the bundle, `git rebase --continue`; when it ends,
+`render` once more and commit. The drift check fails otherwise, and while `<PATTERNS_PLAN>` exists.
+**Two ADRs with one number** (parallel branches) fail `lint`: the later branch takes the next
+free number — its file, its title and every citation (supersession stamps, glossary and map links,
+code comments; a ZDD record already committed gets a `ZDD record (amended):` line) — then regenerates.
 
 **If ZDD's skills are missing** in Claude Code, the developer has not installed ZDD for this
 repo. Tell them to run, from the repo's folder: `claude plugin install mattpocock-skills@zero-drift-docs --scope project`,
@@ -60,8 +61,7 @@ then `claude plugin install zdd@zero-drift-docs --scope project`, then restart C
 interview and related skills are built on Matt Pocock's skills, so ZDD installs the one release of them
 it is tested with, and this repo switches other copies off on purpose. Setup, and joining a repo: https://github.com/rich-rees/zero-drift-docs#readme.
 
-Optional: `grill` runs a design interview that writes glossary terms and ADRs into
-`<BUNDLE_DIR>/` as they crystallize (needs the `mattpocock-skills` plugin; without it,
+Optional: `grill` runs a design interview that writes glossary terms and ADRs into `<BUNDLE_DIR>/` as they crystallize (needs the `mattpocock-skills` plugin; without it,
 work decisions out in plan mode and let "update ZDD" capture them). Matt Pocock's
 skills read a root `GLOSSARY.md` and `docs/adr/` by default; this repo's are under `<BUNDLE_DIR>/`. See `docs/agents/domain.md`.
 
