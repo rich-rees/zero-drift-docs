@@ -2,7 +2,7 @@
 // copied into AGENTS.md for Codex) name every user-facing skill — a new skill
 // without a line here fails — and carry the rules every adopter needs: the
 // release line leads the reply with its three cases, generated-file conflicts
-// take either side then regenerate, "update ZDD" is never delegated, a
+// regenerate mid-merge then render once more, "update ZDD" is never delegated, a
 // developer joining the repo is told both install commands in order, and a
 // ZDD defect has a home. Run: node --test "plugins/zdd/test/*.test.mjs"
 import { test } from "node:test";
@@ -23,7 +23,7 @@ test("the instructions name every user-facing skill as `(Skill: <name>)` or in b
 test("the instructions carry the adopter rules (2.2.0, 2.3.0)", () => {
   assert.match(BODY, /"upgrade ZDD"/);
   assert.match(BODY, /first line of your reply/i);
-  assert.match(BODY, /take either side[\s\S]*commit[\s\S]*regenerate/i);
+  assert.match(BODY, /nor by checking out a side[\s\S]*derive[\s\S]*render[\s\S]*commit the merge[\s\S]*render`? once\s+more/i);
   assert.match(BODY, /never (?:hand|delegate)[\s\S]*subagent|subagent[\s\S]*never/i);
   assert.match(BODY, /claude plugin install mattpocock-skills@zero-drift-docs --scope project/);
   assert.match(BODY, /claude plugin install zdd@zero-drift-docs --scope project/);

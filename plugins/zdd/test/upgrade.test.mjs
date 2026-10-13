@@ -13,7 +13,8 @@ import { readFileSync, writeFileSync, rmSync, mkdtempSync, cpSync, mkdirSync, re
 import { dirname, resolve, join } from "node:path";
 import { tmpdir, homedir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { UPGRADE_NOTES, newestTag } from "../scripts/bootstrap.mjs";
+import { createHash } from "node:crypto";
+import { UPGRADE_NOTES, newestTag, INSTRUCTION_RULES, compareVersions } from "../scripts/bootstrap.mjs";
 
 const PLUGIN = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SCRIPT = join(PLUGIN, "scripts", "bootstrap.mjs");
@@ -103,11 +104,13 @@ test("the notes say what is new since the repo's engine pin: from 2.0 no 1.x or 
   assert.match(unpinned, /^1\.1 /m, unpinned);
 });
 
-test("2.1's note re-runs detection: an opt-in extractor the evidence shows is offered with that evidence, never added", () => {
+test("every upgrade re-runs detection: an opt-in extractor the evidence shows is offered with that evidence, never added — from 2.0.0, and from 2.2.1, which crosses no 2.1 note (2.4.1, from the first adopter)", () => {
+  const later = adopted("detect-2-2", { fixture: "fixture-jobs", extractors: ["supabase"], engine: "2.2.1", settings: { extraKnownMarketplaces: LOCK("v2.2.1") } });
+  assert.match(runJson(later, ["upgrade", "--plan"]).notes.join("\n"), /^offers the opt-in extractor `jobs`.*`Procfile` runs a process/m);
   const repo = adopted("detect-2-1", { fixture: "fixture-jobs", extractors: ["supabase"] });
   const json = runJson(repo, ["upgrade"]);
   const notes = json.notes.join("\n");
-  assert.match(notes, /^2\.1 offers the opt-in extractor `jobs`.*`Procfile` runs a process/m, notes);
+  assert.match(notes, /^offers the opt-in extractor `jobs`.*`Procfile` runs a process/m, notes);
   assert.deepEqual(JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8")).extractors, ["supabase"], "never added silently");
   assert.match(notes, /^2\.1 .*`\*` in a scanned url: it no longer matches a fixed route segment/m, notes);
 });
@@ -222,7 +225,63 @@ test("--drop removes only the named sections, after the block is refreshed; an i
   assert.doesNotMatch(after, /<!-- zdd:begin -->/);
   assert.match(after, /^Intro\.$/m);
   assert.ok(json.notes.some((n) => /CLAUDE\.md: removed line 7 under "## Loading ZDD" \(Say "load ZDD" before work\. Never hand-edit zdd\/graph\.json\.\), and the heading it was all of, on the user's word/.test(n)), json.notes.join("\n"));
-  assert.deepEqual(runJson(repo, ["upgrade", "--plan"]).duplicates.map((d) => d.heading), ["### Docs"]);
+  // The run moved the pin past every rule "### Docs" speaks to, so the next
+  // upgrade does not ask about it again (2.4.1, finding 3).
+  assert.deepEqual(runJson(repo, ["upgrade", "--plan"]).duplicates.map((d) => d.heading), []);
+});
+
+test("2.4.1, finding 1 and the first adopter 1: an owned workflow's pre-2.2 header names \"upgrade ZDD\" after the upgrade; a lint step passing --merge under its own condition is kept as written and named", () => {
+  const repo = adopted("wf-header", { engine: "2.2.1", settings: { extraKnownMarketplaces: LOCK("v2.2.1") } });
+  const OLD = "# Managed by Zero-Drift Docs (zdd): written by `zdd:bootstrap`; `zdd:bootstrap\n# --upgrade` rewrites the engine pin below. Remove this header line to take\n# ownership of the file.";
+  const NEW = '# Managed by Zero-Drift Docs (zdd): written by `zdd:bootstrap`; "upgrade ZDD"\n# rewrites the engine pin below. Remove this header line to take ownership\n# of the file.';
+  const template = readFileSync(join(PLUGIN, "templates", "zdd.yml"), "utf8");
+  assert.ok(template.includes(NEW), "the template already says it");
+  const DIO_STEP = `run: npx -y "$ZDD_ENGINE" lint \${{ (github.event_name == 'workflow_dispatch' || !github.event.pull_request.draft) && '--tempstate --merge' || '' }}`;
+  const old = template.replace(NEW, OLD).replace('run: npx -y "$ZDD_ENGINE" lint --merge', DIO_STEP).replace(/@rich-rees\/zdd-engine@[0-9.]+/, "@rich-rees/zdd-engine@2.2.1");
+  mkdirSync(join(repo, ".github", "workflows"), { recursive: true });
+  const wf = join(repo, ".github", "workflows", "zdd.yml");
+  writeFileSync(wf, old.replace(/\n/g, "\r\n"));
+  const json = runJson(repo, ["upgrade"]);
+  const after = readFileSync(wf, "utf8");
+  assert.ok(after.includes(NEW.replace(/\n/g, "\r\n")), "the header is today's, CRLF kept");
+  assert.ok(after.includes(DIO_STEP + "\r\n"), "the conditional step is untouched");
+  assert.doesNotMatch(after, /lint --merge \$\{\{/, "never made unconditional");
+  const notes = json.notes.join("\n");
+  assert.match(notes, /zdd\.yml: its header comment now names "upgrade ZDD"/, notes);
+  assert.match(notes, /zdd\.yml: the lint step passes --merge in a shape of its own \(under a condition\?\) — kept as written; check by hand/, notes);
+  assert.doesNotMatch(notes, /now runs `lint --merge`/);
+  const again = runJson(repo, ["upgrade"]);
+  assert.doesNotMatch(again.notes.join("\n"), /header comment now names/, "once only");
+});
+
+test("2.4.1, finding 3: an upgrade lists only the units speaking to a rule changed since the repo's pin — a repo at 2.4.0 is asked about the generated-files rule (2.4.1), not about load or update", () => {
+  const repo = adopted("dupes-since", { claude: CLAUDE_WITH_DUPES, engine: "2.4.0", settings: { extraKnownMarketplaces: LOCK("v2.4.0") } });
+  const plan = runJson(repo, ["upgrade", "--plan"]);
+  assert.deepEqual(plan.duplicates.map((d) => [d.heading, d.rules]), [["## Loading ZDD", ["generated"]]]);
+  const text = run(repo, ["upgrade", "--plan"]);
+  assert.ok(!text.includes('ZDD now says: "load ZDD"'), "an unchanged rule is not shown again");
+  assert.ok(text.includes("ZDD now says: the generated artifacts"), text);
+});
+
+test("2.4.1, finding 3: each rule's `since` is a release no later than this plugin, and moves with what the rule says — change `says`, then bump `since` and this table together", () => {
+  const PINNED = {
+    load: "2.4.0", patterns: "2.3.0", update: "2.4.0", upgrade: "2.3.0", skew: "2.3.0", generated: "2.4.1",
+    merge: "2.4.1", renumber: "2.4.1", install: "2.3.0", grill: "2.3.0", findings: "2.3.0", record: "2.4.1",
+  };
+  const VERSION = JSON.parse(readFileSync(join(PLUGIN, ".claude-plugin", "plugin.json"), "utf8")).version;
+  const SAYS_SHA = {};
+  for (const rule of INSTRUCTION_RULES) {
+    assert.match(rule.since ?? "", /^\d+\.\d+\.\d+$/, rule.id);
+    assert.ok(compareVersions(rule.since, VERSION) <= 0, `${rule.id}: since ${rule.since} is later than the plugin (${VERSION})`);
+    assert.equal(rule.since, PINNED[rule.id], `${rule.id}: since moved — update the table`);
+    SAYS_SHA[rule.id] = createHash("sha256").update(rule.says).digest("hex").slice(0, 12);
+  }
+  assert.deepEqual(Object.keys(SAYS_SHA).sort(), Object.keys(PINNED).sort());
+  const SAYS_PINNED = {
+    load: "f5ab5c09cab0", patterns: "ce86483b2454", update: "0143764c1f10", upgrade: "1f328adcb3f1", skew: "c0a3cd59c82f", generated: "d342fc5876db",
+    merge: "52c697625ade", renumber: "14bee2c44864", install: "df690ac41ed2", grill: "474fe1670736", findings: "85cf9aed5169", record: "3767c173ae7e",
+  };
+  assert.deepEqual(SAYS_SHA, SAYS_PINNED, "a rule's `says` changed — bump its `since` to this release, then copy the new hashes here");
 });
 
 test("newestTag: the highest release tag by semver, ignoring pre-releases and junk", () => {

@@ -26,39 +26,39 @@ verbs carry it, and all work with any coding agent:
 **Say it when ZDD changes a decision.** A use is the moment an artifact *turned* a
 decision (you were about to do one thing; it sent you another way), *confirmed* one,
 or showed code to *reuse*; reading is never a use. Print one line then and carry on
-— no stop, no question — saying what you would otherwise have done: `ZDD: ADR-0015
-turned — I was about to read jobs straight from the database; the app goes through
-/api/jobs`. "update ZDD" writes these as the **ZDD record** (sections `glossary`,
-`adrs`, `blessings`, `map`, `comments`; `turned` / `confirmed` / `reused` (map
-only) / `stored` lines in plain sentences, or `- none`) into the update commit's message;
-`zdd-engine tally` counts them over the repo's history.
+— no stop, no question — naming the artifact as ZDD's and saying what you would
+otherwise have done: `ZDD: the ZDD ADR-0015 turned this — I was about to read jobs
+straight from the database; the app goes through /api/jobs`. Name ZDD the same way —
+"ZDD blessing", "ZDD ADR", "the ZDD glossary", "the ZDD map", "ZDD's codebase metadata",
+"a ZDD-kept code comment" — when you find one that matters or create one ("I've found a
+ZDD blessing for file uploads, so I'll read its exemplar", "I'm recording this as a ZDD
+ADR"), so the reader can tell it came from ZDD, not your own judgement. "update ZDD"
+writes these as the **ZDD record** (sections `glossary`, `adrs`, `blessings`, `map`,
+`comments`; `turned` / `confirmed` / `reused` (map only) / `stored` lines in plain
+sentences, or `- none`) into the update commit's message; `zdd-engine tally` counts them.
 
-**A release or engine-skew line** from ZDD's session-start checks (or `load`)
-is the **first line of your reply**, verbatim, and is fixed before the task.
-Which fix depends on what the line says:
-- *this machine is behind the repo's lock* — run the commands the line
-  prints, then restart;
-- *this branch is behind main* (a teammate's PR moved the lock and this branch
-  has not merged it) — merge main into the branch; nothing to install;
-- *the repo is behind the newest ZDD release* — "upgrade ZDD", only if the
-  team chooses to; it is not a fault.
+**A release or engine-skew line** from ZDD's session-start checks (or `load`) is the
+**first line of your reply**, verbatim, and is fixed before the task. The fix depends on it:
+- *this machine is behind the repo's lock* — run the commands the line prints, then restart;
+- *this branch is behind main* (a teammate's PR moved the lock and this branch has not merged it) — merge main into the branch; nothing to install;
+- *the repo is behind the newest ZDD release* — "upgrade ZDD", only if the team chooses to; it is not a fault.
 
-**Never hand-edit the generated artifacts** — `<METADATA_DIR>/`, `<GRAPH>`,
-`<AGENT_INDEX>`, `<ADR_INDEX>`, `<BLESSING_INDEX>`,
+**Never hand-edit the generated artifacts** — `<METADATA_DIR>/`, `<GRAPH>`, `<AGENT_INDEX>`
+(and `<AGENT_INDEX_DIR>/` when it has two levels), `<ADR_INDEX>`, `<BLESSING_INDEX>`,
 `<HUMAN_INDEX>` — or this file (`<INSTRUCTIONS>`). A merge conflict in a generated file is
-never resolved by hand: take either side (`git checkout --theirs -- <file>`,
-then `git add <file>`; it is about to be rebuilt), finish the merge, commit
-it, then regenerate with "update ZDD" and commit that. On a rebase, the same
-for each replayed commit, regenerating once at the end. The drift check fails
-otherwise, and it fails while `<PATTERNS_PLAN>` exists.
+never resolved by hand, nor by checking out a side: with the merge open, run `derive` then
+`render` (they overwrite it), `git add` the bundle and commit the merge; then `render` once
+more and commit, as the human index reads the merge-base, which the merge moved. On a
+rebase, the same per replayed commit. The drift check fails otherwise, and it fails while
+`<PATTERNS_PLAN>` exists. **Two ADRs with one number** (parallel branches) fail `lint`: the
+later branch takes the next free number — its file, its title and every citation
+(supersession stamps, glossary and map links, code comments, ZDD record lines) — then regenerates.
 
-**If ZDD's skills are missing** in Claude Code, the developer has not installed ZDD
-for this repo. Tell them to run, from the repo's folder:
-`claude plugin install mattpocock-skills@zero-drift-docs --scope project`, then
-`claude plugin install zdd@zero-drift-docs --scope project`, then restart Claude
-Code. ZDD's design interview and related skills are built on Matt Pocock's skills,
-so ZDD installs the one release of them it is tested with, and this repo switches
-other copies off on purpose. Setup, and joining a repo: https://github.com/rich-rees/zero-drift-docs#readme.
+**If ZDD's skills are missing** in Claude Code, the developer has not installed ZDD for this
+repo. Tell them to run, from the repo's folder: `claude plugin install mattpocock-skills@zero-drift-docs --scope project`,
+then `claude plugin install zdd@zero-drift-docs --scope project`, then restart Claude Code. ZDD's design
+interview and related skills are built on Matt Pocock's skills, so ZDD installs the one release of them
+it is tested with, and this repo switches other copies off on purpose. Setup, and joining a repo: https://github.com/rich-rees/zero-drift-docs#readme.
 
 Optional: `grill` runs a design interview that writes glossary terms and ADRs into
 `<BUNDLE_DIR>/` as they crystallize (needs the `mattpocock-skills` plugin; without it,
