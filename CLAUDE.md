@@ -44,6 +44,19 @@ Supersession points both ways; never edit an accepted decision into a new truth.
   `plugins/zdd/.codex-plugin/plugin.json`) and the marketplace entry, kept in
   sync (a test pins them), tagged `vX.Y.Z`.
 
+## Findings are the backlog
+
+Findings live as GitHub issues labelled `finding` on this repo; they are
+ZDD's only backlog (Rich's call, 2026-10-13). A tracker task elsewhere
+records only *that* a release is due, never what goes in it. A release
+starts with `gh issue list --label finding --state open`, and every open
+finding gets one of: **fixed** in this release (closed by the release
+commit, which cites it), **deferred** (a comment saying why and until when),
+or **declined** (closed with the reason). A release whose notes don't
+account for every open finding isn't finished. (Why: 2.4.1 cited #24 and
+filed #26 and #27, yet never swept #15–#19 in, because nothing made a
+release start from the open list.)
+
 ## Releasing
 
 Every line is checked off in the release PR; *(test)* marks the ones a test
@@ -51,6 +64,8 @@ already holds, so a red suite names what was forgotten.
 
 **Before the PR merges**
 
+- [ ] Every open `finding` issue is fixed, deferred or declined (above), and
+      the Versioning entry names each one by number.
 - [ ] The version pins move together and `render` runs (above). *(test)*
 - [ ] Whatever a new feature **reads**, bootstrap **writes** — a test binds
       each writer to its reader (as the lock bootstrap writes is the one the
