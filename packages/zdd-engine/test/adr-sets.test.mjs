@@ -114,3 +114,47 @@ test("tally's stores and the one-set default: both folders' numbers are counted;
   assert.match(readFileSync(join(one, "zdd", "agent-index.md"), "utf8"), /Decisions: `zdd\/adr\/`\. Human index/);
   rmSync(one, { recursive: true, force: true });
 });
+
+test("CR-032: an ADR folder that exists but cannot be listed fails lint — one set or two — never an empty corpus that passes", () => {
+  const repo = twoSets();
+  rmSync(join(repo, "zdd", "adr-harness"), { recursive: true });
+  writeFileSync(join(repo, "zdd", "adr-harness"), "not a folder\n");
+  let r = engine(repo, "lint");
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /zdd\/adr-harness: could not be listed \(ENOTDIR\) — its ADRs are not checked/);
+  rmSync(repo, { recursive: true, force: true });
+  const one = mkdtempSync(join(tmpdir(), "zdd-adrsets-unl-"));
+  cpSync(FIXTURE, one, { recursive: true });
+  rmSync(join(one, "zdd", "adr"), { recursive: true });
+  writeFileSync(join(one, "zdd", "adr"), "not a folder\n");
+  r = engine(one, "lint");
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /zdd\/adr: could not be listed \(ENOTDIR\)/);
+  rmSync(one, { recursive: true, force: true });
+});
+
+test("CR-033 / CR-043: with two sets, a custom application folder is linked where it is, the viewer is told a harness ADR's folder, and render's summary counts each index", () => {
+  const repo = twoSets();
+  renameSync(join(repo, "zdd", "adr"), join(repo, "zdd", "decisions"));
+  withPaths(repo, { adrDir: "zdd/decisions" });
+  const moved = join(repo, "zdd", "adr-harness", "0001-widgets-are-the-core-entity.md");
+  writeFileSync(moved, readFileSync(moved, "utf8").replace("../adr/", "../decisions/"));
+  writeFileSync(join(repo, "zdd", "blessings", "cites.md"), "---\nwhere: src/app/page.tsx\nkind: copy\nadr: ADR-0002, ADR-0001\n---\n\nCiting both? Copy it.\n");
+  const r = engine(repo, "render");
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /1 ADRs -> adr-index\.md, 1 -> adr-harness-index\.md/);
+  const index = readFileSync(join(repo, "zdd", "blessing-index.md"), "utf8");
+  assert.match(index, /why: \[ADR-0002\]\(decisions\/0002-things-replace-widgets\.md\), \[ADR-0001\]\(adr-harness\/0001-widgets-are-the-core-entity\.md\)/, index);
+  const html = readFileSync(join(repo, "zdd", "human-index.html"), "utf8");
+  const bundle = JSON.parse(/window\.BUNDLE = (.*);\n/.exec(html)[1]);
+  assert.deepEqual(bundle.docs.adrs.map((a) => [a.num, a.dir ?? null]).sort(), [["0001", "zdd/adr-harness"], ["0002", null]], "only a harness ADR carries its folder");
+  rmSync(repo, { recursive: true, force: true });
+});
+
+test("CR-039: the tally counts ADR files, so two files with one number stay two (as before the harness set)", () => {
+  const repo = mkdtempSync(join(tmpdir(), "zdd-adrsets-dup-"));
+  cpSync(FIXTURE, repo, { recursive: true });
+  writeFileSync(join(repo, "zdd", "adr", "0002-another.md"), "# Another\n\nx.\n");
+  assert.deepEqual(readStores(repo, { adrDir: "zdd/adr", glossary: "zdd/glossary.md", blessingsDir: "zdd/blessings" }).adrs, ["0001", "0002", "0002"]);
+  rmSync(repo, { recursive: true, force: true });
+});

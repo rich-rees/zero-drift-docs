@@ -274,7 +274,7 @@ function rebaseFromSet(text, setDir, indexDir) {
 // `adr/<file>` it has always had (its bytes never move); a harness ADR's
 // folder is worked out from paths.harnessAdrDir.
 function adrHrefFromBundle(adr) {
-  if (adr.set !== "harness") return `adr/${adr.file}`;
+  if (PATHS.harnessAdrDir === undefined) return `adr/${adr.file}`;
   return `${posix.relative(PATHS.bundleDir, adr.dir) || "."}/${adr.file}`;
 }
 
@@ -754,7 +754,10 @@ async function render() {
   // the top-level key is otherwise invisible to it (verification CR-026).
   // Only added when set, so a config without it keeps the v0.3.1 bytes.
   const options = NON_AREA_TAGS.length ? { ...VIEWER.options, nonAreaTags: NON_AREA_TAGS } : VIEWER.options;
-  const viewerDocs = { ...docs, adrs: docs.adrs.map(({ num, file, title, body }) => ({ num, file, title, body })) };
+  // A harness ADR carries its folder (`dir`), so the viewer names its source
+  // and resolves its links from there (CR-033); an application ADR carries
+  // nothing new, so a repo with one set embeds the 2.4 projection.
+  const viewerDocs = { ...docs, adrs: docs.adrs.map(({ num, file, title, body, set, dir }) => (set === "harness" ? { num, file, title, body, dir } : { num, file, title, body })) };
   const html = viewer.render({ graph, docs: viewerDocs, changed, options, bundleName: BUNDLE_NAME, repoBase: REPO_BASE });
   if (typeof html !== "string") {
     console.error(`Viewer '${VIEWER.name}' must return the human index as a string`);
@@ -818,7 +821,7 @@ async function render() {
     const fix = AGENT_INDEX.levels === 2 ? "trim the features' pointer lists, or raise agentIndex.budgetTokens in zdd/config.json" : 'raise agentIndex.budgetTokens in zdd/config.json, set agentIndex.levels to 2 (areas first, then one file per area, each feature one hop away), or link each feature\'s entry points only';
     console.error(`WARNING: agent index ≈${approxTokens} tokens (budget ${AGENT_INDEX.budget}) — ${fix}`);
   }
-  return { html, graphJson, agentIndex, areaFiles, adrIndex, harnessAdrIndex, blessingIndex, counts: { blessings, concepts: concepts.length, edges: graph.edges.length, features: features.length, adrs: docs.adrs.length } };
+  return { html, graphJson, agentIndex, areaFiles, adrIndex, harnessAdrIndex, blessingIndex, counts: { blessings, concepts: concepts.length, edges: graph.edges.length, features: features.length, adrs: docs.adrs.length, harnessAdrs: docs.adrs.filter((a) => a.set === "harness").length } };
 }
 
 export async function run(args) {
@@ -1000,6 +1003,6 @@ export async function run(args) {
     }
     const indexName = PATHS.agentIndex.split("/").pop();
     const sections = areaFiles.size ? `${counts.features} feature sections -> ${areaFiles.size} area files under ${areaLabel} (areas listed in ${indexName})` : `${counts.features} feature sections -> ${indexName}`;
-    console.log(`Wrote ${counts.concepts} concepts, ${counts.edges} edges -> graph.json + human-index.html (viewer ${VIEWER.name}); ${sections}; ${counts.adrs} ADRs -> adr-index.md; ${counts.blessings} blessings -> blessing-index.md`);
+    console.log(`Wrote ${counts.concepts} concepts, ${counts.edges} edges -> graph.json + human-index.html (viewer ${VIEWER.name}); ${sections}; ${harnessAdrIndex !== null ? `${counts.adrs - counts.harnessAdrs} ADRs -> adr-index.md, ${counts.harnessAdrs} -> ${PATHS.harnessAdrIndex.split("/").pop()}` : `${counts.adrs} ADRs -> adr-index.md`}; ${counts.blessings} blessings -> blessing-index.md`);
   }
 }
