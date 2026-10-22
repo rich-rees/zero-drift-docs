@@ -143,7 +143,9 @@ export function readStores(repoRoot, paths) {
   const rel = (p) => relative(repoRoot, p).split(/[\\/]/).join("/");
   // Both ADR sets when the harness set is configured (decision 0033).
   const listed = listAdrFiles(repoRoot, paths);
-  const adrs = [...new Set(listed.files.map((e) => e.num))].sort();
+  // One entry per file, as before the harness set: two files with one number
+  // (a merge) are two, and lint names the duplicate (CR-039).
+  const adrs = listed.files.map((e) => e.num).sort();
   for (const u of listed.unreadable) notes.push(`${u.dir}: could not be listed (${u.code}) — no ADR counted as never named`);
   const glossary = resolve(repoRoot, paths.glossary);
   let terms = [];

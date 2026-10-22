@@ -6,7 +6,7 @@
 // ritual lives in the zdd plugin's skills; this is the mechanical half.
 //
 //   zdd-engine derive [--check] [--verbose]   codebase metadata from source
-//   zdd-engine render [--check]               agent index + ADR index + human index
+//   zdd-engine render [--check]               agent index + ADR index (and the harness ADR index, when set) + blessing index + human index
 //   zdd-engine lint [--merge] [--tempstate]   deterministic store lints
 //   zdd-engine freshness [--base <ref>]       advisory semantic-map staleness nudge
 //   zdd-engine tally [--since <ref|date>] [--json]  the ZDD record, counted over git history

@@ -149,7 +149,10 @@ export function run(args) {
 // number line, so every check below keys on the number across both folders.
 // With one set an ADR is named by its file, as before; with two, by its
 // folder too.
-const { files: adrEntries } = listAdrFiles(REPO, paths);
+const { files: adrEntries, unreadable: adrUnreadable } = listAdrFiles(REPO, paths);
+// A set that exists but cannot be listed is a lint failure, never an empty
+// corpus that passes (CR-032).
+for (const u of adrUnreadable) problems.push(`${u.dir}: could not be listed (${u.code}) — its ADRs are not checked; an ADR folder must be a readable folder`);
 const twoSets = adrSets(paths).length > 1;
 const nameOf = (e) => (twoSets ? `${e.dir}/${e.file}` : e.file);
 
