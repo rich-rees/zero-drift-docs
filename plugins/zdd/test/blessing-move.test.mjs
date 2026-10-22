@@ -313,3 +313,32 @@ test("CR-024: upgrading from 2.4.1, the text pass shows an adopter's own paragra
   writeFileSync(cfg, JSON.stringify({ ...JSON.parse(readFileSync(cfg, "utf8")), engine: VERSION }, null, 2) + "\n");
   assert.ok(!runJson(repo, ["upgrade", "--plan"]).duplicates.some((d) => /Our blessings live/.test(d.text)), "a repo already on 2.5 is not asked again");
 });
+
+test("dry-run finding: a path written relative to its app is taken when exactly one repo file ends with it; two is a question, a folder is named, a span's arguments are not its path", () => {
+  const files = ["apps/web/src/lib/graph-walk.ts", "apps/web/src/lib/util.ts", "apps/api/lib/util.ts", "scripts/ci/job-stack.mjs"];
+  const ctx = {
+    page: "zdd/map/features/f.md", pageType: "Feature", mapDir: "zdd/map", blessingsDir: "zdd/blessings", bundleDir: "zdd", metadataDir: "zdd/metadata", adrDir: "zdd/adr",
+    isFile: (r) => files.includes(r),
+    isDir: (r) => ["apps/api/tests/integration"].includes(r.replace(/\/+$/, "")),
+    readRecord: () => null,
+    filesEndingWith: (tail) => files.filter((f) => f === tail || f.endsWith(`/${tail}`)),
+  };
+  const move = (text) => proposeMove({ text, parts: [text], adrs: [] }, ctx);
+  assert.equal(move("Walking a journey? Call `walkJourney` in `lib/graph-walk.ts` because x.").where, "apps/web/src/lib/graph-walk.ts");
+  assert.equal(move("Adding a CI job? Run `scripts/ci/job-stack.mjs start` because x.").where, "scripts/ci/job-stack.mjs");
+  const two = move("Using a util? Copy `lib/util.ts` because x.");
+  assert.equal(two.where, null);
+  assert.match(two.problem, /the path `lib\/util\.ts` matches more than one repo file \(apps\/web\/src\/lib\/util\.ts, apps\/api\/lib\/util\.ts\) — write the one meant in full/);
+  assert.match(move("Testing with a person? Copy `a_person` in `apps/api/tests/integration/` because x.").problem, /it names a folder \(`apps\/api\/tests\/integration\/`\), not a file/);
+});
+
+test("dry-run finding: a second checkout under .claude/worktrees/ never makes an app-relative path ambiguous (decision 0026)", () => {
+  const repo = adopter("worktrees");
+  mkdirSync(join(repo, "src", "lib"), { recursive: true });
+  writeFileSync(join(repo, "src", "lib", "walk.ts"), "export const walk = 1;\n");
+  mkdirSync(join(repo, ".claude", "worktrees", "other", "src", "lib"), { recursive: true });
+  writeFileSync(join(repo, ".claude", "worktrees", "other", "src", "lib", "walk.ts"), "export const walk = 1;\n");
+  writeFileSync(join(repo, "zdd", "map", "features", "things.md"), THINGS_PAGE.replace("# Notes", "- Walking things? Call `lib/walk.ts` because x.\n\n# Notes"));
+  const p = runJson(repo, ["upgrade", "--plan"]).blessingMoves.proposals.find((x) => x.id === "walking-things");
+  assert.equal(p.where, "src/lib/walk.ts", p.problem);
+});

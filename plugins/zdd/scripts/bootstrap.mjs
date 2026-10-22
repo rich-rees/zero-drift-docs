@@ -1924,6 +1924,54 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
   return { version, plan, ...ledgerOut(ledger), duplicates, blessingMoves };
 }
 
+// Every file in the adopter's repo, once per run: git's list when there is
+// one (what is tracked or not ignored), else a bounded walk that skips the
+// usual build and dependency folders. Used to find the one file a path
+// written relative to its app means. `.claude/worktrees/` is never source
+// (decision 0026, the engine's ALWAYS_IGNORED): every file there is a second
+// copy from another checkout, and would make every path ambiguous.
+const REPO_FILES = new WeakMap();
+const notSource = (rel) => /^\.claude\/worktrees(\/|$)/i.test(rel) || rel.split("/").some((seg) => RETIRED_SKIP_DIRS.has(seg));
+function repoFiles(ledger) {
+  if (REPO_FILES.has(ledger)) return REPO_FILES.get(ledger);
+  let files = null;
+  if (hasGit(ledger.root)) {
+    try {
+      files = execFileSync("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard"], { cwd: ledger.root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 30_000, maxBuffer: 256 * 1024 * 1024 }).split("\0").filter(Boolean);
+    } catch {
+      files = null;
+    }
+  }
+  if (!files) {
+    files = [];
+    const rec = (dir, depth) => {
+      if (depth > 12 || files.length > 100_000) return;
+      let names;
+      try {
+        names = readdirSync(dir).sort();
+      } catch {
+        return;
+      }
+      for (const name of names) {
+        const p = join(dir, name);
+        let st;
+        try {
+          st = lstatSync(p);
+        } catch {
+          continue;
+        }
+        if (st.isDirectory()) {
+          if (!RETIRED_SKIP_DIRS.has(name) && !name.startsWith(".")) rec(p, depth + 1);
+        } else if (st.isFile()) files.push(posixify(relative(ledger.root, p)));
+      }
+    };
+    rec(ledger.root, 0);
+  }
+  files = files.filter((f) => !notSource(f));
+  REPO_FILES.set(ledger, files);
+  return files;
+}
+
 // Anything at all at a repo-relative path — a file, a folder, a link
 // (lstat, never followed).
 function entryExists(root, rel) {
@@ -1987,6 +2035,14 @@ function moveBlessings(ledger, paths, { move, kindOf }) {
           return null;
         }
       },
+      isDir: (r) => {
+        try {
+          return lstatSync(ledger.abs(r.replace(/\/+$/, ""))).isDirectory();
+        } catch {
+          return false;
+        }
+      },
+      filesEndingWith: (tail) => repoFiles(ledger).filter((f) => f === tail || f.endsWith(`/${tail}`)),
     };
     const moved = [];
     for (const item of found.items) {
