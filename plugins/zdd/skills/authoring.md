@@ -51,7 +51,8 @@ next free number in either folder, and a citation, a blessing's reason or a
 supersession works across them unchanged. `bootstrap.mjs split-adrs` opens
 the second set (decision 0034).
 
-Format (`zdd/adr/NNNN-kebab-title.md`, numbered continuing the sequence):
+Format (`NNNN-kebab-title.md` in its set's folder — `zdd/adr/`, or the
+harness set's — numbered continuing the sequence across both):
 
 ```markdown
 # <Decision, as a short declarative title>

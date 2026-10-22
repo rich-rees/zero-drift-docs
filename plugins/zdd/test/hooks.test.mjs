@@ -555,3 +555,11 @@ test("fence (2.0.0): the blessing index is generated and fenced; the pattern pla
   assert.equal(paths.blessingIndex, "zdd/blessing-index.md");
   assert.throws(() => artifactPaths({ paths: { metadataDir: "zdd/work", patternsPlan: "zdd/work/plan.md" } }), /contains "zdd\/work\/plan\.md"/);
 });
+
+test("CR-046: the fence guards the harness ADR index when the set is configured, and only then", () => {
+  setConfig({ ...VALID, paths: { harnessAdrDir: "zdd/adr-harness", harnessAdrIndex: "zdd/adr-harness-index.md" } });
+  blocked(fence("Write", { file_path: join(repo, "zdd", "adr-harness-index.md") }), "the harness index");
+  silent(fence("Write", { file_path: join(repo, "zdd", "adr-harness", "0002-x.md") }), "a harness ADR is curated");
+  setConfig(VALID);
+  silent(fence("Write", { file_path: join(repo, "zdd", "adr-harness-index.md") }), "no set, no fence on that name");
+});

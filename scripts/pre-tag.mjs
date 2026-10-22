@@ -34,7 +34,7 @@ const argv = process.argv.slice(2);
 const split = argv.includes("--split");
 const [tag, ...adopters] = argv.filter((a) => a !== "--split");
 if (!/^v\d+\.\d+\.\d+$/.test(tag ?? "")) {
-  console.error("usage: pre-tag.mjs vX.Y.Z <adopter checkout> …");
+  console.error("usage: pre-tag.mjs vX.Y.Z [--split] <adopter checkout> …");
   process.exit(2);
 }
 const run = (label, cmd, args, cwd) => {

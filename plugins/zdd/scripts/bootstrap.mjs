@@ -1041,8 +1041,12 @@ export const DOMAIN_DOC = "docs/agents/domain.md";
 export function domainDocText(paths) {
   return readFileSync(join(TEMPLATES, "domain.md"), "utf8")
     .replaceAll("<GLOSSARY>", paths.glossary)
-    .replaceAll("<ADR_DIR>", paths.adrDir)
-    .replaceAll("<ADR_INDEX>", paths.adrIndex);
+    // A harness set at bootstrap (decision 0033) is named; without one the
+    // text is 2.4's. An existing domain.md is the adopter's, never rewritten:
+    // the split lists it for a hand edit instead.
+    .replaceAll("<HARNESS_ADR_RULE>", () => (paths.harnessAdrDir ? ` A decision about how the team builds (review, tests, CI, the tracker, ZDD itself) goes in \`${paths.harnessAdrDir}/\` instead, on the same numbering.` : ""))
+    .replaceAll("<ADR_DIR>", () => paths.adrDir)
+    .replaceAll("<ADR_INDEX>", () => paths.adrIndex);
 }
 function writeDomainDoc(ledger, paths) {
   if (ledger.exists(DOMAIN_DOC)) {
@@ -1607,30 +1611,53 @@ export function splitAdrs(root, { plan = false, harness = null, application = nu
   const current = artifactPaths(config);
   const configured = current.harnessAdrDir !== undefined;
   if (configured && (dir || index)) throw new Error(`paths.harnessAdrDir is already ${current.harnessAdrDir} — --dir and --index name a new set; leave them out`);
-  // The set's paths, judged by the same rules as every other path.
-  const paths = configured ? current : artifactPaths({ ...config, paths: { ...(config.paths ?? {}), harnessAdrDir: dir ?? "zdd/adr-harness", harnessAdrIndex: index ?? "zdd/adr-harness-index.md" } });
+  // The set's paths, judged by the same rules as every other path (CR-030:
+  // the full overlap rule the engine applies).
+  const nextConfig = configured ? config : { ...config, paths: { ...(config.paths ?? {}), harnessAdrDir: dir ?? "zdd/adr-harness", harnessAdrIndex: index ?? "zdd/adr-harness-index.md" } };
+  const paths = artifactPaths(nextConfig);
   const ledger = new Ledger(root, { dryRun: plan });
-  const adrAbs = ledger.abs(paths.adrDir);
-  const files = existsSync(adrAbs) ? readdirSync(adrAbs).filter((f) => /^\d{4}-.*\.md$/.test(f)).sort() : [];
-  const proposals = files.map((file) => {
+  // --- what there is: every ADR, read whole (CR-026, CR-034) ---
+  const listDir = (rel) => {
+    const abs = ledger.abs(rel);
+    if (!existsSync(abs)) return [];
+    if (!lstatSync(abs).isDirectory()) throw new Error(`${rel} is not a folder — an ADR set is a folder of NNNN-*.md files`);
+    return readdirSync(abs).filter((f) => /^\d{4}-.*\.md$/.test(f)).sort();
+  };
+  const unfit = [];
+  const proposals = listDir(paths.adrDir).map((file) => {
     const rel = `${paths.adrDir}/${file}`;
-    let tag = null;
+    let text = null;
     try {
-      if (lstatSync(ledger.abs(rel)).size <= MAX_SCAN_BYTES) tag = scopeTag(ledger.read(rel));
-    } catch {
-      tag = null;
+      const st = lstatSync(ledger.abs(rel));
+      if (!st.isFile()) unfit.push(`${rel} (not a regular file)`);
+      else if (st.size > MAX_SCAN_BYTES) unfit.push(`${rel} (over ${MAX_SCAN_BYTES / 1024} KiB)`);
+      else text = ledger.read(rel);
+    } catch (e) {
+      unfit.push(`${rel} (unreadable: ${e.code ?? "error"})`);
     }
-    return { num: file.slice(0, 4), file, from: rel, tag };
+    return { num: file.slice(0, 4), file, from: rel, tag: text === null ? null : scopeTag(text), text };
   });
-  const tokenNow = createHash("sha256").update(JSON.stringify([paths.harnessAdrDir, paths.harnessAdrIndex, proposals.map((p) => [p.num, p.file, p.tag])])).digest("hex").slice(0, 8);
+  // One number line (CR-036): a number twice, or already in the harness set,
+  // makes --harness=NNNN name two files — refused before anything is shown.
+  const seen = new Map(listDir(paths.harnessAdrDir).map((f) => [f.slice(0, 4), `${paths.harnessAdrDir}/${f}`]));
+  const dupes = [];
+  for (const p of proposals) {
+    if (seen.has(p.num)) dupes.push(`ADR-${p.num}: ${seen.get(p.num)} and ${p.from}`);
+    else seen.set(p.num, p.from);
+  }
+  if (dupes.length) throw new Error(`two ADRs share a number (${dupes.join("; ")}) — renumber the later one first (lint names it); the split addresses ADRs by number`);
+  const digest = (t) => (t === null ? null : createHash("sha256").update(t).digest("hex").slice(0, 16));
+  const tokenNow = createHash("sha256").update(JSON.stringify([paths.harnessAdrDir, paths.harnessAdrIndex, proposals.map((p) => [p.num, p.file, p.tag, digest(p.text)])])).digest("hex").slice(0, 8);
   const untagged = proposals.filter((p) => !p.tag);
+  const shown = proposals.map(({ text, ...p }) => p);
   if (plan && !token) {
     ledger.notes.push(
       untagged.length
         ? `${untagged.length} of ${proposals.length} ADRs carry no Scope tag line — propose a set for each from what it decides (harness: how the team builds — review, tests, CI, the tracker, ZDD itself; application: what the product does), and let the developer confirm or change each one`
         : `every ADR carries a Scope tag line — the developer confirms the list`,
     );
-    return { plan: true, token: tokenNow, dir: paths.harnessAdrDir, index: paths.harnessAdrIndex, proposals, ...ledgerOut(ledger) };
+    for (const u of unfit) ledger.notes.push(`${u}: cannot be moved by the split — fix it, or keep it in the application set`);
+    return { plan: true, token: tokenNow, dir: paths.harnessAdrDir, index: paths.harnessAdrIndex, proposals: shown, ...ledgerOut(ledger) };
   }
   // --- judged whole before the first write ---
   if (!token) throw new Error("split-adrs takes the token split-adrs --plan printed (--token=<token>), so the write moves exactly the list the developer read");
@@ -1646,45 +1673,75 @@ export function splitAdrs(root, { plan = false, harness = null, application = nu
   if (undecided.length) throw new Error(`no set given for the untagged ADR${undecided.length === 1 ? "" : "s"} ${undecided.map((p) => `ADR-${p.num}`).join(", ")} — name each in --harness or --application; the split never decides an untagged ADR`);
   for (const p of proposals) p.set = h.has(p.num) ? "harness" : a.has(p.num) ? "application" : p.tag;
   const toMove = proposals.filter((p) => p.set === "harness");
+  const cannot = toMove.filter((p) => p.text === null);
+  if (cannot.length) throw new Error(`cannot move ${cannot.map((p) => p.from).join(", ")}: ${unfit.filter((u) => cannot.some((c) => u.startsWith(c.from))).join("; ")} — fix it first, or keep it in --application`);
   const moved = new Map(toMove.map((p) => [p.from, `${paths.harnessAdrDir}/${p.file}`]));
-  const taken = toMove.filter((p) => entryExists(root, `${paths.harnessAdrDir}/${p.file}`));
-  if (taken.length) throw new Error(`${taken.map((p) => `${paths.harnessAdrDir}/${p.file}`).join(", ")} already there — move it by hand, then run split-adrs --plan again`);
-  // --- writes ---
-  if (!configured) {
-    const next = { ...config, paths: { ...(config.paths ?? {}), harnessAdrDir: paths.harnessAdrDir, harnessAdrIndex: paths.harnessAdrIndex } };
-    ledger.overwrite("zdd/config.json", JSON.stringify(next, null, 2) + "\n");
-    ledger.notes.push(`zdd/config.json: paths.harnessAdrDir = ${paths.harnessAdrDir}, paths.harnessAdrIndex = ${paths.harnessAdrIndex} (decision 0033)`);
+  // A destination is free only when nothing is there and its path is safe (CR-027).
+  for (const p of toMove) {
+    const state = destinationState(root, `${paths.harnessAdrDir}/${p.file}`);
+    if (state !== "absent") throw new Error(`${paths.harnessAdrDir}/${p.file} ${state === "present" ? "is already there" : "cannot be written safely (a link, or a path ZDD may not use)"} — move it by hand, then run split-adrs --plan again`);
   }
-  if (!toMove.length && !entryExists(root, paths.harnessAdrDir)) ledger.create(`${paths.harnessAdrDir}/.gitkeep`, "");
-  // Every Markdown file in the bundle but the generated ones is re-pointed;
-  // the moved ADRs are re-pointed from where they land.
+  // Every Markdown file whose links may need re-pointing: the bundle's, and
+  // both ADR folders' wherever they live (CR-026); the generated ones never.
+  // A page the walk could not read refuses the split (its links would break).
   const generated = new Set([paths.agentIndex, paths.adrIndex, paths.blessingIndex, paths.harnessAdrIndex, paths.patternsPlan].filter(Boolean));
   const areaDir = agentIndexAreaDir(paths.agentIndex);
+  const pages = new Set();
+  const skippedPages = [];
+  for (const top of [paths.bundleDir, paths.adrDir, paths.harnessAdrDir]) {
+    const { files, skipped } = listMapPages(ledger, top);
+    skippedPages.push(...skipped);
+    for (const f of files) if (!generated.has(f) && !(areaDir && f.startsWith(`${areaDir}/`)) && !f.startsWith(`${paths.metadataDir}/`) && !moved.has(f)) pages.add(f);
+  }
+  if (skippedPages.length) throw new Error(`the split could not read ${skippedPages.slice(0, 5).join(", ")}${skippedPages.length > 5 ? ", …" : ""} — links there could break unseen; fix or move it, then run split-adrs --plan again`);
   const bundle = paths.bundleDir === "." ? "" : paths.bundleDir;
-  const { files: pages, skipped } = listMapPages(ledger, paths.bundleDir);
-  for (const what of skipped) ledger.notes.push(`${paths.bundleDir}: ${what} was not read for links to the moved ADRs — check it by hand`);
+  const repoint = (text, oldRel, newRel) => outsideFences(text, (chunk) => repointLinks(chunk, { oldRel, newRel, moved, bundleDir: paths.bundleDir }));
+  // --- writes: every new file first, undone if any is refused (CR-025) ---
+  const created = [];
+  for (const p of toMove) {
+    const to = moved.get(p.from);
+    if (ledger.create(to, repoint(p.text, p.from, to))) created.push(to);
+    else {
+      for (const c of created) ledger.remove(c);
+      throw new Error(`${to} appeared during the run — nothing was moved; run split-adrs --plan again`);
+    }
+  }
+  if (!toMove.length && !entryExists(root, paths.harnessAdrDir)) ledger.create(`${paths.harnessAdrDir}/.gitkeep`, "");
+  for (const p of toMove) ledger.remove(p.from);
   let repointed = 0;
-  for (const rel of pages) {
-    if (generated.has(rel) || (areaDir && rel.startsWith(`${areaDir}/`)) || rel.startsWith(`${paths.metadataDir}/`)) continue;
+  for (const rel of [...pages].sort()) {
     const text = ledger.read(rel);
-    const newRel = moved.get(rel) ?? rel;
-    const next = outsideFences(text, (chunk) => repointLinks(chunk, { oldRel: rel, newRel, moved, bundleDir: paths.bundleDir }));
-    if (moved.has(rel)) {
-      ledger.create(newRel, next);
-      ledger.remove(rel);
-    } else if (next !== text) {
+    const next = repoint(text, rel, rel);
+    if (next !== text) {
       ledger.overwrite(rel, next);
       repointed++;
     }
   }
-  if (toMove.length) ledger.notes.push(`${toMove.length} ADR${toMove.length === 1 ? "" : "s"} moved to ${paths.harnessAdrDir}/ with ${toMove.length === 1 ? "its number" : "their numbers"} unchanged; ${repointed} other file${repointed === 1 ? "" : "s"} in ${paths.bundleDir}/ re-pointed`);
-  // Outside the bundle ZDD writes nothing: what still points at an old path is listed.
+  if (!configured) {
+    ledger.overwrite("zdd/config.json", JSON.stringify(nextConfig, null, 2) + "\n");
+    ledger.notes.push(`zdd/config.json: paths.harnessAdrDir = ${paths.harnessAdrDir}, paths.harnessAdrIndex = ${paths.harnessAdrIndex} (decision 0033)`);
+    // ZDD's instructions name the harness index from now on (CR-038).
+    writeInstructions(ledger, nextConfig);
+    if (ledger.exists("AGENTS.md")) {
+      const cur = ledger.read("AGENTS.md");
+      if (cur.includes(SNIPPET_BEGIN) || cur.includes(LEGACY_SNIPPET_HEADING)) writeSnippet(ledger, "AGENTS.md", artifactPaths(nextConfig, { lenient: true }));
+    }
+  }
+  if (toMove.length) ledger.notes.push(`${toMove.length} ADR${toMove.length === 1 ? "" : "s"} moved to ${paths.harnessAdrDir}/ with ${toMove.length === 1 ? "its number" : "their numbers"} unchanged; ${repointed} other file${repointed === 1 ? "" : "s"} re-pointed`);
+  // Outside the bundle and the ADR folders ZDD writes nothing: what still
+  // points at an old path is listed — every file git sees, untracked ones
+  // included, and what was too big to read is said (CR-029).
   const outside = [];
-  for (const rel of sweepList(ledger, paths.metadataDir).files) {
-    if (bundle && (rel === bundle || rel.startsWith(`${bundle}/`))) continue;
+  let tooBig = 0;
+  const inside = (rel, top) => top && (rel === top || rel.startsWith(`${top}/`));
+  for (const rel of repoFiles(ledger)) {
+    if (inside(rel, bundle) || inside(rel, paths.adrDir) || inside(rel, paths.harnessAdrDir) || !RETIRED_SCAN_EXT.test(rel)) continue;
     let text;
     try {
-      if (lstatSync(ledger.abs(rel)).size > MAX_SCAN_BYTES) continue;
+      if (lstatSync(ledger.abs(rel)).size > MAX_SCAN_BYTES) {
+        tooBig++;
+        continue;
+      }
       text = ledger.read(rel);
     } catch {
       continue;
@@ -1696,8 +1753,27 @@ export function splitAdrs(root, { plan = false, harness = null, application = nu
     ledger.notes.push(`${o.file}:${o.line} still points at ${o.link}${target ? ` — now ${target}` : ""}; ZDD never edits outside ${paths.bundleDir}/, so change it by hand`);
   }
   if (outside.length > 50) ledger.notes.push(`… and ${outside.length - 50} more lines outside ${paths.bundleDir}/ that point at a moved ADR`);
+  if (tooBig) ledger.notes.push(`${tooBig} file${tooBig === 1 ? "" : "s"} outside ${paths.bundleDir}/ over ${MAX_SCAN_BYTES / 1024} KiB not read for links to the moved ADRs — search ${tooBig === 1 ? "it" : "them"} by hand`);
+  if (toMove.length && ledger.exists(DOMAIN_DOC)) ledger.notes.push(`${DOMAIN_DOC} is yours and names only ${paths.adrDir}/ — add ${paths.harnessAdrDir}/ for harness decisions, so Matt Pocock's skills file them there`);
   ledger.notes.push(`run \`render\` (it writes ${paths.harnessAdrIndex} and rewrites ${paths.adrIndex}), then \`lint\`, and commit the split in one PR`);
-  return { plan, token: tokenNow, dir: paths.harnessAdrDir, index: paths.harnessAdrIndex, proposals, moved: [...moved].map(([from, to]) => ({ from, to })), outside, ...ledgerOut(ledger) };
+  return { plan, token: tokenNow, dir: paths.harnessAdrDir, index: paths.harnessAdrIndex, proposals: shown, moved: [...moved].map(([from, to]) => ({ from, to })), outside, ...ledgerOut(ledger) };
+}
+
+// "absent" (nothing there), "present" (anything at all, not followed), or
+// "unsafe" (the path escapes the repo, crosses a link, or cannot be checked).
+function destinationState(root, rel) {
+  let abs;
+  try {
+    abs = resolveInside(root, rel, rel);
+  } catch {
+    return "unsafe";
+  }
+  try {
+    lstatSync(abs);
+    return "present";
+  } catch (e) {
+    return e.code === "ENOENT" ? "absent" : "unsafe";
+  }
 }
 
 export function narrateSplit(r) {

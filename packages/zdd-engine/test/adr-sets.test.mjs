@@ -158,3 +158,29 @@ test("CR-039: the tally counts ADR files, so two files with one number stay two 
   assert.deepEqual(readStores(repo, { adrDir: "zdd/adr", glossary: "zdd/glossary.md", blessingsDir: "zdd/blessings" }).adrs, ["0001", "0002", "0002"]);
   rmSync(repo, { recursive: true, force: true });
 });
+
+test("CR-046: a map page's bare citation of a harness ADR links into its folder — from the index and from a two-level area file; a changed harness ADR is in the human index's highlight", () => {
+  const repo = twoSets();
+  const page = join(repo, "zdd", "map", "features", "things.md");
+  writeFileSync(page, readFileSync(page, "utf8").replace("description: CRUD for things with an audit trail (ADR-0002).", "description: CRUD for things with an audit trail (ADR-0002, after ADR-0001)."));
+  assert.equal(engine(repo, "render").status, 0);
+  assert.match(readFileSync(join(repo, "zdd", "agent-index.md"), "utf8"), /\[ADR-0001\]\(adr-harness\/0001-widgets-are-the-core-entity\.md\)/);
+  const cfg = join(repo, "zdd", "config.json");
+  const c = JSON.parse(readFileSync(cfg, "utf8"));
+  writeFileSync(cfg, JSON.stringify({ ...c, agentIndex: { ...(c.agentIndex ?? {}), levels: 2 }, render: { storeChanges: true } }, null, 2) + "\n");
+  const git = (...a) => execFileSync("git", a, { cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  git("init", "-q", "-b", "main");
+  git("add", "-A");
+  git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "base");
+  git("update-ref", "refs/remotes/origin/main", "HEAD");
+  git("checkout", "-q", "-b", "work");
+  const harness = join(repo, "zdd", "adr-harness", "0001-widgets-are-the-core-entity.md");
+  writeFileSync(harness, readFileSync(harness, "utf8") + "\nA later note.\n");
+  const r = engine(repo, "render");
+  assert.equal(r.status, 0, r.stderr);
+  const area = readFileSync(join(repo, "zdd", "agent-index", "things.md"), "utf8");
+  assert.match(area, /\[ADR-0001\]\(\.\.\/adr-harness\/0001-widgets-are-the-core-entity\.md\)/, area);
+  const bundle = JSON.parse(/window\.BUNDLE = (.*);\n/.exec(readFileSync(join(repo, "zdd", "human-index.html"), "utf8"))[1]);
+  assert.deepEqual(bundle.docs.changed.adrs, [{ file: "0001-widgets-are-the-core-entity.md", status: "updated" }]);
+  rmSync(repo, { recursive: true, force: true });
+});

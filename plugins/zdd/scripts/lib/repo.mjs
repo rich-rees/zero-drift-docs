@@ -226,6 +226,12 @@ export function artifactPaths(config, { lenient = false } = {}) {
       for (const c of [...CURATED_KEYS.map((k) => out[k]), out.harnessAdrDir, out.patternsPlan, CONFIG_REL].filter(Boolean)) if (posixPrefix(p, c)) return `paths.${key} ${JSON.stringify(p)} contains ${JSON.stringify(c)}`;
     } else if (samePosix(p, CONFIG_REL)) return `paths.${key} ${JSON.stringify(p)} is the config file`;
     for (const other of Object.keys(out)) if (other !== key && samePosix(p, out[other])) return `paths.${key} and paths.${other} are both ${JSON.stringify(p)}`;
+    // A generated file inside a curated folder (or the reverse) is refused as
+    // the engine refuses it (CR-030): `zdd/adr-harness/index.md` would be
+    // read as an ADR folder's file and written as an index.
+    if (key !== "metadataDir") {
+      for (const c of [...CURATED_KEYS, "harnessAdrDir", "patternsPlan"]) if (out[c] !== undefined && pathsOverlap(p, out[c])) return `paths.${key} ${JSON.stringify(p)} overlaps paths.${c} ${JSON.stringify(out[c])}`;
+    }
     return null;
   };
   // The harness ADR set (decision 0033): both keys or neither, the folder

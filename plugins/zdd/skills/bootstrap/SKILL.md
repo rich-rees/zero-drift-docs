@@ -205,7 +205,8 @@ with a harness of its own; no for a solo or young repo. Cost: one more
 folder and one more index. Saying no keeps one set; it can be split later."
 On yes, after step 4 run `node "$PLUGIN/scripts/bootstrap.mjs" split-adrs
 --plan`, then the write with its token (on a new repo there is nothing to
-move: it writes the two config keys and the empty folder). On an existing
+move, though the seeded ADR-0001 carries no tag, so name it: it is an
+application decision about the repo, `--application=0001`). On an existing
 repo with decisions already in `zdd/adr/`, the split proposes a set for
 each — a `Scope: harness` / `Scope: product` tag line decides; for every
 other ADR propose a set from what it decides, show the whole list as **one
@@ -276,7 +277,8 @@ apply"):
 5. the semantic map and its example feature — theirs; the example shows how
    a feature claims its code by linking it;
 6. the codebase metadata — the inventory, generated, never hand-edited;
-7. the agent index, the human index, the ADR index and the blessing index —
+7. the agent index, the human index, the ADR index (and the harness ADR
+   index, if that set was opened) and the blessing index —
    generated at step 5 by `render`, never hand-edited (the cards for these
    come from the script's explanation table, `explain(path)`);
 8. the config and **the lock** (`.claude/settings.json`: which plugins are on

@@ -50,7 +50,8 @@ Run this as the definition of done for every unit of work — the spoken form is
    npx -y @rich-rees/zdd-engine@2.5.0 derive
    ```
 4. **Run the renderer.** Rebuilds the graph artifact (`zdd/graph.json`), the
-   agent index, the ADR index, the blessing index, and the human index:
+   agent index, the ADR index (and the harness ADR index, when the repo has
+   one), the blessing index, and the human index:
    ```
    npx -y @rich-rees/zdd-engine@2.5.0 render
    ```
