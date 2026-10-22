@@ -60,6 +60,7 @@
 //   }
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, lstatSync, chmodSync, openSync, writeSync, closeSync } from "node:fs";
+import { findMapBlessings, proposeMove, blessingSlug, blessingFileText, removeMoved } from "./lib/blessing-move.mjs";
 import { join, dirname, basename, relative, posix } from "node:path";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -1425,6 +1426,12 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
       ledger.create(`${paths.mapDir}/${sub}/.gitkeep`, "");
     }
   }
+  // The blessing store (2.5, decision 0031): one file per blessing, empty
+  // at adoption; "update ZDD" mints them.
+  if (!existsSync(ledger.abs(paths.blessingsDir))) {
+    mkdirSync(ledger.abs(paths.blessingsDir), { recursive: true });
+    ledger.create(`${paths.blessingsDir}/.gitkeep`, "");
+  }
   const apps = answers.apps ?? (answers.stack ? stack.apps : detection.apps.map((a) => a.name));
   const slugs = dedupe(apps.map(slug)); // CR-013
   apps.forEach((app, i) => {
@@ -1529,12 +1536,13 @@ export function exampleFeature(config, paths) {
     "*where* the capability lives (`resource:`), *what connects* (links to the",
     "records `derive` inventoried - a feature CLAIMS a record by linking it, and",
     "`zdd-engine lint` lists every route, table, function and surface no slice",
-    "claims), and *what to copy* (a `# Blessings` section: one line per",
-    "pattern, opening with the question it answers - \"Adding an endpoint?\" -",
-    "then the exemplar to copy, the pattern to refuse, and the reason: an ADR,",
-    "or \"because ...\"). A unit of work that adds or changes user-facing",
-    "behaviour adds a slice or extends one; \"choose patterns\" reads the",
-    "blessings before the code is written.",
+    "claims). *What to copy* lives apart, in the blessing store",
+    `(\`${paths.blessingsDir}/\`): one file per pattern, opening with the question it`,
+    "answers - \"Adding an endpoint?\" - with `where:` (the code to copy or",
+    "extend) and `kind:` in its header, then the pattern to refuse and the",
+    "reason: an ADR, or \"because ...\". A unit of work that adds or changes",
+    "user-facing behaviour adds a slice or extends one; \"choose patterns\" reads",
+    "the blessings before the code is written.",
     "",
     "Claim a record with a markdown link, `[title](path)`, the path relative to",
     "this file - for this stack, for example:",
@@ -1558,7 +1566,7 @@ function ledgerOut(l) {
 // change; `drop` (ids from the plan's duplicates) removes adopter sections the
 // block now covers, on the user's word; `to` (a tag newer than this plugin)
 // moves only the lock — the rest waits for that release's own upgrade.
-export function upgrade(root, { lock = false, plan = false, drop = null, to = null, remote, home } = {}) {
+export function upgrade(root, { lock = false, plan = false, drop = null, to = null, moveBlessings: move = false, kinds = null, remote, home } = {}) {
   const version = pluginVersion();
   if (to !== null) return moveLockOnly(root, version, to, { plan, lock, remote, home });
   const cfg = readConfig(root);
@@ -1574,6 +1582,7 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
     throw new Error(`zdd/config.json's engine pin ${cfg.config.engine} is newer than this plugin (${version}) — update this machine's plugin first; upgrade never moves a repo backwards`);
   }
   const dropIds = parseDrop(drop);
+  const kindOf = parseKinds(kinds);
   if (dropIds.length && !plan) {
     const known = upgrade(root, { lock, plan: true }).duplicates.map((d) => d.id);
     const bad = dropIds.find((id) => !known.includes(id));
@@ -1679,6 +1688,10 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
     for (const what of links.skipped) ledger.notes.push(`${mapDir}: ${what} was not read for old metadata/service/ links — check it by hand`);
     if (renamed.length && existsSync(ledger.abs(`${mapDir}/services`))) ledger.notes.push(`${mapDir}/services/ is your hand-written folder for third-party systems — ZDD now calls them external services and a fresh install names the folder external-services/; rename it if you like (git mv), it is never renamed for you`);
   }
+  // Blessings leave the map for the blessing store (2.5, decision 0032):
+  // proposed on every run, written only with --move-blessings, which the
+  // skill passes once the developer has read the list and said yes.
+  const blessingMoves = moveBlessings(ledger, artifactPaths(config, { lenient: true }), { move, kindOf });
   const upgradePaths = artifactPaths(config, { lenient: true });
   const instructionsOk = writeInstructions(ledger, config) !== null;
   if (instructionsOk && ledger.exists("CLAUDE.md")) {
@@ -1729,10 +1742,90 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
     }
   }
   ledger.notes.push(...offerOptIns(root, config));
-  ledger.notes.push("curated artifacts (glossary, ADRs, map pages, metadata) untouched — upgrade never writes them, save one mechanical rewrite named above: a map link to a record whose kind a release renamed");
+  ledger.notes.push("curated artifacts (glossary, ADRs, map pages, metadata) untouched — upgrade never writes them, save two mechanical moves named above: a map link to a record whose kind a release renamed, and blessings moved out of the map on --move-blessings");
   ledger.notes.push("if the engine pin moved: run `derive` and `render`, then `lint`, and commit the regenerated artifacts in the same PR");
-  return { version, plan, ...ledgerOut(ledger), duplicates };
+  return { version, plan, ...ledgerOut(ledger), duplicates, blessingMoves };
 }
+
+// --kinds=<id>:<copy|extend>,… — the developer's answers to the proposed
+// kinds, by the proposed file name.
+function parseKinds(kinds) {
+  const out = new Map();
+  if (kinds === null || kinds === undefined || kinds === false || kinds === "") return out;
+  for (const pair of String(kinds).split(",").map((x) => x.trim()).filter(Boolean)) {
+    const m = /^([a-z0-9][a-z0-9-]*):(copy|extend)$/.exec(pair);
+    if (!m) throw new Error(`--kinds takes <file name>:<copy|extend> pairs, comma-separated (the names upgrade --plan printed) — got '${pair.slice(0, 60)}'`);
+    out.set(m[1], m[2]);
+  }
+  return out;
+}
+
+// Every blessing still on a map page, with what the move would write
+// (decision 0032). With `move`, each that can move is written to the store
+// (created exclusively) and removed from its page; one that cannot (no
+// question, no repo file for where:) stays and is named. Returns
+// { proposals, moved, left }, each proposal { id, file, from, question,
+// where, symbol, kind, appliesTo, firstBuiltIn, adrs, problem }.
+function moveBlessings(ledger, paths, { move, kindOf }) {
+  const { files, skipped } = listMapPages(ledger, paths.mapDir);
+  for (const what of skipped) ledger.notes.push(`${paths.mapDir}: ${what} was not read for blessings to move — check it by hand`);
+  const taken = new Set();
+  const proposals = [];
+  for (const rel of files) {
+    const text = ledger.read(rel);
+    const found = findMapBlessings(text);
+    if (!found.items.length) continue;
+    const pageType = /^---\r?\n[\s\S]*?^type:\s*(.+?)\s*$/m.exec(text)?.[1]?.replace(/^["']|["']$/g, "") ?? "";
+    const ctx = {
+      page: rel,
+      pageType,
+      mapDir: paths.mapDir,
+      blessingsDir: paths.blessingsDir,
+      bundleDir: paths.bundleDir,
+      metadataDir: paths.metadataDir,
+      adrDir: paths.adrDir,
+      isFile: (r) => {
+        try {
+          return ledger.exists(r);
+        } catch {
+          return false;
+        }
+      },
+      readRecord: (r) => {
+        try {
+          return JSON.parse(ledger.read(r));
+        } catch {
+          return null;
+        }
+      },
+    };
+    const moved = [];
+    for (const item of found.items) {
+      const p = proposeMove(item, ctx);
+      let id = blessingSlug(p.question ?? item.text);
+      for (let n = 2; taken.has(id) || ledger.exists(`${paths.blessingsDir}/${id}.md`); n++) id = `${blessingSlug(p.question ?? item.text)}-${n}`;
+      taken.add(id);
+      if (kindOf.has(id)) p.kind = kindOf.get(id);
+      const proposal = { id, file: `${paths.blessingsDir}/${id}.md`, from: `${rel}:${item.first + 1}`, ...p };
+      delete proposal.text;
+      proposals.push(proposal);
+      if (!move || p.problem) continue;
+      ledger.create(proposal.file, blessingFileText(p));
+      moved.push(item);
+    }
+    if (moved.length) {
+      ledger.overwrite(rel, removeMoved(text, found, moved));
+      ledger.notes.push(`${rel}: ${moved.length} blessing${moved.length === 1 ? "" : "s"} moved to ${paths.blessingsDir}/ (2.5, decision 0032)`);
+    }
+  }
+  const unknownKind = [...kindOf.keys()].filter((id) => !proposals.some((p) => p.id === id));
+  if (unknownKind.length) throw new Error(`--kinds names ${unknownKind.join(", ")}, which this run does not propose (it proposes ${proposals.length ? proposals.map((p) => p.id).join(", ") : "none"})`);
+  const left = proposals.filter((p) => p.problem);
+  if (proposals.length && !move) ledger.notes.push(`${proposals.length} blessing${proposals.length === 1 ? "" : "s"} still on map pages — listed below with what the move would write; once the developer has read the list (and the kind of each), run upgrade again with --move-blessings (and --kinds=<name>:<copy|extend>,… for any kind they change). lint fails while a blessing stays in the map`);
+  for (const p of left) ledger.notes.push(`${p.from}: this blessing cannot move — ${p.problem}`);
+  return { proposals, moved: move ? proposals.filter((p) => !p.problem) : [], left };
+}
+
 
 // ---------------------------------------------------------------------------
 // What each release brings an existing adopter (CAS-101): one entry per
@@ -1854,12 +1947,13 @@ export function outsideFences(text, fn) {
   return out.join("\n");
 }
 
-function migrateMapLinks(ledger, mapDir, metadataDir = "zdd/metadata") {
+// Every Markdown page under mapDir, walked the render's way: bounded depth
+// and entries, symlinks never followed, oversized pages named and skipped.
+function listMapPages(ledger, mapDir) {
   const abs = ledger.abs(mapDir);
-  if (!existsSync(abs)) return { touched: [], skipped: [] };
-  const touched = [];
+  if (!existsSync(abs)) return { files: [], skipped: [] };
   const skipped = [];
-  const files = [];
+  const found = [];
   let entries = 0;
   const rec = (dir, depth) => {
     if (++entries > MAP_WALK_ENTRIES) {
@@ -1892,12 +1986,12 @@ function migrateMapLinks(ledger, mapDir, metadataDir = "zdd/metadata") {
       }
       if (st.isSymbolicLink()) skipped.push(`${posixify(relative(ledger.root, p))} (a symlink — never followed)`);
       else if (st.isDirectory()) rec(p, depth + 1);
-      else if (st.isFile() && /\.md$/i.test(name)) files.push(p);
+      else if (st.isFile() && /\.md$/i.test(name)) found.push(p);
     }
   };
   rec(abs, 0);
-  const metaPrefix = metadataDir.replace(/\/+$/, "");
-  for (const p of files) {
+  const files = [];
+  for (const p of found) {
     const rel = posixify(relative(ledger.root, p));
     let st;
     try {
@@ -1909,6 +2003,16 @@ function migrateMapLinks(ledger, mapDir, metadataDir = "zdd/metadata") {
       skipped.push(`${rel} (over ${MAX_SCAN_BYTES / 1024} KiB — not read)`);
       continue;
     }
+    files.push(rel);
+  }
+  return { files, skipped };
+}
+
+function migrateMapLinks(ledger, mapDir, metadataDir = "zdd/metadata") {
+  const touched = [];
+  const { files, skipped } = listMapPages(ledger, mapDir);
+  const metaPrefix = metadataDir.replace(/\/+$/, "");
+  for (const rel of files) {
     const text = ledger.read(rel);
     const pageDir = posix.dirname(rel);
     // A fenced code block is an example, not a pointer: left as written (CR-518).
@@ -2618,13 +2722,14 @@ export const ARTIFACT_EXPLANATIONS = [
   { match: /(^|\/)adr\/0001-adopt-zero-drift-docs\.md$/, what: "your first decision record: that this repo adopted ZDD, and why", why: "a worked example of the format, and the corpus's first entry — your decision, dated today", who: "ZDD seeds it once; it is yours from then on", handEdited: "yes — edit the reasons to match yours" },
   { match: /(^|\/)adr\/?(\d{4}-.*\.md)?$/, what: "the decision records (ADRs): one short file per decision that was hard to reverse, surprising without context, and a real trade-off", why: "so the AI does not reintroduce the approach you rejected in March", who: "you (and the AI, as decisions crystallise); never reconstructed from old code by default", handEdited: "yes — written when decided, never rewritten into a new truth (a new one supersedes it)" },
   { match: /(^|\/)map\/features\/example-feature\.md$/, what: "an example feature page in the semantic map, showing how a feature claims the code it owns by linking it", why: "so the folder is never an unexplained empty one; it shows the shape", who: "ZDD writes the example once", handEdited: "yes — rename it to a real feature or delete it" },
-  { match: /(^|\/)map\/apps\/[^/]+\.md$/, what: "one page per app you named (web, mobile, API) in the semantic map", why: "a home for the rules that apply across that whole app (the blessings: which code to copy, which to refuse)", who: "ZDD writes the stub at install; you fill it", handEdited: "yes — yours" },
-  { match: /(^|\/)map\/(features|apps|external-services)\/\.gitkeep$|(^|\/)map\/?$/, what: "the semantic map: short pages grouping the code into features, apps and the third-party systems it depends on, with the blessings (which existing code to copy for a kind of work, and what to refuse)", why: "grouping and precedent are the two things the code cannot say about itself", who: "you and the AI, one mapping session at install and then as each piece of work touches a feature", handEdited: "yes — yours; the links inside it are kept in step with the code by the drift check" },
+  { match: /(^|\/)map\/apps\/[^/]+\.md$/, what: "one page per app you named (web, mobile, API) in the semantic map", why: "a home for what the whole app is and what belongs to it; a house rule for the app is a blessing that names it (applies-to)", who: "ZDD writes the stub at install; you fill it", handEdited: "yes — yours" },
+  { match: /(^|\/)map\/(features|apps|external-services)\/\.gitkeep$|(^|\/)map\/?$/, what: "the semantic map: short pages grouping the code into features, apps and the third-party systems it depends on, and the links the code cannot show", why: "grouping is a thing the code cannot say about itself", who: "you and the AI, one mapping session at install and then as each piece of work touches a feature", handEdited: "yes — yours; the links inside it are kept in step with the code by the drift check" },
+  { match: /(^|\/)blessings\/(\.gitkeep|[^/]+\.md)?$/, what: "the blessings: one short file per kind of work done more than once (\"Adding an upload?\"), naming the existing code to copy or extend (where:), the trap to refuse, and why", why: "the most common pattern in a codebase is often the deprecated one; a blessing is how the AI copies the right code, and reuses a helper instead of writing a second one", who: "you and the AI: \"choose patterns\" proposes one, \"update ZDD\" mints it once the code exists", handEdited: "yes — yours; lint fails one whose where: names no file" },
   { match: /(^|\/)metadata\/?$/, what: "the inventory of the code (routes, tables, screens, jobs, components, external services), one small JSON file each", why: "a mechanical, always-correct map of what exists, so the AI finds its way without grepping", who: "the engine (derive) — regenerated by \"update ZDD\"", handEdited: "never — the drift check fails if it is" },
   { match: /(^|\/)graph\.json$/, what: "the whole generated picture in one machine-readable file: every record and every link", why: "the human index is rendered from it, and other tools can read it", who: "the engine (render)", handEdited: "never" },
   { match: /(^|\/)agent-index\.md$/, what: "the short index the AI reads at the start of every session: each feature with pointers to its code", why: "orientation in one screen, so each session starts knowing where things are", who: "the engine (render)", handEdited: "never" },
   { match: /(^|\/)adr-index\.md$/, what: "one line per decision record, with what supersedes what", why: "the AI reads the whole list before work, then only the decisions its task cites", who: "the engine (render)", handEdited: "never" },
-  { match: /(^|\/)blessing-index\.md$/, what: "one line per blessing: the question it answers (\"Adding an upload?\") and the reason", why: "read before any code is written, so the right existing code is copied", who: "the engine (render)", handEdited: "never" },
+  { match: /(^|\/)blessing-index\.md$/, what: "one line per blessing: the question it answers (\"Adding an upload?\"), where the code is, and why", why: "read before any code is written, so the right existing code is copied or extended", who: "the engine (render)", handEdited: "never" },
   { match: /(^|\/)human-index\.html$/, what: "an interactive picture of the system for people: features, screens, endpoints, tables and how they connect", why: "for someone who must understand a system they did not build", who: "the engine (render)", handEdited: "never" },
   { match: /^CLAUDE\.md$/, what: "Claude Code's instruction file for this repo — yours", why: "ZDD adds exactly one line to it, which loads zdd/instructions.md into every session", who: "you; ZDD adds the one line at install and never edits the file again", handEdited: "yes — yours" },
   { match: /^AGENTS\.md$/, what: "Codex's instruction file for this repo — yours, with ZDD's instructions copied in between two marker lines (Codex cannot load a separate file)", why: "so Codex sessions get the same rules as Claude Code sessions", who: "you, outside the markers; ZDD rewrites what is between them on upgrade", handEdited: "yes outside the markers, never inside" },
@@ -2806,6 +2911,17 @@ export function narrateUpgrade(r) {
     for (const s of says) out.push(`      ZDD now says: ${s}`);
     out.push(`      → read the two together: same, different, or contradicting? Keep it, change it by hand, or remove this whole paragraph or bullet on the user's word (--drop=${d.id})`);
   }
+  for (const b of r.blessingMoves?.proposals ?? []) {
+    out.push(`  blessing ${b.from}: "${brief(b.question ?? "(no trigger question)")}"`);
+    if (b.problem) {
+      out.push(`      stays on the map — ${b.problem}`);
+      continue;
+    }
+    out.push(`      → ${b.file}`, `        where: ${b.where}${b.symbol ? ` (${b.symbol})` : ""}`, `        kind: ${b.kind} (proposed — copy imitates the method, extend reuses the shared code; confirm or change it: --kinds=${b.id}:${b.kind === "copy" ? "extend" : "copy"})`);
+    if (b.appliesTo) out.push(`        applies-to: ${b.appliesTo}`);
+    out.push(`        first-built-in: ${b.firstBuiltIn}`);
+    if (b.adrs.length) out.push(`        adr: ${b.adrs.map((n) => `ADR-${n}`).join(", ")}`);
+  }
   return out.map(printable).join("\n");
 }
 
@@ -2846,7 +2962,7 @@ if (process.argv[1] && posixify(process.argv[1]).endsWith("/scripts/bootstrap.mj
     } else if (cmd === "upgrade") {
       const to = flags.to === undefined ? null : String(flags.to);
       const remote = typeof flags.remote === "string" ? flags.remote : undefined;
-      const r = upgrade(root, { lock: flags.lock === true, plan: flags.plan === true, drop: flags.drop ?? null, to, remote, home: flags.home });
+      const r = upgrade(root, { lock: flags.lock === true, plan: flags.plan === true, drop: flags.drop ?? null, to, moveBlessings: flags["move-blessings"] === true, kinds: flags.kinds ?? null, remote, home: flags.home });
       process.stdout.write(flags.json ? JSON.stringify(r, null, 2) + "\n" : narrateUpgrade(r) + "\n");
     } else if (cmd === "preflight") {
       const p = await preflight(root, { ...(typeof flags.registry === "string" ? { registry: flags.registry } : {}), ...(typeof flags.github === "string" ? { github: flags.github } : {}) });
@@ -2859,7 +2975,7 @@ if (process.argv[1] && posixify(process.argv[1]).endsWith("/scripts/bootstrap.mj
       const s = releaseStatus(root, typeof flags.remote === "string" ? flags.remote : undefined, flags.home);
       process.stdout.write(flags.json ? JSON.stringify(s) + "\n" : printable(narrateReleaseStatus(s)) + "\n");
     } else {
-      process.stderr.write("Usage: bootstrap.mjs <preflight [--registry=<url>] [--github=<url>]|detect|estimate|apply --answers=<file>|upgrade [--plan] [--lock] [--drop=<ids>] [--to=vX.Y.Z]|release-status [--remote=<url>]> [--root=<dir>] [--date=YYYY-MM-DD] [--home=<dir>] [--json]\n");
+      process.stderr.write("Usage: bootstrap.mjs <preflight [--registry=<url>] [--github=<url>]|detect|estimate|apply --answers=<file>|upgrade [--plan] [--lock] [--drop=<ids>] [--move-blessings [--kinds=<name>:<copy|extend>,…]] [--to=vX.Y.Z]|release-status [--remote=<url>]> [--root=<dir>] [--date=YYYY-MM-DD] [--home=<dir>] [--json]\n");
       process.exit(2);
     }
   } catch (e) {
