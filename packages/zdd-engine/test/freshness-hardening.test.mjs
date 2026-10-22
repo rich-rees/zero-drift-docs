@@ -111,7 +111,7 @@ test("CR-016: an adopter root inside a larger checkout compares adopter-relative
   appendFileSync(join(app, "zdd", "map", "apps", "fixture-app.md"), "\nUpdated.\n");
   commit(mono, "concepts");
   out = ok(engine(app, "freshness", "--base", "main"), "exempt");
-  assert.match(out, /No semantic concepts affected/, "the same-diff exemption matches adopter-relative too");
+  assert.match(out, /No semantic-map page or blessing affected/, "the same-diff exemption matches adopter-relative too");
   const diff = changedAgainstBase(app, "main", "main");
   assert.ok(diff.changed.every((f) => !f.startsWith("packages/")), JSON.stringify(diff));
   rmSync(mono, { recursive: true, force: true });

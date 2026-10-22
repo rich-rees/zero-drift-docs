@@ -30,6 +30,7 @@ export const DEFAULT_PATHS = {
   glossary: "zdd/glossary.md",
   adrDir: "zdd/adr",
   mapDir: "zdd/map",
+  blessingsDir: "zdd/blessings",
   metadataDir: "zdd/metadata",
   agentIndex: "zdd/agent-index.md",
   adrIndex: "zdd/adr-index.md",
@@ -187,8 +188,10 @@ export const agentIndexAreaDir = (agentIndexRel) => {
   const stripped = agentIndexRel.replace(/\.[^./\\]+$/, "");
   return stripped === agentIndexRel ? `${agentIndexRel}-areas` : stripped;
 };
-export const GENERATED_KEYS = ["metadataDir", "graph", "agentIndex", "adrIndex", "blessingIndex", "humanIndex"];
-export const CURATED_KEYS = ["glossary", "adrDir", "mapDir"];
+export const GENERATED_KEYS = ["metadataDir", "graph", "agentIndex", "adrIndex", "blessingIndex", "humanIndex", "harnessAdrIndex"];
+export const CURATED_KEYS = ["glossary", "adrDir", "mapDir", "blessingsDir"];
+// Optional, together or not at all (decision 0033); absent from DEFAULT_PATHS.
+export const HARNESS_KEYS = ["harnessAdrDir", "harnessAdrIndex"];
 export const CONFIG_REL = "zdd/config.json";
 // Two repo-relative paths share ground: one is the other, or sits under it.
 // Case is folded where the filesystem folds it (Windows, macOS), as the
@@ -220,17 +223,51 @@ export function artifactPaths(config, { lenient = false } = {}) {
   const overlap = (key) => {
     const p = out[key];
     if (key === "metadataDir") {
-      for (const c of [...CURATED_KEYS.map((k) => out[k]), out.patternsPlan, CONFIG_REL]) if (posixPrefix(p, c)) return `paths.${key} ${JSON.stringify(p)} contains ${JSON.stringify(c)}`;
+      for (const c of [...CURATED_KEYS.map((k) => out[k]), out.harnessAdrDir, out.patternsPlan, CONFIG_REL].filter(Boolean)) if (posixPrefix(p, c)) return `paths.${key} ${JSON.stringify(p)} contains ${JSON.stringify(c)}`;
     } else if (samePosix(p, CONFIG_REL)) return `paths.${key} ${JSON.stringify(p)} is the config file`;
     for (const other of Object.keys(out)) if (other !== key && samePosix(p, out[other])) return `paths.${key} and paths.${other} are both ${JSON.stringify(p)}`;
+    // A generated file inside a curated folder (or the reverse) is refused as
+    // the engine refuses it (CR-030): `zdd/adr-harness/index.md` would be
+    // read as an ADR folder's file and written as an index.
+    if (key !== "metadataDir") {
+      for (const c of [...CURATED_KEYS, "harnessAdrDir", "patternsPlan"]) if (out[c] !== undefined && pathsOverlap(p, out[c])) return `paths.${key} ${JSON.stringify(p)} overlaps paths.${c} ${JSON.stringify(out[c])}`;
+    }
     return null;
   };
+  // The harness ADR set (decision 0033): both keys or neither, the folder
+  // apart from the application set's. Strict throws; lenient drops the pair,
+  // so a hook never fences or counts a half-configured set.
+  const harness = HARNESS_KEYS.filter((k) => configured[k] !== undefined);
+  if (harness.length) {
+    try {
+      if (harness.length === 1) throw new Error(`paths.${harness[0]} is set but paths.${HARNESS_KEYS.find((k) => !harness.includes(k))} is not — a harness ADR set needs its folder and its index (decision 0033); set both, or neither`);
+      for (const key of HARNESS_KEYS) {
+        const rel = repoRelative(configured[key], `paths.${key}`, { exact: true });
+        if (rel === ".") throw new Error(`paths.${key}: must not be the repo root`);
+        out[key] = rel;
+      }
+      if (pathsOverlap(out.harnessAdrDir, out.adrDir)) throw new Error(`paths.harnessAdrDir ${JSON.stringify(out.harnessAdrDir)} overlaps paths.adrDir ${JSON.stringify(out.adrDir)} — the harness ADR set is a folder of its own (decision 0033)`);
+    } catch (e) {
+      if (!lenient) throw e;
+      for (const key of HARNESS_KEYS) delete out[key];
+    }
+  }
+  // The blessing store is a folder of its own (CR-008), as the engine says.
+  for (const other of ["glossary", "adrDir", "harnessAdrDir", "mapDir", "patternsPlan"].filter((k) => out[k] !== undefined)) {
+    if (pathsOverlap(out.blessingsDir, out[other])) {
+      if (!lenient) throw new Error(`paths.blessingsDir ${JSON.stringify(out.blessingsDir)} overlaps paths.${other} ${JSON.stringify(out[other])} — the blessing store is a folder of its own (decision 0031)`);
+      out.blessingsDir = DEFAULT_PATHS.blessingsDir;
+      break;
+    }
+  }
   // Judge every generated key against the values as configured, then apply
   // the fallbacks together, so two keys sharing a value both fall back.
-  const bad = GENERATED_KEYS.map((key) => [key, overlap(key)]).filter(([, why]) => why);
+  const generated = GENERATED_KEYS.filter((k) => k !== "harnessAdrIndex" || out.harnessAdrIndex !== undefined);
+  const bad = generated.map((key) => [key, overlap(key)]).filter(([, why]) => why);
   for (const [key, why] of bad) {
     if (!lenient) throw new Error(`${why} — a generated path must not overlap a curated one`);
-    out[key] = DEFAULT_PATHS[key];
+    if (key === "harnessAdrIndex") for (const k of HARNESS_KEYS) delete out[k];
+    else out[key] = DEFAULT_PATHS[key];
   }
   // A default can itself collide with a curated value the adopter chose
   // (`glossary: "zdd/graph.json"`); a generated key with nowhere safe to fall

@@ -382,7 +382,7 @@ test("CR-068/CR-099: an absent store dir in a populated bundle is noted on stder
   // The fixture's blessings cite ADR-0002, so the typo is also a failure: the
   // citation names an ADR the (empty) corpus does not hold.
   assert.equal(out.status, 1, out.stderr);
-  assert.match(out.stderr, /things\.md:\d+ .*cites ADR-0002, which does not exist/);
+  assert.match(out.stderr, /blessings\/adding-an-endpoint-for-things\.md .*cites ADR-0002, which does not exist/);
   out = spawn(repo, ["render"]);
   assert.equal(out.status, 0, out.stderr);
   assert.match(out.stderr, /^WARNING: paths\.adrDir 'zdd\/decisions' does not exist/m, out.stderr);

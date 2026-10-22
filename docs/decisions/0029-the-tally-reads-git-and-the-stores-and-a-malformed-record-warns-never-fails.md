@@ -1,6 +1,6 @@
 # 0029 — The tally reads records out of git and its denominator out of the stores; a malformed record warns at `lint --merge`, never fails
 
-**Date:** 2026-10-10 · **Status:** accepted · **Origin:** ZDD 2.4 grill questions 6, 7 and 9. **Extends** [0028](0028-the-zdd-record-lives-in-the-update-commit-message-five-sections-in-plain-sentences.md) (the record's shape) and [0009](0009-unclaimed-records-warn-never-fail.md) (the warning tier).
+**Date:** 2026-10-10 · **Status:** accepted; point 2's source for blessings superseded in part by [0031](0031-blessings-live-in-a-store-of-their-own-one-file-each-with-a-where-and-a-kind.md) (2026-10-22: the tally reads the blessing store, one entry per file) · **Origin:** ZDD 2.4 grill questions 6, 7 and 9. **Extends** [0028](0028-the-zdd-record-lives-in-the-update-commit-message-five-sections-in-plain-sentences.md) (the record's shape) and [0009](0009-unclaimed-records-warn-never-fail.md) (the warning tier).
 
 ## Context
 

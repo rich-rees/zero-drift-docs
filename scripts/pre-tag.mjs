@@ -5,7 +5,7 @@
 // this script proves it against REAL adopter checkouts on this machine,
 // as a regression check — never as the standard a new user is held to.
 //
-//   node scripts/pre-tag.mjs vX.Y.Z <adopter checkout> [<adopter checkout> …]
+//   node scripts/pre-tag.mjs vX.Y.Z [--split] <adopter checkout> [<adopter checkout> …]
 //
 // For each adopter: a throwaway copy (no node_modules, no .git history
 // beyond a fresh init), a fake `.claude/worktrees/` folder planted, then
@@ -13,6 +13,14 @@
 // runs derive, render and lint — exactly what the adopter's upgrade PR will
 // do. Any failure names the adopter and the step. The repo's own pins are
 // checked first (scripts/release-check.mjs), then both suites.
+//
+// Since 2.5 the upgrade PR also moves the blessings out of the map
+// (decision 0032): the dry run takes the plan's token and moves them with
+// the proposed kinds, as the adopter's run will after the developer reads
+// the list. `--split` also runs split-adrs (decision 0034), each ADR to the
+// set its Scope tag names and every untagged one to the application set —
+// the mechanics only; which set an untagged ADR belongs in is the team's
+// call, never the dry run's.
 import { execFileSync, spawnSync } from "node:child_process";
 import { cpSync, mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { join, dirname, resolve, basename } from "node:path";
@@ -22,9 +30,11 @@ import { fileURLToPath } from "node:url";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const PLUGIN = join(ROOT, "plugins", "zdd", "scripts", "bootstrap.mjs");
 const ENGINE = join(ROOT, "packages", "zdd-engine", "bin", "zdd-engine.mjs");
-const [tag, ...adopters] = process.argv.slice(2);
+const argv = process.argv.slice(2);
+const split = argv.includes("--split");
+const [tag, ...adopters] = argv.filter((a) => a !== "--split");
 if (!/^v\d+\.\d+\.\d+$/.test(tag ?? "")) {
-  console.error("usage: pre-tag.mjs vX.Y.Z <adopter checkout> …");
+  console.error("usage: pre-tag.mjs vX.Y.Z [--split] <adopter checkout> …");
   process.exit(2);
 }
 const run = (label, cmd, args, cwd) => {
@@ -58,7 +68,17 @@ for (const adopter of adopters) {
     writeFileSync(join(copy, ".gitignore"), (existsSync(join(copy, ".gitignore")) ? "" : "") + "\n.claude/worktrees/\n", { flag: "a" });
     const label = basename(src);
     let ok = run(`${label}: upgrade --plan`, process.execPath, [PLUGIN, "upgrade", "--plan", `--root=${copy}`], copy);
-    ok = run(`${label}: upgrade`, process.execPath, [PLUGIN, "upgrade", `--root=${copy}`], copy) && ok;
+    const plan = JSON.parse(spawnSync(process.execPath, [PLUGIN, "upgrade", "--plan", `--root=${copy}`, "--json"], { cwd: copy, encoding: "utf8" }).stdout || "{}");
+    const moves = plan.blessingMoves?.proposals ?? [];
+    const moving = moves.length ? [`--move-blessings=${plan.blessingMoves.token}`] : [];
+    ok = run(`${label}: upgrade${moves.length ? ` (moving ${moves.filter((p) => !p.problem).length} of ${moves.length} blessings; ${moves.filter((p) => p.problem).length} stay, named)` : ""}`, process.execPath, [PLUGIN, "upgrade", ...moving, `--root=${copy}`], copy) && ok;
+    for (const p of moves.filter((m) => m.problem)) console.log(`        ${label}: ${p.from} stays on the map — ${p.problem}`);
+    if (split) {
+      const sp = JSON.parse(spawnSync(process.execPath, [PLUGIN, "split-adrs", "--plan", `--root=${copy}`, "--json"], { cwd: copy, encoding: "utf8" }).stdout || "{}");
+      const untagged = (sp.proposals ?? []).filter((p) => !p.tag).map((p) => p.num);
+      const tagged = (sp.proposals ?? []).filter((p) => p.tag === "harness").length;
+      ok = run(`${label}: split-adrs (${tagged} to harness by their tag, ${untagged.length} untagged kept in the application set)`, process.execPath, [PLUGIN, "split-adrs", `--token=${sp.token}`, `--application=${untagged.join(",")}`, `--root=${copy}`], copy) && ok;
+    }
     ok = run(`${label}: derive`, process.execPath, [ENGINE, "derive", `--root=${copy}`], copy) && ok;
     ok = run(`${label}: render`, process.execPath, [ENGINE, "render", `--root=${copy}`], copy) && ok;
     ok = run(`${label}: lint`, process.execPath, [ENGINE, "lint", `--root=${copy}`], copy) && ok;

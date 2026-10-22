@@ -1,10 +1,10 @@
 # Zero-Drift Docs (ZDD)
 
 A documentation architecture for repos built by **human + agent pairs**. ZDD keeps
-seven documentation artifacts *at most one unit of work behind the code* — and, with
+eight documentation artifacts *at most one unit of work behind the code* — and, with
 CI, makes drift in the machine-generated ones **un-mergeable**.
 
-> **Status: 2.4.1.** The plugin installs in Claude Code
+> **Status: 2.5.0.** The plugin installs in Claude Code
 > and in Codex from this one repo; `bootstrap` detects your stack (or grills
 > for it on a greenfield repo), proposes extractors with evidence, and *writes*
 > the opt-ins; the engine (`packages/zdd-engine`, npm `@rich-rees/zdd-engine`)
@@ -39,44 +39,61 @@ session. ZDD closes that gap and nothing else.
 Documentation has two consumers with different failure modes: the **agent** (orients
 by grep-and-read, re-pays the cost every session) and the **human** (can't hold the
 system shape in their head; hand-maintained mechanism prose rots fastest). ZDD gives
-each what it needs, off **seven artifacts** — the design test for every fact:
+each what it needs, off **eight artifacts** — the design test for every fact:
 
 > **Document only what grep cannot find and code cannot say.**
 
-Four are **curated** (they can rot, so a per-PR ritual + CI watch them) and three are
+Five are **curated** (they can rot, so a per-PR ritual + CI watch them) and three are
 **generated** (rot-proof by construction, never hand-edited). The count is by
 *role*, not by file: the generated half also lands on disk as `zdd/adr-index.md`
-(the ADRs' index, rendered), `zdd/blessing-index.md` (the map's blessings, one
-line each, by trigger question) and `zdd/graph.json` (the machine form of the
-whole generated half — schema `zdd-graph/1` — from which the human index is
-rendered). All are mandatory outputs of `render` and all are fenced, but they
-are forms of artifacts 5–7, not an eighth, ninth and tenth.
+(the ADRs' index, rendered; a harness set has `zdd/adr-harness-index.md` too, and
+only then), `zdd/blessing-index.md` (the blessings, one line
+each: the trigger question, where the code is, and why) and `zdd/graph.json`
+(the machine form of the whole generated half — schema `zdd-graph/1` — from
+which the human index is rendered). All are mandatory outputs of `render` and
+all are fenced, but they are forms of artifacts 6–8, not a ninth, tenth and
+eleventh.
 
 | # | Artifact | Kind | Home |
 |---|----------|------|------|
 | 1 | Glossary — the ubiquitous language | Curated | `zdd/glossary.md` |
-| 2 | ADRs — decisions + rejected alternatives | Curated | `zdd/adr/` |
+| 2 | ADRs — decisions + rejected alternatives (optionally a harness set beside the application set) | Curated | `zdd/adr/` (+ `zdd/adr-harness/`) |
 | 3 | Code comments — constraints at the site | Curated | the source |
-| 4 | Semantic map — groupings, non-textual edges, blessings | Curated | `zdd/map/` |
-| 5 | Codebase metadata — mechanical inventory | Generated | `zdd/metadata/` |
-| 6 | Agent index — feature-first orientation | Generated | `zdd/agent-index.md` |
-| 7 | Human index — hosted graph view | Generated | `zdd/human-index.html` |
+| 4 | Semantic map — groupings and non-textual edges | Curated | `zdd/map/` |
+| 5 | Blessings — the code to copy or extend for a kind of work, and why | Curated | `zdd/blessings/` |
+| 6 | Codebase metadata — mechanical inventory | Generated | `zdd/metadata/` |
+| 7 | Agent index — feature-first orientation | Generated | `zdd/agent-index.md` |
+| 8 | Human index — hosted graph view | Generated | `zdd/human-index.html` |
 
-The semantic map is more than grouping that folder structure already does. It
-is where the **blessings** live: one-liners in a concept naming the **exemplar
-to copy** and the **pattern to refuse** — "adding an endpoint? copy this one;
-never inline the auth check" — each citing the ADR that blessed it. They answer
-a failure mode grep makes worse, not better: **pattern frequency in code is
-never a verdict.** The most common pattern is often the deprecated one, and an
+The semantic map is more than grouping that folder structure already does: it
+names the product's parts and says what belongs to each, with the links the
+code cannot show. The **blessings** sit beside it, one short file each naming
+**where** the code to copy or extend is and the **pattern to refuse** —
+"adding an endpoint? copy this one; never inline the auth check" — with the
+ADR that blessed it. A blessing is the developer who built a great
+file-upload component shouting across the table so everyone reuses it. They
+answer a failure mode grep makes worse, not better: **pattern frequency in
+code is never a verdict.** The most common pattern is often the deprecated one, and an
 agent that copies the nearest example copies the wrong one with confidence. A
 blessing is the curated answer; the engine's lint refuses a blessing whose ADR
-has since been superseded, so a stale blessing cannot sit quietly (the format is
-in [`skills/authoring.md`](plugins/zdd/skills/authoring.md)).
+has since been superseded, or whose `where:` names a file that no longer
+exists, so a stale blessing cannot sit quietly (the format is in
+[`skills/authoring.md`](plugins/zdd/skills/authoring.md)). A blessing is
+**`copy`** (imitate this method) or **`extend`** (reuse this shared code); for
+an `extend` blessing the index names who uses the code, worked out from the
+metadata, because extending it means retesting them.
+
+The ADRs can come in **two sets** (decisions 0033, 0034), when a team opts in:
+the **application** set says what the product does, and can be handed to a
+stakeholder as it stands; the **harness** set says how the team builds it —
+review, tests, CI, the tracker, ZDD itself. Each has its own index. One number
+line runs across both, so `ADR-0019` is one decision wherever it lives, a
+citation never changes, and splitting an existing set renumbers nothing.
 
 A blessing helps only if it is read before the code is written, so it has a
 moment of its own. **"Choose patterns"** runs once the design is settled: it
-reads the generated **blessing index** (every blessing's trigger question, one
-line each) whole, opens the blessings that match the work, checks the inventory
+reads the generated **blessing index** (every blessing's trigger question,
+where and why, one line each) whole, opens the blessings that match the work, checks the inventory
 for logic that already exists, and commits a **pattern plan** — per piece:
 follow a blessing, depart from one and why, none applies, or a new pattern to
 bless. **"Update ZDD"** then decides against the code as it merges: it mints
@@ -195,7 +212,8 @@ points you at the install or at plan-mode + "update ZDD", and ZDD keeps working.
 His skills read a root `GLOSSARY.md` and `docs/adr/` by name (`CONTEXT.md`
 before his 1.3). `bootstrap` writes `docs/agents/domain.md`, the file they honour,
 pointing them at `zdd/glossary.md` and `zdd/adr/` (only when absent; a
-hand-written one is kept). Keep the glossary under `zdd/`: moved to a root
+hand-written one is kept — after a split, `split-adrs` names it so the harness
+folder can be added by hand). Keep the glossary under `zdd/`: moved to a root
 `glossary.md` it collides with his `GLOSSARY.md` on case-insensitive disks
 (Windows, macOS) but not on Linux CI. `lint` warns while a root `GLOSSARY.md` or
 `CONTEXT.md` sits beside the real glossary.
@@ -251,7 +269,7 @@ reviewable file, never one question per item.
 from [the releases page](https://github.com/rich-rees/zero-drift-docs/releases)):
 
 ```
-claude plugin marketplace add rich-rees/zero-drift-docs@v2.4.1 --scope project
+claude plugin marketplace add rich-rees/zero-drift-docs@v2.5.0 --scope project
 claude plugin install zdd@zero-drift-docs --scope project
 ```
 
@@ -376,8 +394,8 @@ by hand once:
 
 1. In `.claude/settings.json`, set
    `extraKnownMarketplaces["zero-drift-docs"].source.ref` to the new tag
-   (`"v2.4.1"`). No lock there? Add the marketplace from the repo's folder with
-   `claude plugin marketplace add rich-rees/zero-drift-docs@v2.4.1 --scope project`.
+   (`"v2.5.0"`). No lock there? Add the marketplace from the repo's folder with
+   `claude plugin marketplace add rich-rees/zero-drift-docs@v2.5.0 --scope project`.
 2. Restart Claude Code. The session's first line names the commands that move
    your machine (on a machine where the marketplace was ever added without a
    scope, that includes `claude plugin marketplace remove zero-drift-docs
@@ -438,7 +456,8 @@ saying no to a row is a visible choice, not a fork.
 | ADRs with the three-part test | **Required.** Solo devs forget their own reasoning within a quarter. | Required. |
 | Constraint comments at the site | Required, and probably already happening. | Required. |
 | Glossary | Start it the first time you correct a word. | **Required.** This is where vocabulary drift actually begins. |
-| Semantic map (groupings, edges, blessings) | Skip the grouping; keep a blessing the first time you catch yourself copying the wrong example. | Worth it when someone will maintain it. The blessings are the part that pays; the lint keeps them honest. |
+| Semantic map (groupings, edges) | Skip it. | Worth it when someone will maintain it. |
+| Blessings | Keep one the first time you catch yourself copying the wrong example. | **The part that pays.** The lint keeps them honest. |
 | Generated inventory (metadata) | Skip, or a ten-line pre-commit script. | Useful when the repo is big enough that orientation costs real tokens. |
 | Agent index, auto-injected | Skip; `CLAUDE.md` is already loaded. | Measure first, then decide. |
 | Human index / graph viewer | Skip. | Earns its place when someone must understand a system they didn't build. |
@@ -451,6 +470,11 @@ saying no to a row is a visible choice, not a fork.
 
 ## Roadmap
 
+- [x] **2.5.0** — blessings in a store of their own, one file each with
+      where and kind, the index saying where and why, an `extend`
+      blessing's users worked out for retesting, and "upgrade ZDD" moving
+      them out of the map on the developer's word; and an opt-in harness
+      ADR set beside the application set, on one number line *(ZDD-1)*.
 - [x] **2.4.1** — the findings from both adopters' moves to 2.4.0:
       ZDD named in every use line, generated-file conflicts regenerated
       mid-merge, the duplicate-ADR-number lint tested and its renumber
@@ -793,6 +817,48 @@ warning can say "behind".
     derive with the `jobs.entries` remedy; the README says a committed
     Railway file is applied by Railway too.
 
+- **`2.5.0` — blessings in a store of their own, and a harness ADR set.**
+  A minor by decision 0035: the new lint failures are each cleared by the
+  upgrade's move or named by it, and the config gains optional keys only
+  (`paths.blessingsDir`; `paths.harnessAdrDir` and `paths.harnessAdrIndex`,
+  together, on the split). No metadata-contract change and no new mandatory
+  generated file. **What moves on the bump**: `derive --check` nothing;
+  `render --check` the blessing index (its new format), `human-index.html`
+  for every adopter (the viewer's code is inlined, and names the folder of
+  an ADR outside `zdd/adr` — a harness ADR's, or a custom `adrDir`'s, whose
+  embedded ADRs gain a `dir` field), and, once blessings move, `graph.json` (the map pages lose their
+  Blessings sections) and `agent-index.md` where a metadata link lived only
+  inside a blessing; "upgrade ZDD" rewrites `zdd/instructions.md` (and the
+  `AGENTS.md` copy) and the pins, and lists the blessings to move — it moves
+  them only with the token its plan printed. The ADR set splits only on
+  `split-adrs`, never on the upgrade.
+  - *Blessings* (decisions 0031, 0032): one file per blessing in
+    `zdd/blessings/`, named for its question, with a header — `where:` (the
+    code; required), `kind:` (`copy` or `extend`; required), `applies-to:`
+    (a house rule for an app), `first-built-in:`, `adr:`. The semantic map
+    keeps its name and holds the groupings and edges. The blessing index
+    says where and why on every line, house rules first under their app;
+    an `extend` blessing names who uses its code, from the metadata, and
+    "choose patterns" lists them to retest. Lint fails a Blessings heading
+    left on a map page, a missing or broken `where:`, a missing or wrong
+    `kind:`, and an `applies-to:` naming no app or package page. The
+    freshness nudge watches each `where:` file.
+  - *The move*: `upgrade --plan` lists every blessing on the map with the
+    file and header it would get; `--move-blessings=<token>` writes that
+    list and nothing else, judged whole before its first write; a blessing
+    with no question or no repo file stays and is named.
+  - *A harness ADR set* (decisions 0033, 0034): opt-in, beside
+    the application set, one number line across both, an index per set,
+    citations and supersession across sets unchanged. `split-adrs` proposes
+    a set per ADR (a `Scope:` tag line decides), moves on the developer's
+    word, re-points links inside `zdd/` and lists the ones outside.
+  - *Findings*: fixed #30, #31, #16 (a divider comment taken as a
+    component's description) and #28 (the retired-name scan read
+    `external-service:<id>` as `service:<id>`); deferred with a comment
+    each to the next findings-sweep release: #15, #17, #18, #19, #26, #27.
+  - *The upgrade's text pass* re-reads an adopter's own paragraphs about
+    blessings once, against the 2.5 rule, so a `CLAUDE.md` that still says
+    blessings live on map pages is shown beside what ZDD now says.
 ## Contributing
 
 Forks and pull requests welcome — the architecture is built for it, with a plug-in

@@ -12,7 +12,8 @@
 //                    (src/viewers/index.mjs) by config `viewer`
 //   - agent index  — llms.txt-shaped, feature-first, budget ~2k tokens
 //   - ADR index    — one orientation line per ADR
-//   - blessing index — one line per blessing, by trigger question (2.0.0)
+//   - blessing index — one line per blessing in the blessing store, by
+//                    trigger question, with where and why (2.0.0, ZDD-1)
 // Renderings carry no facts of their own and are never edited; if one looks
 // wrong the fix is in a store, the derived layer, or this renderer.
 // Deterministic: same inputs in, byte-identical outputs. Node stdlib only.
@@ -31,7 +32,10 @@ import { extractLinks as extractMapLinks } from "./lib/map-links.mjs";
 import { changedTerms, parseNameStatus } from "./lib/store-changes.mjs";
 import { refreshOriginBase } from "./lib/fetch-freshness.mjs";
 import { buildAdrIndex } from "./lib/adr-index.mjs";
+import { adrSets } from "./lib/adr-sets.mjs";
 import { buildBlessingIndex } from "./lib/blessing-index.mjs";
+import { loadBlessings, usersOf } from "./lib/blessings.mjs";
+import { MAX_STORE_FILE_BYTES } from "./lib/walk-markdown.mjs";
 import { slugify } from "./lib/slug.mjs";
 import { loadConfig, resolveViewer, resolveNonAreaTags, validateRepoBase, absentStoreNotes } from "./lib/config.mjs";
 import { loadViewer, DEFAULT_VIEWER } from "./viewers/index.mjs";
@@ -39,7 +43,7 @@ import { loadViewer, DEFAULT_VIEWER } from "./viewers/index.mjs";
 // Per-run state, set by run() from the adopter's config: repo root, artifact
 // paths, the bundle folder node ids are relative to (the zdd/ folder), the
 // display name, the GitHub base URL for source links, and the base branch.
-let REPO, CONFIG, PATHS, BUNDLE, SEMANTIC, DERIVED, OUT_HTML, OUT_INDEX, OUT_ADR_INDEX, OUT_BLESSING_INDEX, OUT_GRAPH;
+let REPO, CONFIG, PATHS, BUNDLE, SEMANTIC, BLESSINGS, DERIVED, OUT_HTML, OUT_INDEX, OUT_ADR_INDEX, OUT_BLESSING_INDEX, OUT_GRAPH;
 let BUNDLE_NAME, REPO_BASE, BASE_BRANCH, VIEWER, NON_AREA_TAGS, AGENT_INDEX;
 const RECORDS_BY_NODE = new Map(); // node id -> the derived record behind a metadata concept
 
@@ -143,15 +147,20 @@ function loadDocs() {
     }
     glossary = normEol(readFileSync(glossaryPath, "utf8"));
   }
-  const adrDir = resolve(REPO, PATHS.adrDir);
+  // Every ADR set (decision 0033): the application set, and the harness set
+  // when it is configured. `set` and `dir` (repo-relative) say where each
+  // ADR lives; the viewer is handed only { num, file, title, body }.
   const adrs = [];
-  for (const path of walk(adrDir, ".md")) {
-    const file = posixify(relative(adrDir, path));
-    const num = /^(\d{4})-/.exec(file)?.[1];
-    if (!num) continue;
-    const body = normEol(readFileSync(path, "utf8"));
-    const title = /^#\s+(.+)$/m.exec(body)?.[1] ?? file;
-    adrs.push({ num, file, title, body });
+  for (const set of adrSets(PATHS)) {
+    const adrDir = resolve(REPO, set.dir);
+    for (const path of walk(adrDir, ".md")) {
+      const file = posixify(relative(adrDir, path));
+      const num = /^(\d{4})-/.exec(file)?.[1];
+      if (!num) continue;
+      const body = normEol(readFileSync(path, "utf8"));
+      const title = /^#\s+(.+)$/m.exec(body)?.[1] ?? file;
+      adrs.push({ num, file, title, body, set: set.name, dir: set.dir });
+    }
   }
   return { glossary, adrs };
 }
@@ -185,8 +194,8 @@ function computeStoreChanges(glossaryText) {
   // embeds a changed-set CI disagrees with.
   refreshOriginBase(git, BASE_BRANCH);
   const glossaryRel = posixify(relative(REPO, resolve(REPO, PATHS.glossary)));
-  const adrRel = posixify(relative(REPO, resolve(REPO, PATHS.adrDir))) + "/";
-  const storePaths = [glossaryRel, adrRel];
+  const adrRels = adrSets(PATHS).map((s) => posixify(relative(REPO, resolve(REPO, s.dir))) + "/");
+  const storePaths = [glossaryRel, ...adrRels];
   const none = { adrs: [], glossaryTerms: [] };
   try {
     let left = null;
@@ -217,11 +226,9 @@ function computeStoreChanges(glossaryText) {
       right ? ["diff", ...extra, left, right, "--", ...paths] : ["diff", ...extra, left, "--", ...paths];
     const nameStatus = [git(...diffArgs(["--name-status"], ...storePaths))];
     if (!right) nameStatus.push(...untracked);
-    const { adrs, glossaryChanged } = parseNameStatus(
-      nameStatus.join("\n"),
-      glossaryRel,
-      adrRel,
-    );
+    const parsed = adrRels.map((adrRel) => parseNameStatus(nameStatus.join("\n"), glossaryRel, adrRel));
+    const adrs = parsed.flatMap((p) => p.adrs).sort((a, b) => (a.file < b.file ? -1 : 1));
+    const glossaryChanged = parsed.some((p) => p.glossaryChanged);
     let glossaryTerms = [];
     if (glossaryChanged) {
       const newGlossary = right ? normEol(git("show", `${right}:${glossaryRel}`)) : glossaryText;
@@ -247,10 +254,28 @@ function computeStoreChanges(glossaryText) {
 // viewer owns that); markdown output gets explicit targets via this helper —
 // skip citations that are already link text or part of a path.
 function linkifyAdrCitations(text, adrs, hrefOf) {
-  const byNum = new Map(adrs.map((a) => [a.num, a.file]));
+  const byNum = new Map();
+  for (const a of adrs) if (!byNum.has(a.num)) byNum.set(a.num, a);
   return text.replace(/(?<!\[)\bADR-(\d{4})\b(?!\]|\()/g, (m, num) =>
     byNum.has(num) ? `[ADR-${num}](${hrefOf(byNum.get(num))})` : m,
   );
+}
+
+// Links to ADR files in an ADR's first sentence, rebased from its own folder
+// to the index's (two sets only: one set keeps lib/adr-index.mjs's rule).
+function rebaseFromSet(text, setDir, indexDir) {
+  return text.replace(/\]\(((?:\.\.?\/)*(?:[^)/#\s]+\/)*\d{4}-[^)/#\s]+\.md)/g, (whole, dest) => {
+    if (/^[a-z][a-z0-9+.-]*:/i.test(dest)) return whole;
+    return `](${posix.relative(indexDir, posix.normalize(posix.join(setDir, dest))) || "."}`;
+  });
+}
+
+// An ADR's href from the bundle folder. The application set keeps the
+// `adr/<file>` it has always had (its bytes never move); a harness ADR's
+// folder is worked out from paths.harnessAdrDir.
+function adrHrefFromBundle(adr) {
+  if (PATHS.harnessAdrDir === undefined) return `adr/${adr.file}`;
+  return `${posix.relative(PATHS.bundleDir, adr.dir) || "."}/${adr.file}`;
 }
 
 // Map-body links (bundle-absolute or relative, .md and .json) resolve to node
@@ -583,7 +608,9 @@ function buildAgentIndex(concepts, features, adrs, { levels = 1, areaDir = "", r
   if (summary.trim()) lines.push(`> ${summary}`, "");
   lines.push(
     "Generated by `zdd-engine render` from the semantic map + codebase metadata — do not edit.",
-    `Vocabulary: \`${PATHS.glossary}\`. Decisions: \`${PATHS.adrDir}/\`. Human index: \`${PATHS.humanIndex}\`.`,
+    PATHS.harnessAdrDir !== undefined
+      ? `Vocabulary: \`${PATHS.glossary}\`. Decisions: \`${PATHS.adrDir}/\` (application), \`${PATHS.harnessAdrDir}/\` (harness). Human index: \`${PATHS.humanIndex}\`.`
+      : `Vocabulary: \`${PATHS.glossary}\`. Decisions: \`${PATHS.adrDir}/\`. Human index: \`${PATHS.humanIndex}\`.`,
   );
   lines.push("");
 
@@ -640,7 +667,7 @@ function buildAgentIndex(concepts, features, adrs, { levels = 1, areaDir = "", r
       lines.push(`- [${area}](${areaDir}/${slug}.md) — ${fs.length} feature${fs.length === 1 ? "" : "s"}: ${shown}`);
       const body = [`# ${BUNDLE_NAME} — ${area}`, "", `One area of [the agent index](../${PATHS.agentIndex.split("/").pop()}). ${AREA_FILE_MARK}`, ""];
       for (const f of fs) body.push(...featureSection(f, "../"));
-      areaFiles.set(slug, linkifyAdrCitations(body.join("\n"), adrs, (file) => `${adrFromArea}/${file}`));
+      areaFiles.set(slug, linkifyAdrCitations(body.join("\n"), adrs, (adr) => (adr.set === "harness" ? `${posix.relative(areaDirRel, adr.dir) || "."}/${adr.file}` : `${adrFromArea}/${adr.file}`)));
     }
     lines.push("");
   } else {
@@ -692,7 +719,7 @@ function buildAgentIndex(concepts, features, adrs, { levels = 1, areaDir = "", r
   lines.push("");
   // Bare ADR citations become links — hrefs are relative to the bundle folder
   // so they resolve on GitHub, like resource pointers.
-  const text = linkifyAdrCitations(lines.join("\n"), adrs, (file) => `adr/${file}`);
+  const text = linkifyAdrCitations(lines.join("\n"), adrs, adrHrefFromBundle);
   return levels === 2 ? { text, areaFiles } : text;
 }
 // The index's area folder (lib/paths.mjs, so the layout check sees it too).
@@ -727,7 +754,12 @@ async function render() {
   // the top-level key is otherwise invisible to it (verification CR-026).
   // Only added when set, so a config without it keeps the v0.3.1 bytes.
   const options = NON_AREA_TAGS.length ? { ...VIEWER.options, nonAreaTags: NON_AREA_TAGS } : VIEWER.options;
-  const html = viewer.render({ graph, docs, changed, options, bundleName: BUNDLE_NAME, repoBase: REPO_BASE });
+  // An ADR outside zdd/adr — a harness ADR, or a custom adrDir's — carries
+  // its folder (`dir`), so the viewer names its source and resolves its links
+  // from there (CR-033); one in zdd/adr carries nothing new, so a default
+  // repo embeds the 2.4 projection byte for byte.
+  const viewerDocs = { ...docs, adrs: docs.adrs.map(({ num, file, title, body, dir }) => (dir !== "zdd/adr" ? { num, file, title, body, dir } : { num, file, title, body })) };
+  const html = viewer.render({ graph, docs: viewerDocs, changed, options, bundleName: BUNDLE_NAME, repoBase: REPO_BASE });
   if (typeof html !== "string") {
     console.error(`Viewer '${VIEWER.name}' must return the human index as a string`);
     process.exit(1);
@@ -738,11 +770,51 @@ async function render() {
   const areaFiles = typeof built === "string" ? new Map() : built.areaFiles;
   // ADR index: the always-load-whole orientation summary of
   // the ADR corpus — one line per ADR, so full bodies are drill-in-when-cited.
-  const adrIndex = buildAdrIndex(docs.adrs);
-  // Blessing index (2.0.0): read whole when choosing patterns. Hrefs are
-  // relative to the bundle folder, like the agent index's.
-  const adrFile = new Map(docs.adrs.map((a) => [a.num, a.file]));
-  const { text: blessingIndex, count: blessings } = buildBlessingIndex(concepts.filter((c) => c.layer === "map"), (num) => (adrFile.has(num) ? `adr/${adrFile.get(num)}` : null));
+  // One index per set (decision 0033), each with hrefs from its own folder.
+  // With one set, the application index is the 2.4 bytes exactly.
+  const sets = adrSets(PATHS);
+  const setOf = new Map(docs.adrs.map((a) => [a.num, a]));
+  const indexFor = (set) => {
+    const indexDir = posix.dirname(set.index);
+    const hrefOf = (adr) => (sets.length === 1 && adr.set === "application" ? `adr/${adr.file}` : `${posix.relative(indexDir, adr.dir) || "."}/${adr.file}`);
+    const other = sets.find((s) => s.name !== set.name);
+    return buildAdrIndex(
+      docs.adrs.filter((a) => a.set === set.name),
+      sets.length === 1
+        ? undefined
+        : {
+            title: set.name === "harness" ? "# ADR index — harness" : "# ADR index",
+            shared: `Numbers are shared with the ${other.name} set (\`${other.index}\`): a gap here is a decision there.`,
+            href: hrefOf,
+            rebase: (text, adr) => rebaseFromSet(text, adr.dir, indexDir),
+            stampOf: (num) => {
+              const target = setOf.get(num);
+              if (!target || target.set === set.name) return `ADR-${num}`;
+              return `[ADR-${num}](${hrefOf(target)}), ${target.set}`;
+            },
+          },
+    );
+  };
+  const adrIndex = indexFor(sets[0]);
+  const harnessAdrIndex = sets.length > 1 ? indexFor(sets[1]) : null;
+  // Blessing index (2.0.0, decision 0031): read whole when choosing
+  // patterns. Hrefs are relative to the bundle folder, like the agent
+  // index's. A blessing names map pages by their path under the map folder.
+  const adrOf = new Map();
+  for (const a of docs.adrs) if (!adrOf.has(a.num)) adrOf.set(a.num, a);
+  const mapRel = posixify(relative(BUNDLE, SEMANTIC));
+  const blessingsRel = posixify(relative(BUNDLE, BLESSINGS));
+  const pages = new Map(concepts.filter((c) => c.layer === "map").map((c) => [c.id.startsWith(`${mapRel}/`) ? c.id.slice(mapRel.length + 1) : c.id, c]));
+  const records = [...RECORDS_BY_NODE.values()];
+  const store = loadBlessings(BLESSINGS, REPO);
+  for (const f of store.unreadable) console.error(`WARNING: ${f}: over ${MAX_STORE_FILE_BYTES / 1024} KiB or unreadable — not in the blessing index`);
+  for (const s of store.skipped) console.error(`WARNING: ${posixify(relative(REPO, s.path)) || "."}: ${s.reason} — not in the blessing index`);
+  const { text: blessingIndex, count: blessings } = buildBlessingIndex(store.blessings, {
+    adrHref: (num) => (adrOf.has(num) ? adrHrefFromBundle(adrOf.get(num)) : null),
+    blessingHref: (id) => `${blessingsRel}/${id}.md`,
+    mapPage: (id) => (pages.has(id) ? { title: pages.get(id).title, href: `${pages.get(id).id}.md` } : null),
+    usersOf: (b) => usersOf(b.where, records),
+  });
   // ~4 chars/token; the budget is a warning, not a gate — the fix is trimming
   // semantic link lists, which is a judgment call (spec §4).
   const approxTokens = Math.round(agentIndex.length / 4);
@@ -750,7 +822,7 @@ async function render() {
     const fix = AGENT_INDEX.levels === 2 ? "trim the features' pointer lists, or raise agentIndex.budgetTokens in zdd/config.json" : 'raise agentIndex.budgetTokens in zdd/config.json, set agentIndex.levels to 2 (areas first, then one file per area, each feature one hop away), or link each feature\'s entry points only';
     console.error(`WARNING: agent index ≈${approxTokens} tokens (budget ${AGENT_INDEX.budget}) — ${fix}`);
   }
-  return { html, graphJson, agentIndex, areaFiles, adrIndex, blessingIndex, counts: { blessings, concepts: concepts.length, edges: graph.edges.length, features: features.length, adrs: docs.adrs.length } };
+  return { html, graphJson, agentIndex, areaFiles, adrIndex, harnessAdrIndex, blessingIndex, counts: { blessings, concepts: concepts.length, edges: graph.edges.length, features: features.length, adrs: docs.adrs.length, harnessAdrs: docs.adrs.filter((a) => a.set === "harness").length } };
 }
 
 export async function run(args) {
@@ -760,6 +832,7 @@ export async function run(args) {
   PATHS = resolved.paths;
   BUNDLE = resolved.bundleDir;
   SEMANTIC = resolve(REPO, PATHS.mapDir);
+  BLESSINGS = resolve(REPO, PATHS.blessingsDir);
   DERIVED = resolve(REPO, PATHS.metadataDir);
   OUT_HTML = resolve(REPO, PATHS.humanIndex);
   OUT_INDEX = resolve(REPO, PATHS.agentIndex);
@@ -793,7 +866,7 @@ export async function run(args) {
   }
   // A missing store dir renders as empty; name it when the bundle is
   // otherwise populated, so a typo is not mistaken for greenfield (CR-068/099).
-  for (const note of absentStoreNotes(REPO, PATHS, ["adrDir", "mapDir", "metadataDir"])) console.error(note);
+  for (const note of absentStoreNotes(REPO, PATHS, ["adrDir", "mapDir", "blessingsDir", "metadataDir", ...(PATHS.harnessAdrDir !== undefined ? ["harnessAdrDir"] : [])])) console.error(note);
   // Refuse an unknown viewer before any store is read: the error names the
   // registry so the fix is a config edit, not a source dig.
   try {
@@ -810,7 +883,7 @@ export async function run(args) {
     console.error(e.message);
     process.exit(1);
   }
-  const { html, graphJson, agentIndex, areaFiles, adrIndex, blessingIndex, counts } = rendered;
+  const { html, graphJson, agentIndex, areaFiles, adrIndex, harnessAdrIndex, blessingIndex, counts } = rendered;
   const norm = (s) => s.replace(/\r\n/g, "\n");
   const outputs = [
     ["graph.json", OUT_GRAPH, graphJson],
@@ -818,6 +891,7 @@ export async function run(args) {
     ["agent-index.md", OUT_INDEX, agentIndex],
     ["adr-index.md", OUT_ADR_INDEX, adrIndex],
     ["blessing-index.md", OUT_BLESSING_INDEX, blessingIndex],
+    ...(harnessAdrIndex !== null ? [[PATHS.harnessAdrIndex.split("/").pop(), resolve(REPO, PATHS.harnessAdrIndex), harnessAdrIndex]] : []),
   ];
   // The area files (agentIndex.levels 2) live in a sibling folder of the
   // index; a file there that this render did not produce is stale, so the
@@ -930,6 +1004,6 @@ export async function run(args) {
     }
     const indexName = PATHS.agentIndex.split("/").pop();
     const sections = areaFiles.size ? `${counts.features} feature sections -> ${areaFiles.size} area files under ${areaLabel} (areas listed in ${indexName})` : `${counts.features} feature sections -> ${indexName}`;
-    console.log(`Wrote ${counts.concepts} concepts, ${counts.edges} edges -> graph.json + human-index.html (viewer ${VIEWER.name}); ${sections}; ${counts.adrs} ADRs -> adr-index.md; ${counts.blessings} blessings -> blessing-index.md`);
+    console.log(`Wrote ${counts.concepts} concepts, ${counts.edges} edges -> graph.json + human-index.html (viewer ${VIEWER.name}); ${sections}; ${harnessAdrIndex !== null ? `${counts.adrs - counts.harnessAdrs} ADRs -> adr-index.md, ${counts.harnessAdrs} -> ${PATHS.harnessAdrIndex.split("/").pop()}` : `${counts.adrs} ADRs -> adr-index.md`}; ${counts.blessings} blessings -> blessing-index.md`);
   }
 }

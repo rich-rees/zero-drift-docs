@@ -17,6 +17,10 @@
 // another folder changed; the first adopter's pipeline concept sat on four such
 // changes.
 //
+// Blessings (ZDD-1, decision 0031) live in their own store and are watched
+// the same way: a blessing's code is its `where:` file, and the source
+// behind every metadata record its text links to.
+//
 // Advisory means advisory: output is GitHub-flavored markdown on stdout (pipe
 // into $GITHUB_STEP_SUMMARY) and the exit code is 0 whatever the checkout
 // looks like — no git, no origin, an unborn branch, a `--base` that does not
@@ -34,6 +38,7 @@ import { loadConfig } from "./lib/config.mjs";
 import { parseFrontmatter } from "./lib/frontmatter.mjs";
 import { extractLinks } from "./lib/map-links.mjs";
 import { walkMarkdown, readBounded, regularFileInside, MAX_STORE_FILE_BYTES } from "./lib/walk-markdown.mjs";
+import { readBlessing } from "./lib/blessings.mjs";
 
 const posixify = (p) => p.split(/[\\/]/).join("/");
 
@@ -142,6 +147,7 @@ export function changedAgainstBase(repoRoot, requestedBase, baseBranch) {
 export function run(args) {
   const { repoRoot: REPO, paths, baseBranch, bundleDir } = loadConfig(args);
   const SEMANTIC = resolve(REPO, paths.mapDir);
+  const BLESSINGS = resolve(REPO, paths.blessingsDir);
   const METADATA = resolve(REPO, paths.metadataDir);
 
   const baseIdx = args.indexOf("--base");
@@ -165,13 +171,18 @@ export function run(args) {
 
   const stale = [];
   const cache = new Map();
-  for (const path of walkMarkdown(SEMANTIC)) {
+  for (const path of [...walkMarkdown(SEMANTIC), ...walkMarkdown(BLESSINGS)]) {
     const conceptRel = posixify(relative(REPO, path));
     if (changedSet.has(conceptRel)) continue; // concept updated in the same diff
     const text = readBounded(path);
     if (text === null) continue; // over the cap: not a concept the nudge can read
     const hits = [];
-    for (const { path: watched, via } of watchedPaths(path, text, { bundleDir, metadataDir: METADATA, cache })) {
+    const watching = watchedPaths(path, text, { bundleDir, metadataDir: METADATA, cache });
+    if (path.startsWith(BLESSINGS)) {
+      const where = readBlessing(text, "").where;
+      if (where) watching.unshift({ path: where.path, via: ["where"] });
+    }
+    for (const { path: watched, via } of watching) {
       // a watched path may be a file or a directory prefix
       for (const f of changed) if (f === watched || f.startsWith(watched + "/")) hits.push({ file: f, via });
     }
@@ -186,21 +197,21 @@ export function run(args) {
   }
 
   if (stale.length === 0) {
-    console.log("### Semantic map\n\nNo semantic concepts affected by this diff, or all affected concepts were updated. ✅");
+    console.log("### Semantic map and blessings\n\nNo semantic-map page or blessing affected by this diff, or every affected one was updated. ✅");
     return;
   }
 
-  console.log("### Semantic map — possibly stale concepts ⚠️\n");
+  console.log("### Semantic map and blessings — possibly stale ⚠️\n");
   console.log(
-    "This diff touches code that the following semantic-map concepts describe — their `resource:` path, or the source behind a metadata record they link to — without updating them. " +
-      "If the feature's edges/blessings changed, run `/zdd:update` in this branch (a Claude session skill) and commit the result. " +
+    "This diff touches code that the following semantic-map concepts and blessings describe — their `resource:` or `where:` path, or the source behind a metadata record they link to — without updating them. " +
+      "If the feature's edges, or the blessed code, changed, say \"update ZDD\" in this branch and commit the result. " +
       "If the change doesn't alter what the concept says, ignore this.\n",
   );
-  console.log("| Concept | Touched files | Via |");
+  console.log("| Page | Touched files | Via |");
   console.log("|---|---|---|");
   for (const s of stale) {
     const files = s.touched.slice(0, 3).map(cell).join("<br>") + (s.touched.length > 3 ? `<br>…+${s.touched.length - 3}` : "");
-    const via = s.via.map((v) => (v === "resource" ? "`resource:`" : `\`${cell(v)}\``)).join("<br>");
+    const via = s.via.map((v) => (v === "resource" || v === "where" ? `\`${v}:\`` : `\`${cell(v)}\``)).join("<br>");
     console.log(`| \`${cell(s.concept)}\` | ${files} | ${via} |`);
   }
 }

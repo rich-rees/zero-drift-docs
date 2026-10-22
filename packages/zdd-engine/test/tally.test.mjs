@@ -33,9 +33,10 @@ const EMPTY = "glossary:\n- none\nadrs:\n- none\nblessings:\n- none\nmap:\n- non
 before(() => {
   repo = mkdtempSync(join(tmpdir(), "zdd-tally-"));
   cpSync(FIXTURE, repo, { recursive: true });
-  // Two more blessings in the map so the never-named list has ones to check.
-  mkdirSync(join(repo, "zdd", "map", "features"), { recursive: true });
-  appendFileSync(join(repo, "zdd", "map", "features", "things.md"), "\n# Blessings\n\n- Adding a thing endpoint? Copy `src/app/api/things/route.ts` — never inline SQL (ADR-0002).\n- Logging a change? Copy `src/lib/audit.ts` because the trail is append-only.\n");
+  // Two more blessings in the store so the never-named list has ones to check.
+  mkdirSync(join(repo, "zdd", "blessings"), { recursive: true });
+  writeFileSync(join(repo, "zdd", "blessings", "adding-a-thing-endpoint.md"), "---\nwhere: src/app/api/things/route.ts\nkind: copy\n---\n\nAdding a thing endpoint? Copy it — never inline SQL (ADR-0002).\n");
+  writeFileSync(join(repo, "zdd", "blessings", "logging-a-change.md"), "---\nwhere: src/app/page.tsx\nkind: copy\n---\n\nLogging a change? Copy the audit call because the trail is append-only.\n");
   git("init", "-q", "-b", "main");
   commit("base: no record");
   git("tag", "start");
@@ -93,7 +94,7 @@ test("tally: counts over the accepted lines only, the legacy pattern record unde
   assert.match(out, /\ncomments\s+0\s+0\s+-\s+0\n/, out);
   assert.match(out, /\n  ADRs: 0001 \(1 of 2\)\n/, "0001 was named only by a refused line; 0002 by a valid one");
   assert.match(out, /\n  glossary terms: "Audit trail" \(1 of 2\)\n/, out);
-  assert.match(out, /\n  blessings: "Adding a page\?", "Adding an endpoint for things\?", "Logging a change\?" \(3 of 4\)\n/, "the question named in a pattern record line counts; the fixture's own two are never named");
+  assert.match(out, /\n  blessings: "Adding a page\?", "Adding an endpoint for things\?", "Logging a change\?", "Saving a thing\?" \(4 of 5\)\n/, "the question named in a pattern record line counts; the fixture's own three are never named");
   assert.match(out, /Shape problems .*\n(  [0-9a-f]{7} chore: three, malformed: .*\n)*  [0-9a-f]{7} chore: three, malformed: section 'comments' missing/, out);
   assert.match(out, /'turned' says nothing of what would otherwise have happened/, out);
   assert.doesNotMatch(out, /forged/);
@@ -194,13 +195,13 @@ test("tally(): a record naming an ADR the stores no longer hold does not count i
 });
 
 test("readStores: ADR numbers, glossary terms and blessing questions from the fixture as it stands; a symlinked glossary is a note", () => {
-  const s = readStores(repo, { adrDir: "zdd/adr", glossary: "zdd/glossary.md", mapDir: "zdd/map" });
+  const s = readStores(repo, { adrDir: "zdd/adr", glossary: "zdd/glossary.md", blessingsDir: "zdd/blessings" });
   assert.deepEqual(s.adrs, ["0001", "0002"]);
   assert.deepEqual(s.terms, ["Thing", "Audit trail"]);
-  assert.deepEqual(s.blessings, ["Adding a page?", "Adding an endpoint for things?", "Adding a thing endpoint?", "Logging a change?"]);
+  assert.deepEqual(s.blessings, ["Adding a page?", "Adding a thing endpoint?", "Adding an endpoint for things?", "Logging a change?", "Saving a thing?"], "by file name");
   assert.deepEqual(s.notes, []);
-  const absent = readStores(repo, { adrDir: "zdd/nowhere", glossary: "zdd/no-glossary.md", mapDir: "zdd/no-map" });
-  assert.deepEqual(absent, { adrs: [], terms: [], blessings: [], notes: [] }, "absent stores are empty, not notes");
+  const absent = readStores(repo, { adrDir: "zdd/nowhere", glossary: "zdd/no-glossary.md", blessingsDir: "zdd/no-blessings" });
+  assert.deepEqual(absent, { adrs: [], terms: [], blessings: [], blessingKeys: [], notes: [] }, "absent stores are empty, not notes");
 });
 
 test("usage names tally and lint --merge", () => {

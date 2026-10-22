@@ -165,6 +165,17 @@ const HEADING_RE = /^ {0,3}#{1,6}\s+(.*?)\s*#*\s*$/;
 const ITEM_RE = /^\s*(?:[-*+]|\d+[.)])\s+(.*)$/;
 const CITATION_RE = /\bADR[-\s]?(\d{4})\b/g;
 
+// How many headings named Blessings the body has (structure only: one in a
+// fenced example does not count). Lint fails a map page with any (CR-019).
+export function blessingHeadings(body) {
+  let n = 0;
+  for (const raw of structuralLines(body)) {
+    const heading = HEADING_RE.exec(raw);
+    if (heading && /^blessings?$/i.test(heading[1].trim())) n++;
+  }
+  return n;
+}
+
 export function extractBlessings(body) {
   const out = [];
   let inSection = false;

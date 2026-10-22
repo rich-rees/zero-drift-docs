@@ -206,3 +206,25 @@ export const Icon = ({ name }: { name: IconName }) => <span>{ICONS[name]}</span>
 `;
   assert.equal(scanComponents(icon).components.find((c) => c.name === "Icon").description, "", "the type's JSDoc is not the component's");
 });
+
+test("a divider comment is never a component's description — it ends the comment block above, so only the prose below it counts", () => {
+  const src = `// ----- Buttons -----
+// The app's primary button.
+export function Primary() {
+  return <button />;
+}
+
+// The secondary one, which never runs alone.
+// =====================================
+export function Secondary() {
+  return <button />;
+}
+
+//////// Inputs ////////
+export const Field = () => <input />;
+`;
+  const found = Object.fromEntries(scanComponents(src).components.map((c) => [c.name, c.description]));
+  assert.equal(found.Primary, "The app's primary button.");
+  assert.equal(found.Secondary, "", "a divider right above the component leaves it no description");
+  assert.equal(found.Field, "");
+});
