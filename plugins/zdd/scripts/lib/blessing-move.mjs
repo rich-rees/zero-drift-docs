@@ -162,8 +162,14 @@ export function triggerQuestion(text) {
 export function proposeMove(item, ctx) {
   const question = triggerQuestion(item.text);
   const pageId = posix.relative(ctx.mapDir, ctx.page).replace(/\.md$/, "");
-  const found = findWhere(item.text, ctx);
-  const problem = !question ? "it opens with no trigger question — add one by hand, then upgrade again" : !found ? "no link or path in it names a repo file to use as where: — add one by hand, then upgrade again" : null;
+  const seen = { folders: [], ambiguous: [] };
+  const found = findWhere(item.text, ctx, seen);
+  const nofile = seen.ambiguous.length
+    ? `the path \`${seen.ambiguous[0].span}\` matches more than one repo file (${seen.ambiguous[0].matches.slice(0, 3).join(", ")}${seen.ambiguous[0].matches.length > 3 ? ", …" : ""}) — write the one meant in full, then upgrade again`
+    : seen.folders.length
+      ? `it names a folder (\`${seen.folders[0]}\`), not a file — a blessing's where: is the file to start from; name it in the text, then upgrade again`
+      : "no link or path in it names a repo file to use as where: — add one by hand, then upgrade again";
+  const problem = !question ? "it opens with no trigger question — add one by hand, then upgrade again" : !found ? nofile : null;
   return {
     question,
     where: found?.path ?? null,
@@ -181,7 +187,7 @@ export function proposeMove(item, ctx) {
 // record names the record's file when it has exactly one; a link to an ADR,
 // a map page or a URL is no exemplar. A code span is a repo path; the code
 // span right after it, when it is an identifier, is the symbol.
-function findWhere(text, ctx) {
+function findWhere(text, ctx, seen = { folders: [], ambiguous: [] }) {
   const tokens = [];
   for (const m of text.matchAll(new RegExp(String.raw`\]\(${DEST}\)|` + "`([^`\\n]+)`", "g"))) tokens.push(m);
   for (let i = 0; i < tokens.length; i++) {
@@ -201,10 +207,23 @@ function findWhere(text, ctx) {
       if (ctx.isFile(resolved)) return { path: resolved, symbol: null };
       continue;
     }
-    const span = m[2].trim();
-    if (!/[\/.]/.test(span) || /\s/.test(span)) continue;
-    const path = span.replace(/^\.\//, "");
-    if (!ctx.isFile(path)) continue;
+    // A span may carry arguments after its path (`scripts/ci/job-stack.mjs
+    // start`): the first word is the path.
+    const span = m[2].trim().split(/\s+/)[0];
+    if (!/[\/.]/.test(span)) continue;
+    let path = span.replace(/^\.\//, "");
+    if (!ctx.isFile(path)) {
+      // Written relative to its app (`lib/graph-walk.ts` for
+      // `apps/backoffice/src/lib/graph-walk.ts`): taken only when exactly one
+      // repo file ends with it; two or more is a question for the developer.
+      const matches = path.includes("/") || /\.[A-Za-z0-9]+$/.test(path) ? (ctx.filesEndingWith?.(path) ?? []) : [];
+      if (matches.length === 1) path = matches[0];
+      else {
+        if (matches.length > 1) seen.ambiguous.push({ span: path, matches });
+        else if (path.endsWith("/") || ctx.isDir?.(path)) seen.folders.push(path);
+        continue;
+      }
+    }
     const next = tokens[i + 1];
     const gap = next ? text.slice(m.index + m[0].length, next.index) : "";
     const symbol = next && next[2] !== undefined && /^[\s(]*$/.test(gap) && /^[A-Za-z_$][\w$.]*(\(\))?$/.test(next[2].trim()) ? next[2].trim().replace(/\(\)$/, "") : null;
