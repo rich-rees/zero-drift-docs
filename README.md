@@ -39,44 +39,53 @@ session. ZDD closes that gap and nothing else.
 Documentation has two consumers with different failure modes: the **agent** (orients
 by grep-and-read, re-pays the cost every session) and the **human** (can't hold the
 system shape in their head; hand-maintained mechanism prose rots fastest). ZDD gives
-each what it needs, off **seven artifacts** — the design test for every fact:
+each what it needs, off **eight artifacts** — the design test for every fact:
 
 > **Document only what grep cannot find and code cannot say.**
 
-Four are **curated** (they can rot, so a per-PR ritual + CI watch them) and three are
+Five are **curated** (they can rot, so a per-PR ritual + CI watch them) and three are
 **generated** (rot-proof by construction, never hand-edited). The count is by
 *role*, not by file: the generated half also lands on disk as `zdd/adr-index.md`
-(the ADRs' index, rendered), `zdd/blessing-index.md` (the map's blessings, one
-line each, by trigger question) and `zdd/graph.json` (the machine form of the
-whole generated half — schema `zdd-graph/1` — from which the human index is
-rendered). All are mandatory outputs of `render` and all are fenced, but they
-are forms of artifacts 5–7, not an eighth, ninth and tenth.
+(the ADRs' index, rendered), `zdd/blessing-index.md` (the blessings, one line
+each: the trigger question, where the code is, and why) and `zdd/graph.json`
+(the machine form of the whole generated half — schema `zdd-graph/1` — from
+which the human index is rendered). All are mandatory outputs of `render` and
+all are fenced, but they are forms of artifacts 6–8, not a ninth, tenth and
+eleventh.
 
 | # | Artifact | Kind | Home |
 |---|----------|------|------|
 | 1 | Glossary — the ubiquitous language | Curated | `zdd/glossary.md` |
 | 2 | ADRs — decisions + rejected alternatives | Curated | `zdd/adr/` |
 | 3 | Code comments — constraints at the site | Curated | the source |
-| 4 | Semantic map — groupings, non-textual edges, blessings | Curated | `zdd/map/` |
-| 5 | Codebase metadata — mechanical inventory | Generated | `zdd/metadata/` |
-| 6 | Agent index — feature-first orientation | Generated | `zdd/agent-index.md` |
-| 7 | Human index — hosted graph view | Generated | `zdd/human-index.html` |
+| 4 | Semantic map — groupings and non-textual edges | Curated | `zdd/map/` |
+| 5 | Blessings — the code to copy or extend for a kind of work, and why | Curated | `zdd/blessings/` |
+| 6 | Codebase metadata — mechanical inventory | Generated | `zdd/metadata/` |
+| 7 | Agent index — feature-first orientation | Generated | `zdd/agent-index.md` |
+| 8 | Human index — hosted graph view | Generated | `zdd/human-index.html` |
 
-The semantic map is more than grouping that folder structure already does. It
-is where the **blessings** live: one-liners in a concept naming the **exemplar
-to copy** and the **pattern to refuse** — "adding an endpoint? copy this one;
-never inline the auth check" — each citing the ADR that blessed it. They answer
-a failure mode grep makes worse, not better: **pattern frequency in code is
-never a verdict.** The most common pattern is often the deprecated one, and an
+The semantic map is more than grouping that folder structure already does: it
+names the product's parts and says what belongs to each, with the links the
+code cannot show. The **blessings** sit beside it, one short file each naming
+**where** the code to copy or extend is and the **pattern to refuse** —
+"adding an endpoint? copy this one; never inline the auth check" — with the
+ADR that blessed it. A blessing is the developer who built a great
+file-upload component shouting across the table so everyone reuses it. They
+answer a failure mode grep makes worse, not better: **pattern frequency in
+code is never a verdict.** The most common pattern is often the deprecated one, and an
 agent that copies the nearest example copies the wrong one with confidence. A
 blessing is the curated answer; the engine's lint refuses a blessing whose ADR
-has since been superseded, so a stale blessing cannot sit quietly (the format is
-in [`skills/authoring.md`](plugins/zdd/skills/authoring.md)).
+has since been superseded, or whose `where:` names a file that no longer
+exists, so a stale blessing cannot sit quietly (the format is in
+[`skills/authoring.md`](plugins/zdd/skills/authoring.md)). A blessing is
+**`copy`** (imitate this method) or **`extend`** (reuse this shared code); for
+an `extend` blessing the index names who uses the code, worked out from the
+metadata, because extending it means retesting them.
 
 A blessing helps only if it is read before the code is written, so it has a
 moment of its own. **"Choose patterns"** runs once the design is settled: it
-reads the generated **blessing index** (every blessing's trigger question, one
-line each) whole, opens the blessings that match the work, checks the inventory
+reads the generated **blessing index** (every blessing's trigger question,
+where and why, one line each) whole, opens the blessings that match the work, checks the inventory
 for logic that already exists, and commits a **pattern plan** — per piece:
 follow a blessing, depart from one and why, none applies, or a new pattern to
 bless. **"Update ZDD"** then decides against the code as it merges: it mints
@@ -438,7 +447,8 @@ saying no to a row is a visible choice, not a fork.
 | ADRs with the three-part test | **Required.** Solo devs forget their own reasoning within a quarter. | Required. |
 | Constraint comments at the site | Required, and probably already happening. | Required. |
 | Glossary | Start it the first time you correct a word. | **Required.** This is where vocabulary drift actually begins. |
-| Semantic map (groupings, edges, blessings) | Skip the grouping; keep a blessing the first time you catch yourself copying the wrong example. | Worth it when someone will maintain it. The blessings are the part that pays; the lint keeps them honest. |
+| Semantic map (groupings, edges) | Skip it. | Worth it when someone will maintain it. |
+| Blessings | Keep one the first time you catch yourself copying the wrong example. | **The part that pays.** The lint keeps them honest. |
 | Generated inventory (metadata) | Skip, or a ten-line pre-commit script. | Useful when the repo is big enough that orientation costs real tokens. |
 | Agent index, auto-injected | Skip; `CLAUDE.md` is already loaded. | Measure first, then decide. |
 | Human index / graph viewer | Skip. | Earns its place when someone must understand a system they didn't build. |

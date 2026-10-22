@@ -4,11 +4,12 @@ Decided on adoption of ZDD in this repository (<DATE>). This is the first entry
 in the decision record — and, fittingly, it is the decision to keep a decision
 record at all.
 
-We will document this codebase with **Zero-Drift Docs**: seven artifacts kept at
-most one PR behind the code. Four are **curated** and can rot, so a per-PR ritual
+We will document this codebase with **Zero-Drift Docs**: eight artifacts kept at
+most one PR behind the code. Five are **curated** and can rot, so a per-PR ritual
 and CI watch them — the glossary (our ubiquitous language), these ADRs (decisions
-and the alternatives we rejected), comments at non-obvious sites in the code, and
-a semantic map of how things connect. Three are **generated** from source and
+and the alternatives we rejected), comments at non-obvious sites in the code, a
+semantic map of how things connect, and the blessings (which existing code to
+copy or extend for a kind of work, and why). Three are **generated** from source and
 never hand-edited — the codebase metadata, the agent index, and the human index.
 The test for whether a fact belongs in the docs at all: *document only what grep
 cannot find and code cannot say.*

@@ -41,9 +41,10 @@ only curated artifact without a home of their own.
    - `first-built-in:` optional: the map page the pattern was first built
      for, so the link to the originating feature is kept. Lint **warns**
      when it names no map page.
-   - The reason stays where it was, an ADR citation or a "because …" in the
-     text; the rules of 0015 point 8 for the question, the reason and the
-     length budget are unchanged.
+   - `adr:` optional: the ADR that blessed it (`ADR-0047`, or several,
+     comma-separated). A citation in the text counts as well; the reason is
+     still an ADR or a "because …", and the rules of 0015 point 8 for the
+     question, the reason and the length budget are unchanged.
 4. **Every index line carries two pointers,** where and why:
    `- A refusal that has to name things? — copy: apps/api/app/fixed_routes/decisions.py (RouteRefusal) · why: ADR-0047`.
    The index lists the `applies-to` blessings under their app first, then
