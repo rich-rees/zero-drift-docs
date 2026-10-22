@@ -834,6 +834,10 @@ export function instructionsBody(paths = artifactPaths({})) {
   const lit = (s) => () => s;
   return readFileSync(join(TEMPLATES, "instructions.md"), "utf8")
     .replaceAll("<GLOSSARY>", lit(p.glossary))
+    // The harness ADR set (decision 0033), only when configured: a repo
+    // without one reads the 2.4 sentences exactly.
+    .replaceAll("<HARNESS_ADR_LOAD>", lit(p.harnessAdrIndex ? ` (and \`${p.harnessAdrIndex}\`, the harness decisions, when the work touches how the team builds)` : ""))
+    .replaceAll("<HARNESS_ADR_INDEX_ITEM>", lit(p.harnessAdrIndex ? ` \`${p.harnessAdrIndex}\`,` : ""))
     .replaceAll("<ADR_INDEX>", lit(p.adrIndex))
     .replaceAll("<BLESSING_INDEX>", lit(p.blessingIndex))
     .replaceAll("<PATTERNS_PLAN>", lit(p.patternsPlan))
@@ -2336,6 +2340,7 @@ export const UPGRADE_NOTES = {
   "2.5.0": ({ paths }) => [
     `2.5 moves blessings out of the semantic map into ${paths.blessingsDir}/, one file each with where: and kind: in its header (decisions 0031, 0032) — the list is below; run upgrade again with --move-blessings once the developer has read it and checked each kind, then render: the blessing index says where and why on every line, and render --check moves`,
     "2.5 makes these FAIL lint, each cleared by the move or named by it (decision 0035): a Blessings section left on a map page, a blessing with no where: or one naming no file, no kind: or one that is neither copy nor extend, an applies-to: naming no app or package page",
+    "2.5 adds an opt-in harness ADR set (decisions 0033, 0034): how-the-team-builds decisions in a folder and index of their own, on one number line with the product's, so the application index can be handed to a stakeholder as it stands. Upgrading splits nothing; when the team wants it, `split-adrs --plan` proposes a set per ADR (a `Scope:` tag line decides) and the write moves them on the developer's word",
   ],
 };
 

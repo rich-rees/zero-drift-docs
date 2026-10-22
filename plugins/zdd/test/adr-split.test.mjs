@@ -148,3 +148,13 @@ test("artifactPaths reads the harness pair like the engine: both or neither, apa
   assert.throws(() => artifactPaths({ paths: { harnessAdrDir: "zdd/h", harnessAdrIndex: "zdd/h.md", blessingsDir: "zdd/h/b" } }), /paths\.blessingsDir "zdd\/h\/b" overlaps paths\.harnessAdrDir/);
   assert.throws(() => artifactPaths({ paths: { harnessAdrDir: "zdd/h", harnessAdrIndex: "zdd/adr-index.md" } }), /paths\.adrIndex and paths\.harnessAdrIndex are both "zdd\/adr-index\.md"/);
 });
+
+test("ZDD's instructions name the harness index only when the set is configured; without it the text is unchanged", async () => {
+  const { instructionsBody } = await import("../scripts/bootstrap.mjs");
+  const plain = instructionsBody({});
+  assert.doesNotMatch(plain, /harness/i);
+  const two = instructionsBody({ harnessAdrDir: "zdd/adr-harness", harnessAdrIndex: "zdd/adr-harness-index.md" });
+  assert.match(two, /`zdd\/adr-index\.md` whole \(and `zdd\/adr-harness-index\.md`, the harness decisions, when the work touches how the team builds\), and the ADRs your task/);
+  assert.match(two, /`zdd\/adr-index\.md`, `zdd\/adr-harness-index\.md`, `zdd\/blessing-index\.md`,/);
+  assert.equal(two.replace(/ \(and `zdd\/adr-harness-index\.md`[^)]*\)/, "").replace(" `zdd/adr-harness-index.md`,", ""), plain);
+});

@@ -16,6 +16,11 @@ Run this as the definition of done for every unit of work — the spoken form is
    - **Glossary** — new or sharpened vocabulary.
    - **ADRs** — decisions crystallised (written when decided, not after merge);
      offer them only when hard-to-reverse *and* surprising *and* a real trade-off.
+     When the repo has a harness ADR set (`paths.harnessAdrDir`), a new ADR
+     goes in the **harness** set when it decides how the team builds (review,
+     tests, CI, the tracker, ZDD itself) and in the **application** set when
+     it decides what the product does; ask when it is not plain. Either way it
+     takes the next free number across **both** folders.
    - **Code comments** — new non-obvious constraints, at the code site. A gotcha
      spanning multiple sites becomes an ADR instead.
    - **Semantic map** — feature and edge changes. **A unit of work

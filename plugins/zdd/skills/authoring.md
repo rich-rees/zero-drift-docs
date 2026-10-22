@@ -42,6 +42,15 @@ Miss any one and skip it — not every decision is an ADR, and a corpus full of
 non-decisions is as useless as none. This three-way test is the judgment CI can
 never make for you; it lives here on purpose.
 
+**Two sets, when the repo has opted in** (decision 0033): the application
+set (`zdd/adr/`) holds what the product does and can be handed to a
+stakeholder as it stands; the harness set (`paths.harnessAdrDir`, often
+`zdd/adr-harness/`) holds how the team builds it — review, tests, CI, the
+tracker, ZDD itself. One number line runs across both: a new ADR takes the
+next free number in either folder, and a citation, a blessing's reason or a
+supersession works across them unchanged. `bootstrap.mjs split-adrs` opens
+the second set (decision 0034).
+
 Format (`zdd/adr/NNNN-kebab-title.md`, numbered continuing the sequence):
 
 ```markdown

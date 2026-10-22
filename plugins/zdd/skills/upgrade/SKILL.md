@@ -361,8 +361,19 @@ https://github.com/rich-rees/zero-drift-docs/issues, labelled `finding`.
   or a wrong one; an `applies-to:` naming no app or package page.
 - **"choose patterns"** puts an `extend` blessing's users on the plan's
   *Retest* line, and **"update ZDD"** checks they were retested.
-- No metadata-contract change and one additive config key
-  (`paths.blessingsDir`); `derive --check` does not move on the bump.
+- **A harness ADR set, opt-in** (decisions 0033, 0034): decisions about how
+  the team builds can live apart from the product's, in their own folder
+  and index, on one number line. Upgrading splits nothing. When the person
+  wants it — now or later — run `split-adrs --plan`: every ADR with a
+  `Scope: harness` / `Scope: product` tag line is decided by it; propose a
+  set for each of the others from what it decides, show the whole list as
+  **one reviewable file**, and run the write with the plan's token and the
+  answers (`--harness=<nums> --application=<nums>`). It moves the harness
+  ADRs with their numbers, re-points links inside `zdd/`, and lists the
+  ones outside (`CLAUDE.md`, `docs/`) for a hand edit. Then render and lint.
+- No metadata-contract change and additive config keys only
+  (`paths.blessingsDir`; `paths.harnessAdrDir` and `paths.harnessAdrIndex`
+  on the split); `derive --check` does not move on the bump.
 
 ### Upgrading to 2.4.1 (findings from the 2.4.0 adoptions)
 
