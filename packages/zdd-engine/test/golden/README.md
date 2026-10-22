@@ -24,7 +24,11 @@ that engine's `derive` + `render` on `test/fixture`, before the extractor split
 and the viewer registry; reproducing them byte-for-byte is the contract those
 refactors met. The `v1.0` / FastAPI goldens were generated at engine 1.0.0 with
 the DIO-312 review fixes applied, by the commands below. The blessing-index
-golden was generated at engine 2.0.0 (CAS-96).
+golden was generated at engine 2.0.0 (CAS-96) and regenerated at 2.5.0
+(ZDD-1), when blessings moved from map pages into the blessing store: the
+index gained where and why, and the two human-index goldens lost the map
+pages' Blessings sections (their bodies, and the node sizes that follow from
+them).
 
 ## Regenerating
 
