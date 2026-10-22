@@ -4,7 +4,7 @@ The mechanical half of [Zero-Drift Docs](https://github.com/rich-rees/zero-drift
 derive the codebase metadata, render the agent + human indexes, and run the drift
 checks. Deterministic — same source bytes in, byte-identical artifacts out — with
 no dependencies beyond the Node stdlib and no LLM anywhere. The judgment-shaped
-half (curating the glossary, ADRs, comments, and map) lives in the `zdd` Claude
+half (curating the glossary, ADRs, comments, map and blessings) lives in the `zdd` Claude
 Code plugin's skills; both call this engine, so CI and the agent can never
 disagree about what "fresh" means.
 
@@ -21,21 +21,28 @@ npx @rich-rees/zdd-engine tally [--since <ref|date>] [--json]
 - **derive** — run the configured extractors over the repo and write
   `zdd/metadata/` (one JSON record per route / surface / table / function /
   bucket / module). `--check` verifies instead of writing: stale, missing, or
-  orphaned records exit 1. This is the blocking CI check for artifact #5.
+  orphaned records exit 1. This is the blocking CI check for artifact #6.
 - **render** — join the semantic map + metadata into the graph artifact
-  (`zdd/graph.json`, schema `zdd-graph/1`), the agent index, the ADR index, the
-  blessing index (`zdd/blessing-index.md`: one line per blessing in the map, its
-  trigger question and its reason, app-level slices first — read whole when
-  choosing patterns), and the human index (the graph rendered by the configured
-  viewer into one self-contained HTML file). `--check` verifies all five.
-  Blocking CI check for artifacts #6–7.
+  (`zdd/graph.json`, schema `zdd-graph/1`), the agent index, the ADR index (and
+  a harness ADR index when `paths.harnessAdrDir` and `paths.harnessAdrIndex`
+  are set — decision 0033), the blessing index (`zdd/blessing-index.md`: one
+  line per blessing in the blessing store — its trigger question, where the
+  code is and why, house rules first under their app, and for an `extend`
+  blessing who uses the code — read whole when choosing patterns), and the
+  human index (the graph rendered by the configured viewer into one
+  self-contained HTML file). `--check` verifies them all. Blocking CI check for
+  artifacts #7–8.
 - **lint** — deterministic curated-store lints: duplicate ADR numbers,
   supersession symmetry (a "supersedes" claim without the matching forward
-  stamp fails), blessings (a blessing in a semantic-map concept that cites a
-  superseded or non-existent ADR fails, and so does one that does not open
-  with its trigger question; one with no reason — neither an ADR nor
-  "because …" — or over 300 visible characters, or citing a partially
-  superseded ADR, is a warning), and the **pattern plan**
+  stamp fails), blessings (one file each in the blessing store,
+  `zdd/blessings/`: a blessing that cites a superseded or non-existent ADR
+  fails, and so does one that does not open with its trigger question, one
+  whose `where:` is missing or names no file, one with no `kind:` or neither
+  `copy` nor `extend`, and one whose `applies-to:` names no app or package
+  page; a Blessings heading left on a semantic-map page fails too; one with
+  no reason — neither an ADR nor "because …" — or over 300 visible
+  characters, or citing a partially superseded ADR, or an unknown
+  `first-built-in:` or header line, is a warning), and the **pattern plan**
   (`zdd/patterns-plan.md`): with `--merge` — the CI step that gates the merge
   — its presence fails, and without it a warning, so a branch stays pushable
   mid-build. With `--tempstate` a tracked `TEMPSTATE.md` fails. See
@@ -50,9 +57,10 @@ npx @rich-rees/zdd-engine tally [--since <ref|date>] [--json]
   a missing section, an unknown verb, a `turned` or `confirmed` line that
   does not say what would otherwise have happened. Shape only; absence of a
   record is never a warning, and a refused line is left out of the tally.
-- **freshness** — advisory (always exits 0): semantic-map concepts whose code a
-  diff touches without updating the concept — the `resource:` path, and the
-  source behind every metadata record the concept links to. Markdown on
+- **freshness** — advisory (always exits 0): semantic-map pages and blessings
+  whose code a diff touches without updating them — a page's `resource:` path,
+  a blessing's `where:` file, and the source behind every metadata record
+  either links to. Markdown on
   stdout, made for `$GITHUB_STEP_SUMMARY`.
 - **tally** — the evidence over time (always exits 0): reads every
   `ZDD record:` (and the 2.0–2.3 `Pattern record:`, as the blessings
@@ -93,7 +101,7 @@ version:
 | `repoBase` | `""` | GitHub `/tree/<branch>/` URL prefix for source links in the human index — http(s) only, refused otherwise |
 | `nonAreaTags` | `[]` | Tags that are properties, not product areas (`react-flow`); a record inherits its area from its claiming feature's first tag not listed here. Shapes `graph.json`, so top-level (the old `viewer.nonAreaTags` still works, with a note) |
 | `baseBranch` | `"main"` | The branch PRs merge into — freshness diffs and the changed-set highlight key on `origin/<baseBranch>` |
-| `paths.*` | `zdd/…` | Where each artifact lives (glossary, adrDir, mapDir, metadataDir, agentIndex, adrIndex, blessingIndex, humanIndex, graph, bundleDir), and the branch's pattern plan (`patternsPlan`, default `zdd/patterns-plan.md`). Keep the glossary under `zdd/`: a glossary moved to a root `glossary.md` collides with Matt Pocock's root `GLOSSARY.md` on case-insensitive disks (Windows, macOS) but not on Linux CI, so the two would disagree by machine |
+| `paths.*` | `zdd/…` | Where each artifact lives (glossary, adrDir, mapDir, blessingsDir, metadataDir, agentIndex, adrIndex, blessingIndex, humanIndex, graph, bundleDir; and, together or not at all, harnessAdrDir and harnessAdrIndex for a harness ADR set beside the application one — decision 0033), and the branch's pattern plan (`patternsPlan`, default `zdd/patterns-plan.md`). Keep the glossary under `zdd/`: a glossary moved to a root `glossary.md` collides with Matt Pocock's root `GLOSSARY.md` on case-insensitive disks (Windows, macOS) but not on Linux CI, so the two would disagree by machine |
 | `render.storeChanges` | `true` | Set `false` to render with no git dependency (drops the "what just changed" highlight) |
 | `claims.strict` | `false` | `true`: every route, table, function and surface belongs to exactly one feature slice. `lint` fails on an unclaimed record not in `claims.allowUnclaimed`, on an allow-list id that names no record, and on a record two slices claim. Off: both are warnings |
 | `claims.allowUnclaimed` | `[]` | Record ids that may stay unclaimed under strict: plumbing no feature owns (`["route:/health", "route:/ready"]`) |

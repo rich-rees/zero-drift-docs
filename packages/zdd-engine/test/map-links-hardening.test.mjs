@@ -172,14 +172,21 @@ test("lint (CR-018/CR-019/CR-025): a symlinked concept is skipped, a loop does n
   assert.doesNotMatch(r.stderr, /outside/, "the linked file's stale blessing is never read");
   // The blessing store is walked the same way (decision 0031).
   const store = join(repo, "zdd", "blessings");
+  let linked = true;
   try {
     symlinkSync(join(repo, "outside.md"), join(store, "linked.md"), "file");
   } catch {
+    linked = false;
     t.diagnostic("symlink creation not permitted here");
   }
   r = lint(repo);
-  assert.equal(r.status, 0, r.stderr);
-  assert.doesNotMatch(r.stderr, /outside|blessings\/linked\.md/, "a linked blessing file is never read");
+  assert.doesNotMatch(r.stderr, /outside\.md/, "a linked blessing file is never read");
+  if (linked) {
+    // ...and never passes unseen: what the walk skipped is a failure (CR-006).
+    assert.equal(r.status, 1, r.stderr);
+    assert.match(r.stderr, /zdd\/blessings\/linked\.md: a symlink — not followed — a blessing there is not checked/);
+    rmSync(join(store, "linked.md"));
+  }
   writeFileSync(join(store, "ctrl.md"), "---\nwhere: src/app/page.tsx\nkind: copy\n---\n\nCopying? copy \x1b[31mthis\x1b[0m, per ADR-0001\n");
   r = lint(repo);
   assert.equal(r.status, 1);
