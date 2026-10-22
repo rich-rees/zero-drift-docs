@@ -18,13 +18,17 @@ Run this as the definition of done for every unit of work — the spoken form is
      offer them only when hard-to-reverse *and* surprising *and* a real trade-off.
    - **Code comments** — new non-obvious constraints, at the code site. A gotcha
      spanning multiple sites becomes an ADR instead.
-   - **Semantic map** — feature / edge / blessing changes. **A unit of work
+   - **Semantic map** — feature and edge changes. **A unit of work
      that adds or changes user-facing behaviour adds a feature slice or
      extends one** (`zdd/map/features/<feature>.md`): the slice claims the
      routes, tables, functions and surfaces it owns by linking them. The
      lint's *unclaimed* list (step 4) is the checklist — every record on it
-     is one no slice has placed yet. A blessing names the exemplar to copy
-     and cites its ADR; if a decision was fully superseded in this unit of
+     is one no slice has placed yet.
+   - **Blessings** — one file each in the blessing store (`zdd/blessings/`,
+     `paths.blessingsDir`). A blessing's `where:` names the code to copy or
+     extend; if this unit of work moved or deleted that file, point the
+     blessing at the code as it is now, or drop it (lint fails a `where:`
+     that names no file). If a decision was fully superseded in this unit of
      work, re-bless or drop every blessing that cited it (the lint fails
      otherwise; a partial supersession only warns). Blessings this unit of
      work proposed are decided in step 2.
@@ -119,8 +123,8 @@ glossary:
 adrs:
 - turned: ZDD ADR-0015 says the app never reads the database directly; I was about to query jobs from Supabase and went through /api/jobs instead
 blessings:
-- followed: the ZDD blessing "How do I add a scheduled job?" (jobs slice) for the stall sweeper
-- minted: the ZDD blessing "How do I expose a table over the API?" (api slice), pointing at src/api/offers.ts
+- followed: the ZDD blessing "How do I add a scheduled job?" (adding-a-scheduled-job) for the stall sweeper
+- minted: the ZDD blessing "How do I expose a table over the API?" (exposing-a-table), pointing at src/api/offers.ts
 map:
 - reused: ZDD's codebase metadata showed save_thing() in src/db.py already saves and logs a change, so I did not write a new helper
 - stored: the ZDD map's offers feature page now lists the /offers route and the offers table as its own
@@ -169,17 +173,25 @@ kill a pattern, change it, or create one the plan never saw.
      the blessing itself is wrong or stale, re-bless or drop it now (with an
      ADR if the change passes the three-part test).
    - **new pattern, candidate blessing** — did it survive, and is its
-     exemplar in the diff? Then **mint it**: one list item under
-     `# Blessings` in the slice it belongs to (an app's concept when it is
-     cross-cutting), in the shape [authoring.md](../authoring.md) gives and
-     passing its test — trigger question first, naming a *kind* of work;
-     **a pointer to existing, reusable code** (a shared helper or base
-     layer before a pattern to imitate); the one trap it refuses; the
-     reason (an ADR, or "because …"). A candidate whose substance is a
+     exemplar in the diff? Then **mint it**: one file in the blessing store,
+     named for its question (`adding-an-upload.md`), in the shape
+     [authoring.md](../authoring.md) gives and passing its test — a header
+     with `where:` (**the existing, reusable code**: a shared helper or base
+     layer before a pattern to imitate), `kind:` (`copy` or `extend`),
+     `applies-to:` when it is a house rule for a whole app,
+     `first-built-in:` (the slice this work built it for) and `adr:` when an
+     ADR blessed it; then the text, trigger question first, naming a *kind*
+     of work, the one trap it refuses, and the reason (an ADR, or
+     "because …"). A candidate whose substance is a
      rule with no code to point at becomes an ADR and a code comment at the
      site instead. Otherwise **drop it**, and record why.
    - **no blessing applies** — nothing to do, unless the build ended up
      copying something; then treat that as precedent.
+   - **Retest** — for every piece that extended an `extend` blessing's code,
+     confirm each user on its *Retest* line was retested (its tests ran, or
+     it was checked by hand), or that the plan says why not. A user left
+     unretested with no reason is a gap to close before the commit, not a
+     line to write.
 2. **Offer unblessed precedent.** Every precedent the plan declared, and any
    the diff shows the build copied without declaring, is offered to the
    developer as a candidate blessing. **Mint it only on their word** — a
@@ -189,11 +201,11 @@ kill a pattern, change it, or create one the plan never saw.
 
    ```
    blessings:
-   - followed: the ZDD blessing "<trigger question>" (<slice>) for <piece>
-   - departed: the ZDD blessing "<trigger question>" (<slice>) for <piece>, because …
-   - minted: the ZDD blessing "<trigger question>" (<slice>), pointing at <path>
+   - followed: the ZDD blessing "<trigger question>" (<blessing>) for <piece>
+   - departed: the ZDD blessing "<trigger question>" (<blessing>) for <piece>, because …
+   - minted: the ZDD blessing "<trigger question>" (<blessing>), pointing at <path>
    - dropped candidate: "<question>", because …
-   - precedent: <path>, minted as "<question>" (<slice>) | declined, because …
+   - precedent: <path>, minted as "<question>" (<blessing>) | declined, because …
    - no blessing applied: <piece>
    ```
 

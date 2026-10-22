@@ -11,8 +11,9 @@ decides, before a line of code, *which existing pattern each piece of the work
 copies* — and writes the decision down, so it can be checked against the code
 at **update**.
 
-Why it exists: the map's **blessings** name the exemplar to copy and the
-pattern to refuse, because the most common pattern in a codebase is often the
+Why it exists: **blessings** — one file each in the blessing store,
+`zdd/blessings/` — name the existing code to copy or extend and the pattern
+to refuse, because the most common pattern in a codebase is often the
 deprecated one. A blessing only helps if it is read *before* the code is
 written. Left to chance, a session copies the nearest example, misses the
 blessed one, and rewrites logic that already exists. "Choose", not "seek": the
@@ -32,11 +33,14 @@ too.
 
 ## Paths
 
-The defaults are below; `zdd/config.json` may move either under `paths.*`
-(`paths.blessingIndex`, `paths.patternsPlan`), so read that block first when it
-exists. The agent index and metadata paths are the ones `load` used.
+The defaults are below; `zdd/config.json` may move any of them under
+`paths.*` (`paths.blessingIndex`, `paths.blessingsDir`, `paths.patternsPlan`),
+so read that block first when it exists. The agent index and metadata paths
+are the ones `load` used.
 
 - the **blessing index** — `zdd/blessing-index.md` (generated; never edit)
+- the **blessing store** — `zdd/blessings/`, one file per blessing; its file
+  name (without `.md`) is the blessing's name
 - the **pattern plan** — `zdd/patterns-plan.md` (this step writes it)
 
 ## Steps
@@ -50,12 +54,23 @@ exists. The agent index and metadata paths are the ones `load` used.
    (a resumed build, another ticket of the same branch), read it: add this
    work's pieces under their own heading and keep everything already there.
 3. **Read the blessing index whole.** It is one line per blessing: the
-   trigger question and the reason, app-level slices first.
-   - For **every app the work touches**, open each of its app-level
-     blessings in full — they are cross-cutting, so all of them apply.
-   - For **each piece**, open in full (in its slice) every blessing whose
-     question matches the piece. Read the whole blessing: the exemplar, the
-     refusal and the reason, and the ADR it cites when the choice is close.
+   trigger question linked to its file, then **where** (`copy:` or
+   `extend:` and the code) and **why** (the ADR or the reason). House rules
+   come first, under "Applies to" their app.
+   - For **every app the work touches**, open each of its house rules in
+     full — they apply to all work in that app.
+   - For **each piece**, open in full (its file in the blessing store) every
+     blessing whose question matches the piece. Read the whole blessing: the
+     `where:` code itself, the refusal and the reason, and the ADR it cites
+     when the choice is close.
+   - A **`copy`** blessing shows a method: you write new code shaped like
+     the exemplar, and the exemplar is not touched.
+   - An **`extend`** blessing names shared code to reuse, and to extend if
+     you must. Its index line names **who uses it** ("used by 3: …"),
+     worked out from the metadata. Extending it means **retesting every
+     one of them**: put them on the plan's *Retest* line. "Users unknown to
+     ZDD" means the metadata cannot see them — grep for the callers before
+     you plan the change, and list what you find.
 4. **Look for logic that already exists.** Blessings say *how to build X*;
    "this already exists, reuse it" is the inventory's job. For each piece,
    check the agent index's feature sections and their pointers, and the
@@ -74,16 +89,16 @@ exists. The agent index and metadata paths are the ones `load` used.
    blessing covers is a decision too: say which file, and why it is the right
    model. Copying it without saying so is how the nearest example wins.
 6. **Choose, per piece, exactly one outcome:**
-   - **follow** `<slice>: <trigger question>` — because …
-   - **depart from** `<slice>: <trigger question>` — because … (a departure
-     with a reason is legitimate; a silent one is the failure this step
-     exists to prevent)
+   - **follow** `<blessing>` ("<trigger question>") — because …
+   - **depart from** `<blessing>` ("<trigger question>") — because … (a
+     departure with a reason is legitimate; a silent one is the failure this
+     step exists to prevent)
    - **no blessing applies** — say what you checked
    - **new pattern, candidate blessing** — the question it would answer (a
      *kind* of work that recurs, not this feature's instance), the existing
      code it would point at — a shared helper or base layer to reuse, named
-     now if it exists, or the code this work will write — the one trap it
-     refuses, and the reason. It must pass the test in
+     now if it exists, or the code this work will write — whether it is
+     `copy` or `extend`, the one trap it refuses, and the reason. It must pass the test in
      [authoring.md](../authoring.md): pointer to reusable code first; a rule
      with no code to point at is an ADR and a code comment, not a blessing.
 7. **Write the plan file** in the shape below, **say the plan aloud** (one
@@ -101,15 +116,20 @@ rest in the update commit's message and deletes this file in that commit.
 CI (lint --merge) fails while it exists. -->
 
 Work: <the unit of work, one line; a ticket id if there is one>
-Apps touched: <app>, <app> (app-level blessings read in full)
+Apps touched: <app>, <app> (house rules read in full)
 
 ## Plan
 
-- **<piece>** — follow `<slice>: <trigger question>` — because …
-- **<piece>** — depart from `<slice>: <trigger question>` — because …
-- **<piece>** — no blessing applies — checked <slices / questions>
-- **<piece>** — new pattern, candidate blessing: "<Question?> Copy <exemplar>
-  — never <refused pattern>." — because …
+- **<piece>** — follow `<blessing>` ("<trigger question>") — because …
+- **<piece>** — depart from `<blessing>` ("<trigger question>") — because …
+- **<piece>** — no blessing applies — checked <questions>
+- **<piece>** — new pattern, candidate blessing (<copy | extend>): "<Question?>
+  Copy <exemplar> — never <refused pattern>." — because …
+
+## Retest
+
+- **<piece>** — extends `<blessing>`'s `<where>`: retest <user>, <user> (from
+  the index; or "users unknown to ZDD — found by grep: …")
 
 ## Reuse
 
@@ -133,8 +153,9 @@ build* — never a silent rewrite of the plan line.
 - **The build** follows the plan. When the code disagrees with it, the plan is
   edited (with the reason) or the code is — not ignored.
 - **"update ZDD"** reconciles the plan against the code *as it will merge*:
-  it mints the candidate blessings that survived (exemplar linked, reason
-  given), records dropped candidates with why, offers any unblessed precedent
+  it mints the candidate blessings that survived (one file each, `where:`
+  and `kind:` in the header, reason given), checks every *Retest* line was
+  retested (or the plan says why not), records dropped candidates with why, offers any unblessed precedent
   as a candidate (minted only on the developer's word), writes the reconciled
   record into the update commit's message, and **deletes the plan file in
   that commit**. Never at merge: a merge runs no code.

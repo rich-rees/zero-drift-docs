@@ -135,3 +135,16 @@ test("freshness: an unrelated change fires nothing", () =>
     commit("readme");
     assert.match(freshness(), /No semantic concepts affected/);
   }));
+
+test("ZDD-1 (decision 0031): a blessing is watched through its where: file — changing the exemplar without the blessing names the blessing; changing both does not", () => {
+  scenario(() => {
+    appendFileSync(join(repo, "src", "app", "page.tsx"), "\n// touched\n");
+    commit("touch the page");
+    let out = freshness();
+    assert.match(out, /\| `zdd\/blessings\/adding-a-page\.md` \| src\/app\/page\.tsx \| `where:` \|/, out);
+    appendFileSync(join(repo, "zdd", "blessings", "adding-a-page.md"), "\n");
+    commit("and the blessing");
+    out = freshness();
+    assert.doesNotMatch(out, /blessings\/adding-a-page\.md/, out);
+  });
+});
