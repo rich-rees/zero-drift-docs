@@ -208,6 +208,7 @@
         "glossary": { "type": "string", "default": "zdd/glossary.md" },
         "adrDir": { "type": "string", "default": "zdd/adr" },
         "mapDir": { "type": "string", "default": "zdd/map" },
+        "blessingsDir": { "type": "string", "default": "zdd/blessings", "description": "The blessing store: one file per blessing (decision 0031)." },
         "metadataDir": { "type": "string", "default": "zdd/metadata" },
         "agentIndex": { "type": "string", "default": "zdd/agent-index.md" },
         "adrIndex": { "type": "string", "default": "zdd/adr-index.md" },

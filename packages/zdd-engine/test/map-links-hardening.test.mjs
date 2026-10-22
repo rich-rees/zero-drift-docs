@@ -170,11 +170,26 @@ test("lint (CR-018/CR-019/CR-025): a symlinked concept is skipped, a loop does n
   let r = lint(repo);
   assert.equal(r.status, 0, r.stderr);
   assert.doesNotMatch(r.stderr, /outside/, "the linked file's stale blessing is never read");
-  concept(repo, "ctrl", "# Blessings\n- copy \x1b[31mthis\x1b[0m, per ADR-0001\n");
+  // The blessing store is walked the same way (decision 0031).
+  const store = join(repo, "zdd", "blessings");
+  try {
+    symlinkSync(join(repo, "outside.md"), join(store, "linked.md"), "file");
+  } catch {
+    t.diagnostic("symlink creation not permitted here");
+  }
+  r = lint(repo);
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stderr, /outside|blessings\/linked\.md/, "a linked blessing file is never read");
+  writeFileSync(join(store, "ctrl.md"), "---\nwhere: src/app/page.tsx\nkind: copy\n---\n\nCopying? copy \x1b[31mthis\x1b[0m, per ADR-0001\n");
   r = lint(repo);
   assert.equal(r.status, 1);
-  assert.match(r.stderr, /ctrl\.md:10 \(blessing: "copy \?\[31mthis\?\[0m, per ADR-0001"\)/, "controls become ?");
-  rmSync(join(map, "features", "ctrl.md"));
+  assert.match(r.stderr, /blessings\/ctrl\.md \(blessing: "Copying\? copy \?\[31mthis\?\[0m, per ADR-0001"\)/, "controls become ?");
+  rmSync(join(store, "ctrl.md"));
+  writeFileSync(join(store, "huge.md"), "---\nwhere: src/app/page.tsx\nkind: copy\n---\n\nHuge? " + "x".repeat(1024 * 1024 + 1));
+  r = lint(repo);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /zdd\/blessings\/huge\.md: over 1024 KiB or unreadable/);
+  rmSync(join(store, "huge.md"));
   writeFileSync(join(map, "features", "huge.md"), "---\ntype: Feature\ntitle: h\ndescription: d\nresource: src\ntags: []\n---\n" + "x".repeat(1024 * 1024 + 1));
   r = lint(repo);
   assert.equal(r.status, 1);
@@ -182,20 +197,20 @@ test("lint (CR-018/CR-019/CR-025): a symlinked concept is skipped, a loop does n
   rmSync(repo, { recursive: true, force: true });
 });
 
-test("lint: the CommonMark cases end to end — a fenced example neither hides a later stale blessing nor fails on a fake one; CR-only and indented headings work", () => {
+test("lint: the CommonMark cases end to end — a Blessings heading inside a fenced example is no blessing left on the map; one after a fenced heading, CR-only and indented headings are", () => {
   const repo = mkRepo();
-  concept(repo, "fenced", "# Blessings\n```md\n# Example\n- copy x, per ADR-9999\n```\n- Real? the real one, per ADR-0002\n");
+  concept(repo, "fenced", "How a blessing used to look:\n```md\n# Blessings\n- copy x, per ADR-9999\n```\n");
   let r = lint(repo);
   assert.equal(r.status, 0, r.stderr);
   concept(repo, "hidden", "# Blessings\n```\n# Key paths\n```\n- stale, per ADR-0001\n");
   r = lint(repo);
-  assert.equal(r.status, 1, "the stale blessing after a fenced heading is still seen");
-  assert.match(r.stderr, /hidden\.md:13 .*superseded by ADR-0002/, "file-relative line: 7 frontmatter lines + body line 6");
+  assert.equal(r.status, 1, "the blessing after a fenced heading is still seen");
+  assert.match(r.stderr, /hidden\.md: holds 1 blessing under a Blessings heading/);
   rmSync(join(repo, "zdd", "map", "features", "hidden.md"));
   writeFileSync(join(repo, "zdd", "map", "features", "cr.md"), "---\rtype: Feature\rtitle: cr\rdescription: d\rresource: src\rtags: []\r---\r\r  # Blessings\r- stale, per ADR-0001\r");
   r = lint(repo);
   assert.equal(r.status, 1, "CR-only + indented heading");
-  assert.match(r.stderr, /cr\.md:10 .*superseded by ADR-0002/);
+  assert.match(r.stderr, /cr\.md: holds 1 blessing under a Blessings heading/);
   rmSync(repo, { recursive: true, force: true });
 });
 

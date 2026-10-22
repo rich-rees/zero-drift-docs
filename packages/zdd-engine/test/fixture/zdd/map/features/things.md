@@ -13,7 +13,3 @@ The things catalogue: list, edit, and audit things.
 - [/api/things/[id]](../../metadata/route/things--_id.json)
 - [save_thing()](../../metadata/function/db--save_thing.json)
 - [signed-in layout](<../../metadata/surface/(app)--_layout.json>)
-
-# Blessings
-- Adding an endpoint for things? Copy [/api/things](../../metadata/route/things.json),
-  per ADR-0002 — never a route named for widgets.
