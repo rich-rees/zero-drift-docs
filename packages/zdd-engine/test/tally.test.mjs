@@ -201,7 +201,7 @@ test("readStores: ADR numbers, glossary terms and blessing questions from the fi
   assert.deepEqual(s.blessings, ["Adding a page?", "Adding a thing endpoint?", "Adding an endpoint for things?", "Logging a change?", "Saving a thing?"], "by file name");
   assert.deepEqual(s.notes, []);
   const absent = readStores(repo, { adrDir: "zdd/nowhere", glossary: "zdd/no-glossary.md", blessingsDir: "zdd/no-blessings" });
-  assert.deepEqual(absent, { adrs: [], terms: [], blessings: [], notes: [] }, "absent stores are empty, not notes");
+  assert.deepEqual(absent, { adrs: [], terms: [], blessings: [], blessingKeys: [], notes: [] }, "absent stores are empty, not notes");
 });
 
 test("usage names tally and lint --merge", () => {

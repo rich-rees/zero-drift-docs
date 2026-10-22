@@ -804,6 +804,7 @@ async function render() {
   const records = [...RECORDS_BY_NODE.values()];
   const store = loadBlessings(BLESSINGS, REPO);
   for (const f of store.unreadable) console.error(`WARNING: ${f}: over ${MAX_STORE_FILE_BYTES / 1024} KiB or unreadable — not in the blessing index`);
+  for (const s of store.skipped) console.error(`WARNING: ${posixify(relative(REPO, s.path)) || "."}: ${s.reason} — not in the blessing index`);
   const { text: blessingIndex, count: blessings } = buildBlessingIndex(store.blessings, {
     adrHref: (num) => (adrOf.has(num) ? adrHrefFromBundle(adrOf.get(num)) : null),
     blessingHref: (id) => `${blessingsRel}/${id}.md`,
@@ -861,7 +862,7 @@ export async function run(args) {
   }
   // A missing store dir renders as empty; name it when the bundle is
   // otherwise populated, so a typo is not mistaken for greenfield (CR-068/099).
-  for (const note of absentStoreNotes(REPO, PATHS, ["adrDir", "mapDir", "metadataDir"])) console.error(note);
+  for (const note of absentStoreNotes(REPO, PATHS, ["adrDir", "mapDir", "blessingsDir", "metadataDir", ...(PATHS.harnessAdrDir !== undefined ? ["harnessAdrDir"] : [])])) console.error(note);
   // Refuse an unknown viewer before any store is read: the error names the
   // registry so the fix is a config edit, not a source dig.
   try {

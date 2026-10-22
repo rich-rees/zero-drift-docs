@@ -91,13 +91,23 @@ export function logFor(repoRoot, since) {
   }
 }
 
+// A blessing's file name as a whole word, a hyphen counting as part of it:
+// `adding-a-page` is not named by `adding-a-page-mobile` (CR-007).
+function fileNameMatcher(id) {
+  const re = new RegExp(`(^|[^\\p{L}\\p{N}_-])${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?=$|[^\\p{L}\\p{N}_-])`, "iu");
+  return (text) => re.test(text);
+}
+
 // Counts per section over the VALID lines, the never-named lists, and every
 // shape problem by commit. `reused` is a bucket of the map section only.
 export function tally(commits, stores) {
   const counts = Object.fromEntries(SECTIONS.map((s) => [s, Object.fromEntries([...USE_VERBS.filter((v) => v !== "reused" || s === "map"), STORE_VERB, ...(s === "blessings" ? BLESSING_VERBS : [])].map((v) => [v, 0]))]));
   const named = { adrs: new Set(), terms: new Set(), blessings: new Set() };
   const termMatchers = stores.terms.map((t) => [t, itemMatcher(t)]);
-  const blessingMatchers = stores.blessings.map((q) => [q, itemMatcher(q)]);
+  const blessingMatchers = stores.blessings.map((q, i) => {
+    const key = stores.blessingKeys?.[i] ?? q;
+    return [q, typeof key === "object" ? fileNameMatcher(key.id) : itemMatcher(key)];
+  });
   const adrSet = new Set(stores.adrs);
   const skipped = [];
   let records = 0;
@@ -147,20 +157,25 @@ export function readStores(repoRoot, paths) {
   } catch (e) {
     if (e.code !== "ENOENT") notes.push(`${rel(glossary)}: could not be read (${e.code ?? "error"}) — no term counted as never named`);
   }
-  // The blessing store (decision 0031): one question per blessing file.
+  // The blessing store (decision 0031): one entry per blessing FILE, the
+  // file name being a blessing's identity (CR-007). Each is labelled and
+  // matched by its question; a question two files share is labelled with the
+  // file name too and matched by it, as the ZDD record names it ("… (<name>)").
   const blessings = [];
-  const seenQ = new Set();
+  const blessingKeys = [];
   const store = loadBlessings(resolve(repoRoot, paths.blessingsDir), repoRoot);
   for (const f of store.unreadable) notes.push(`${f}: over ${MAX_STORE_FILE_BYTES / 1024} KiB or unreadable — not in the never-named list`);
+  const asked = new Map();
+  for (const b of store.blessings) if (b.shape.question) asked.set(b.shape.question, (asked.get(b.shape.question) ?? 0) + 1);
   for (const b of store.blessings) {
     const q = b.shape.question;
-    if (q && !seenQ.has(q)) {
-      seenQ.add(q);
-      blessings.push(q);
-    }
+    if (!q) continue;
+    const shared = asked.get(q) > 1;
+    blessings.push(shared ? `${q} (${b.id})` : q);
+    blessingKeys.push(shared ? { id: b.id } : q);
   }
   for (const s of store.skipped) notes.push(`${rel(s.path)}: ${s.reason} — blessings there are not in the never-named list`);
-  return { adrs, terms, blessings, notes };
+  return { adrs, terms, blessings, blessingKeys, notes };
 }
 
 export function run(args) {

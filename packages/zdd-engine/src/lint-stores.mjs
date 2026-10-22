@@ -53,7 +53,7 @@ import { readFileSync, readdirSync, existsSync, lstatSync, realpathSync } from "
 import { join, resolve, relative } from "node:path";
 import { loadConfig, absentStoreNotes } from "./lib/config.mjs";
 import { parseFrontmatter } from "./lib/frontmatter.mjs";
-import { extractBlessings, forwardStamps, BLESSING_LENGTH_BUDGET } from "./lib/map-links.mjs";
+import { extractBlessings, blessingHeadings, forwardStamps, BLESSING_LENGTH_BUDGET } from "./lib/map-links.mjs";
 import { loadBlessings, BLESSING_KINDS, HEADER_KEYS } from "./lib/blessings.mjs";
 import { adrSets, listAdrFiles } from "./lib/adr-sets.mjs";
 import { walkMarkdown, readBounded, MAX_STORE_FILE_BYTES } from "./lib/walk-markdown.mjs";
@@ -141,7 +141,7 @@ export function run(args) {
   // A missing adrDir or mapDir is greenfield-tolerated (empty corpus passes);
   // say so when the rest of the bundle exists, so a typo is not a silent pass
   // (CR-068).
-  for (const note of absentStoreNotes(REPO, paths, ["adrDir", "mapDir", ...(paths.harnessAdrDir !== undefined ? ["harnessAdrDir"] : [])])) console.error(note);
+  for (const note of absentStoreNotes(REPO, paths, ["adrDir", "mapDir", "blessingsDir", ...(paths.harnessAdrDir !== undefined ? ["harnessAdrDir"] : [])])) console.error(note);
 
   const problems = [];
 
@@ -237,10 +237,15 @@ for (const path of walkMarkdown(MAP_DIR)) {
       `${rel}: holds ${left.length} blessing${left.length === 1 ? "" : "s"} under a Blessings heading — since 2.5 a blessing is a file of its own in ${blessingsRel}/ ` +
         `(decision 0031); say "upgrade ZDD", which moves them and names any it cannot`,
     );
+  } else if (blessingHeadings(parsed ? parsed.body : text)) {
+    problems.push(`${rel}: has a Blessings heading with no blessing under it — since 2.5 blessings live in ${blessingsRel}/ (decision 0031); move what the section says there, or into the page's prose, and remove the heading`);
   }
 }
 const store = loadBlessings(BLESSINGS_DIR, REPO);
 for (const f of store.unreadable) problems.push(`${printable(f)}: over ${MAX_STORE_FILE_BYTES / 1024} KiB or unreadable — a blessing is a few lines; the detail belongs in its ADR`);
+// What the walk did not read is a blessing lint did not check (CR-006): a
+// symlink, an unlistable folder, a cut-off — each a failure, never a pass.
+for (const s of store.skipped) problems.push(`${printable(relative(REPO, s.path).split(/[\\/]/).join("/") || ".")}: ${s.reason} — a blessing there is not checked; the blessing store holds regular files only`);
 const REPO_REAL = (() => {
   try {
     return realpathSync(REPO);

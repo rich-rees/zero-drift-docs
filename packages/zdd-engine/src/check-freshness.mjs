@@ -197,17 +197,17 @@ export function run(args) {
   }
 
   if (stale.length === 0) {
-    console.log("### Semantic map\n\nNo semantic concepts affected by this diff, or all affected concepts were updated. ✅");
+    console.log("### Semantic map and blessings\n\nNo semantic-map page or blessing affected by this diff, or every affected one was updated. ✅");
     return;
   }
 
-  console.log("### Semantic map — possibly stale concepts ⚠️\n");
+  console.log("### Semantic map and blessings — possibly stale ⚠️\n");
   console.log(
     "This diff touches code that the following semantic-map concepts and blessings describe — their `resource:` or `where:` path, or the source behind a metadata record they link to — without updating them. " +
       "If the feature's edges, or the blessed code, changed, say \"update ZDD\" in this branch and commit the result. " +
       "If the change doesn't alter what the concept says, ignore this.\n",
   );
-  console.log("| Concept | Touched files | Via |");
+  console.log("| Page | Touched files | Via |");
   console.log("|---|---|---|");
   for (const s of stale) {
     const files = s.touched.slice(0, 3).map(cell).join("<br>") + (s.touched.length > 3 ? `<br>…+${s.touched.length - 3}` : "");

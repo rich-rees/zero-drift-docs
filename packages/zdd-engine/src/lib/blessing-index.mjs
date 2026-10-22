@@ -19,6 +19,18 @@ const OPENING_MAX = 80;
 const USERS_SHOWN = 5;
 
 const printable = (t) => String(t).replace(/[\x00-\x1f\x7f]/g, "?");
+// Link text with its brackets and backslashes escaped; a destination with a
+// space, a bracket or an angle bracket in angle brackets, `<` and `>`
+// percent-encoded; a code span opened with more backticks than it holds
+// (CR-023).
+const label = (t) => printable(t).replace(/([\\\[\]])/g, "\\$1");
+const dest = (d) => (/[\s()<>]/.test(d) ? `<${printable(d).replace(/</g, "%3C").replace(/>/g, "%3E")}>` : printable(d));
+const code = (t) => {
+  const s = printable(t);
+  const run = Math.max(0, ...[...s.matchAll(/`+/g)].map((m) => m[0].length));
+  const fence = "`".repeat(run + 1);
+  return run ? `${fence} ${s} ${fence}` : `\`${s}\``;
+};
 const byText = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 
 // `blessings`: the store as lib/blessings.mjs reads it.
@@ -59,7 +71,7 @@ export function buildBlessingIndex(blessings, opts) {
   const groups = [...houseRules].map(([id, list]) => ({ id, page: opts.mapPage(id), list }));
   groups.sort((a, b) => byText(a.page?.title ?? a.id, b.page?.title ?? b.id) || byText(a.id, b.id));
   for (const g of groups) {
-    lines.push(g.page ? `## Applies to [${printable(g.page.title)}](${g.page.href})` : `## Applies to ${printable(g.id)} _(no such map page)_`, "");
+    lines.push(g.page ? `## Applies to [${label(g.page.title)}](${dest(g.page.href)})` : `## Applies to ${printable(g.id)} _(no such map page)_`, "");
     for (const b of g.list) lines.push(`- ${line(b, opts)}`);
     lines.push("");
   }
@@ -74,10 +86,10 @@ export function buildBlessingIndex(blessings, opts) {
 function line(b, opts) {
   const shape = b.shape;
   const head = shape.question
-    ? `[${printable(shape.question)}](${opts.blessingHref(b.id)})`
-    : `[_(no trigger question)_](${opts.blessingHref(b.id)}) ${printable(shape.visible.length > OPENING_MAX ? shape.visible.slice(0, OPENING_MAX - 1).trimEnd() + "…" : shape.visible)}`;
+    ? `[${label(shape.question)}](${dest(opts.blessingHref(b.id))})`
+    : `[_(no trigger question)_](${dest(opts.blessingHref(b.id))}) ${printable(shape.visible.length > OPENING_MAX ? shape.visible.slice(0, OPENING_MAX - 1).trimEnd() + "…" : shape.visible)}`;
   const kind = b.kind === "copy" || b.kind === "extend" ? b.kind : "where";
-  let where = b.where ? `\`${printable(b.where.path)}\`${b.where.symbol ? ` (${printable(b.where.symbol)})` : ""}` : "_none given_";
+  let where = b.where ? `${code(b.where.path)}${b.where.symbol ? ` (${printable(b.where.symbol)})` : ""}` : "_none given_";
   if (b.kind === "extend" && b.where) {
     const users = opts.usersOf(b);
     if (users === null) where += ", users unknown to ZDD";

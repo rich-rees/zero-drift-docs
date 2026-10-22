@@ -28,12 +28,13 @@ export const HEADER_KEYS = ["where", "kind", "applies-to", "first-built-in", "ad
 const CITATION_RE = /\bADR[-\s]?(\d{4})\b/g;
 
 // `path` or `path (Symbol)` -> { path, symbol } with a posix path, or null
-// for an empty value. The path is not checked here: lint judges it against
-// the repo.
+// for an empty value. The symbol is set apart by a space, so a file whose
+// name ends in brackets (`src/cache(key)`) stays a path (CR-010). The path is
+// not checked here: lint judges it against the repo.
 export function parseWhere(value) {
   const v = String(value ?? "").trim();
   if (!v) return null;
-  const m = /^(.*?)\s*\(([^()]+)\)$/.exec(v);
+  const m = /^(.*?)\s+\(([^()]+)\)$/.exec(v);
   const path = (m ? m[1] : v).trim().replace(/^`|`$/g, "").split("\\").join("/").replace(/^\.\//, "");
   const symbol = m ? m[2].trim().replace(/^`|`$/g, "") : null;
   return path ? { path, symbol: symbol || null } : null;

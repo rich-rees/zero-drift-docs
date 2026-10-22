@@ -122,6 +122,11 @@ export function validatePathLayout(paths, configRel) {
   // The two ADR sets are two folders: one inside the other would read every
   // ADR twice, under two sets.
   if (paths.harnessAdrDir !== undefined && overlaps(paths.adrDir, paths.harnessAdrDir)) return clash("harnessAdrDir", "adrDir", "the harness ADR set is a folder of its own, beside the application set (decision 0033)");
+  // The blessing store too (CR-008): inside the map, a map page would be read
+  // as a blessing and a blessing as a map page.
+  for (const key of ["glossary", "adrDir", "harnessAdrDir", "mapDir", "patternsPlan"].filter((k) => paths[k] !== undefined)) {
+    if (overlaps(paths.blessingsDir, value(key))) return clash("blessingsDir", key, "the blessing store is a folder of its own (decision 0031)");
+  }
   const outputWhy = "render's outputs must be distinct files, apart from every store and the config it reads";
   for (let i = 0; i < OUTPUT_KEYS.length; i++) {
     for (let j = i + 1; j < OUTPUT_KEYS.length; j++) {

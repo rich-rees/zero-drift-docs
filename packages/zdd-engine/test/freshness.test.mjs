@@ -97,14 +97,14 @@ test("freshness: a change under the resource path fires via `resource:`; updatin
     appendFileSync(join(repo, "src", "components", "HomePage.tsx"), "\n// touched\n");
     commit("touch component");
     let out = freshness();
-    assert.match(out, /possibly stale concepts/);
+    assert.match(out, /Semantic map and blessings — possibly stale/);
     assert.match(out, /\| `zdd\/map\/features\/things\.md` \| src\/components\/HomePage\.tsx \| `resource:` \|/);
     assert.match(out, APP_ROW);
     appendFileSync(join(repo, "zdd", "map", "features", "things.md"), "\nUpdated.\n");
     appendFileSync(join(repo, "zdd", "map", "apps", "fixture-app.md"), "\nUpdated.\n");
     commit("update concepts");
     out = freshness();
-    assert.match(out, /No semantic concepts affected/);
+    assert.match(out, /No semantic-map page or blessing affected/);
   }));
 
 test("freshness: a change to the source behind a LINKED metadata record fires, naming the record — the 1.1.0 widening", () =>
@@ -114,7 +114,7 @@ test("freshness: a change to the source behind a LINKED metadata record fires, n
     appendFileSync(join(repo, "src", "app", "api", "things", "[id]", "route.ts"), "\n// touched\n");
     commit("touch linked route");
     const out = freshness();
-    assert.match(out, /possibly stale concepts/);
+    assert.match(out, /Semantic map and blessings — possibly stale/);
     assert.match(out, /\| `zdd\/map\/features\/things\.md` \| src\/app\/api\/things\/\[id\]\/route\.ts \| `metadata\/route\/things--_id` \|/);
     assert.match(out, APP_ROW);
     // One file reached two ways lists both routes in: HomePage.tsx is under the
@@ -133,7 +133,7 @@ test("freshness: an unrelated change fires nothing", () =>
   scenario(() => {
     writeFileSync(join(repo, "README.md"), "# unrelated\n");
     commit("readme");
-    assert.match(freshness(), /No semantic concepts affected/);
+    assert.match(freshness(), /No semantic-map page or blessing affected/);
   }));
 
 test("ZDD-1 (decision 0031): a blessing is watched through its where: file — changing the exemplar without the blessing names the blessing; changing both does not", () => {
