@@ -371,10 +371,12 @@ merge gate.
   ignores is never source.
 - Findings — things ZDD got wrong, as opposed to things wrong in your repo —
   live as [GitHub Issues labelled `finding`](https://github.com/rich-rees/zero-drift-docs/issues?q=is%3Aopen+label%3Afinding);
-  a `blocker` is one a new user following this README can hit. A finding
-  with a workaround on your side is logged, not released; findings ship
-  together in a release train, and you move only when a release carries
-  something you need.
+  a `blocker` is one a new user following this README can hit. They are
+  ZDD's only backlog: every release starts from the open list, and its
+  Versioning entry says of each one whether it was fixed, deferred (and
+  why) or declined. A finding with a workaround on your side may wait for
+  a later release; findings ship together in a release train, and you move
+  only when a release carries something you need.
 
 ### Upgrading
 
