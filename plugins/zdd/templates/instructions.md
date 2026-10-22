@@ -5,7 +5,7 @@ behind the code — seven in `<BUNDLE_DIR>/`, plus code comments in the source. 
 verbs carry it, and all work with any coding agent:
 
 - **"load ZDD"** — before designing or building in an area. Read
-  `<GLOSSARY>` whole, `<ADR_INDEX>` whole, and the ADRs your task
+  `<GLOSSARY>` whole, `<ADR_INDEX>` whole<HARNESS_ADR_LOAD>, and the ADRs your task
   cites; say what you loaded (`ZDD: loaded …`); then read the code fresh.
   Never trust the docs over the code. (Skill: `load`.)
 - **"choose patterns"** — once the design is settled, before any code. First
@@ -44,7 +44,7 @@ sentences, or `- none`) into the update commit's message; `zdd-engine tally` cou
 - *the repo is behind the newest ZDD release* — "upgrade ZDD", only if the team chooses to; it is not a fault.
 
 **Never hand-edit the generated artifacts** — `<METADATA_DIR>/`, `<GRAPH>`, `<AGENT_INDEX>`
-(and `<AGENT_INDEX_DIR>/` when it has two levels), `<ADR_INDEX>`, `<BLESSING_INDEX>`,
+(and `<AGENT_INDEX_DIR>/` when it has two levels), `<ADR_INDEX>`,<HARNESS_ADR_INDEX_ITEM> `<BLESSING_INDEX>`,
 `<HUMAN_INDEX>` — or this file (`<INSTRUCTIONS>`). A merge conflict in a generated file is
 never resolved by hand, nor by checking out a side: with the merge open, run `derive` then
 `render` (they overwrite it), `git add` the bundle and commit the merge; then `render` once

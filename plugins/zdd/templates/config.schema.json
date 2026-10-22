@@ -207,6 +207,8 @@
       "properties": {
         "glossary": { "type": "string", "default": "zdd/glossary.md" },
         "adrDir": { "type": "string", "default": "zdd/adr" },
+        "harnessAdrDir": { "type": "string", "description": "Optional, with harnessAdrIndex: a harness ADR set beside the application set in adrDir — one number line across both (decision 0033). bootstrap's split-adrs writes it." },
+        "harnessAdrIndex": { "type": "string", "description": "Optional, with harnessAdrDir: the harness set's index — generated, checked by render --check." },
         "mapDir": { "type": "string", "default": "zdd/map" },
         "blessingsDir": { "type": "string", "default": "zdd/blessings", "description": "The blessing store: one file per blessing (decision 0031)." },
         "metadataDir": { "type": "string", "default": "zdd/metadata" },

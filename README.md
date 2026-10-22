@@ -56,7 +56,7 @@ eleventh.
 | # | Artifact | Kind | Home |
 |---|----------|------|------|
 | 1 | Glossary — the ubiquitous language | Curated | `zdd/glossary.md` |
-| 2 | ADRs — decisions + rejected alternatives | Curated | `zdd/adr/` |
+| 2 | ADRs — decisions + rejected alternatives (optionally a harness set beside the application set) | Curated | `zdd/adr/` (+ `zdd/adr-harness/`) |
 | 3 | Code comments — constraints at the site | Curated | the source |
 | 4 | Semantic map — groupings and non-textual edges | Curated | `zdd/map/` |
 | 5 | Blessings — the code to copy or extend for a kind of work, and why | Curated | `zdd/blessings/` |
@@ -81,6 +81,13 @@ exists, so a stale blessing cannot sit quietly (the format is in
 **`copy`** (imitate this method) or **`extend`** (reuse this shared code); for
 an `extend` blessing the index names who uses the code, worked out from the
 metadata, because extending it means retesting them.
+
+The ADRs can come in **two sets** (decisions 0033, 0034), when a team opts in:
+the **application** set says what the product does, and can be handed to a
+stakeholder as it stands; the **harness** set says how the team builds it —
+review, tests, CI, the tracker, ZDD itself. Each has its own index. One number
+line runs across both, so `ADR-0019` is one decision wherever it lives, a
+citation never changes, and splitting an existing set renumbers nothing.
 
 A blessing helps only if it is read before the code is written, so it has a
 moment of its own. **"Choose patterns"** runs once the design is settled: it

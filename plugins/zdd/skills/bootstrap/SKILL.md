@@ -196,6 +196,23 @@ up; a "no" is a visible choice, never a silent omission:
    same checks, run on your machine before each push; it makes a forgotten
    update loud, but it gates nothing. Recommended: yes."
 
+Then, still one at a time, **"Keep harness decisions apart from product
+decisions?"** — "ZDD can keep two sets of decision records: one about what
+the product does, which you can hand to a stakeholder as it stands, and one
+about how the team builds it (reviews, tests, CI, the tracker). They share
+one number line, so nothing is ever renumbered. Recommended: yes for a team
+with a harness of its own; no for a solo or young repo. Cost: one more
+folder and one more index. Saying no keeps one set; it can be split later."
+On yes, after step 4 run `node "$PLUGIN/scripts/bootstrap.mjs" split-adrs
+--plan`, then the write with its token (on a new repo there is nothing to
+move: it writes the two config keys and the empty folder). On an existing
+repo with decisions already in `zdd/adr/`, the split proposes a set for
+each — a `Scope: harness` / `Scope: product` tag line decides; for every
+other ADR propose a set from what it decides, show the whole list as **one
+reviewable file**, and pass the person's answers as `--harness=` and
+`--application=` (decision 0034). Links inside `zdd/` are re-pointed; the
+ones outside are listed for a hand edit.
+
 Then, still one at a time: **"Do you use Codex as well as Claude Code?"**
 (writes the same instructions into `AGENTS.md`, because Codex cannot load a
 separate file), and **"Seed the first decision record, 'Adopt Zero-Drift
