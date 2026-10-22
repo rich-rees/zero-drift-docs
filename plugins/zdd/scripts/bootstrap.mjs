@@ -2133,6 +2133,10 @@ export const UPGRADE_NOTES = {
     }
     return notes;
   },
+  "2.5.0": ({ paths }) => [
+    `2.5 moves blessings out of the semantic map into ${paths.blessingsDir}/, one file each with where: and kind: in its header (decisions 0031, 0032) — the list is below; run upgrade again with --move-blessings once the developer has read it and checked each kind, then render: the blessing index says where and why on every line, and render --check moves`,
+    "2.5 makes these FAIL lint, each cleared by the move or named by it (decision 0035): a Blessings section left on a map page, a blessing with no where: or one naming no file, no kind: or one that is neither copy nor extend, an applies-to: naming no app or package page",
+  ],
 };
 
 export function compareVersions(a, b) {
