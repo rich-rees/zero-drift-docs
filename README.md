@@ -826,8 +826,9 @@ warning can say "behind".
   together, on the split). No metadata-contract change and no new mandatory
   generated file. **What moves on the bump**: `derive --check` nothing;
   `render --check` the blessing index (its new format), `human-index.html`
-  for every adopter (the viewer's code is inlined, and names a harness ADR's
-  folder), and, once blessings move, `graph.json` (the map pages lose their
+  for every adopter (the viewer's code is inlined, and names the folder of
+  an ADR outside `zdd/adr` — a harness ADR's, or a custom `adrDir`'s, whose
+  embedded ADRs gain a `dir` field), and, once blessings move, `graph.json` (the map pages lose their
   Blessings sections) and `agent-index.md` where a metadata link lived only
   inside a blessing; "upgrade ZDD" rewrites `zdd/instructions.md` (and the
   `AGENTS.md` copy) and the pins, and lists the blessings to move — it moves
