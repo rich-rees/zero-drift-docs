@@ -14,7 +14,7 @@ verbs carry it, and all work with any coding agent:
   piece, reuse this code, follow a blessing, depart from one and why, none
   applies, or a new pattern to bless. (Skill: `patterns`.)
 - **"update ZDD"** — before finishing a unit of work. Curate the artifacts the
-  change touched (glossary / ADRs / comments / map); reconcile the pattern
+  change touched (glossary / ADRs / comments / map / blessings); reconcile the pattern
   plan (mint the blessings that survived, record the rest in the commit
   message, delete the plan); regenerate the generated ones; write the ZDD
   record (below) into the commit's message; commit them with the code. Run it
@@ -52,7 +52,7 @@ more and commit, as the human index reads the merge-base, which the merge moved.
 at each stop: `derive`, `render`, `git add` the bundle, `git rebase --continue`; when it ends,
 `render` once more and commit. The drift check fails otherwise, and while `<PATTERNS_PLAN>` exists.
 **Two ADRs with one number** (parallel branches) fail `lint`: the later branch takes the next
-free number — its file, its title and every citation (supersession stamps, glossary and map links,
+free number — its file, its title and every citation (supersession stamps, glossary, map and blessing links,
 code comments; a ZDD record already committed gets a `ZDD record (amended):` line) — then regenerates.
 
 **If ZDD's skills are missing** in Claude Code, the developer has not installed ZDD for this

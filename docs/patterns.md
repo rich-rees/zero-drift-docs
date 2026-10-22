@@ -1,9 +1,10 @@
 # Blessings and "choose patterns"
 
 How ZDD makes an agent copy the right pattern instead of the nearest one,
-from the line in the map to the record in the commit. The rationale and the
+from the blessing's file to the record in the commit. The rationale and the
 alternatives that lost are in
-[decision 0015](decisions/0015-choose-patterns-blessings-are-read-before-building.md);
+[decision 0015](decisions/0015-choose-patterns-blessings-are-read-before-building.md)
+and, for the blessing store, [decision 0031](decisions/0031-blessings-live-in-a-store-of-their-own-one-file-each-with-a-where-and-a-kind.md);
 the authoring rules are in
 [`plugins/zdd/skills/authoring.md`](../plugins/zdd/skills/authoring.md).
 
@@ -16,16 +17,31 @@ example copies the wrong one with confidence, and code review sees locally
 plausible code. When the agent does not know that a helper already exists,
 it writes a second one.
 
-A **blessing** is the curated answer: one line in the semantic map naming
-the **exemplar to copy**, the **pattern to refuse**, and the **reason**. It
-is how the map outranks "copy the nearest example".
+A **blessing** is the curated answer: one short file in the blessing store,
+`zdd/blessings/`, naming **where** the code to copy or extend is, the
+**pattern to refuse**, and **why**. It is how ZDD outranks "copy the nearest
+example". It is the developer who built a great file-upload component
+shouting across the table so everyone reuses it: "need X? here's the code,
+and here's why".
 
 ```markdown
-# Blessings
-- Adding an endpoint? Copy [GET /me](/metadata/route/me.json): take the user
-  with `Depends(current_user)`, per ADR-0024 — never check a role inside the
-  endpoint's body.
+---
+where: app/deps.py (current_user)
+kind: copy
+applies-to: apps/api
+adr: ADR-0024
+---
+
+Adding an endpoint? Take the user with `Depends(current_user)`, as
+[GET /me](../metadata/route/me.json) does — never check a role inside the
+endpoint's body.
 ```
+
+The file name, `adding-an-endpoint.md`, is the blessing's name. `kind` says
+which of two things it is: **`copy`**, a method you imitate in new code
+without touching the exemplar, or **`extend`**, shared code you reuse and,
+if you must, extend — and then everything that already uses it has to be
+retested.
 
 A blessing is worth something only if it is read **before the code is
 written**, by a session that knows what it is about to build. Before 2.0, ZDD
@@ -52,37 +68,43 @@ blessings as a hint; only the ticket's own step binds.
 ## The blessing index
 
 `render` writes `zdd/blessing-index.md` (`paths.blessingIndex`): one line per
-blessing, its trigger question and its reason, grouped by slice, with the
-app-level slices first.
+blessing, its trigger question linked to its file, then **where** and
+**why**. House rules come first, under the app they apply to; every other
+blessing follows in one list, by question.
 
 ```markdown
-## App-level
+## Applies to [API](map/apps/api.md)
 
-### [API](map/apps/api.md)
+- [Adding an endpoint?](blessings/adding-an-endpoint.md) — copy: `app/deps.py` (current_user) · why: [ADR-0024](adr/0024-auth-at-the-dependency.md)
+- [Recording who did what?](blessings/recording-who-did-what.md) — extend: `app/audit.py` (record_change), used by 3: /jobs, /offers, /tenants · why: [ADR-0026](adr/0026-audit-in-the-transaction.md)
 
-- Adding an endpoint? — [ADR-0024](adr/0024-auth-at-the-dependency.md)
-- Recording who did what? — [ADR-0026](adr/0026-audit-in-the-transaction.md)
+## Every other blessing
 
-## Slices
-
-### [Jobs](map/features/jobs.md)
-
-- Writing to something a tenant owns? — [ADR-0042](adr/0042-lock-then-judge.md)
-- Naming a job state? — because the mobile app switches on the string
+- [Naming a job state?](blessings/naming-a-job-state.md) — copy: `app/jobs/states.py` · why: because the mobile app switches on the string
+- [Writing to something a tenant owns?](blessings/writing-to-a-tenant-record.md) — copy: `app/tenancy/lock.py` (lock_then_judge) · why: [ADR-0042](adr/0042-lock-then-judge.md)
 ```
 
 It is a generated artifact like the agent and ADR indexes: never edited by
 hand, fenced against edits when the fence is on, and checked by
 `render --check`. It exists so the step can **read every question at once
 and open only the blessings that match**. Each blessing costs about 95 tokens
-in full and about 15 tokens as an index line, so the index stays cheap to read
-whole at a thousand blessings, where reading every blessing would not.
+in full and about 25 tokens as an index line, so the index stays cheap to read
+whole at hundreds of blessings, where reading every blessing would not.
 
-**App-level** blessings live in an app's concept (`map/apps/*.md`, type
-`Application` or `Package`). They are cross-cutting rules such as auth, data
-access or styling, so the step reads **every one of them in full** for each
-app the work touches. Feature blessings live in a feature slice and are
-opened when their question matches.
+**House rules** carry `applies-to:` naming an app or package page
+(`apps/api`). They are cross-cutting rules such as auth, data access or
+styling, so the step reads **every one of them in full** for each app the
+work touches. Every other blessing is opened when its question matches.
+`first-built-in:` remembers the slice a pattern was first built for; it
+never decides where the blessing applies — a file-upload pattern does not
+"belong" to the feature that happened to need it first.
+
+**Who uses an `extend` blessing's code** is worked out on every render from
+the metadata: every record that references the exemplar's record, or that
+it says uses it. "Users unknown to ZDD" means no record has that file (an
+extractor that is off, a language ZDD does not read): the step greps for the
+callers instead. The list is never written by hand, because a hand-written
+list is stale the first time someone adds a caller.
 
 The agent index's reading path names the blessing index, so a session that
 has only the auto-injected index still learns where the patterns are.
@@ -94,8 +116,10 @@ The `patterns` skill walks the session through it:
 1. **Inputs.** ZDD is loaded. The design is named in one line and split into
    **pieces of work**: "a new endpoint", "a screen", "a table and its
    migration", "a background job". The apps it touches are named.
-2. **Read the blessing index whole**, open every app-level blessing for a
-   touched app, and open every blessing whose question matches a piece.
+2. **Read the blessing index whole**, open every house rule for a touched
+   app, and open every blessing whose question matches a piece. A piece that
+   extends an `extend` blessing's code lists its users on the plan's
+   *Retest* line.
 3. **Look for logic that already exists.** Blessings cover *how to build X*.
    "This already exists" is the inventory's job, so the step checks the agent
    index's pointers and the metadata (functions, routes, modules, tables) and
@@ -121,7 +145,8 @@ choose patterns ──► zdd/patterns-plan.md committed on the branch
         │
         ▼
   update ZDD ─────► reconcile against the final diff
-                    ├─ mint the candidates that survived (into the map)
+                    ├─ mint the candidates that survived (one file each, in zdd/blessings/)
+                    ├─ check every Retest line was retested
                     ├─ record the dropped ones, and why
                     ├─ offer unblessed precedent (minted on the developer's word)
                     ├─ write the "ZDD record:" (its blessings section) into the update commit's message
@@ -155,14 +180,18 @@ The plan file's shape:
 # Pattern plan
 
 Work: APP-123 — invite a member to a team
-Apps touched: api, web (app-level blessings read in full)
+Apps touched: api, web (house rules read in full)
 
 ## Plan
 
-- **POST /invitations** — follow `API: Adding an endpoint?` — the admin dependency covers the role check
-- **invitation email** — follow `Outbound queues: Asking another system to do something?`
-- **invite form** — depart from `Web: A form an administrator fills in?` — because the invitee picks no tenant; one field
-- **invitation expiry** — new pattern, candidate blessing: "A record that lapses on its own? Store the deadline, judge it on read — never a sweep." — because there is no job runner on web
+- **POST /invitations** — follow `adding-an-endpoint` ("Adding an endpoint?") — the admin dependency covers the role check
+- **invitation email** — follow `asking-another-system` ("Asking another system to do something?")
+- **invite form** — depart from `an-admin-form` ("A form an administrator fills in?") — because the invitee picks no tenant; one field
+- **invitation expiry** — new pattern, candidate blessing (copy): "A record that lapses on its own? Store the deadline, judge it on read — never a sweep." — because there is no job runner on web
+
+## Retest
+
+- **invitation email** — extends `asking-another-system`'s `apps/api/app/outbound.py`: retest /jobs, /offers
 
 ## Reuse
 
@@ -179,9 +208,14 @@ Apps touched: api, web (app-level blessings read in full)
 |---|---|---|
 | A blessing that does not open with a trigger question | `lint` | **fails** (it would be invisible in the index) |
 | A blessing citing a fully superseded or missing ADR | `lint` | **fails** (unchanged since 1.1) |
+| A blessing with no `where:`, or one that names no file in the repo | `lint` | **fails** (2.5: a blessing is a pointer to reusable code; a moved exemplar goes red) |
+| A blessing with no `kind:`, or one that is neither `copy` nor `extend` | `lint` | **fails** (2.5) |
+| An `applies-to:` that names no app or package page | `lint` | **fails** (2.5) |
+| A Blessings section left on a semantic-map page | `lint` | **fails** (2.5: "upgrade ZDD" moves them) |
+| A `first-built-in:` that names no map page, or a header line ZDD does not read | `lint` | warning |
 | A blessing with no reason (no ADR, no "because …") | `lint` | warning |
-| A blessing that points at no code (no link, no path in backticks) | `lint` | warning (2.3: a blessing is a pointer to reusable code; a rule belongs in its ADR) |
 | A blessing over 300 visible characters | `lint` | warning |
+| A blessing's `where:` file changed without the blessing | `freshness` | listed, advisory |
 | The blessing index out of date, hand-edited or missing | `render --check` | **fails** |
 | The pattern plan exists | `lint --merge` (CI) | **fails** |
 | The pattern plan exists | `lint` (local, pre-push) | warning: the branch must stay pushable mid-build |
@@ -214,18 +248,18 @@ short:
 - **Keep it under 300 visible characters.** Link text counts and link targets
   do not. The question, the exemplar, the refusal and the reason fit; the
   detail belongs in the ADR.
-- **Link the exemplar** with a metadata link where the extractors inventory
-  it, so freshness notices when the blessed code changes.
+- **Name the code in `where:`**, a repo file and optionally the symbol in
+  brackets. Freshness notices when that file changes; lint fails when it no
+  longer exists.
+- **Say the `kind:`**: `copy` or `extend`.
 - **Name the refusal**: "copy X, never Y".
 
 ```markdown
-# Blessings
-- Adding an endpoint? Copy [POST /api/things](/metadata/route/things.json),
-  per ADR-0012 — never inline the auth check.                         ✓
-- Naming a migration? Prefix it with the ticket id, because two branches
-  minting the same number merge without a conflict — never a sequence. ✓ (a warning: no code to start from — right for a naming rule)
-- Copy POST /api/things for new endpoints, per ADR-0012.              ✗ no question: lint fails
-- Adding an endpoint? Copy POST /api/things.                          ⚠ passes, with a warning: no reason
+Adding an endpoint? Copy POST /api/things, per ADR-0012 — never inline the
+auth check.                                     ✓ (with where: and kind: in its header)
+Copy POST /api/things for new endpoints.         ✗ no question: lint fails
+Adding an endpoint? Copy POST /api/things.       ⚠ passes, with a warning: no reason
+Naming a migration? Prefix it with the ticket id. ✗ no where: — a naming rule is an ADR and a code comment, not a blessing
 ```
 
 ## How a host harness carries it
@@ -249,13 +283,19 @@ the spoken verbs and the merge gate.
 
 Say "upgrade ZDD", then:
 
-1. `render`, and commit `zdd/blessing-index.md` in the upgrade PR.
-2. `lint`: every blessing it fails for having no trigger question gets one.
+1. **Move the blessings** (2.5, [decision 0032](decisions/0032-the-upgrade-moves-blessings-out-of-the-map-after-showing-the-list.md)).
+   The upgrade lists every blessing still on a map page with what it would
+   write — its file name, `where:`, a proposed `kind:`, `applies-to:` for a
+   blessing from an app page, `first-built-in:` — and writes nothing until
+   the developer has read the list, checked each kind, and said yes. A
+   blessing with no question, or nothing in it that names a repo file, stays
+   where it is and is named, to fix by hand.
+2. `render`, and commit `zdd/blessing-index.md` in the upgrade PR.
+3. `lint`: every blessing it fails for having no trigger question gets one.
    Propose them as **one reviewable file** — each blessing with the question
    it would answer, one line each — approved by the developer in one pass
-   (2.3: never one question per blessing; the first adopter had 62 at once). Upgrade
-   never rewrites the map.
-3. Optionally, take a pass over the length and reason warnings.
+   (2.3: never one question per blessing; the first adopter had 62 at once).
+4. Optionally, take a pass over the length and reason warnings.
 
 From the next unit of work on, say "choose patterns" once the design is
 settled.

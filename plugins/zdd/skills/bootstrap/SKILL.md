@@ -20,9 +20,9 @@ Explain a term the first time it comes up, in one sentence:
 - an **extractor** — the part of ZDD that reads one convention of the code
   (the database migrations, the web routes, the screens) and writes the
   inventory of what it finds;
-- a **blessing** — a one-line note in the docs saying "for this kind of work,
-  start from this existing code, and never do that" — so the AI copies the
-  right example instead of the nearest one;
+- a **blessing** — a short note, one file each in `zdd/blessings/`, saying
+  "for this kind of work, start from this existing code, and never do that"
+  — so the AI copies the right example instead of the nearest one;
 - the **lock** — one line in the repo's settings pinning it to one ZDD
   release, so every developer runs the same one until the team chooses to
   move.
@@ -334,7 +334,9 @@ file** the person ticks, edits or strikes in one pass:
   proposed definition beside it.
 - **Blessings** (the most valuable): kinds of work done several times and
   the existing code to start from, under the test above; the file lists the
-  trap each one refuses and its reason.
+  trap each one refuses, its reason, and whether it is `copy` or `extend`.
+  Each approved one becomes a file in `zdd/blessings/` with its header
+  (authoring.md).
 - **Decisions, carefully:** the code shows *what* was decided, never *why*,
   and a confident invented reason is worse than none because later sessions
   trust it. Propose only the decisions that would surprise a newcomer
