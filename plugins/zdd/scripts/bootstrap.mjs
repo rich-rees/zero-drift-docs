@@ -1733,6 +1733,7 @@ export function splitAdrs(root, { plan = false, harness = null, application = nu
   // included, and what was too big to read is said (CR-029).
   const outside = [];
   let tooBig = 0;
+  let unread = 0;
   const inside = (rel, top) => top && (rel === top || rel.startsWith(`${top}/`));
   for (const rel of repoFiles(ledger)) {
     if (inside(rel, bundle) || inside(rel, paths.adrDir) || inside(rel, paths.harnessAdrDir) || !RETIRED_SCAN_EXT.test(rel)) continue;
@@ -1744,6 +1745,7 @@ export function splitAdrs(root, { plan = false, harness = null, application = nu
       }
       text = ledger.read(rel);
     } catch {
+      unread++;
       continue;
     }
     for (const hit of linksToMoved(text, { fileRel: rel, moved, bundleDir: paths.bundleDir })) outside.push({ file: rel, ...hit });
@@ -1754,6 +1756,7 @@ export function splitAdrs(root, { plan = false, harness = null, application = nu
   }
   if (outside.length > 50) ledger.notes.push(`… and ${outside.length - 50} more lines outside ${paths.bundleDir}/ that point at a moved ADR`);
   if (tooBig) ledger.notes.push(`${tooBig} file${tooBig === 1 ? "" : "s"} outside ${paths.bundleDir}/ over ${MAX_SCAN_BYTES / 1024} KiB not read for links to the moved ADRs — search ${tooBig === 1 ? "it" : "them"} by hand`);
+  if (unread) ledger.notes.push(`${unread} file${unread === 1 ? "" : "s"} outside ${paths.bundleDir}/ could not be read for links to the moved ADRs — search ${unread === 1 ? "it" : "them"} by hand`);
   if (toMove.length && ledger.exists(DOMAIN_DOC)) ledger.notes.push(`${DOMAIN_DOC} is yours and names only ${paths.adrDir}/ — add ${paths.harnessAdrDir}/ for harness decisions, so Matt Pocock's skills file them there`);
   ledger.notes.push(`run \`render\` (it writes ${paths.harnessAdrIndex} and rewrites ${paths.adrIndex}), then \`lint\`, and commit the split in one PR`);
   return { plan, token: tokenNow, dir: paths.harnessAdrDir, index: paths.harnessAdrIndex, proposals: shown, moved: [...moved].map(([from, to]) => ({ from, to })), outside, ...ledgerOut(ledger) };

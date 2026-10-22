@@ -754,10 +754,11 @@ async function render() {
   // the top-level key is otherwise invisible to it (verification CR-026).
   // Only added when set, so a config without it keeps the v0.3.1 bytes.
   const options = NON_AREA_TAGS.length ? { ...VIEWER.options, nonAreaTags: NON_AREA_TAGS } : VIEWER.options;
-  // A harness ADR carries its folder (`dir`), so the viewer names its source
-  // and resolves its links from there (CR-033); an application ADR carries
-  // nothing new, so a repo with one set embeds the 2.4 projection.
-  const viewerDocs = { ...docs, adrs: docs.adrs.map(({ num, file, title, body, set, dir }) => (set === "harness" ? { num, file, title, body, dir } : { num, file, title, body })) };
+  // An ADR outside zdd/adr — a harness ADR, or a custom adrDir's — carries
+  // its folder (`dir`), so the viewer names its source and resolves its links
+  // from there (CR-033); one in zdd/adr carries nothing new, so a default
+  // repo embeds the 2.4 projection byte for byte.
+  const viewerDocs = { ...docs, adrs: docs.adrs.map(({ num, file, title, body, dir }) => (dir !== "zdd/adr" ? { num, file, title, body, dir } : { num, file, title, body })) };
   const html = viewer.render({ graph, docs: viewerDocs, changed, options, bundleName: BUNDLE_NAME, repoBase: REPO_BASE });
   if (typeof html !== "string") {
     console.error(`Viewer '${VIEWER.name}' must return the human index as a string`);

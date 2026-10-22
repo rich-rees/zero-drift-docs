@@ -147,7 +147,7 @@ test("CR-033 / CR-043: with two sets, a custom application folder is linked wher
   assert.match(index, /why: \[ADR-0002\]\(decisions\/0002-things-replace-widgets\.md\), \[ADR-0001\]\(adr-harness\/0001-widgets-are-the-core-entity\.md\)/, index);
   const html = readFileSync(join(repo, "zdd", "human-index.html"), "utf8");
   const bundle = JSON.parse(/window\.BUNDLE = (.*);\n/.exec(html)[1]);
-  assert.deepEqual(bundle.docs.adrs.map((a) => [a.num, a.dir ?? null]).sort(), [["0001", "zdd/adr-harness"], ["0002", null]], "only a harness ADR carries its folder");
+  assert.deepEqual(bundle.docs.adrs.map((a) => [a.num, a.dir ?? null]).sort(), [["0001", "zdd/adr-harness"], ["0002", "zdd/decisions"]], "an ADR outside zdd/adr carries its folder, a custom application folder's too");
   rmSync(repo, { recursive: true, force: true });
 });
 
