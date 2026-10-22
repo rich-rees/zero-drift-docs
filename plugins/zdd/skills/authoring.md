@@ -59,28 +59,43 @@ replaces an old one: the new one says it supersedes ADR-NNNN, and you stamp the 
 one at the top — `**Superseded [in part] by ADR-MMMM**` — never edit a frozen ADR
 into a new truth. History doesn't lie; it accretes.
 
-## Semantic map — blessings
+## Semantic map
 
-The map says *where, what-connects, what-to-copy*; never what the code does.
-Groupings and non-textual edges are the first two. The third is the
-**blessing**: a one-line entry under a `# Blessings` heading in a concept.
+The map says *where* and *what connects*; never what the code does. A page
+per feature, app, package and third-party system groups the inventory (a
+feature claims the records it owns by linking them), and its links carry the
+edges the code cannot show. What to copy lives apart, in the blessings.
+
+## Blessings
+
+A **blessing** is one file in the blessing store (`zdd/blessings/`,
+`paths.blessingsDir`), named for its question (`adding-an-upload.md`). The
+file name is its name everywhere else: the pattern plan, the ZDD record.
 
 **A blessing is a generic, work-shaped pointer to reusable code.** It answers
 a *recurring kind of work* ("Adding an upload?", "Adding an endpoint?") with
 a pointer to **existing code to start from and, where possible, reuse** —
 a shared base layer before a pattern to imitate — plus **the one trap it
 refuses and its reason**. Pattern frequency in code is never a verdict — the
-most common pattern is often the deprecated one — so a blessing is how the
-map outranks "copy the nearest example", and how the AI reuses the helper
-that already exists instead of writing a second one.
+most common pattern is often the deprecated one — so a blessing is how ZDD
+outranks "copy the nearest example", and how the AI reuses the helper that
+already exists instead of writing a second one.
 
-The model, from PressPlay (DIO-336):
+The model, from PressPlay (DIO-336), as a 2.5 blessing file:
 
 ```markdown
-- Adding an upload? Start from `lib/media-upload-client.ts` (`uploadMedia`)
-  — reuse or extend it before writing new upload code; video's larger flow is
-  `VideoUploadContext` + the `signed-upload` route. Files go straight to
-  Storage, never through a Vercel function (ADR-0098).
+---
+where: lib/media-upload-client.ts (uploadMedia)
+kind: extend
+applies-to: apps/web
+first-built-in: features/video-upload
+adr: ADR-0098
+---
+
+Adding an upload? Start from `uploadMedia` — reuse or extend it before
+writing new upload code; video's larger flow is `VideoUploadContext` + the
+`signed-upload` route. Files go straight to Storage, never through a Vercel
+function.
 ```
 
 Three components already share `uploadMedia`, so a future PDF or audio
@@ -97,13 +112,14 @@ blessing*, and "update ZDD"'s minting step:
    pattern to imitate. A blessing with nothing to point at is not one: a
    rule whose substance is "decide X this way" ("Deciding where an answer
    is stored?") belongs in its **ADR and a code comment at the site**, not
-   the map. `lint` warns on a blessing that points at no code.
+   the blessings. `lint` **fails** a blessing whose `where:` is missing or
+   names no file.
 2. **One trap, with its reason.** One instruction is allowed, as the thing
    the blessing refuses ("never through a Vercel function"), with the ADR or
    a "because".
 3. **Generic, not narrow.** The question names a *kind* of work that recurs
    ("Adding an upload?"), not one feature's instance ("Adding the video
-   upload?"); a map that drifts to many narrow blessings (PressPlay reached
+   upload?"); a store that drifts to many narrow blessings (PressPlay reached
    83) is re-cut to the shared layers (DIO-336 cut it to roughly 30–40).
 4. **No exemplar yet: a candidate.** A new kind of work with no reusable code
    to point at is a *candidate blessing* in the pattern plan, minted at
@@ -111,25 +127,38 @@ blessing*, and "update ZDD"'s minting step:
 
 A blessing is read at a known moment: **"choose patterns"** (the `patterns`
 skill) reads the generated **blessing index** — one line per blessing, its
-trigger question and its reason — before any code is written, and opens in
-full only the blessings whose question matches the work. Blessings are
-proposed there and **minted at "update ZDD"**, against the code as it merges.
-So the shape below is what makes a blessing findable, not just tidy. The
-whole lifecycle, with examples, is in
+trigger question, where the code is and why — before any code is written,
+and opens in full only the blessings whose question matches the work.
+Blessings are proposed there and **minted at "update ZDD"**, against the
+code as it merges. So the shape below is what makes a blessing findable, not
+just tidy. The whole lifecycle, with examples, is in
 [docs/patterns.md](https://github.com/rich-rees/zero-drift-docs/blob/main/docs/patterns.md).
 
-Format (one list item per blessing, under the heading):
+**The header**, between `---` lines:
 
-```markdown
-# Blessings
-- Adding an endpoint here? Start from [POST /api/things](/metadata/route/things.json)
-  — its auth and validation are the shared shape, per ADR-0012 — never inline
-  the auth check.
-- Saving a graph? Go through the RPC in `lib/graph-rpc.ts`, per ADR-0005 — never
-  client-side diffing.
-- Naming a migration? Prefix it with the ticket id, because two branches
-  minting the same number merge without a conflict — never a bare sequence.
-```
+- **`where:`** (required) — the code to start from: a repo path, and the
+  class or function in brackets when the file holds several
+  (`apps/api/app/fixed_routes/decisions.py (RouteRefusal)`). `lint` fails a
+  missing one, and one that names no file: when the exemplar moves or is
+  deleted, the blessing goes red instead of pointing nowhere.
+- **`kind:`** (required) — **`copy`** when the exemplar shows a method you
+  imitate in new code, leaving it untouched; **`extend`** when it is shared
+  code you reuse and, if you must, extend. An `extend` blessing's index
+  line names who uses the code, worked out from the metadata on every
+  render — extending it means retesting each of them, and "choose patterns"
+  puts them on the plan's *Retest* line.
+- **`applies-to:`** (optional) — an app or package page, by its path under
+  the map (`apps/web`), for a **house rule**: auth, data access, styling,
+  uploads — anything that applies across the app. The index lists these
+  first, under their app, and a session reads every one for an app it
+  touches. `lint` fails one that names no app or package page.
+- **`first-built-in:`** (optional) — the map page the pattern was first
+  built for (`features/jobs`), so the link to its origin is kept. It never
+  decides where the blessing applies.
+- **`adr:`** (optional) — the ADR that blessed it (`ADR-0012`, or several,
+  comma-separated). A citation in the text counts too.
+
+**The text**, after the header:
 
 - **Open with the trigger question.** The first sentence is the question the
   blessing answers, ending in `?` — "Adding an endpoint here?", "A status that
@@ -137,33 +166,23 @@ Format (one list item per blessing, under the heading):
   blessing without one is invisible to a session choosing patterns, and
   `zdd-engine lint` **fails** it. Phrase it as the moment someone would reach
   for the pattern, not as the pattern's name.
-- **Point at the code.** A metadata link (`/metadata/route/….json`) is what
-  lets the freshness nudge notice when the blessed code changes; a path or a
-  file in backticks (`lib/graph-rpc.ts`, with the function beside it) is fine
-  for something the extractors do not inventory — a bare function name is
-  not a pointer, name its file. An ADR link or a URL is the reason, not the
-  exemplar. `lint` **warns** on a blessing with no pointer; a naming rule
-  earns that warning and is fine.
-- **Give the reason.** Cite the ADR that blessed it ("per ADR-0012"), or say
-  why inline ("because …"). Neither is a lint **warning**: a blessing with no
-  reason is an opinion. **An ADR is encouraged, not required** — cite one when
-  the pattern passes the three-part test above; a house convention often does
-  not, and forcing one breeds throwaway ADRs. A blessing citing an ADR that
-  has been **fully superseded** (or that does not exist) **fails** the lint;
-  one citing an ADR superseded *in part* gets a warning to check the blessed
-  pattern — a stale blessing is worse than none, because it sends the agent
-  to copy the refused pattern with a citation attached. When an ADR is
-  superseded, re-bless under the new decision or drop the line, in the same
-  unit of work.
+- **Give the reason.** Cite the ADR that blessed it (`adr:`, or "per
+  ADR-0012" in the text), or say why inline ("because …"). Neither is a
+  lint **warning**: a blessing with no reason is an opinion. **An ADR is
+  encouraged, not required** — cite one when the pattern passes the
+  three-part test above; a house convention often does not, and forcing one
+  breeds throwaway ADRs. A blessing citing an ADR that has been **fully
+  superseded** (or that does not exist) **fails** the lint; one citing an
+  ADR superseded *in part* gets a warning to check the blessed pattern — a
+  stale blessing is worse than none, because it sends the agent to copy the
+  refused pattern with a citation attached. When an ADR is superseded,
+  re-bless under the new decision or drop the blessing, in the same unit of
+  work.
 - **Keep it short.** Over 300 characters of visible text (link text counts,
   link targets do not) is a lint **warning**. The question, the pointer, the
   refusal and the reason fit; the detail belongs in the ADR.
 - **Name the refusal.** "Start from X" alone is a pointer; "start from X,
   never Y" is the judgment the reader needs.
-- **App or feature.** A blessing that applies across an app (auth, data
-  access, styling, uploads) goes in the app's concept under `map/apps/`; the
-  index lists those first and a session reads all of them for an app it
-  touches. A blessing for one feature's shape goes in that feature's slice.
 
 ## Code comments
 
