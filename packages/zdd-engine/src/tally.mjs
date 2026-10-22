@@ -23,9 +23,9 @@ import { execFileSync } from "node:child_process";
 import { readdirSync, existsSync, lstatSync } from "node:fs";
 import { resolve, relative } from "node:path";
 import { loadConfig } from "./lib/config.mjs";
-import { parseFrontmatter } from "./lib/frontmatter.mjs";
-import { extractBlessings, blessingShape } from "./lib/map-links.mjs";
-import { walkMarkdown, readBounded, MAX_STORE_FILE_BYTES } from "./lib/walk-markdown.mjs";
+import { loadBlessings } from "./lib/blessings.mjs";
+import { listAdrFiles } from "./lib/adr-sets.mjs";
+import { readBounded, MAX_STORE_FILE_BYTES } from "./lib/walk-markdown.mjs";
 import { SECTIONS, USE_VERBS, STORE_VERB, BLESSING_VERBS, LOG_FORMAT, recordsInLog, namesIn, glossaryTerms, itemMatcher, printable } from "./lib/zdd-record.mjs";
 
 const git = (cwd, args) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 60_000, maxBuffer: 256 * 1024 * 1024 });
@@ -91,13 +91,23 @@ export function logFor(repoRoot, since) {
   }
 }
 
+// A blessing's file name as a whole word, a hyphen counting as part of it:
+// `adding-a-page` is not named by `adding-a-page-mobile` (CR-007).
+function fileNameMatcher(id) {
+  const re = new RegExp(`(^|[^\\p{L}\\p{N}_-])${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?=$|[^\\p{L}\\p{N}_-])`, "iu");
+  return (text) => re.test(text);
+}
+
 // Counts per section over the VALID lines, the never-named lists, and every
 // shape problem by commit. `reused` is a bucket of the map section only.
 export function tally(commits, stores) {
   const counts = Object.fromEntries(SECTIONS.map((s) => [s, Object.fromEntries([...USE_VERBS.filter((v) => v !== "reused" || s === "map"), STORE_VERB, ...(s === "blessings" ? BLESSING_VERBS : [])].map((v) => [v, 0]))]));
   const named = { adrs: new Set(), terms: new Set(), blessings: new Set() };
   const termMatchers = stores.terms.map((t) => [t, itemMatcher(t)]);
-  const blessingMatchers = stores.blessings.map((q) => [q, itemMatcher(q)]);
+  const blessingMatchers = stores.blessings.map((q, i) => {
+    const key = stores.blessingKeys?.[i] ?? q;
+    return [q, typeof key === "object" ? fileNameMatcher(key.id) : itemMatcher(key)];
+  });
   const adrSet = new Set(stores.adrs);
   const skipped = [];
   let records = 0;
@@ -131,13 +141,12 @@ export function tally(commits, stores) {
 export function readStores(repoRoot, paths) {
   const notes = [];
   const rel = (p) => relative(repoRoot, p).split(/[\\/]/).join("/");
-  const adrDir = resolve(repoRoot, paths.adrDir);
-  let adrs = [];
-  try {
-    if (existsSync(adrDir)) adrs = readdirSync(adrDir).filter((f) => /^\d{4}-.*\.md$/.test(f)).map((f) => f.slice(0, 4)).sort();
-  } catch (e) {
-    notes.push(`${rel(adrDir)}: could not be listed (${e.code ?? "error"}) — no ADR counted as never named`);
-  }
+  // Both ADR sets when the harness set is configured (decision 0033).
+  const listed = listAdrFiles(repoRoot, paths);
+  // One entry per file, as before the harness set: two files with one number
+  // (a merge) are two, and lint names the duplicate (CR-039).
+  const adrs = listed.files.map((e) => e.num).sort();
+  for (const u of listed.unreadable) notes.push(`${u.dir}: could not be listed (${u.code}) — no ADR counted as never named`);
   const glossary = resolve(repoRoot, paths.glossary);
   let terms = [];
   try {
@@ -150,27 +159,25 @@ export function readStores(repoRoot, paths) {
   } catch (e) {
     if (e.code !== "ENOENT") notes.push(`${rel(glossary)}: could not be read (${e.code ?? "error"}) — no term counted as never named`);
   }
+  // The blessing store (decision 0031): one entry per blessing FILE, the
+  // file name being a blessing's identity (CR-007). Each is labelled and
+  // matched by its question; a question two files share is labelled with the
+  // file name too and matched by it, as the ZDD record names it ("… (<name>)").
   const blessings = [];
-  const seenQ = new Set();
-  const mapDir = resolve(repoRoot, paths.mapDir);
-  const state = { depth: 0, entries: 0, skipped: [] };
-  for (const path of existsSync(mapDir) ? walkMarkdown(mapDir, [], state) : []) {
-    const text = readBounded(path, MAX_STORE_FILE_BYTES);
-    if (text === null) {
-      notes.push(`${rel(path)}: over ${MAX_STORE_FILE_BYTES / 1024} KiB or unreadable — its blessings are not in the never-named list`);
-      continue;
-    }
-    const parsed = parseFrontmatter(text);
-    for (const b of extractBlessings(parsed ? parsed.body : text)) {
-      const q = blessingShape(b.text).question;
-      if (q && !seenQ.has(q)) {
-        seenQ.add(q);
-        blessings.push(q);
-      }
-    }
+  const blessingKeys = [];
+  const store = loadBlessings(resolve(repoRoot, paths.blessingsDir), repoRoot);
+  for (const f of store.unreadable) notes.push(`${f}: over ${MAX_STORE_FILE_BYTES / 1024} KiB or unreadable — not in the never-named list`);
+  const asked = new Map();
+  for (const b of store.blessings) if (b.shape.question) asked.set(b.shape.question, (asked.get(b.shape.question) ?? 0) + 1);
+  for (const b of store.blessings) {
+    const q = b.shape.question;
+    if (!q) continue;
+    const shared = asked.get(q) > 1;
+    blessings.push(shared ? `${q} (${b.id})` : q);
+    blessingKeys.push(shared ? { id: b.id } : q);
   }
-  for (const s of state.skipped) notes.push(`${rel(s.path)}: ${s.reason} — blessings there are not in the never-named list`);
-  return { adrs, terms, blessings, notes };
+  for (const s of store.skipped) notes.push(`${rel(s.path)}: ${s.reason} — blessings there are not in the never-named list`);
+  return { adrs, terms, blessings, blessingKeys, notes };
 }
 
 export function run(args) {

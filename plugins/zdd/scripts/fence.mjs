@@ -333,6 +333,7 @@ function main() {
     { rel: paths.graph, kind: "file" },
     { rel: paths.agentIndex, kind: "file" },
     { rel: paths.adrIndex, kind: "file" },
+    { rel: paths.harnessAdrIndex, kind: "file" }, // the harness ADR index, when the set is configured (decision 0033)
     { rel: paths.blessingIndex, kind: "file" },
     { rel: paths.humanIndex, kind: "file" },
     { rel: agentIndexAreaDir(paths.agentIndex), kind: "dir" }, // the two-level index's area folder (2.3), for any index name (CR-005)

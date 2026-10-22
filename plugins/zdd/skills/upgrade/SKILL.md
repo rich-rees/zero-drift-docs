@@ -142,6 +142,21 @@ It writes nothing. Walk the person through it in plain words, in this order:
    release tag held somewhere ZDD does not write — a lock test, a setup
    guide), each with its replacement. Say where each is and what to change
    it to; these are the person's files, changed by hand.
+6. **Blessings still on map pages** (2.5, decision 0032). The plan lists
+   each one under `blessing <page>:<line>`, with the file it would become
+   (`zdd/blessings/<name>.md`) and its header: `where:` (the code it points
+   at), a **proposed `kind:`**, `applies-to:` when it sat on an app or
+   package page, `first-built-in:` (the page it sat on), `adr:`. Show them
+   as **one reviewable list** — never one question per blessing — and say
+   in plain words what `kind` means: **copy** is "imitate this method in new
+   code; the exemplar is not touched"; **extend** is "reuse this shared
+   code, and if you extend it, retest everything that already uses it".
+   The proposal is a guess from the wording ("extend", "reuse", "shared");
+   recommend a kind for each one you would change, and why. A blessing that
+   **stays on the map** (no question, or nothing in it that names a repo
+   file) is named with the reason: those are fixed by hand after the move,
+   and lint fails until they are. File names can be changed later with
+   `git mv`; nothing else refers to them yet.
 
 Then ask, **one question at a time** (questions 2 to 4 of about 5):
 
@@ -154,19 +169,30 @@ Then ask, **one question at a time** (questions 2 to 4 of about 5):
 - If their own text was named: **"Which of these paragraphs or bullets
   shall I remove?"** — list them with your same / different / contradicting
   reading and a recommendation for each; they answer with the ones to drop.
+- If blessings are listed: **"Move these blessings into `zdd/blessings/`,
+  with these kinds?"** — recommended yes; cost: every map page that held
+  blessings is edited (only the moved lines go) and one file per blessing is
+  created, all in this PR. Saying no leaves them where they are, and lint
+  fails until they move. They answer with any kind to change.
 
 Read the answers back, then go on.
 
 ## Step 3 — write
 
 ```
-node "$PLUGIN/scripts/bootstrap.mjs" upgrade [--lock] [--drop=<ids>]
+node "$PLUGIN/scripts/bootstrap.mjs" upgrade [--lock] [--drop=<ids>] [--move-blessings=<token> [--kinds=<name>:<copy|extend>,…]]
 ```
 
 `--lock` only on a yes to the lock question; `--drop=<id>,<id>` only with the
 ids the plan printed for the sentences the user chose (each id binds the
 sentence's text and its place: if it changed since the plan, the run refuses
-— show the plan again). Relay the ledger in plain words, as in step 2. Its
+— show the plan again); `--move-blessings=<token>` only on a yes to the
+blessings question, with the token the plan printed and `--kinds=<name>:<kind>`
+for each kind the person changed (the names the plan printed). The token
+binds the run to the list the person read: if a blessing was added or
+changed since, the run refuses before writing anything — show the plan again.
+A name already taken in the store, a wrong `--kinds` name or a `paths` value
+the engine would refuse also stops the run before its first write. Relay the ledger in plain words, as in step 2. Its
 notes match the plan's.
 
 ## Step 4 — the questions the notes raise, one at a time
@@ -205,9 +231,9 @@ node "$PLUGIN/scripts/bootstrap.mjs" preflight
 Then, with the engine this plugin pins:
 
 ```
-npx -y @rich-rees/zdd-engine@2.4.1 derive
-npx -y @rich-rees/zdd-engine@2.4.1 render
-npx -y @rich-rees/zdd-engine@2.4.1 lint
+npx -y @rich-rees/zdd-engine@2.5.0 derive
+npx -y @rich-rees/zdd-engine@2.5.0 render
+npx -y @rich-rees/zdd-engine@2.5.0 lint
 ```
 
 Show what moved in the generated artifacts and say why, from the notes (a
@@ -311,6 +337,43 @@ https://github.com/rich-rees/zero-drift-docs/issues, labelled `finding`.
 - **`lint --merge` warns, never fails,** on a record it cannot fully read.
   No config-schema or metadata-contract change; `derive --check` and
   `render --check` do not move on the bump.
+
+## Upgrading to 2.5 (blessings in a store of their own)
+
+- **Blessings move out of the map** (decisions 0031, 0032): one file each
+  in `zdd/blessings/` (`paths.blessingsDir`), named for its question, with
+  a header — `where:` (the code to copy or extend; required), `kind:`
+  (`copy` or `extend`; required), `applies-to:` (a house rule for an app),
+  `first-built-in:` (the slice it came from), `adr:`. Step 2 lists them and
+  step 3 moves them on the person's yes. The semantic map keeps its name and
+  holds the groupings and the edges.
+- **The blessing index says where and why** on every line, house rules
+  first under their app; an `extend` blessing names who uses its code,
+  worked out from the metadata. `render --check` moves on the bump, in up
+  to four files — render and commit them in this PR: `blessing-index.md`
+  (its new format), `graph.json` and `human-index.html` (the map pages'
+  bodies lose their Blessings sections), and `agent-index.md` when a
+  metadata link lived only inside a moved blessing (the feature no longer
+  points at that record — link it from the feature page if it should).
+- **New lint failures**, each cleared by the move or named by it
+  (decision 0035, which is why 2.5 is a minor): a Blessings section left on
+  a map page; a blessing with no `where:` or one naming no file; no `kind:`
+  or a wrong one; an `applies-to:` naming no app or package page.
+- **"choose patterns"** puts an `extend` blessing's users on the plan's
+  *Retest* line, and **"update ZDD"** checks they were retested.
+- **A harness ADR set, opt-in** (decisions 0033, 0034): decisions about how
+  the team builds can live apart from the product's, in their own folder
+  and index, on one number line. Upgrading splits nothing. When the person
+  wants it — now or later — run `split-adrs --plan`: every ADR with a
+  `Scope: harness` / `Scope: product` tag line is decided by it; propose a
+  set for each of the others from what it decides, show the whole list as
+  **one reviewable file**, and run the write with the plan's token and the
+  answers (`--harness=<nums> --application=<nums>`). It moves the harness
+  ADRs with their numbers, re-points links inside `zdd/`, and lists the
+  ones outside (`CLAUDE.md`, `docs/`) for a hand edit. Then render and lint.
+- No metadata-contract change and additive config keys only
+  (`paths.blessingsDir`; `paths.harnessAdrDir` and `paths.harnessAdrIndex`
+  on the split); `derive --check` does not move on the bump.
 
 ### Upgrading to 2.4.1 (findings from the 2.4.0 adoptions)
 

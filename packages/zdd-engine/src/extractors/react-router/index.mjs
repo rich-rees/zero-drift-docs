@@ -301,9 +301,16 @@ export function model(text) {
     }
     return lo;
   };
+  // A divider (`----- Section -----`, `=====`, `//// Inputs ////`) heads a
+  // section of the file; it is never prose, so it ends the block, and what
+  // sits above it describes the section, not this declaration (#16).
+  const isDivider = (t) => !/[A-Za-z0-9]/.test(t) || /^[^A-Za-z0-9\s]{3,}.*[^A-Za-z0-9\s]{3,}$/.test(t);
   const commentAbove = (at) => {
     const found = [];
-    for (let k = lineOf(at) - 1; k >= 0 && commentLine[k] !== null; k--) found.push(commentLine[k]);
+    for (let k = lineOf(at) - 1; k >= 0 && commentLine[k] !== null; k--) {
+      if (commentLine[k] && isDivider(commentLine[k])) break;
+      found.push(commentLine[k]);
+    }
     return found.reverse().filter(Boolean).join(" ");
   };
   return { text, code, mask, commentAbove };

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // ZDD Stop hook — the prompt for the curated half. The CI check makes drift in
 // the GENERATED artifacts un-mergeable; the curated half (glossary, ADRs,
-// comments, the map with its blessings) is protected only by the finish
+// comments, the map, the blessings) is protected only by the finish
 // ritual, and the moment the ritual gets skipped is the moment the agent
 // declares done. This hook fires when the agent ends a turn, and if code has
 // changed on this branch while nothing in the ZDD bundle moved, it blocks
@@ -164,7 +164,7 @@ export function classify(changed, root, config) {
   if (rootRel.startsWith("..") || isAbsolute(rootRel)) return null; // the adopter root is not inside this git checkout
   const prefix = rootRel && rootRel !== "." ? rootRel + "/" : "";
   const paths = artifactPaths(config, { lenient: true });
-  const zddPrefixes = [paths.bundleDir, paths.glossary, paths.adrDir, paths.mapDir, paths.metadataDir, paths.agentIndex, paths.adrIndex, paths.blessingIndex, paths.humanIndex, paths.graph]
+  const zddPrefixes = [paths.bundleDir, paths.glossary, paths.adrDir, paths.harnessAdrDir, paths.harnessAdrIndex, paths.mapDir, paths.blessingsDir, paths.metadataDir, paths.agentIndex, paths.adrIndex, paths.blessingIndex, paths.humanIndex, paths.graph]
     .filter(Boolean)
     .map(fold);
   // The pattern plan is a session's working file, not the curated half: a

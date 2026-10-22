@@ -20,9 +20,9 @@ Explain a term the first time it comes up, in one sentence:
 - an **extractor** — the part of ZDD that reads one convention of the code
   (the database migrations, the web routes, the screens) and writes the
   inventory of what it finds;
-- a **blessing** — a one-line note in the docs saying "for this kind of work,
-  start from this existing code, and never do that" — so the AI copies the
-  right example instead of the nearest one;
+- a **blessing** — a short note, one file each in `zdd/blessings/`, saying
+  "for this kind of work, start from this existing code, and never do that"
+  — so the AI copies the right example instead of the nearest one;
 - the **lock** — one line in the repo's settings pinning it to one ZDD
   release, so every developer runs the same one until the team chooses to
   move.
@@ -196,6 +196,24 @@ up; a "no" is a visible choice, never a silent omission:
    same checks, run on your machine before each push; it makes a forgotten
    update loud, but it gates nothing. Recommended: yes."
 
+Then, still one at a time, **"Keep harness decisions apart from product
+decisions?"** — "ZDD can keep two sets of decision records: one about what
+the product does, which you can hand to a stakeholder as it stands, and one
+about how the team builds it (reviews, tests, CI, the tracker). They share
+one number line, so nothing is ever renumbered. Recommended: yes for a team
+with a harness of its own; no for a solo or young repo. Cost: one more
+folder and one more index. Saying no keeps one set; it can be split later."
+On yes, after step 4 run `node "$PLUGIN/scripts/bootstrap.mjs" split-adrs
+--plan`, then the write with its token (on a new repo there is nothing to
+move, though the seeded ADR-0001 carries no tag, so name it: it is an
+application decision about the repo, `--application=0001`). On an existing
+repo with decisions already in `zdd/adr/`, the split proposes a set for
+each — a `Scope: harness` / `Scope: product` tag line decides; for every
+other ADR propose a set from what it decides, show the whole list as **one
+reviewable file**, and pass the person's answers as `--harness=` and
+`--application=` (decision 0034). Links inside `zdd/` are re-pointed; the
+ones outside are listed for a hand edit.
+
 Then, still one at a time: **"Do you use Codex as well as Claude Code?"**
 (writes the same instructions into `AGENTS.md`, because Codex cannot load a
 separate file), and **"Seed the first decision record, 'Adopt Zero-Drift
@@ -259,7 +277,8 @@ apply"):
 5. the semantic map and its example feature — theirs; the example shows how
    a feature claims its code by linking it;
 6. the codebase metadata — the inventory, generated, never hand-edited;
-7. the agent index, the human index, the ADR index and the blessing index —
+7. the agent index, the human index, the ADR index (and the harness ADR
+   index, if that set was opened) and the blessing index —
    generated at step 5 by `render`, never hand-edited (the cards for these
    come from the script's explanation table, `explain(path)`);
 8. the config and **the lock** (`.claude/settings.json`: which plugins are on
@@ -288,14 +307,14 @@ is written into the host's settings.
 
 ## Step 5 — the engine, then the one mapping session
 
-1. **Derive** — `npx -y @rich-rees/zdd-engine@2.4.1 derive`. "This reads the
+1. **Derive** — `npx -y @rich-rees/zdd-engine@2.5.0 derive`. "This reads the
    code and writes the inventory." On a greenfield repo it writes nothing and
    passes; that is correct.
-2. **Render** — `npx -y @rich-rees/zdd-engine@2.4.1 render`. "This writes the
+2. **Render** — `npx -y @rich-rees/zdd-engine@2.5.0 render`. "This writes the
    indexes from the inventory and the map." Commit the generated artifacts
    (`zdd/graph.json`, the agent, ADR and blessing indexes, the human index);
    never edit them.
-3. **Lint** — `npx -y @rich-rees/zdd-engine@2.4.1 lint`. The same blocking
+3. **Lint** — `npx -y @rich-rees/zdd-engine@2.5.0 lint`. The same blocking
    check CI runs: ADR numbering, supersession symmetry, and every blessing's
    citation and trigger question. A failure here is fixed now, not discovered
    on the first PR. It also prints the **unclaimed records** — on day one
@@ -334,7 +353,9 @@ file** the person ticks, edits or strikes in one pass:
   proposed definition beside it.
 - **Blessings** (the most valuable): kinds of work done several times and
   the existing code to start from, under the test above; the file lists the
-  trap each one refuses and its reason.
+  trap each one refuses, its reason, and whether it is `copy` or `extend`.
+  Each approved one becomes a file in `zdd/blessings/` with its header
+  (authoring.md).
 - **Decisions, carefully:** the code shows *what* was decided, never *why*,
   and a confident invented reason is worse than none because later sessions
   trust it. Propose only the decisions that would surprise a newcomer

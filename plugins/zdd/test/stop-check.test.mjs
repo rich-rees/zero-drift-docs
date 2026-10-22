@@ -267,3 +267,11 @@ test("CAS-96: the pattern plan alone is not the curated half — code plus only 
   writeFileSync(join(repo, "zdd", "blessing-index.md"), "# Blessing index\n");
   silent(run(repo), "a regenerated index is a ZDD change");
 });
+
+test("CR-046: a harness ADR set outside the bundle counts as ZDD — a code change with only a harness ADR moved is not blocked", () => {
+  const repo = mkRepo({ config: { extractors: ["generic"], hooks: { stop: true }, paths: { harnessAdrDir: "docs/harness-decisions", harnessAdrIndex: "docs/harness-index.md" } } });
+  touchCode(repo);
+  mkdirSync(join(repo, "docs", "harness-decisions"), { recursive: true });
+  writeFileSync(join(repo, "docs", "harness-decisions", "0002-review.md"), "# Review\n");
+  silent(run(repo), "a harness ADR moved alongside the code");
+});

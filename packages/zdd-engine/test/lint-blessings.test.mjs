@@ -1,11 +1,15 @@
-// The blessing-citation lint (DIO-313): the semantic map's first hard check.
-// A blessing that cites a fully superseded ADR, or one that does not exist,
-// fails `zdd-engine lint`; a citation of an ADR superseded in part is a
-// WARNING on stderr and exit 0. The blessing's shape (CAS-96): no trigger
+// The blessing lints (DIO-313; the blessing store since ZDD-1, decision
+// 0031). A blessing that cites a fully superseded ADR, or one that does not
+// exist, fails `zdd-engine lint`; a citation of an ADR superseded in part is
+// a WARNING on stderr and exit 0. The blessing's shape (CAS-96): no trigger
 // question fails; no reason (neither an ADR nor "because …") and over the
-// length budget warn. The pattern plan warns, and fails with --merge.
-// Observed at the CLI seam on scratch copies of the Next.js fixture (whose
-// ADR-0001 is superseded by ADR-0002), plus the parsers on their own.
+// length budget warn. Its header (decision 0031): no `where`, a `where` that
+// names no file in the repo, no `kind` or a wrong one, and an `applies-to`
+// that names no app or package page fail; an unknown `first-built-in` or
+// header key warns. A Blessings section left on a map page fails, naming the
+// upgrade. The pattern plan warns, and fails with --merge. Observed at the
+// CLI seam on scratch copies of the Next.js fixture (whose ADR-0001 is
+// superseded by ADR-0002), plus the parsers on their own.
 // Run: node --test "test/*.test.mjs"
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -15,6 +19,7 @@ import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { extractBlessings, forwardStamps, blessingShape } from "../src/lib/map-links.mjs";
+import { parseWhere, readBlessing, usersOf } from "../src/lib/blessings.mjs";
 
 const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const BIN = join(PKG, "bin", "zdd-engine.mjs");
@@ -26,6 +31,11 @@ const mkRepo = () => {
   return repo;
 };
 const lint = (repo) => spawnSync(process.execPath, [BIN, "lint"], { cwd: repo, encoding: "utf8" });
+// One blessing file. `header` is the lines between the fences; the default
+// names a real file of the fixture and a kind, so a test states only what it
+// is about.
+const bless = (repo, id, text, header = "where: src/app/page.tsx\nkind: copy") =>
+  writeFileSync(join(repo, "zdd", "blessings", `${id}.md`), `---\n${header}\n---\n\n${text}\n`);
 const concept = (repo, name, body) =>
   writeFileSync(join(repo, "zdd", "map", "features", `${name}.md`), `---\ntype: Feature\ntitle: ${name}\ndescription: test\nresource: src\ntags: [${name}]\n---\n\n${body}`);
 
@@ -73,29 +83,28 @@ test("forwardStamps: full and partial stamps, bold or plain, linked or bare", ()
   ]);
 });
 
-test("lint: a blessing citing a fully superseded ADR fails, naming the concept, the blessing and the superseding ADR", () => {
+test("lint: a blessing citing a fully superseded ADR fails, naming the file, the blessing and the superseding ADR", () => {
   const repo = mkRepo();
-  concept(repo, "widgets", "# Blessings\n- Adding a widget? copy `src/widgets.ts`, per ADR-0001 — never ad-hoc SQL.\n");
+  bless(repo, "adding-a-widget", "Adding a widget? copy `src/widgets.ts`, per ADR-0001 — never ad-hoc SQL.");
   const r = lint(repo);
   assert.equal(r.status, 1, r.stdout + r.stderr);
   assert.match(r.stderr, /Store lints failed \(1\)/);
-  assert.match(r.stderr, /zdd\/map\/features\/widgets\.md:10 \(blessing: "Adding a widget\? copy/, "concept, line, excerpt");
+  assert.match(r.stderr, /zdd\/blessings\/adding-a-widget\.md \(blessing: "Adding a widget\? copy/, "file and excerpt");
   assert.match(r.stderr, /cites ADR-0001, which is superseded by ADR-0002/);
   assert.match(r.stderr, /re-bless under the current decision, or drop the blessing/);
   rmSync(repo, { recursive: true, force: true });
 });
 
-test("lint: a blessing citing the current ADR passes; citing a non-existent ADR fails", () => {
+test("lint: a blessing citing the current ADR passes; citing a non-existent ADR fails; the header's adr: is a citation too", () => {
   const repo = mkRepo();
-  concept(repo, "things", "# Blessings\n- Adding a thing? copy [things](/metadata/route/things.json), per ADR-0002.\n");
   let r = lint(repo);
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /store lints passed/);
-  assert.equal(r.stderr, "", "no warning for a clean blessing");
-  concept(repo, "ghost", "# Blessings\n- Per ADR-0042, copy nothing.\n");
+  assert.equal(r.stderr, "", "the fixture's three blessings are clean");
+  bless(repo, "ghost", "Copying a ghost? Copy nothing.", "where: src/app/page.tsx\nkind: copy\nadr: ADR-0042");
   r = lint(repo);
   assert.equal(r.status, 1);
-  assert.match(r.stderr, /ghost\.md:10 .*cites ADR-0042, which does not exist/);
+  assert.match(r.stderr, /ghost\.md .*cites ADR-0042, which does not exist/);
   rmSync(repo, { recursive: true, force: true });
 });
 
@@ -104,42 +113,116 @@ test("lint: a partial supersession and a reasonless blessing are WARNING lines, 
   const adrDir = join(repo, "zdd", "adr");
   writeFileSync(join(adrDir, "0003-things-get-audit.md"), "# Things get an audit trail\n\nThis supersedes ADR-0002 in part: the audit half.\n");
   writeFileSync(join(adrDir, "0002-things-replace-widgets.md"), "# Things replace widgets\n\n**Superseded in part by ADR-0003** (2026-02-01): the audit half.\n\nThis supersedes ADR-0001: the core entity is renamed.\n");
-  concept(
-    repo,
-    "things",
-    "# Blessings\n- Adding a things route? Copy the things route, per ADR-0002.\n- Auditing a change? Copy the audit log — no decision named.\n- Naming a file? Use kebab-case because the deploy is case-sensitive.\n",
-  );
+  bless(repo, "auditing-a-change", "Auditing a change? Copy the audit log — no decision named.");
+  bless(repo, "naming-a-file", "Naming a file? Use kebab-case because the deploy is case-sensitive.");
   const r = lint(repo);
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /store lints passed/);
-  assert.match(r.stderr, /^WARNING: zdd\/map\/features\/things\.md:10 .*cites ADR-0002, superseded in part by ADR-0003/m);
-  assert.match(r.stderr, /^WARNING: zdd\/map\/features\/things\.md:11 .*gives no reason — cite the ADR that blessed it, or say why inline/m);
-  assert.doesNotMatch(r.stderr, /things\.md:12 .*gives no reason/, "a 'because' clause is a reason; no ADR is required (2.3 adds a separate 'points at no code' warning for it)");
+  assert.match(r.stderr, /^WARNING: zdd\/blessings\/adding-an-endpoint-for-things\.md .*cites ADR-0002, superseded in part by ADR-0003/m);
+  assert.match(r.stderr, /^WARNING: zdd\/blessings\/auditing-a-change\.md .*gives no reason — cite the ADR that blessed it \('adr:'\), or say why inline/m);
+  assert.doesNotMatch(r.stderr, /naming-a-file\.md .*gives no reason/, "a 'because' clause is a reason; no ADR is required");
   rmSync(repo, { recursive: true, force: true });
 });
 
 test("lint (CAS-96): a blessing that opens with no trigger question FAILS, naming the fix; a question after the first sentence is not one", () => {
   const repo = mkRepo();
-  concept(repo, "things", "# Blessings\n- Copy the things route, per ADR-0002.\n- Copy it. Adding a route? per ADR-0002.\n- Adding a route (any route; even a hook)? Copy [/api/things](/metadata/route/things.json?x=1), per ADR-0002.\n");
+  bless(repo, "a", "Copy the things route, per ADR-0002.");
+  bless(repo, "b", "Copy it. Adding a route? per ADR-0002.");
+  bless(repo, "c", "Adding a route (any route; even a hook)? Copy [/api/things](../metadata/route/things.json?x=1), per ADR-0002.");
   const r = lint(repo);
   assert.equal(r.status, 1, r.stderr);
   assert.match(r.stderr, /Store lints failed \(2\)/);
-  assert.match(r.stderr, /things\.md:10 .*opens with no trigger question — start it with the question it answers/);
-  assert.match(r.stderr, /things\.md:11 .*opens with no trigger question/);
-  assert.doesNotMatch(r.stderr, /things\.md:12 .*trigger question/, "a semicolon inside the question, and a ? inside a URL, are fine");
+  assert.match(r.stderr, /blessings\/a\.md .*opens with no trigger question — start it with the question it answers/);
+  assert.match(r.stderr, /blessings\/b\.md .*opens with no trigger question/);
+  assert.doesNotMatch(r.stderr, /blessings\/c\.md .*trigger question/, "a semicolon inside the question, and a ? inside a URL, are fine");
   rmSync(repo, { recursive: true, force: true });
 });
 
 test("lint (CAS-96): over the length budget is a WARNING; link targets do not count, link text does", () => {
   const repo = mkRepo();
-  const long = "Adding a route? " + "word ".repeat(60) + "per ADR-0002.";
-  const linky = `Adding a route? Copy [x](/metadata/route/${"a".repeat(400)}.json), per ADR-0002.`;
-  concept(repo, "things", `# Blessings\n- ${long}\n- ${linky}\n`);
+  bless(repo, "long", "Adding a route? " + "word ".repeat(60) + "per ADR-0002.");
+  bless(repo, "linky", `Adding a route? Copy [x](../metadata/route/${"a".repeat(400)}.json), per ADR-0002.`);
   const r = lint(repo);
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stderr, /^WARNING: zdd\/map\/features\/things\.md:10 .*is 329 characters \(budget 300\) — .*the detail belongs in the ADR/m);
-  assert.doesNotMatch(r.stderr, /things\.md:11 .*characters/);
+  assert.match(r.stderr, /^WARNING: zdd\/blessings\/long\.md .*is 329 characters \(budget 300\) — .*the detail belongs in the ADR/m);
+  assert.doesNotMatch(r.stderr, /linky\.md .*characters/);
   rmSync(repo, { recursive: true, force: true });
+});
+
+test("decision 0031: a Blessings section left on a map page FAILS, naming the count and the upgrade that moves it", () => {
+  const repo = mkRepo();
+  concept(repo, "widgets", "# Blessings\n- Adding a widget? Copy `src/app/page.tsx`, per ADR-0002.\n- Naming one? Kebab-case.\n");
+  const r = lint(repo);
+  assert.equal(r.status, 1, r.stderr);
+  assert.match(r.stderr, /zdd\/map\/features\/widgets\.md: holds 2 blessings under a Blessings heading — since 2\.5 a blessing is a file of its own in zdd\/blessings\/ .*say "upgrade ZDD", which moves them/);
+  rmSync(repo, { recursive: true, force: true });
+});
+
+test("decision 0031: the header — where must name a file inside the repo, kind must be copy or extend, applies-to must be an app or package page", () => {
+  const repo = mkRepo();
+  bless(repo, "no-where", "Adding a page? Copy it because x.", "kind: copy");
+  bless(repo, "gone", "Adding a page? Copy it because x.", "where: src/app/gone.tsx\nkind: copy");
+  bless(repo, "folder", "Adding a page? Copy it because x.", "where: src/app\nkind: copy");
+  bless(repo, "outside", "Adding a page? Copy it because x.", "where: ../outside.ts\nkind: copy");
+  bless(repo, "absolute", "Adding a page? Copy it because x.", "where: /etc/passwd\nkind: copy");
+  bless(repo, "no-kind", "Adding a page? Copy it because x.", "where: src/app/page.tsx");
+  bless(repo, "bad-kind", "Adding a page? Copy it because x.", "where: src/app/page.tsx\nkind: imitate");
+  bless(repo, "feature-rule", "Adding a page? Copy it because x.", "where: src/app/page.tsx\nkind: copy\napplies-to: features/things");
+  bless(repo, "no-page", "Adding a page? Copy it because x.", "where: src/app/page.tsx\nkind: copy\napplies-to: apps/nowhere");
+  bless(repo, "no-header", "Adding a page? Copy it because x.", "");
+  const r = lint(repo);
+  assert.equal(r.status, 1, r.stderr);
+  assert.match(r.stderr, /no-where\.md .*has no 'where:' — name the code to start from/);
+  assert.match(r.stderr, /gone\.md .*'where: src\/app\/gone\.tsx' names no file in the repo — the exemplar moved or was deleted/);
+  assert.match(r.stderr, /folder\.md .*'where: src\/app' names no file in the repo/);
+  assert.match(r.stderr, /outside\.md .*'where: \.\.\/outside\.ts' is not a path inside the repo/);
+  assert.match(r.stderr, /absolute\.md .*'where: \/etc\/passwd' is not a path inside the repo/);
+  assert.match(r.stderr, /no-kind\.md .*has no 'kind:' — 'copy' \(imitate this method\) or 'extend'/);
+  assert.match(r.stderr, /bad-kind\.md .*'kind: imitate' is neither 'copy' nor 'extend'/);
+  assert.match(r.stderr, /feature-rule\.md .*'applies-to: features\/things' is a Feature page — a house rule applies to an app or a package/);
+  assert.match(r.stderr, /no-page\.md .*'applies-to: apps\/nowhere' names no semantic-map page/);
+  assert.match(r.stderr, /no-header\.md .*has no 'where:'/);
+  assert.match(r.stderr, /no-header\.md .*has no 'kind:'/);
+  assert.match(r.stderr, /Store lints failed \(11\)/);
+  rmSync(repo, { recursive: true, force: true });
+});
+
+test("decision 0031: an unknown first-built-in and an unknown header key are WARNINGS, exit 0", () => {
+  const repo = mkRepo();
+  bless(repo, "lost", "Adding a page? Copy it because x.", "where: src/app/page.tsx\nkind: copy\nfirst-built-in: features/nowhere\napply-to: apps/fixture-app");
+  const r = lint(repo);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stderr, /^WARNING: zdd\/blessings\/lost\.md .*'first-built-in: features\/nowhere' names no semantic-map page/m);
+  assert.match(r.stderr, /^WARNING: zdd\/blessings\/lost\.md .*has header line ZDD does not read \(apply-to\) — the header is where, kind, applies-to, first-built-in, adr/m);
+  rmSync(repo, { recursive: true, force: true });
+});
+
+test("parseWhere and readBlessing: a path with an optional symbol; the header's adr and the text's citations both count, header first", () => {
+  assert.deepEqual(parseWhere("apps/api/decisions.py (RouteRefusal)"), { path: "apps/api/decisions.py", symbol: "RouteRefusal" });
+  assert.deepEqual(parseWhere("`src\\lib\\upload.ts`"), { path: "src/lib/upload.ts", symbol: null });
+  assert.deepEqual(parseWhere("./a.ts (`f`)"), { path: "a.ts", symbol: "f" });
+  assert.equal(parseWhere(""), null);
+  const b = readBlessing("---\nwhere: a.ts\nkind: extend\nadr: ADR-0009\napplies-to: apps/web.md\n---\n\nAdding X?\nCopy y, per ADR-0003 and ADR-0009.\n", "adding-x");
+  assert.deepEqual(b.adrs, ["0009", "0003"]);
+  assert.equal(b.text, "Adding X? Copy y, per ADR-0003 and ADR-0009.");
+  assert.equal(b.kind, "extend");
+  assert.equal(b.appliesTo, "apps/web");
+  assert.equal(b.shape.question, "Adding X?");
+});
+
+test("usersOf (decision 0031 point 5): inbound refs and usedBy edges, narrowed by symbol, null when no record has the file", () => {
+  const records = [
+    { id: "component:Button", title: "Button", resource: ["ui/Button.tsx"], refs: ["surface:/b"], facts: { edges: { usedBy: ["surface:/b"] } } },
+    { id: "component:Icon", title: "Icon", resource: ["ui/Button.tsx"], refs: [], facts: {} },
+    { id: "surface:/a", title: "/a", resource: ["app/a.tsx"], refs: ["component:Button"], facts: {} },
+    { id: "surface:/b", title: "/b", resource: ["app/b.tsx"], refs: [], facts: {} },
+    { id: "surface:/c", title: "/c", resource: ["app/c.tsx"], refs: ["component:Icon"], facts: {} },
+  ];
+  assert.deepEqual(usersOf({ path: "ui/Button.tsx", symbol: "Button" }, records).map((r) => r.id), ["surface:/a", "surface:/b"]);
+  assert.deepEqual(usersOf({ path: "ui/Button.tsx", symbol: null }, records).map((r) => r.id), ["surface:/a", "surface:/b", "surface:/c"], "no symbol: every record of the file");
+  assert.deepEqual(usersOf({ path: "ui/Button.tsx", symbol: "Nope" }, records).map((r) => r.id), ["surface:/a", "surface:/b", "surface:/c"], "a symbol no record names narrows nothing");
+  assert.deepEqual(usersOf({ path: "app/b.tsx", symbol: null }, records).map((r) => r.id), [], "known, and used by nothing");
+  assert.equal(usersOf({ path: "lib/unknown.py", symbol: null }, records), null, "no record: unknown, never zero");
 });
 
 test("lint (CAS-96): the pattern plan warns on a plain run and fails with --merge, at its configured path", () => {
@@ -178,6 +261,7 @@ test("blessingShape: visible text, the question, the because clause", () => {
 test("lint: an absent mapDir is greenfield-tolerated; a mistyped one in a populated bundle gets the CR-068 note", () => {
   const repo = mkRepo();
   rmSync(join(repo, "zdd", "map"), { recursive: true });
+  rmSync(join(repo, "zdd", "blessings"), { recursive: true }); // they name map pages
   let r = lint(repo);
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stderr, /^WARNING: paths\.mapDir 'zdd\/map' does not exist/m);
@@ -189,23 +273,6 @@ test("lint: an absent mapDir is greenfield-tolerated; a mistyped one in a popula
   assert.equal(r.stderr, "");
   rmSync(repo, { recursive: true, force: true });
   rmSync(green, { recursive: true, force: true });
-});
-
-test("2.3 (CAS-103 pick 4): a blessing that points at no code warns — a blessing is a pointer to reusable code; a link or a path in backticks satisfies it", (t) => {
-  const repo = mkRepo();
-  t.after(() => rmSync(repo, { recursive: true, force: true }));
-  concept(repo, "answers", "# Blessings\n- Deciding where an answer is stored? Keep it in the session, because the store is append-only — never in the browser.\n");
-  const r1 = lint(repo);
-  assert.equal(r1.status, 0, r1.stderr);
-  assert.match(r1.stderr, /answers\.md:\d+ \(blessing: "Deciding where an answer is stored\?.*points at no code — a blessing answers a kind of work with existing code to start from/, r1.stderr);
-  assert.equal(blessingShape("Deciding where an answer is stored? Keep it in the session.").exemplar, false);
-  for (const ok of ["Adding an upload? Start from `lib/media-upload-client.ts` (`uploadMedia`) — reuse it before writing new upload code; never through a Vercel function, because the limit is 4.5 MB.", "Adding a route? Start from [GET /me](/metadata/route/me.json), per ADR-0001 — never inline auth."]) {
-    assert.equal(blessingShape(ok).exemplar, true, ok);
-  }
-  concept(repo, "answers", "# Blessings\n- Adding an upload? Start from `lib/media-upload-client.ts` (`uploadMedia`) — reuse it before writing new upload code, because three screens share it — never a second client.\n");
-  const r2 = lint(repo);
-  assert.equal(r2.status, 0, r2.stderr);
-  assert.doesNotMatch(r2.stderr, /points at no code/);
 });
 
 test("CR-521: a link to an ADR or a URL is a reason, not an exemplar; a metadata record or a repo file is one", () => {

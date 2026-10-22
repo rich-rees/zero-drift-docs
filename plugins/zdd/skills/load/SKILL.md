@@ -77,7 +77,11 @@ names; the `zdd/…` names apply only where a key is absent.
    point is to start with the right words.
 2. **Read the ADR index whole** (`paths.adrIndex`, default `zdd/adr-index.md`).
    One line per decision; this is the map of what has been decided and what
-   supersedes what.
+   supersedes what. When the repo has a **harness ADR set**
+   (`paths.harnessAdrIndex` in `zdd/config.json`, decision 0033), read that
+   index whole too whenever the work touches how the team builds — review,
+   tests, CI, the tracker, ZDD itself. The two sets share one number line,
+   so `ADR-0019` is one decision whichever index lists it.
 3. **Drill into the ADR bodies your task cites** — plus the glossary entries for
    the prompt's terms, and the agent-index sections for the feature you're
    touching.

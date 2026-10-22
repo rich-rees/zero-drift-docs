@@ -876,3 +876,19 @@ test("upgrade (CAS-96, 2.0): an owned workflow's bare lint step gains --merge an
   assert.ok(odd.notes.some((n) => /no `run: npx -y "\$ZDD_ENGINE" lint` step found — add --merge to your lint step by hand/.test(n)), odd.notes.join("\n"));
   assert.ok(readFileSync(wf, "utf8").includes("run: make lint"), "a workflow of another shape is left as it is");
 });
+
+test("CR-013 (decision 0031): bootstrap writes the blessing store — at its default, at a configured path on a repair run — and a repair keeps what is there", () => {
+  const repo = fresh("bless-store");
+  writeFileSync(join(repo, "index.ts"), "");
+  const first = applyJson(repo, "bs1", { extractors: ["generic"] });
+  assert.ok(first.wrote.includes("zdd/blessings/.gitkeep"), first.wrote.join("\n"));
+  assert.ok(existsSync(join(repo, "zdd", "blessings", ".gitkeep")));
+  writeFileSync(join(repo, "zdd", "blessings", "adding-a-thing.md"), "---\nwhere: index.ts\nkind: copy\n---\n\nAdding a thing? Copy it because x.\n");
+  const again = applyJson(repo, "bs2", {});
+  assert.ok(!again.wrote.some((f) => f.startsWith("zdd/blessings/")), "a repair never writes into a store that is there");
+  assert.equal(readFileSync(join(repo, "zdd", "blessings", "adding-a-thing.md"), "utf8"), "---\nwhere: index.ts\nkind: copy\n---\n\nAdding a thing? Copy it because x.\n");
+  const cfg = join(repo, "zdd", "config.json");
+  writeFileSync(cfg, JSON.stringify({ ...JSON.parse(readFileSync(cfg, "utf8")), paths: { blessingsDir: "docs/blessings" } }, null, 2) + "\n");
+  const custom = applyJson(repo, "bs3", {});
+  assert.ok(custom.wrote.includes("docs/blessings/.gitkeep"), custom.wrote.join("\n"));
+});

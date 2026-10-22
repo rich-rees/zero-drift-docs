@@ -16,11 +16,13 @@ import { existsSync, openSync, readSync, closeSync } from "node:fs";
 const MAX_CONFIG_BYTES = 1024 * 1024; // the plugin's cap too (plugins/zdd/scripts/lib/repo.mjs)
 import { dirname, join, resolve, relative } from "node:path";
 import { repoRelative, overlaps, agentIndexAreaDir } from "./paths.mjs";
+import { harnessPathsError } from "./adr-sets.mjs";
 
 export const DEFAULT_PATHS = {
   glossary: "zdd/glossary.md",
   adrDir: "zdd/adr",
   mapDir: "zdd/map",
+  blessingsDir: "zdd/blessings",
   metadataDir: "zdd/metadata",
   agentIndex: "zdd/agent-index.md",
   adrIndex: "zdd/adr-index.md",
@@ -102,17 +104,28 @@ export function validateRepoBase(repoBase) {
 // is not in the set. `configRel` is the config file's repo-relative name (it
 // may start with `..` when --config= points elsewhere; then it overlaps
 // nothing). Returns an error string or null.
-const OUTPUT_KEYS = ["graph", "humanIndex", "agentIndex", "adrIndex", "blessingIndex"];
+// The harness ADR set's two keys (decision 0033) take part only when set.
+const ALL_OUTPUT_KEYS = ["graph", "humanIndex", "agentIndex", "adrIndex", "blessingIndex", "harnessAdrIndex"];
 // patternsPlan is the branch's working file (CAS-96): written by a session,
 // never by the engine, so it is kept apart from the outputs like a store.
-const INPUT_KEYS = ["glossary", "adrDir", "mapDir", "metadataDir", "patternsPlan"];
+const ALL_INPUT_KEYS = ["glossary", "adrDir", "harnessAdrDir", "mapDir", "blessingsDir", "metadataDir", "patternsPlan"];
 export function validatePathLayout(paths, configRel) {
+  const OUTPUT_KEYS = ALL_OUTPUT_KEYS.filter((k) => paths[k] !== undefined);
+  const INPUT_KEYS = ALL_INPUT_KEYS.filter((k) => paths[k] !== undefined);
   const label = (key) => (key === "config" ? "the config file" : `paths.${key}`);
   const value = (key) => (key === "config" ? configRel : paths[key]);
   const clash = (a, b, why) => `${label(a)} '${value(a)}' overlaps ${label(b)} '${value(b)}' — ${why}`;
   const metadataWhy = "metadataDir must be a dedicated folder (derive prunes everything in it that is not a current record)";
-  for (const key of ["glossary", "adrDir", "mapDir", "patternsPlan", ...OUTPUT_KEYS, "config"]) {
+  for (const key of [...INPUT_KEYS.filter((k) => k !== "metadataDir"), ...OUTPUT_KEYS, "config"]) {
     if (overlaps(paths.metadataDir, value(key))) return clash("metadataDir", key, metadataWhy);
+  }
+  // The two ADR sets are two folders: one inside the other would read every
+  // ADR twice, under two sets.
+  if (paths.harnessAdrDir !== undefined && overlaps(paths.adrDir, paths.harnessAdrDir)) return clash("harnessAdrDir", "adrDir", "the harness ADR set is a folder of its own, beside the application set (decision 0033)");
+  // The blessing store too (CR-008): inside the map, a map page would be read
+  // as a blessing and a blessing as a map page.
+  for (const key of ["glossary", "adrDir", "harnessAdrDir", "mapDir", "patternsPlan"].filter((k) => paths[k] !== undefined)) {
+    if (overlaps(paths.blessingsDir, value(key))) return clash("blessingsDir", key, "the blessing store is a folder of its own (decision 0031)");
   }
   const outputWhy = "render's outputs must be distinct files, apart from every store and the config it reads";
   for (let i = 0; i < OUTPUT_KEYS.length; i++) {
@@ -140,9 +153,9 @@ export function validatePathLayout(paths, configRel) {
 // WARNING line when any other store (adr, map, metadata, glossary) is
 // present — the bundle is not greenfield, the path is probably wrong. A
 // truly greenfield bundle gets no line. Advisory: exit codes are unchanged.
-const STORE_KEYS = ["adrDir", "mapDir", "metadataDir", "glossary"];
+const STORE_KEYS = ["adrDir", "harnessAdrDir", "mapDir", "blessingsDir", "metadataDir", "glossary"];
 export function absentStoreNotes(repoRoot, paths, keys) {
-  const present = STORE_KEYS.filter((k) => existsSync(resolve(repoRoot, paths[k])));
+  const present = STORE_KEYS.filter((k) => paths[k] !== undefined && existsSync(resolve(repoRoot, paths[k])));
   if (!present.length) return [];
   return keys
     .filter((k) => !present.includes(k))
@@ -207,6 +220,11 @@ export function loadConfig(args, cwd = process.cwd()) {
   // Every artifact path is read or written on the adopter's behalf — none may
   // point outside the checkout (CR-006). Same rule for localExtractorDir.
   for (const [key, value] of Object.entries(paths)) paths[key] = repoRelative(value, `paths.${key}`);
+  const harnessError = harnessPathsError(paths);
+  if (harnessError) {
+    console.error(harnessError);
+    process.exit(1);
+  }
   if (config.localExtractorDir !== undefined) config.localExtractorDir = repoRelative(config.localExtractorDir, "localExtractorDir");
   const configRel = relative(repoRoot, configPath).split(/[\\/]/).join("/");
   const layoutError = validatePathLayout(paths, configRel);

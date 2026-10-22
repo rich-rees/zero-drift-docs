@@ -1,11 +1,11 @@
 # Zero-Drift Docs (ZDD) — how this repo's documentation works
 
-This repo uses ZDD: seven documentation artifacts kept at most one unit of work
-behind the code — six in `<BUNDLE_DIR>/`, plus code comments in the source. Spoken
+This repo uses ZDD: eight documentation artifacts kept at most one unit of work
+behind the code — seven in `<BUNDLE_DIR>/`, plus code comments in the source. Spoken
 verbs carry it, and all work with any coding agent:
 
 - **"load ZDD"** — before designing or building in an area. Read
-  `<GLOSSARY>` whole, `<ADR_INDEX>` whole, and the ADRs your task
+  `<GLOSSARY>` whole, `<ADR_INDEX>` whole<HARNESS_ADR_LOAD>, and the ADRs your task
   cites; say what you loaded (`ZDD: loaded …`); then read the code fresh.
   Never trust the docs over the code. (Skill: `load`.)
 - **"choose patterns"** — once the design is settled, before any code. First
@@ -14,7 +14,7 @@ verbs carry it, and all work with any coding agent:
   piece, reuse this code, follow a blessing, depart from one and why, none
   applies, or a new pattern to bless. (Skill: `patterns`.)
 - **"update ZDD"** — before finishing a unit of work. Curate the artifacts the
-  change touched (glossary / ADRs / comments / map); reconcile the pattern
+  change touched (glossary / ADRs / comments / map / blessings); reconcile the pattern
   plan (mint the blessings that survived, record the rest in the commit
   message, delete the plan); regenerate the generated ones; write the ZDD
   record (below) into the commit's message; commit them with the code. Run it
@@ -44,7 +44,7 @@ sentences, or `- none`) into the update commit's message; `zdd-engine tally` cou
 - *the repo is behind the newest ZDD release* — "upgrade ZDD", only if the team chooses to; it is not a fault.
 
 **Never hand-edit the generated artifacts** — `<METADATA_DIR>/`, `<GRAPH>`, `<AGENT_INDEX>`
-(and `<AGENT_INDEX_DIR>/` when it has two levels), `<ADR_INDEX>`, `<BLESSING_INDEX>`,
+(and `<AGENT_INDEX_DIR>/` when it has two levels), `<ADR_INDEX>`,<HARNESS_ADR_INDEX_ITEM> `<BLESSING_INDEX>`,
 `<HUMAN_INDEX>` — or this file (`<INSTRUCTIONS>`). A merge conflict in a generated file is
 never resolved by hand, nor by checking out a side: with the merge open, run `derive` then
 `render` (they overwrite it), `git add` the bundle and commit the merge; then `render` once
@@ -52,7 +52,7 @@ more and commit, as the human index reads the merge-base, which the merge moved.
 at each stop: `derive`, `render`, `git add` the bundle, `git rebase --continue`; when it ends,
 `render` once more and commit. The drift check fails otherwise, and while `<PATTERNS_PLAN>` exists.
 **Two ADRs with one number** (parallel branches) fail `lint`: the later branch takes the next
-free number — its file, its title and every citation (supersession stamps, glossary and map links,
+free number — its file, its title and every citation (supersession stamps, glossary, map and blessing links,
 code comments; a ZDD record already committed gets a `ZDD record (amended):` line) — then regenerates.
 
 **If ZDD's skills are missing** in Claude Code, the developer has not installed ZDD for this

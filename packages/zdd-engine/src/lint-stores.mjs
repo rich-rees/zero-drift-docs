@@ -10,10 +10,13 @@
 //    unless the target carries the matching forward stamp ("Superseded [in
 //    part] by ... ADR-NNNN"), so a reader can never land on a dead decision
 //    unsignposted.
-// 2. Blessing citations (DIO-313): a blessing in a semantic-map concept — the
-//    one-liner naming the exemplar to copy, always citing the ADR that
-//    blessed it — fails when the ADR it cites carries a full "Superseded by"
-//    stamp, or does not exist. A stale blessing is worse than none: it sends
+// 2. Blessings (DIO-313; the store since ZDD-1, decision 0031): a blessing —
+//    one file in the blessing store naming the exemplar to copy or extend —
+//    fails when the ADR it cites carries a full "Superseded by" stamp, or
+//    does not exist, and when its `where` names no file in the repo, its
+//    `kind` is missing or neither copy nor extend, or its `applies-to` names
+//    no app or package page. A Blessings section left on a map page fails:
+//    "upgrade ZDD" moves it. A stale blessing is worse than none: it sends
 //    the agent to copy the pattern a later decision refused. The map's first
 //    hard check. A citation of an ADR superseded IN PART is a WARNING line on
 //    stderr, never a failure.
@@ -46,11 +49,13 @@
 //    failure.
 
 import { execFileSync } from "node:child_process";
-import { readFileSync, readdirSync, existsSync, lstatSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync, lstatSync, realpathSync } from "node:fs";
 import { join, resolve, relative } from "node:path";
 import { loadConfig, absentStoreNotes } from "./lib/config.mjs";
 import { parseFrontmatter } from "./lib/frontmatter.mjs";
-import { extractBlessings, forwardStamps, blessingShape, BLESSING_LENGTH_BUDGET } from "./lib/map-links.mjs";
+import { extractBlessings, blessingHeadings, forwardStamps, BLESSING_LENGTH_BUDGET } from "./lib/map-links.mjs";
+import { loadBlessings, BLESSING_KINDS, HEADER_KEYS } from "./lib/blessings.mjs";
+import { adrSets, listAdrFiles } from "./lib/adr-sets.mjs";
 import { walkMarkdown, readBounded, MAX_STORE_FILE_BYTES } from "./lib/walk-markdown.mjs";
 import { unclaimedRecords, CLAIMABLE_KINDS, OPT_IN_CLAIMABLE_KINDS } from "./lib/claims.mjs";
 import { recordsInLog, LOG_FORMAT, printable as printableAll } from "./lib/zdd-record.mjs";
@@ -131,18 +136,25 @@ export function run(args) {
       console.error(`WARNING: claims.strictKinds names '${named}' but the records are '${emitted}' (${paths.metadataDir}/${emitted}/) — strict governs neither; say "upgrade ZDD", which moves the config key and this list together`);
     }
   }
-  const ADR_DIR = resolve(REPO, paths.adrDir);
   const MAP_DIR = resolve(REPO, paths.mapDir);
   const METADATA_DIR = resolve(REPO, paths.metadataDir);
   // A missing adrDir or mapDir is greenfield-tolerated (empty corpus passes);
   // say so when the rest of the bundle exists, so a typo is not a silent pass
   // (CR-068).
-  for (const note of absentStoreNotes(REPO, paths, ["adrDir", "mapDir"])) console.error(note);
+  for (const note of absentStoreNotes(REPO, paths, ["adrDir", "mapDir", "blessingsDir", ...(paths.harnessAdrDir !== undefined ? ["harnessAdrDir"] : [])])) console.error(note);
 
   const problems = [];
 
-const adrFiles = (existsSync(ADR_DIR) ? readdirSync(ADR_DIR) : []).filter((f) => /^\d{4}-.*\.md$/.test(f)).sort();
-const numOf = (f) => f.slice(0, 4);
+// Both ADR sets when the harness set is configured (decision 0033): one
+// number line, so every check below keys on the number across both folders.
+// With one set an ADR is named by its file, as before; with two, by its
+// folder too.
+const { files: adrEntries, unreadable: adrUnreadable } = listAdrFiles(REPO, paths);
+// A set that exists but cannot be listed is a lint failure, never an empty
+// corpus that passes (CR-032).
+for (const u of adrUnreadable) problems.push(`${u.dir}: could not be listed (${u.code}) — its ADRs are not checked; an ADR folder must be a readable folder`);
+const twoSets = adrSets(paths).length > 1;
+const nameOf = (e) => (twoSets ? `${e.dir}/${e.file}` : e.file);
 
 // ---- 0. Duplicate ADR numbers ----
 // Two concurrent branches each minting "the next ADR" merge WITHOUT a git
@@ -152,34 +164,37 @@ const numOf = (f) => f.slice(0, 4);
 // Which file that branch added is the branch's to know, never the sort
 // order's (CAS-107 CR-001): both are named and neither is picked.
 const seenNum = new Map();
-for (const file of adrFiles) {
-  const n = numOf(file);
+for (const e of adrEntries) {
+  const n = e.num;
   if (seenNum.has(n)) {
     problems.push(
-      `duplicate ADR number ${n}: ${seenNum.get(n)} and ${file} — two branches each minted it; ` +
+      `duplicate ADR number ${n}: ${nameOf(seenNum.get(n))} and ${nameOf(e)} — ${twoSets ? "the two ADR sets share one number line (decision 0033); " : ""}two branches each minted it; ` +
         `the ADR the later-merged branch added takes the next free number (rename it, retitle it, rewrite its citations), the other keeps ${n}`,
     );
   } else {
-    seenNum.set(n, file);
+    seenNum.set(n, e);
   }
 }
 
 // ---- 1. Supersession symmetry ----
-const byNum = new Map(adrFiles.map((f) => [numOf(f), f]));
+const byNum = new Map();
+for (const e of adrEntries) if (!byNum.has(e.num)) byNum.set(e.num, e);
 
-for (const file of adrFiles) {
-  const text = readFileSync(join(ADR_DIR, file), "utf8");
+for (const entry of adrEntries) {
+  const file = nameOf(entry);
+  const text = readFileSync(entry.abs, "utf8");
   // Active claims only ("supersedes ADR-NNNN"); the passive stamp
   // ("Superseded by ...") is the other side of the contract.
   for (const m of text.matchAll(/\bsupersedes\b[\s\S]{0,120}?ADR[-\s]?0*(\d+)/gi)) {
     const targetNum = m[1].padStart(4, "0");
-    const targetFile = byNum.get(targetNum);
-    if (!targetFile) {
+    const target = byNum.get(targetNum);
+    if (!target) {
       problems.push(`${file}: claims to supersede ADR-${targetNum}, which does not exist`);
       continue;
     }
-    const targetText = readFileSync(join(ADR_DIR, targetFile), "utf8");
-    const claimerNum = numOf(file);
+    const targetFile = nameOf(target);
+    const targetText = readFileSync(target.abs, "utf8");
+    const claimerNum = entry.num;
     const stamp = new RegExp(`\\bsuperseded(\\s+in\\s+part)?\\s+by\\b[\\s\\S]{0,120}?ADR[-\\s]?0*${Number(claimerNum)}\\b`, "i");
     if (!stamp.test(targetText)) {
       problems.push(
@@ -190,19 +205,26 @@ for (const file of adrFiles) {
   }
 }
 
-// ---- 2. Blessing citations ----
-// Every blessing in every map concept, against the ADR corpus as it stands.
-// Stamps are read from the cited ADR's own text (the forward half of the
-// supersession contract, which lint 1 keeps honest). The map is walked the
-// hardened way — symlinks skipped, reads bounded (CR-018/CR-019) — and a
-// concept over the cap is a lint failure, not a silent pass. Excerpts of
-// map text in diagnostics have control characters neutralised (CR-025).
+// ---- 2. Blessings (decision 0031) ----
+// Blessings live in the blessing store, one file each. A `# Blessings`
+// section left on a semantic-map page FAILS: "upgrade ZDD" moves them
+// (decision 0032), and two homes would mean two parsers. Every blessing in
+// the store is checked against the ADR corpus as it stands — stamps are read
+// from the cited ADR's own text (the forward half of the supersession
+// contract, which lint 1 keeps honest) — and against the repo: its `where`
+// must name a file that exists. Both stores are walked the hardened way —
+// symlinks skipped, reads bounded (CR-018/CR-019) — and a file over the cap
+// is a lint failure, not a silent pass. Excerpts in diagnostics have control
+// characters neutralised (CR-025).
 const printable = (t) => t.replace(/[\x00-\x1f\x7f]/g, "?");
 const stampsByNum = new Map();
 const stampsOf = (num) => {
-  if (!stampsByNum.has(num)) stampsByNum.set(num, forwardStamps(readFileSync(join(ADR_DIR, byNum.get(num)), "utf8")));
+  if (!stampsByNum.has(num)) stampsByNum.set(num, forwardStamps(readFileSync(byNum.get(num).abs, "utf8")));
   return stampsByNum.get(num);
 };
+const BLESSINGS_DIR = resolve(REPO, paths.blessingsDir);
+const blessingsRel = paths.blessingsDir.split("\\").join("/").replace(/\/+$/, "");
+const mapPages = new Map(); // path under the map folder, no .md -> its type
 for (const path of walkMarkdown(MAP_DIR)) {
   const rel = relative(REPO, path).split(/[\\/]/).join("/");
   const text = readBounded(path, MAX_STORE_FILE_BYTES);
@@ -211,49 +233,87 @@ for (const path of walkMarkdown(MAP_DIR)) {
     continue;
   }
   const parsed = parseFrontmatter(text);
-  const body = parsed ? parsed.body : text;
-  // Blessing line numbers are body-relative; report them file-relative.
-  const normalised = text.replace(/\r\n?/g, "\n");
-  const offset = parsed ? (normalised.slice(0, normalised.length - parsed.body.length).match(/\n/g) ?? []).length : 0;
-  for (const b of extractBlessings(body)) {
-    const excerpt = printable(b.text.length > 60 ? b.text.slice(0, 59) + "…" : b.text);
-    const where = `${rel}:${b.line + offset} (blessing: "${excerpt}")`;
-    const shape = blessingShape(b.text);
-    if (!shape.question) {
-      problems.push(
-        `${where}: opens with no trigger question — start it with the question it answers ("Adding an endpoint? Copy …"); ` +
-          `the blessing index lists blessings by that question, so this one is invisible to a session choosing patterns`,
-      );
+  mapPages.set(relative(MAP_DIR, path).split(/[\\/]/).join("/").replace(/\.md$/, ""), parsed ? String(parsed.frontmatter.type ?? "") : "");
+  const left = extractBlessings(parsed ? parsed.body : text);
+  if (left.length) {
+    problems.push(
+      `${rel}: holds ${left.length} blessing${left.length === 1 ? "" : "s"} under a Blessings heading — since 2.5 a blessing is a file of its own in ${blessingsRel}/ ` +
+        `(decision 0031); say "upgrade ZDD", which moves them and names any it cannot`,
+    );
+  } else if (blessingHeadings(parsed ? parsed.body : text)) {
+    problems.push(`${rel}: has a Blessings heading with no blessing under it — since 2.5 blessings live in ${blessingsRel}/ (decision 0031); move what the section says there, or into the page's prose, and remove the heading`);
+  }
+}
+const store = loadBlessings(BLESSINGS_DIR, REPO);
+for (const f of store.unreadable) problems.push(`${printable(f)}: over ${MAX_STORE_FILE_BYTES / 1024} KiB or unreadable — a blessing is a few lines; the detail belongs in its ADR`);
+// What the walk did not read is a blessing lint did not check (CR-006): a
+// symlink, an unlistable folder, a cut-off — each a failure, never a pass.
+for (const s of store.skipped) problems.push(`${printable(relative(REPO, s.path).split(/[\\/]/).join("/") || ".")}: ${s.reason} — a blessing there is not checked; the blessing store holds regular files only`);
+const REPO_REAL = (() => {
+  try {
+    return realpathSync(REPO);
+  } catch {
+    return REPO;
+  }
+})();
+for (const b of store.blessings) {
+  const excerpt = printable(b.text.length > 60 ? b.text.slice(0, 59) + "…" : b.text);
+  const where = `${printable(b.file)} (blessing: "${excerpt}")`;
+  const shape = b.shape;
+  if (!shape.question) {
+    problems.push(
+      `${where}: opens with no trigger question — start it with the question it answers ("Adding an endpoint? Copy …"); ` +
+        `the blessing index lists blessings by that question, so this one is invisible to a session choosing patterns`,
+    );
+  }
+  if (!b.where) {
+    problems.push(`${where}: has no 'where:' — name the code to start from, a repo path and optionally its symbol ("where: src/lib/upload.ts (uploadMedia)")`);
+  } else {
+    const target = resolve(REPO, b.where.path);
+    const inside = !/^([a-z][a-z0-9+.-]*:|\/|\\)/i.test(b.where.path) && !relative(REPO, target).split(/[\\/]/).includes("..");
+    let isFile = false;
+    if (inside) {
+      try {
+        isFile = lstatSync(target).isFile() && !relative(REPO_REAL, realpathSync(target)).split(/[\\/]/).includes("..");
+      } catch {
+        isFile = false;
+      }
     }
-    if (!shape.exemplar) {
-      console.error(
-        `WARNING: ${where} points at no code — a blessing answers a kind of work with existing code to start from and reuse ` +
-          `("Adding an upload? Start from \`lib/media-upload-client.ts\` …"), then the one trap it refuses; a rule with no code to point at ` +
-          `belongs in its ADR and a code comment at the site, and a kind of work with no exemplar yet is a candidate, minted once the code exists`,
-      );
-    }
-    if (shape.length > BLESSING_LENGTH_BUDGET) {
-      console.error(`WARNING: ${where} is ${shape.length} characters (budget ${BLESSING_LENGTH_BUDGET}) — keep the question, the exemplar, the refusal and the reason; the detail belongs in the ADR`);
-    }
-    if (!b.adrs.length) {
-      if (!shape.because) console.error(`WARNING: ${where} gives no reason — cite the ADR that blessed it, or say why inline ("because …")`);
+    if (!inside) problems.push(`${where}: 'where: ${printable(b.where.path)}' is not a path inside the repo — name a file relative to the repo root`);
+    else if (!isFile) problems.push(`${where}: 'where: ${printable(b.where.path)}' names no file in the repo — the exemplar moved or was deleted; point the blessing at the code as it is now, or drop it`);
+  }
+  if (b.kind === null) problems.push(`${where}: has no 'kind:' — 'copy' (imitate this method) or 'extend' (reuse this shared code; extending it means retesting what uses it)`);
+  else if (!BLESSING_KINDS.includes(b.kind)) problems.push(`${where}: 'kind: ${printable(b.kind)}' is neither 'copy' nor 'extend'`);
+  if (b.appliesTo !== null) {
+    const type = mapPages.get(b.appliesTo);
+    if (type === undefined) problems.push(`${where}: 'applies-to: ${printable(b.appliesTo)}' names no semantic-map page — give an app or package page's path under ${paths.mapDir}/, without .md ("apps/web")`);
+    else if (!["Application", "Package"].includes(type)) problems.push(`${where}: 'applies-to: ${printable(b.appliesTo)}' is a ${printable(type || "untyped")} page — a house rule applies to an app or a package; name one, or remove the line`);
+  }
+  if (b.firstBuiltIn !== null && !mapPages.has(b.firstBuiltIn)) {
+    console.error(`WARNING: ${where} 'first-built-in: ${printable(b.firstBuiltIn)}' names no semantic-map page — give its path under ${paths.mapDir}/, without .md ("features/jobs")`);
+  }
+  if (b.unknownKeys.length) console.error(`WARNING: ${where} has header line${b.unknownKeys.length === 1 ? "" : "s"} ZDD does not read (${b.unknownKeys.map(printable).join(", ")}) — the header is ${HEADER_KEYS.join(", ")}`);
+  if (shape.length > BLESSING_LENGTH_BUDGET) {
+    console.error(`WARNING: ${where} is ${shape.length} characters (budget ${BLESSING_LENGTH_BUDGET}) — keep the question, the exemplar, the refusal and the reason; the detail belongs in the ADR`);
+  }
+  if (!b.adrs.length) {
+    if (!shape.because) console.error(`WARNING: ${where} gives no reason — cite the ADR that blessed it ('adr:'), or say why inline ("because …")`);
+    continue;
+  }
+  for (const num of b.adrs) {
+    if (!byNum.has(num)) {
+      problems.push(`${where}: cites ADR-${num}, which does not exist`);
       continue;
     }
-    for (const num of b.adrs) {
-      if (!byNum.has(num)) {
-        problems.push(`${where}: cites ADR-${num}, which does not exist`);
-        continue;
-      }
-      const full = stampsOf(num).filter((s) => !s.partial);
-      const partial = stampsOf(num).filter((s) => s.partial);
-      if (full.length) {
-        problems.push(
-          `${where}: cites ADR-${num}, which is superseded by ADR-${full.map((s) => s.by).join(", ADR-")} — ` +
-            `re-bless under the current decision, or drop the blessing`,
-        );
-      } else if (partial.length) {
-        console.error(`WARNING: ${where} cites ADR-${num}, superseded in part by ADR-${partial.map((s) => s.by).join(", ADR-")} — check the blessed pattern still stands`);
-      }
+    const full = stampsOf(num).filter((s) => !s.partial);
+    const partial = stampsOf(num).filter((s) => s.partial);
+    if (full.length) {
+      problems.push(
+        `${where}: cites ADR-${num}, which is superseded by ADR-${full.map((s) => s.by).join(", ADR-")} — ` +
+          `re-bless under the current decision, or drop the blessing`,
+      );
+    } else if (partial.length) {
+      console.error(`WARNING: ${where} cites ADR-${num}, superseded in part by ADR-${partial.map((s) => s.by).join(", ADR-")} — check the blessed pattern still stands`);
     }
   }
 }

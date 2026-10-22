@@ -718,8 +718,9 @@
     if (!a) return;
     docsBack.hidden = false;
     docsTitle.textContent = `ADR-${a.num}`;
-    docsSource.textContent = `zdd/adr/${a.file}`;
-    renderDocMarkdown(a.body, "zdd/adr");
+    const dir = a.dir || "zdd/adr"; // a harness ADR says where it lives (decision 0033)
+    docsSource.textContent = `${dir}/${a.file}`;
+    renderDocMarkdown(a.body, dir);
     openPanel(docsEl);
   }
   docsBack.addEventListener("click", openAdrIndex);
