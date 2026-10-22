@@ -314,7 +314,7 @@ test("CAS-107 CR-020: the opt-in offer is quiet for an extractor already on", ()
 test("CAS-107 finding 3: each rule's `since` is a release no later than this plugin, and moves with what the rule says — change `says`, then bump `since` and this table together", () => {
   const PINNED = {
     load: "2.4.0", patterns: "2.3.0", update: "2.4.0", upgrade: "2.3.0", skew: "2.3.0", generated: "2.4.1",
-    merge: "2.4.1", renumber: "2.4.1", install: "2.3.0", grill: "2.3.0", findings: "2.3.0", record: "2.4.1",
+    merge: "2.4.1", renumber: "2.4.1", install: "2.3.0", grill: "2.3.0", findings: "2.3.0", record: "2.4.1", blessings: "2.5.0",
   };
   const VERSION = JSON.parse(readFileSync(join(PLUGIN, ".claude-plugin", "plugin.json"), "utf8")).version;
   const SAYS_SHA = {};
@@ -327,7 +327,7 @@ test("CAS-107 finding 3: each rule's `since` is a release no later than this plu
   assert.deepEqual(Object.keys(SAYS_SHA).sort(), Object.keys(PINNED).sort());
   const SAYS_PINNED = {
     load: "f5ab5c09cab0", patterns: "ce86483b2454", update: "0143764c1f10", upgrade: "1f328adcb3f1", skew: "c0a3cd59c82f", generated: "d342fc5876db",
-    merge: "98d4b51c843c", renumber: "d1f96292c08e", install: "df690ac41ed2", grill: "474fe1670736", findings: "85cf9aed5169", record: "3767c173ae7e",
+    merge: "98d4b51c843c", renumber: "d1f96292c08e", install: "df690ac41ed2", grill: "474fe1670736", findings: "85cf9aed5169", record: "3767c173ae7e", blessings: "5d7a511af2c2",
   };
   assert.deepEqual(SAYS_SHA, SAYS_PINNED, "a rule's `says` changed — bump its `since` to this release, then copy the new hashes here");
 });

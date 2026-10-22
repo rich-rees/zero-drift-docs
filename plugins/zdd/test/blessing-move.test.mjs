@@ -301,3 +301,15 @@ test("a blessing that cannot move stays on its page and is named; the others mov
   assert.ok(p.notes.some((n) => /^zdd\/map\/apps\/fixture-app\.md: its Blessings heading stays, because something other than a blessing is under it/.test(n)), p.notes.join("\n"));
   assert.match(engine(prose, ["lint"]).stderr, /fixture-app\.md: has a Blessings heading with no blessing under it/);
 });
+
+test("CR-024: upgrading from 2.4.1, the text pass shows an adopter's own paragraph about blessings beside the 2.5 rule — and only once the rule has changed since the pin", () => {
+  const repo = adopter("rule");
+  writeFileSync(join(repo, "CLAUDE.md"), "# Ours\n\n@zdd/instructions.md\n\n## Docs\n\nOur blessings live on the semantic map, under a Blessings heading in each feature slice.\n");
+  const plan = runJson(repo, ["upgrade", "--plan"]);
+  const hit = plan.duplicates.find((d) => /Our blessings live on the semantic map/.test(d.text));
+  assert.ok(hit, JSON.stringify(plan.duplicates));
+  assert.ok(hit.rules.includes("blessings"), hit.rules.join(","));
+  const cfg = join(repo, "zdd", "config.json");
+  writeFileSync(cfg, JSON.stringify({ ...JSON.parse(readFileSync(cfg, "utf8")), engine: VERSION }, null, 2) + "\n");
+  assert.ok(!runJson(repo, ["upgrade", "--plan"]).duplicates.some((d) => /Our blessings live/.test(d.text)), "a repo already on 2.5 is not asked again");
+});
