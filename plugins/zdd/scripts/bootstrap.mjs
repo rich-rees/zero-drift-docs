@@ -64,8 +64,9 @@
 //     "seedAdr": true                                  // ADR-0001 "Adopt Zero-Drift Docs"
 //   }
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, lstatSync, chmodSync, openSync, writeSync, closeSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, lstatSync, chmodSync, openSync, writeSync, closeSync, rmSync } from "node:fs";
 import { findMapBlessings, proposeMove, blessingSlug, blessingFileText, removeMoved } from "./lib/blessing-move.mjs";
+import { scopeTag, repointLinks, linksToMoved } from "./lib/adr-split.mjs";
 import { join, dirname, basename, relative, posix } from "node:path";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -734,6 +735,17 @@ export class Ledger {
     this.kept = [];
     this.skipped = [];
     this.notes = [];
+    this.removed = [];
+    this.gone = new Set();
+  }
+  // A file removed by a move (the ADR split, decision 0034): recorded, and in
+  // a dry run only marked gone, so a later read in the same plan agrees.
+  remove(rel) {
+    const path = this.abs(rel);
+    if (!this.removed.includes(rel)) this.removed.push(rel);
+    this.pending.delete(rel);
+    if (this.dryRun) return void this.gone.add(rel);
+    rmSync(path);
   }
   abs(rel) {
     return resolveInside(this.root, rel, rel);
@@ -784,6 +796,7 @@ export class Ledger {
   }
   exists(rel) {
     if (this.pending.has(rel)) return true;
+    if (this.gone.has(rel)) return false;
     try {
       return lstatSync(this.abs(rel)).isFile();
     } catch {
@@ -1561,7 +1574,139 @@ export function exampleFeature(config, paths) {
 }
 
 function ledgerOut(l) {
-  return { wrote: l.wrote, kept: l.kept, skipped: l.skipped, notes: l.notes };
+  return { wrote: l.wrote, kept: l.kept, skipped: l.skipped, notes: l.notes, ...(l.removed.length ? { removed: l.removed } : {}) };
+}
+
+// ---------------------------------------------------------------------------
+// split-adrs (ZDD-1, decision 0034): the opt-in step that turns one ADR set
+// into an application set and a harness set. `--plan` proposes a set for each
+// ADR — a tag line (`Scope: harness` / `Scope: product`, exactly) decides;
+// anything else is left for the developer, with the AI's proposal from the
+// content. The write takes the plan's token and an explicit set for every
+// untagged ADR; it writes the two config keys, moves the harness ADRs
+// (numbers unchanged), re-points every link inside the bundle, and lists the
+// links and paths outside it for a hand edit. Everything is judged before
+// the first write.
+// ---------------------------------------------------------------------------
+const parseNums = (v, flag) => {
+  if (v === null || v === undefined || v === false || v === true || v === "") return [];
+  const nums = String(v).split(",").map((x) => x.trim()).filter(Boolean);
+  for (const n of nums) if (!/^\d{4}$/.test(n)) throw new Error(`${flag} takes ADR numbers, four digits each, comma-separated — got '${n.slice(0, 20)}'`);
+  return nums;
+};
+
+export function splitAdrs(root, { plan = false, harness = null, application = null, token = null, dir = null, index = null } = {}) {
+  const cfg = readConfig(root);
+  if (cfg.state === "absent") throw new Error(`no zdd/config.json under ${root} — adopt ZDD first (bootstrap)`);
+  if (cfg.state === "invalid") throw new Error(`${cfg.error} — fix it by hand; the split never rewrites a config it cannot read`);
+  const config = cfg.config;
+  const current = artifactPaths(config);
+  const configured = current.harnessAdrDir !== undefined;
+  if (configured && (dir || index)) throw new Error(`paths.harnessAdrDir is already ${current.harnessAdrDir} — --dir and --index name a new set; leave them out`);
+  // The set's paths, judged by the same rules as every other path.
+  const paths = configured ? current : artifactPaths({ ...config, paths: { ...(config.paths ?? {}), harnessAdrDir: dir ?? "zdd/adr-harness", harnessAdrIndex: index ?? "zdd/adr-harness-index.md" } });
+  const ledger = new Ledger(root, { dryRun: plan });
+  const adrAbs = ledger.abs(paths.adrDir);
+  const files = existsSync(adrAbs) ? readdirSync(adrAbs).filter((f) => /^\d{4}-.*\.md$/.test(f)).sort() : [];
+  const proposals = files.map((file) => {
+    const rel = `${paths.adrDir}/${file}`;
+    let tag = null;
+    try {
+      if (lstatSync(ledger.abs(rel)).size <= MAX_SCAN_BYTES) tag = scopeTag(ledger.read(rel));
+    } catch {
+      tag = null;
+    }
+    return { num: file.slice(0, 4), file, from: rel, tag };
+  });
+  const tokenNow = createHash("sha256").update(JSON.stringify([paths.harnessAdrDir, paths.harnessAdrIndex, proposals.map((p) => [p.num, p.file, p.tag])])).digest("hex").slice(0, 8);
+  const untagged = proposals.filter((p) => !p.tag);
+  if (plan && !token) {
+    ledger.notes.push(
+      untagged.length
+        ? `${untagged.length} of ${proposals.length} ADRs carry no Scope tag line — propose a set for each from what it decides (harness: how the team builds — review, tests, CI, the tracker, ZDD itself; application: what the product does), and let the developer confirm or change each one`
+        : `every ADR carries a Scope tag line — the developer confirms the list`,
+    );
+    return { plan: true, token: tokenNow, dir: paths.harnessAdrDir, index: paths.harnessAdrIndex, proposals, ...ledgerOut(ledger) };
+  }
+  // --- judged whole before the first write ---
+  if (!token) throw new Error("split-adrs takes the token split-adrs --plan printed (--token=<token>), so the write moves exactly the list the developer read");
+  if (!/^[0-9a-f]{8}$/.test(String(token))) throw new Error("--token takes the 8 hex characters split-adrs --plan printed");
+  if (token !== tokenNow) throw new Error(`--token=${token}: the ADRs changed since the plan (its token is now ${tokenNow}) — run split-adrs --plan again`);
+  const h = new Set(parseNums(harness, "--harness"));
+  const a = new Set(parseNums(application, "--application"));
+  const known = new Set(proposals.map((p) => p.num));
+  for (const n of [...h, ...a]) if (!known.has(n)) throw new Error(`ADR-${n} is not in ${paths.adrDir}/ (this run lists ${proposals.length ? proposals.map((p) => p.num).join(", ") : "none"})`);
+  const both = [...h].filter((n) => a.has(n));
+  if (both.length) throw new Error(`ADR-${both.join(", ADR-")} named in both --harness and --application — one set each`);
+  const undecided = untagged.filter((p) => !h.has(p.num) && !a.has(p.num));
+  if (undecided.length) throw new Error(`no set given for the untagged ADR${undecided.length === 1 ? "" : "s"} ${undecided.map((p) => `ADR-${p.num}`).join(", ")} — name each in --harness or --application; the split never decides an untagged ADR`);
+  for (const p of proposals) p.set = h.has(p.num) ? "harness" : a.has(p.num) ? "application" : p.tag;
+  const toMove = proposals.filter((p) => p.set === "harness");
+  const moved = new Map(toMove.map((p) => [p.from, `${paths.harnessAdrDir}/${p.file}`]));
+  const taken = toMove.filter((p) => entryExists(root, `${paths.harnessAdrDir}/${p.file}`));
+  if (taken.length) throw new Error(`${taken.map((p) => `${paths.harnessAdrDir}/${p.file}`).join(", ")} already there — move it by hand, then run split-adrs --plan again`);
+  // --- writes ---
+  if (!configured) {
+    const next = { ...config, paths: { ...(config.paths ?? {}), harnessAdrDir: paths.harnessAdrDir, harnessAdrIndex: paths.harnessAdrIndex } };
+    ledger.overwrite("zdd/config.json", JSON.stringify(next, null, 2) + "\n");
+    ledger.notes.push(`zdd/config.json: paths.harnessAdrDir = ${paths.harnessAdrDir}, paths.harnessAdrIndex = ${paths.harnessAdrIndex} (decision 0033)`);
+  }
+  if (!toMove.length && !entryExists(root, paths.harnessAdrDir)) ledger.create(`${paths.harnessAdrDir}/.gitkeep`, "");
+  // Every Markdown file in the bundle but the generated ones is re-pointed;
+  // the moved ADRs are re-pointed from where they land.
+  const generated = new Set([paths.agentIndex, paths.adrIndex, paths.blessingIndex, paths.harnessAdrIndex, paths.patternsPlan].filter(Boolean));
+  const areaDir = agentIndexAreaDir(paths.agentIndex);
+  const bundle = paths.bundleDir === "." ? "" : paths.bundleDir;
+  const { files: pages, skipped } = listMapPages(ledger, paths.bundleDir);
+  for (const what of skipped) ledger.notes.push(`${paths.bundleDir}: ${what} was not read for links to the moved ADRs — check it by hand`);
+  let repointed = 0;
+  for (const rel of pages) {
+    if (generated.has(rel) || (areaDir && rel.startsWith(`${areaDir}/`)) || rel.startsWith(`${paths.metadataDir}/`)) continue;
+    const text = ledger.read(rel);
+    const newRel = moved.get(rel) ?? rel;
+    const next = outsideFences(text, (chunk) => repointLinks(chunk, { oldRel: rel, newRel, moved, bundleDir: paths.bundleDir }));
+    if (moved.has(rel)) {
+      ledger.create(newRel, next);
+      ledger.remove(rel);
+    } else if (next !== text) {
+      ledger.overwrite(rel, next);
+      repointed++;
+    }
+  }
+  if (toMove.length) ledger.notes.push(`${toMove.length} ADR${toMove.length === 1 ? "" : "s"} moved to ${paths.harnessAdrDir}/ with ${toMove.length === 1 ? "its number" : "their numbers"} unchanged; ${repointed} other file${repointed === 1 ? "" : "s"} in ${paths.bundleDir}/ re-pointed`);
+  // Outside the bundle ZDD writes nothing: what still points at an old path is listed.
+  const outside = [];
+  for (const rel of sweepList(ledger, paths.metadataDir).files) {
+    if (bundle && (rel === bundle || rel.startsWith(`${bundle}/`))) continue;
+    let text;
+    try {
+      if (lstatSync(ledger.abs(rel)).size > MAX_SCAN_BYTES) continue;
+      text = ledger.read(rel);
+    } catch {
+      continue;
+    }
+    for (const hit of linksToMoved(text, { fileRel: rel, moved, bundleDir: paths.bundleDir })) outside.push({ file: rel, ...hit });
+  }
+  for (const o of outside.slice(0, 50)) {
+    const target = [...moved].find(([old]) => o.link.includes(posix.basename(old)))?.[1];
+    ledger.notes.push(`${o.file}:${o.line} still points at ${o.link}${target ? ` — now ${target}` : ""}; ZDD never edits outside ${paths.bundleDir}/, so change it by hand`);
+  }
+  if (outside.length > 50) ledger.notes.push(`… and ${outside.length - 50} more lines outside ${paths.bundleDir}/ that point at a moved ADR`);
+  ledger.notes.push(`run \`render\` (it writes ${paths.harnessAdrIndex} and rewrites ${paths.adrIndex}), then \`lint\`, and commit the split in one PR`);
+  return { plan, token: tokenNow, dir: paths.harnessAdrDir, index: paths.harnessAdrIndex, proposals, moved: [...moved].map(([from, to]) => ({ from, to })), outside, ...ledgerOut(ledger) };
+}
+
+export function narrateSplit(r) {
+  const out = [r.plan ? `ADR split plan — nothing written yet (harness set: ${r.dir}/, index ${r.index})` : `ADR split into ${r.dir}/`];
+  if (r.plan && !r.moved) {
+    out.push(`  token: ${r.token} — pass it with --token once the developer has confirmed every set`);
+    for (const p of r.proposals) out.push(`  ADR-${p.num}  ${p.tag ? `${p.tag} (its Scope tag line)` : "untagged — propose a set from its content"}  ${p.from}`);
+  }
+  const verb = r.plan ? "would write" : "wrote";
+  for (const f of r.wrote) out.push(`  ${verb} ${f}`);
+  for (const f of r.removed ?? []) out.push(`  ${r.plan ? "would remove" : "removed"} ${f}`);
+  for (const n of r.notes) out.push(`  note    ${n}`);
+  return out.map(printable).join("\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -3024,6 +3169,9 @@ if (process.argv[1] && posixify(process.argv[1]).endsWith("/scripts/bootstrap.mj
       const remote = typeof flags.remote === "string" ? flags.remote : undefined;
       const r = upgrade(root, { lock: flags.lock === true, plan: flags.plan === true, drop: flags.drop ?? null, to, moveBlessings: flags["move-blessings"] ?? false, kinds: flags.kinds ?? null, remote, home: flags.home });
       process.stdout.write(flags.json ? JSON.stringify(r, null, 2) + "\n" : narrateUpgrade(r) + "\n");
+    } else if (cmd === "split-adrs") {
+      const r = splitAdrs(root, { plan: flags.plan === true, harness: flags.harness ?? null, application: flags.application ?? null, token: typeof flags.token === "string" ? flags.token : null, dir: typeof flags.dir === "string" ? flags.dir : null, index: typeof flags.index === "string" ? flags.index : null });
+      process.stdout.write(flags.json ? JSON.stringify(r, null, 2) + "\n" : narrateSplit(r) + "\n");
     } else if (cmd === "preflight") {
       const p = await preflight(root, { ...(typeof flags.registry === "string" ? { registry: flags.registry } : {}), ...(typeof flags.github === "string" ? { github: flags.github } : {}) });
       process.stdout.write(flags.json ? JSON.stringify(p, null, 2) + "\n" : narratePreflight(p) + "\n");
@@ -3035,7 +3183,7 @@ if (process.argv[1] && posixify(process.argv[1]).endsWith("/scripts/bootstrap.mj
       const s = releaseStatus(root, typeof flags.remote === "string" ? flags.remote : undefined, flags.home);
       process.stdout.write(flags.json ? JSON.stringify(s) + "\n" : printable(narrateReleaseStatus(s)) + "\n");
     } else {
-      process.stderr.write("Usage: bootstrap.mjs <preflight [--registry=<url>] [--github=<url>]|detect|estimate|apply --answers=<file>|upgrade [--plan] [--lock] [--drop=<ids>] [--move-blessings=<token> [--kinds=<name>:<copy|extend>,…]] [--to=vX.Y.Z]|release-status [--remote=<url>]> [--root=<dir>] [--date=YYYY-MM-DD] [--home=<dir>] [--json]\n");
+      process.stderr.write("Usage: bootstrap.mjs <preflight [--registry=<url>] [--github=<url>]|detect|estimate|apply --answers=<file>|upgrade [--plan] [--lock] [--drop=<ids>] [--move-blessings=<token> [--kinds=<name>:<copy|extend>,…]] [--to=vX.Y.Z]|split-adrs [--plan] [--token=<token> --harness=<nums> --application=<nums>] [--dir=<rel> --index=<rel>]|release-status [--remote=<url>]> [--root=<dir>] [--date=YYYY-MM-DD] [--home=<dir>] [--json]\n");
       process.exit(2);
     }
   } catch (e) {

@@ -164,7 +164,7 @@ export function classify(changed, root, config) {
   if (rootRel.startsWith("..") || isAbsolute(rootRel)) return null; // the adopter root is not inside this git checkout
   const prefix = rootRel && rootRel !== "." ? rootRel + "/" : "";
   const paths = artifactPaths(config, { lenient: true });
-  const zddPrefixes = [paths.bundleDir, paths.glossary, paths.adrDir, paths.mapDir, paths.blessingsDir, paths.metadataDir, paths.agentIndex, paths.adrIndex, paths.blessingIndex, paths.humanIndex, paths.graph]
+  const zddPrefixes = [paths.bundleDir, paths.glossary, paths.adrDir, paths.harnessAdrDir, paths.harnessAdrIndex, paths.mapDir, paths.blessingsDir, paths.metadataDir, paths.agentIndex, paths.adrIndex, paths.blessingIndex, paths.humanIndex, paths.graph]
     .filter(Boolean)
     .map(fold);
   // The pattern plan is a session's working file, not the curated half: a

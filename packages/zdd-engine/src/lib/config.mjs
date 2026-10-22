@@ -153,9 +153,9 @@ export function validatePathLayout(paths, configRel) {
 // WARNING line when any other store (adr, map, metadata, glossary) is
 // present — the bundle is not greenfield, the path is probably wrong. A
 // truly greenfield bundle gets no line. Advisory: exit codes are unchanged.
-const STORE_KEYS = ["adrDir", "mapDir", "blessingsDir", "metadataDir", "glossary"];
+const STORE_KEYS = ["adrDir", "harnessAdrDir", "mapDir", "blessingsDir", "metadataDir", "glossary"];
 export function absentStoreNotes(repoRoot, paths, keys) {
-  const present = STORE_KEYS.filter((k) => existsSync(resolve(repoRoot, paths[k])));
+  const present = STORE_KEYS.filter((k) => paths[k] !== undefined && existsSync(resolve(repoRoot, paths[k])));
   if (!present.length) return [];
   return keys
     .filter((k) => !present.includes(k))

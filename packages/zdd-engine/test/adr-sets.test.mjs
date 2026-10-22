@@ -42,6 +42,7 @@ test("render: one index per set — each lists only its own ADRs and says the nu
   const repo = twoSets();
   const r = engine(repo, "render");
   assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stderr, /harnessAdrDir .* does not exist/, "a present harness folder is a present store");
   const app = readFileSync(join(repo, "zdd", "adr-index.md"), "utf8");
   const harness = readFileSync(join(repo, "zdd", "adr-harness-index.md"), "utf8");
   assert.match(app, /^# ADR index\n/);
