@@ -216,7 +216,9 @@ function findWhere(text, ctx, seen = { folders: [], ambiguous: [] }) {
       // Written relative to its app (`lib/graph-walk.ts` for
       // `apps/backoffice/src/lib/graph-walk.ts`): taken only when exactly one
       // repo file ends with it; two or more is a question for the developer.
-      const matches = path.includes("/") || /\.[A-Za-z0-9]+$/.test(path) ? (ctx.filesEndingWith?.(path) ?? []) : [];
+      // Each candidate must be a regular file in the working tree now: git
+      // still lists a deleted tracked file, and a link is no file (CR-037).
+      const matches = path.includes("/") || /\.[A-Za-z0-9]+$/.test(path) ? (ctx.filesEndingWith?.(path) ?? []).filter((f) => ctx.isFile(f)) : [];
       if (matches.length === 1) path = matches[0];
       else {
         if (matches.length > 1) seen.ambiguous.push({ span: path, matches });

@@ -55,7 +55,7 @@ skill that carries it.
 
 | Moment | Verb (skill) | Reads | Writes |
 |---|---|---|---|
-| Before designing | **"load ZDD"** (`load`) | glossary, ADR index, cited ADRs, agent index | nothing; it declares what it loaded and points at the next step |
+| Before designing | **"load ZDD"** (`load`) | glossary, ADR index (and the harness ADR index for work on how the team builds), cited ADRs, agent index | nothing; it declares what it loaded and points at the next step |
 | Design settled, before code | **"choose patterns"** (`patterns`) | blessing index, matching blessings, agent index and metadata | `zdd/patterns-plan.md` |
 | Before finishing | **"update ZDD"** (`update`) | the plan, the final diff | curated artifacts, new blessings, regenerated artifacts, the ZDD record in the commit message (its `blessings` section is the reconciled plan); deletes the plan |
 

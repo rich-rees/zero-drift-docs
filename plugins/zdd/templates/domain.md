@@ -24,7 +24,7 @@ If any of these files don't exist, proceed silently.
 - A new or sharpened term goes in `<GLOSSARY>`, never in a root `GLOSSARY.md`
   or `CONTEXT.md`.
 - A new decision goes in `<ADR_DIR>/`, continuing the existing numbering,
-  never in `docs/adr/`. An ADR that supersedes another stamps the old one
+  never in `docs/adr/`.<HARNESS_ADR_RULE> An ADR that supersedes another stamps the old one
   `Superseded [in part] by ADR-NNNN`; ZDD's lint checks both directions.
 - Capture them as they crystallise, in the formats ZDD's `update` skill uses
   ("update ZDD" regenerates the index afterwards).

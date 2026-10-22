@@ -60,7 +60,9 @@ test("scopeTag: an exact Scope line decides, bold or not, quoted or not; a sente
   assert.equal(scopeTag("# X\n\nScope: harness\n"), "harness");
   assert.equal(scopeTag("**Scope:** product\n"), "application");
   assert.equal(scopeTag("> **Scope: harness**\n"), "harness");
-  assert.equal(scopeTag("Scope: application.\r\n"), "application");
+  assert.equal(scopeTag("Scope: product\r\n"), "application");
+  // CR-035: only the two documented words, exactly, and never inside an example.
+  for (const loose of ["Scope: application\n", "Scope: Harness\n", "scope: harness\n", "Scope: harness.\n", "```md\nScope: harness\n```\n", "<!--\nScope: harness\n-->\n"]) assert.equal(scopeTag(loose), null, loose);
   // PressPlay's ADR-0049: an argument, not a tag.
   assert.equal(scopeTag("**Scope: a *placed* bank address is not blocked.** That is the MQ picker's legitimate path."), null);
   assert.equal(scopeTag("Scope: harness and product both\n"), null);
@@ -157,4 +159,97 @@ test("ZDD's instructions name the harness index only when the set is configured;
   assert.match(two, /`zdd\/adr-index\.md` whole \(and `zdd\/adr-harness-index\.md`, the harness decisions, when the work touches how the team builds\), and the ADRs your task/);
   assert.match(two, /`zdd\/adr-index\.md`, `zdd\/adr-harness-index\.md`, `zdd\/blessing-index\.md`,/);
   assert.equal(two.replace(/ \(and `zdd\/adr-harness-index\.md`[^)]*\)/, "").replace(" `zdd/adr-harness-index.md`,", ""), plain);
+});
+
+test("CR-034 / CR-036: the token binds each ADR's content — an edit after the plan is refused; two ADRs with one number are refused before any plan", () => {
+  const repo = adopter("content");
+  const { token } = ok(repo, ["--plan"]);
+  const f = join(repo, "zdd", "adr", "0002-things-replace-widgets.md");
+  writeFileSync(f, readFileSync(f, "utf8") + "\nAn afterthought.\n");
+  const before = tree(repo);
+  const r = split(repo, [`--token=${token}`, "--harness=0001", "--application=0002"]);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /the ADRs changed since the plan/);
+  assert.deepEqual(tree(repo), before);
+  writeFileSync(join(repo, "zdd", "adr", "0002-another.md"), "# Another\n\nx.\n");
+  const d = split(repo, ["--plan"]);
+  assert.equal(d.status, 1);
+  assert.match(d.stderr, /two ADRs share a number \(ADR-0002: zdd\/adr\/0002-another\.md and zdd\/adr\/0002-things-replace-widgets\.md\)/);
+});
+
+test("CR-026 / CR-028 / CR-038: an ADR folder outside zdd/ moves too; reference-style links are re-pointed inside and listed outside; ZDD's instructions name the new index", () => {
+  const repo = adopter("outside");
+  mkdirSync(join(repo, "docs"), { recursive: true });
+  cpSync(join(repo, "zdd", "adr"), join(repo, "docs", "decisions"), { recursive: true });
+  rmSync(join(repo, "zdd", "adr"), { recursive: true });
+  const cfg = join(repo, "zdd", "config.json");
+  writeFileSync(cfg, JSON.stringify({ ...JSON.parse(readFileSync(cfg, "utf8")), paths: { adrDir: "docs/decisions" } }, null, 2) + "\n");
+  writeFileSync(join(repo, "zdd", "glossary.md"), "# Glossary\n\n**Thing**: see [the old one][old].\n\n[old]: ../docs/decisions/0001-widgets-are-the-core-entity.md\n");
+  writeFileSync(join(repo, "docs", "notes.md"), "See [the entity][e].\n\n[e]: decisions/0001-widgets-are-the-core-entity.md\n");
+  bootstrapInstructions(repo);
+  const { token } = ok(repo, ["--plan"]);
+  const r = ok(repo, [`--token=${token}`, "--harness=0001", "--application=0002"]);
+  assert.ok(existsSync(join(repo, "zdd", "adr-harness", "0001-widgets-are-the-core-entity.md")), "moved out of docs/decisions");
+  assert.ok(!existsSync(join(repo, "docs", "decisions", "0001-widgets-are-the-core-entity.md")));
+  assert.match(readFileSync(join(repo, "zdd", "adr-harness", "0001-widgets-are-the-core-entity.md"), "utf8"), /\]\(\.\.\/\.\.\/docs\/decisions\/0002-things-replace-widgets\.md\)/);
+  assert.match(readFileSync(join(repo, "zdd", "glossary.md"), "utf8"), /^\[old\]: adr-harness\/0001-widgets-are-the-core-entity\.md$/m, "a reference definition inside zdd/");
+  assert.ok(r.notes.some((n) => /^docs\/notes\.md:3 still points at decisions\/0001-widgets-are-the-core-entity\.md/.test(n)), r.notes.join("\n"));
+  assert.match(readFileSync(join(repo, "zdd", "instructions.md"), "utf8"), /`zdd\/adr-harness-index\.md`, the harness decisions/);
+  assert.equal(engine(repo, ["render"]).status, 0);
+  assert.equal(engine(repo, ["lint"]).status, 0);
+});
+// ZDD's instructions file as bootstrap writes it, so the split's refresh has one to rewrite.
+const bootstrapInstructions = (repo) => {
+  const r = spawnSync(process.execPath, [SCRIPT, "upgrade", `--root=${repo}`, `--home=${join(scratch, "home")}`], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+};
+
+test("CR-026 / CR-027: an ADR the split cannot read, or a destination that is a link or is taken, is refused before the first write", () => {
+  const repo = adopter("unfit");
+  const big = join(repo, "zdd", "adr", "0001-widgets-are-the-core-entity.md");
+  writeFileSync(big, readFileSync(big, "utf8") + "x".repeat(1024 * 1024 + 1));
+  let { token } = ok(repo, ["--plan"]);
+  let before = tree(repo);
+  let r = split(repo, [`--token=${token}`, "--harness=0001", "--application=0002"]);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /cannot move zdd\/adr\/0001-widgets-are-the-core-entity\.md: .*over 1024 KiB/);
+  assert.deepEqual(tree(repo), before);
+  const fine = adopter("taken");
+  mkdirSync(join(fine, "zdd", "adr-harness", "0001-widgets-are-the-core-entity.md"), { recursive: true });
+  // Anything already at the ADR's name in the harness folder has its number:
+  // refused before the plan, as a duplicate, so nothing is written.
+  before = tree(fine);
+  r = split(fine, ["--plan"]);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /two ADRs share a number \(ADR-0001: zdd\/adr-harness\/0001-widgets-are-the-core-entity\.md and zdd\/adr\/0001-widgets-are-the-core-entity\.md\)/);
+  assert.deepEqual(tree(fine), before);
+});
+
+test("CR-030: the plugin refuses a harness index inside an ADR folder, as the engine does — before the split writes anything", async () => {
+  const { artifactPaths } = await import("../scripts/lib/repo.mjs");
+  assert.throws(() => artifactPaths({ paths: { harnessAdrDir: "zdd/h", harnessAdrIndex: "zdd/h/index.md" } }), /paths\.harnessAdrIndex "zdd\/h\/index\.md" overlaps paths\.harnessAdrDir "zdd\/h"/);
+  const repo = adopter("nested");
+  const before = tree(repo);
+  const r = split(repo, ["--plan", "--dir=zdd/h", "--index=zdd/h/index.md"]);
+  assert.equal(r.status, 1);
+  assert.deepEqual(tree(repo), before);
+});
+
+test("CR-037: the blessing move never takes a tracked file that was deleted, or a link, as a path's one match", async () => {
+  const { proposeMove } = await import("../scripts/lib/blessing-move.mjs");
+  const ctx = {
+    page: "zdd/map/features/f.md", pageType: "Feature", mapDir: "zdd/map", blessingsDir: "zdd/blessings", bundleDir: "zdd", metadataDir: "zdd/metadata", adrDir: "zdd/adr",
+    isFile: (r) => r === "apps/web/src/lib/kept.ts",
+    readRecord: () => null,
+    filesEndingWith: (tail) => ["apps/web/src/lib/gone.ts", "apps/web/src/lib/kept.ts"].filter((f) => f.endsWith(`/${tail}`)),
+  };
+  const p = proposeMove({ text: "Walking? Copy `lib/gone.ts` because x.", parts: ["Walking? Copy `lib/gone.ts` because x."], adrs: [] }, ctx);
+  assert.equal(p.where, null);
+  assert.match(p.problem, /no link or path in it names a repo file/);
+});
+
+test("CR-042 / CR-046: pre-tag's usage names --split, and a bad call exits 2 without running anything", () => {
+  const r = spawnSync(process.execPath, [resolve(PLUGIN, "..", "..", "scripts", "pre-tag.mjs")], { encoding: "utf8" });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /usage: pre-tag\.mjs vX\.Y\.Z \[--split\] <adopter checkout>/);
 });

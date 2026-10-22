@@ -204,10 +204,11 @@
       "type": "object",
       "description": "Where each artifact lives. Defaults are the self-contained zdd/* layout; point elsewhere only if adopting an existing glossary/ADR directory.",
       "additionalProperties": false,
+      "dependencies": { "harnessAdrDir": ["harnessAdrIndex"], "harnessAdrIndex": ["harnessAdrDir"] },
       "properties": {
         "glossary": { "type": "string", "default": "zdd/glossary.md" },
         "adrDir": { "type": "string", "default": "zdd/adr" },
-        "harnessAdrDir": { "type": "string", "description": "Optional, with harnessAdrIndex: a harness ADR set beside the application set in adrDir — one number line across both (decision 0033). bootstrap's split-adrs writes it." },
+        "harnessAdrDir": { "type": "string", "description": "Optional, with harnessAdrIndex: the folder of a harness ADR set, beside (never inside) adrDir — one number line across both (decision 0033). bootstrap's split-adrs writes it." },
         "harnessAdrIndex": { "type": "string", "description": "Optional, with harnessAdrDir: the harness set's index — generated, checked by render --check." },
         "mapDir": { "type": "string", "default": "zdd/map" },
         "blessingsDir": { "type": "string", "default": "zdd/blessings", "description": "The blessing store: one file per blessing (decision 0031)." },

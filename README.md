@@ -46,7 +46,8 @@ each what it needs, off **eight artifacts** — the design test for every fact:
 Five are **curated** (they can rot, so a per-PR ritual + CI watch them) and three are
 **generated** (rot-proof by construction, never hand-edited). The count is by
 *role*, not by file: the generated half also lands on disk as `zdd/adr-index.md`
-(the ADRs' index, rendered), `zdd/blessing-index.md` (the blessings, one line
+(the ADRs' index, rendered; a harness set has `zdd/adr-harness-index.md` too, and
+only then), `zdd/blessing-index.md` (the blessings, one line
 each: the trigger question, where the code is, and why) and `zdd/graph.json`
 (the machine form of the whole generated half — schema `zdd-graph/1` — from
 which the human index is rendered). All are mandatory outputs of `render` and
@@ -211,7 +212,8 @@ points you at the install or at plan-mode + "update ZDD", and ZDD keeps working.
 His skills read a root `GLOSSARY.md` and `docs/adr/` by name (`CONTEXT.md`
 before his 1.3). `bootstrap` writes `docs/agents/domain.md`, the file they honour,
 pointing them at `zdd/glossary.md` and `zdd/adr/` (only when absent; a
-hand-written one is kept). Keep the glossary under `zdd/`: moved to a root
+hand-written one is kept — after a split, `split-adrs` names it so the harness
+folder can be added by hand). Keep the glossary under `zdd/`: moved to a root
 `glossary.md` it collides with his `GLOSSARY.md` on case-insensitive disks
 (Windows, macOS) but not on Linux CI. `lint` warns while a root `GLOSSARY.md` or
 `CONTEXT.md` sits beside the real glossary.
@@ -823,8 +825,9 @@ warning can say "behind".
   (`paths.blessingsDir`; `paths.harnessAdrDir` and `paths.harnessAdrIndex`,
   together, on the split). No metadata-contract change and no new mandatory
   generated file. **What moves on the bump**: `derive --check` nothing;
-  `render --check` the blessing index (its new format) and, once blessings
-  move, `graph.json` and `human-index.html` (the map pages lose their
+  `render --check` the blessing index (its new format), `human-index.html`
+  for every adopter (the viewer's code is inlined, and names a harness ADR's
+  folder), and, once blessings move, `graph.json` (the map pages lose their
   Blessings sections) and `agent-index.md` where a metadata link lived only
   inside a blessing; "upgrade ZDD" rewrites `zdd/instructions.md` (and the
   `AGENTS.md` copy) and the pins, and lists the blessings to move — it moves
