@@ -74,9 +74,15 @@ export function rebaseAdrLinks(text) {
 // index lives at zdd/adr-index.md) so they resolve on GitHub, matching the
 // agent index's convention — including the links carried inside an extracted
 // first sentence, which is what rebaseAdrLinks above is for.
-export function buildAdrIndex(adrs) {
+//
+// `sets` (decision 0033) is given only when the harness set is configured,
+// one index per set: { title, shared (the line saying the numbers are
+// shared), href(adr), rebase(text, adr), stampOf(num) — how a superseding
+// ADR is named, marked and linked when it is in the other set }. Without it
+// the bytes are the one-set index's, unchanged.
+export function buildAdrIndex(adrs, sets) {
   const lines = [];
-  lines.push("# ADR index");
+  lines.push(sets ? sets.title : "# ADR index");
   lines.push("");
   lines.push(
     "One line per ADR: number — title — first sentence, plus supersession stamps.",
@@ -85,15 +91,17 @@ export function buildAdrIndex(adrs) {
     "(by the task, the spec, the glossary, or the agent index) — and declare the",
     "selection.",
   );
+  if (sets) lines.push(sets.shared);
   lines.push("");
   const sorted = [...adrs].sort((a, b) => (a.num < b.num ? -1 : 1));
+  const stampName = sets ? sets.stampOf : (num) => `ADR-${num}`;
   for (const adr of sorted) {
-    const sentence = rebaseAdrLinks(firstSentence(adr.body));
+    const sentence = sets ? sets.rebase(firstSentence(adr.body), adr) : rebaseAdrLinks(firstSentence(adr.body));
     const stamps = supersessionStamps(adr.body);
-    let line = `- [ADR-${adr.num}](adr/${adr.file}) — ${adr.title}`;
+    let line = `- [ADR-${adr.num}](${sets ? sets.href(adr) : `adr/${adr.file}`}) — ${adr.title}`;
     if (sentence) line += ` — ${sentence}`;
-    const partial = stamps.filter((s) => s.partial).map((s) => `ADR-${s.by}`);
-    const full = stamps.filter((s) => !s.partial).map((s) => `ADR-${s.by}`);
+    const partial = stamps.filter((s) => s.partial).map((s) => stampName(s.by));
+    const full = stamps.filter((s) => !s.partial).map((s) => stampName(s.by));
     if (full.length) line += ` _(superseded by ${full.join(", ")})_`;
     if (partial.length) line += ` _(superseded in part by ${partial.join(", ")})_`;
     lines.push(line);

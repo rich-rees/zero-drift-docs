@@ -24,6 +24,7 @@ import { readdirSync, existsSync, lstatSync } from "node:fs";
 import { resolve, relative } from "node:path";
 import { loadConfig } from "./lib/config.mjs";
 import { loadBlessings } from "./lib/blessings.mjs";
+import { listAdrFiles } from "./lib/adr-sets.mjs";
 import { readBounded, MAX_STORE_FILE_BYTES } from "./lib/walk-markdown.mjs";
 import { SECTIONS, USE_VERBS, STORE_VERB, BLESSING_VERBS, LOG_FORMAT, recordsInLog, namesIn, glossaryTerms, itemMatcher, printable } from "./lib/zdd-record.mjs";
 
@@ -130,13 +131,10 @@ export function tally(commits, stores) {
 export function readStores(repoRoot, paths) {
   const notes = [];
   const rel = (p) => relative(repoRoot, p).split(/[\\/]/).join("/");
-  const adrDir = resolve(repoRoot, paths.adrDir);
-  let adrs = [];
-  try {
-    if (existsSync(adrDir)) adrs = readdirSync(adrDir).filter((f) => /^\d{4}-.*\.md$/.test(f)).map((f) => f.slice(0, 4)).sort();
-  } catch (e) {
-    notes.push(`${rel(adrDir)}: could not be listed (${e.code ?? "error"}) — no ADR counted as never named`);
-  }
+  // Both ADR sets when the harness set is configured (decision 0033).
+  const listed = listAdrFiles(repoRoot, paths);
+  const adrs = [...new Set(listed.files.map((e) => e.num))].sort();
+  for (const u of listed.unreadable) notes.push(`${u.dir}: could not be listed (${u.code}) — no ADR counted as never named`);
   const glossary = resolve(repoRoot, paths.glossary);
   let terms = [];
   try {

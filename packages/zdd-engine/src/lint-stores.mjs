@@ -55,6 +55,7 @@ import { loadConfig, absentStoreNotes } from "./lib/config.mjs";
 import { parseFrontmatter } from "./lib/frontmatter.mjs";
 import { extractBlessings, forwardStamps, BLESSING_LENGTH_BUDGET } from "./lib/map-links.mjs";
 import { loadBlessings, BLESSING_KINDS, HEADER_KEYS } from "./lib/blessings.mjs";
+import { adrSets, listAdrFiles } from "./lib/adr-sets.mjs";
 import { walkMarkdown, readBounded, MAX_STORE_FILE_BYTES } from "./lib/walk-markdown.mjs";
 import { unclaimedRecords, CLAIMABLE_KINDS, OPT_IN_CLAIMABLE_KINDS } from "./lib/claims.mjs";
 import { recordsInLog, LOG_FORMAT, printable as printableAll } from "./lib/zdd-record.mjs";
@@ -135,18 +136,22 @@ export function run(args) {
       console.error(`WARNING: claims.strictKinds names '${named}' but the records are '${emitted}' (${paths.metadataDir}/${emitted}/) — strict governs neither; say "upgrade ZDD", which moves the config key and this list together`);
     }
   }
-  const ADR_DIR = resolve(REPO, paths.adrDir);
   const MAP_DIR = resolve(REPO, paths.mapDir);
   const METADATA_DIR = resolve(REPO, paths.metadataDir);
   // A missing adrDir or mapDir is greenfield-tolerated (empty corpus passes);
   // say so when the rest of the bundle exists, so a typo is not a silent pass
   // (CR-068).
-  for (const note of absentStoreNotes(REPO, paths, ["adrDir", "mapDir"])) console.error(note);
+  for (const note of absentStoreNotes(REPO, paths, ["adrDir", "mapDir", ...(paths.harnessAdrDir !== undefined ? ["harnessAdrDir"] : [])])) console.error(note);
 
   const problems = [];
 
-const adrFiles = (existsSync(ADR_DIR) ? readdirSync(ADR_DIR) : []).filter((f) => /^\d{4}-.*\.md$/.test(f)).sort();
-const numOf = (f) => f.slice(0, 4);
+// Both ADR sets when the harness set is configured (decision 0033): one
+// number line, so every check below keys on the number across both folders.
+// With one set an ADR is named by its file, as before; with two, by its
+// folder too.
+const { files: adrEntries } = listAdrFiles(REPO, paths);
+const twoSets = adrSets(paths).length > 1;
+const nameOf = (e) => (twoSets ? `${e.dir}/${e.file}` : e.file);
 
 // ---- 0. Duplicate ADR numbers ----
 // Two concurrent branches each minting "the next ADR" merge WITHOUT a git
@@ -156,34 +161,37 @@ const numOf = (f) => f.slice(0, 4);
 // Which file that branch added is the branch's to know, never the sort
 // order's (2.4.1 CR-001): both are named and neither is picked.
 const seenNum = new Map();
-for (const file of adrFiles) {
-  const n = numOf(file);
+for (const e of adrEntries) {
+  const n = e.num;
   if (seenNum.has(n)) {
     problems.push(
-      `duplicate ADR number ${n}: ${seenNum.get(n)} and ${file} — two branches each minted it; ` +
+      `duplicate ADR number ${n}: ${nameOf(seenNum.get(n))} and ${nameOf(e)} — ${twoSets ? "the two ADR sets share one number line (decision 0033); " : ""}two branches each minted it; ` +
         `the ADR the later-merged branch added takes the next free number (rename it, retitle it, rewrite its citations), the other keeps ${n}`,
     );
   } else {
-    seenNum.set(n, file);
+    seenNum.set(n, e);
   }
 }
 
 // ---- 1. Supersession symmetry ----
-const byNum = new Map(adrFiles.map((f) => [numOf(f), f]));
+const byNum = new Map();
+for (const e of adrEntries) if (!byNum.has(e.num)) byNum.set(e.num, e);
 
-for (const file of adrFiles) {
-  const text = readFileSync(join(ADR_DIR, file), "utf8");
+for (const entry of adrEntries) {
+  const file = nameOf(entry);
+  const text = readFileSync(entry.abs, "utf8");
   // Active claims only ("supersedes ADR-NNNN"); the passive stamp
   // ("Superseded by ...") is the other side of the contract.
   for (const m of text.matchAll(/\bsupersedes\b[\s\S]{0,120}?ADR[-\s]?0*(\d+)/gi)) {
     const targetNum = m[1].padStart(4, "0");
-    const targetFile = byNum.get(targetNum);
-    if (!targetFile) {
+    const target = byNum.get(targetNum);
+    if (!target) {
       problems.push(`${file}: claims to supersede ADR-${targetNum}, which does not exist`);
       continue;
     }
-    const targetText = readFileSync(join(ADR_DIR, targetFile), "utf8");
-    const claimerNum = numOf(file);
+    const targetFile = nameOf(target);
+    const targetText = readFileSync(target.abs, "utf8");
+    const claimerNum = entry.num;
     const stamp = new RegExp(`\\bsuperseded(\\s+in\\s+part)?\\s+by\\b[\\s\\S]{0,120}?ADR[-\\s]?0*${Number(claimerNum)}\\b`, "i");
     if (!stamp.test(targetText)) {
       problems.push(
@@ -208,7 +216,7 @@ for (const file of adrFiles) {
 const printable = (t) => t.replace(/[\x00-\x1f\x7f]/g, "?");
 const stampsByNum = new Map();
 const stampsOf = (num) => {
-  if (!stampsByNum.has(num)) stampsByNum.set(num, forwardStamps(readFileSync(join(ADR_DIR, byNum.get(num)), "utf8")));
+  if (!stampsByNum.has(num)) stampsByNum.set(num, forwardStamps(readFileSync(byNum.get(num).abs, "utf8")));
   return stampsByNum.get(num);
 };
 const BLESSINGS_DIR = resolve(REPO, paths.blessingsDir);
