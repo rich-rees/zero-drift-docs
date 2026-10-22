@@ -31,14 +31,19 @@
 //       app, a mature codebase) and the opt-in backfill: source files,
 //       commits, age, and an honest estimate of the user's review time.
 //
-//   bootstrap.mjs upgrade [--lock] [--root=<dir>] [--json]
+//   bootstrap.mjs upgrade [--plan] [--lock] [--drop=<ids>]
+//                         [--move-blessings=<token> [--kinds=<name>:<copy|extend>,…]]
+//                         [--to=vX.Y.Z] [--root=<dir>] [--json]
 //       The only later writer into an adopter's repo. Migrates `adapter` →
 //       `extractors`, moves `viewer.nonAreaTags` to the top level, rewrites
 //       every plugin-OWNED file (engine pins, the managed hook, the marked
 //       snippet blocks) to this plugin's version, moves our release lock's
 //       ref (decision 0021; `--lock` writes an absent one, on the user's
-//       word), and names every file it changed. Never touches a curated
-//       artifact or a file it does not own.
+//       word), and names every file it changed. It touches a curated
+//       artifact only by two mechanical moves, each named: a map link to a
+//       record whose kind a release renamed (2.3), and — with the token the
+//       plan printed — blessings out of the map into the blessing store
+//       (2.5, decision 0032). Never a file it does not own otherwise.
 //
 // Trust: the answer set, the existing config, and everything in the checkout
 // are untrusted input. Answers are validated whole before the first write;
@@ -1583,6 +1588,23 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
   }
   const dropIds = parseDrop(drop);
   const kindOf = parseKinds(kinds);
+  if (move !== false && move !== true && !/^[0-9a-f]{8}$/.test(String(move))) throw new Error("--move-blessings takes the token upgrade --plan printed (8 hex characters)");
+  if (move === true) throw new Error("--move-blessings takes the token upgrade --plan printed (--move-blessings=<token>), so the write moves exactly the list the developer read");
+  // The move is judged whole before the first write (CR-002, CR-003,
+  // CR-009): the paths as configured, strictly; every --kinds answer against
+  // the proposals; the token against the list the plan showed; every
+  // destination free. A plan run is the computation, as for --drop.
+  if (!plan && (move || kindOf.size)) {
+    try {
+      artifactPaths(cfg.config);
+    } catch (e) {
+      throw new Error(`${e.message} — fix zdd/config.json's paths before moving blessings; the move never guesses where the store is`);
+    }
+    const preview = upgrade(root, { lock, plan: true, kinds }).blessingMoves;
+    if (move && preview.token !== move) throw new Error(`--move-blessings=${move}: the blessings on the map changed since the plan (its token is now ${preview.token}) — run upgrade --plan again and read the new list`);
+    const taken = preview.proposals.filter((p) => !p.problem && entryExists(root, p.file));
+    if (taken.length) throw new Error(`the blessing store already holds ${taken.map((p) => p.file).join(", ")} — move or rename it by hand, then run upgrade --plan again`);
+  }
   if (dropIds.length && !plan) {
     const known = upgrade(root, { lock, plan: true }).duplicates.map((d) => d.id);
     const bad = dropIds.find((id) => !known.includes(id));
@@ -1691,7 +1713,13 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
   // Blessings leave the map for the blessing store (2.5, decision 0032):
   // proposed on every run, written only with --move-blessings, which the
   // skill passes once the developer has read the list and said yes.
-  const blessingMoves = moveBlessings(ledger, artifactPaths(config, { lenient: true }), { move, kindOf });
+  const blessingMoves = moveBlessings(ledger, artifactPaths(config, { lenient: true }), { move: Boolean(move), kindOf });
+  // The store exists after every upgrade (CR-005): lint and render say so
+  // when it does not, and a repo with no blessings yet still has its folder.
+  {
+    const dir = artifactPaths(config, { lenient: true }).blessingsDir;
+    if (!entryExists(root, dir) && !blessingMoves.moved.length) ledger.create(`${dir}/.gitkeep`, "");
+  }
   const upgradePaths = artifactPaths(config, { lenient: true });
   const instructionsOk = writeInstructions(ledger, config) !== null;
   if (instructionsOk && ledger.exists("CLAUDE.md")) {
@@ -1747,6 +1775,17 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
   return { version, plan, ...ledgerOut(ledger), duplicates, blessingMoves };
 }
 
+// Anything at all at a repo-relative path — a file, a folder, a link
+// (lstat, never followed).
+function entryExists(root, rel) {
+  try {
+    lstatSync(resolveInside(root, rel, rel));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // --kinds=<id>:<copy|extend>,… — the developer's answers to the proposed
 // kinds, by the proposed file name.
 function parseKinds(kinds) {
@@ -1767,6 +1806,7 @@ function parseKinds(kinds) {
 // { proposals, moved, left }, each proposal { id, file, from, question,
 // where, symbol, kind, appliesTo, firstBuiltIn, adrs, problem }.
 function moveBlessings(ledger, paths, { move, kindOf }) {
+  const binding = [];
   const { files, skipped } = listMapPages(ledger, paths.mapDir);
   for (const what of skipped) ledger.notes.push(`${paths.mapDir}: ${what} was not read for blessings to move — check it by hand`);
   const taken = new Set();
@@ -1802,28 +1842,43 @@ function moveBlessings(ledger, paths, { move, kindOf }) {
     const moved = [];
     for (const item of found.items) {
       const p = proposeMove(item, ctx);
+      // A name is free only when nothing at all is there — a folder or a
+      // link of that name takes it too (CR-001).
       let id = blessingSlug(p.question ?? item.text);
-      for (let n = 2; taken.has(id) || ledger.exists(`${paths.blessingsDir}/${id}.md`); n++) id = `${blessingSlug(p.question ?? item.text)}-${n}`;
+      for (let n = 2; taken.has(id) || ledger.pending.has(`${paths.blessingsDir}/${id}.md`) || entryExists(ledger.root, `${paths.blessingsDir}/${id}.md`); n++) id = `${blessingSlug(p.question ?? item.text)}-${n}`;
       taken.add(id);
+      const proposed = p.kind;
       if (kindOf.has(id)) p.kind = kindOf.get(id);
       const proposal = { id, file: `${paths.blessingsDir}/${id}.md`, from: `${rel}:${item.first + 1}`, ...p };
+      // The token covers what the developer reads, the proposed kind included
+      // and the answer to it left out.
+      binding.push(JSON.stringify([id, proposal.from, p.text, p.where, p.symbol, proposed, p.appliesTo, p.firstBuiltIn, p.adrs, p.problem]));
       delete proposal.text;
       proposals.push(proposal);
       if (!move || p.problem) continue;
-      ledger.create(proposal.file, blessingFileText(p));
-      moved.push(item);
+      // The blessing leaves its page only once its file exists (CR-001).
+      if (ledger.create(proposal.file, blessingFileText(p))) moved.push(item);
+      else {
+        proposal.problem = `${proposal.file} appeared during the run — it stays on the map; run upgrade --plan again`;
+        ledger.notes.push(`${proposal.from}: this blessing was not moved — ${proposal.problem}`);
+      }
     }
     if (moved.length) {
       ledger.overwrite(rel, removeMoved(text, found, moved));
       ledger.notes.push(`${rel}: ${moved.length} blessing${moved.length === 1 ? "" : "s"} moved to ${paths.blessingsDir}/ (2.5, decision 0032)`);
+      // A Blessings heading that keeps prose of its own stays, and lint fails
+      // on it until the prose finds a home (CR-019).
+      const after = findMapBlessings(removeMoved(text, found, moved));
+      if (!after.items.length && after.sections.length) ledger.notes.push(`${rel}: its Blessings heading stays, because something other than a blessing is under it — move that into the page's prose or a blessing, and remove the heading (lint fails while it is there)`);
     }
   }
   const unknownKind = [...kindOf.keys()].filter((id) => !proposals.some((p) => p.id === id));
   if (unknownKind.length) throw new Error(`--kinds names ${unknownKind.join(", ")}, which this run does not propose (it proposes ${proposals.length ? proposals.map((p) => p.id).join(", ") : "none"})`);
+  const token = createHash("sha256").update(binding.join("\n")).digest("hex").slice(0, 8);
   const left = proposals.filter((p) => p.problem);
-  if (proposals.length && !move) ledger.notes.push(`${proposals.length} blessing${proposals.length === 1 ? "" : "s"} still on map pages — listed below with what the move would write; once the developer has read the list (and the kind of each), run upgrade again with --move-blessings (and --kinds=<name>:<copy|extend>,… for any kind they change). lint fails while a blessing stays in the map`);
-  for (const p of left) ledger.notes.push(`${p.from}: this blessing cannot move — ${p.problem}`);
-  return { proposals, moved: move ? proposals.filter((p) => !p.problem) : [], left };
+  if (proposals.length && !move) ledger.notes.push(`${proposals.length} blessing${proposals.length === 1 ? "" : "s"} still on map pages — listed below with what the move would write; once the developer has read the list (and the kind of each), run upgrade again with --move-blessings=${token} (and --kinds=<name>:<copy|extend>,… for any kind they change). lint fails while a blessing stays in the map`);
+  for (const p of left) if (!/appeared during the run/.test(p.problem)) ledger.notes.push(`${p.from}: this blessing cannot move — ${p.problem}`);
+  return { token, proposals, moved: move ? proposals.filter((p) => !p.problem) : [], left };
 }
 
 
@@ -2915,6 +2970,7 @@ export function narrateUpgrade(r) {
     for (const s of says) out.push(`      ZDD now says: ${s}`);
     out.push(`      → read the two together: same, different, or contradicting? Keep it, change it by hand, or remove this whole paragraph or bullet on the user's word (--drop=${d.id})`);
   }
+  if (r.plan && r.blessingMoves?.proposals?.length) out.push(`  blessings to move — read the list, then run upgrade with --move-blessings=${r.blessingMoves.token}`);
   for (const b of r.blessingMoves?.proposals ?? []) {
     out.push(`  blessing ${b.from}: "${brief(b.question ?? "(no trigger question)")}"`);
     if (b.problem) {
@@ -2966,7 +3022,7 @@ if (process.argv[1] && posixify(process.argv[1]).endsWith("/scripts/bootstrap.mj
     } else if (cmd === "upgrade") {
       const to = flags.to === undefined ? null : String(flags.to);
       const remote = typeof flags.remote === "string" ? flags.remote : undefined;
-      const r = upgrade(root, { lock: flags.lock === true, plan: flags.plan === true, drop: flags.drop ?? null, to, moveBlessings: flags["move-blessings"] === true, kinds: flags.kinds ?? null, remote, home: flags.home });
+      const r = upgrade(root, { lock: flags.lock === true, plan: flags.plan === true, drop: flags.drop ?? null, to, moveBlessings: flags["move-blessings"] ?? false, kinds: flags.kinds ?? null, remote, home: flags.home });
       process.stdout.write(flags.json ? JSON.stringify(r, null, 2) + "\n" : narrateUpgrade(r) + "\n");
     } else if (cmd === "preflight") {
       const p = await preflight(root, { ...(typeof flags.registry === "string" ? { registry: flags.registry } : {}), ...(typeof flags.github === "string" ? { github: flags.github } : {}) });
@@ -2979,7 +3035,7 @@ if (process.argv[1] && posixify(process.argv[1]).endsWith("/scripts/bootstrap.mj
       const s = releaseStatus(root, typeof flags.remote === "string" ? flags.remote : undefined, flags.home);
       process.stdout.write(flags.json ? JSON.stringify(s) + "\n" : printable(narrateReleaseStatus(s)) + "\n");
     } else {
-      process.stderr.write("Usage: bootstrap.mjs <preflight [--registry=<url>] [--github=<url>]|detect|estimate|apply --answers=<file>|upgrade [--plan] [--lock] [--drop=<ids>] [--move-blessings [--kinds=<name>:<copy|extend>,…]] [--to=vX.Y.Z]|release-status [--remote=<url>]> [--root=<dir>] [--date=YYYY-MM-DD] [--home=<dir>] [--json]\n");
+      process.stderr.write("Usage: bootstrap.mjs <preflight [--registry=<url>] [--github=<url>]|detect|estimate|apply --answers=<file>|upgrade [--plan] [--lock] [--drop=<ids>] [--move-blessings=<token> [--kinds=<name>:<copy|extend>,…]] [--to=vX.Y.Z]|release-status [--remote=<url>]> [--root=<dir>] [--date=YYYY-MM-DD] [--home=<dir>] [--json]\n");
       process.exit(2);
     }
   } catch (e) {

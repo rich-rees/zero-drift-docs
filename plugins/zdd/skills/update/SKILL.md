@@ -1,6 +1,6 @@
 ---
 name: update
-description: "\"update ZDD\" — the Zero-Drift Docs finish ritual. Curate the changed artifacts (glossary, ADRs, code comments, semantic map), reconcile the branch's pattern plan (mint the blessings that survived, record the rest, delete the plan), regenerate the codebase metadata and the indexes, write the ZDD record (what each artifact turned, confirmed, supplied for reuse, or stored) into the commit's message, and commit everything in the PR so docs and code merge atomically. Use before finishing any unit of work (a PR is one instantiation) in a repo that uses ZDD; triggers on \"update ZDD\"."
+description: "\"update ZDD\" — the Zero-Drift Docs finish ritual. Curate the changed artifacts (glossary, ADRs, code comments, semantic map, blessings), reconcile the branch's pattern plan (mint the blessings that survived, record the rest, delete the plan), regenerate the codebase metadata and the indexes, write the ZDD record (what each artifact turned, confirmed, supplied for reuse, or stored) into the commit's message, and commit everything in the PR so docs and code merge atomically. Use before finishing any unit of work (a PR is one instantiation) in a repo that uses ZDD; triggers on \"update ZDD\"."
 ---
 
 # zdd:update — the finish ritual

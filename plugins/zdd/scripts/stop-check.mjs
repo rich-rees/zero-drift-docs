@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // ZDD Stop hook — the prompt for the curated half. The CI check makes drift in
 // the GENERATED artifacts un-mergeable; the curated half (glossary, ADRs,
-// comments, the map with its blessings) is protected only by the finish
+// comments, the map, the blessings) is protected only by the finish
 // ritual, and the moment the ritual gets skipped is the moment the agent
 // declares done. This hook fires when the agent ends a turn, and if code has
 // changed on this branch while nothing in the ZDD bundle moved, it blocks

@@ -1,7 +1,7 @@
 # Zero-Drift Docs (ZDD) — how this repo's documentation works
 
-This repo uses ZDD: seven documentation artifacts kept at most one unit of work
-behind the code — six in `<BUNDLE_DIR>/`, plus code comments in the source. Spoken
+This repo uses ZDD: eight documentation artifacts kept at most one unit of work
+behind the code — seven in `<BUNDLE_DIR>/`, plus code comments in the source. Spoken
 verbs carry it, and all work with any coding agent:
 
 - **"load ZDD"** — before designing or building in an area. Read

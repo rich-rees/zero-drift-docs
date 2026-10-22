@@ -1,6 +1,6 @@
 # 0008 — A Stop hook prompts for the curated half, once per session
 
-**Date:** 2026-09-08 · **Status:** accepted · **Origin:** an external review of the public repo from the model's side (Adam, 2026-09-08) and the DIO-313 discussion that followed; built under DIO-313 (plugin + engine 1.1.0).
+**Date:** 2026-09-08 · **Status:** accepted; where blessings live superseded in part by [0031](0031-blessings-live-in-a-store-of-their-own-one-file-each-with-a-where-and-a-kind.md) (2026-10-22: the curated half is the glossary, ADRs, comments, the map and the blessing store) · **Origin:** an external review of the public repo from the model's side (Adam, 2026-09-08) and the DIO-313 discussion that followed; built under DIO-313 (plugin + engine 1.1.0).
 
 ## Context
 

@@ -1,6 +1,6 @@
 # 0031 — Blessings live in a store of their own, one file each, with a `where` and a `kind`
 
-**Date:** 2026-10-22 · **Status:** accepted · **Origin:** ZDD-1 (ZDD 2.5), finding [#30](https://github.com/rich-rees/zero-drift-docs/issues/30), decisions 2–6b of the design session on 2026-10-22 (Rich's calls). **Supersedes, in part:** [0015](0015-choose-patterns-blessings-are-read-before-building.md) point 5 (the index grouped by slice, app-level slices first) and point 8 (a blessing is a list item in a map concept; a missing exemplar only warns).
+**Date:** 2026-10-22 · **Status:** accepted · **Origin:** ZDD-1 (ZDD 2.5), finding [#30](https://github.com/rich-rees/zero-drift-docs/issues/30), decisions 2–6b of the design session on 2026-10-22 (Rich's calls). **Supersedes, in part:** [0015](0015-choose-patterns-blessings-are-read-before-building.md) point 5 (the index grouped by slice, app-level slices first) and point 8 (a blessing is a list item in a map concept; a missing exemplar only warns); [0008](0008-stop-hook-prompts-the-curated-half.md) (the curated half named "the semantic map with its blessings", and blessing lint as the map's check); [0029](0029-the-tally-reads-git-and-the-stores-and-a-malformed-record-warns-never-fails.md) point 2 (the tally reads the blessing index — it reads the blessing store).
 
 ## Context
 
@@ -61,7 +61,9 @@ only curated artifact without a home of their own.
 ## Consequences
 
 - The blessing index's bytes change for every adopter with blessings, and
-  two lint failures are new. 2.5 is still a minor:
+  four lint failures are new: a Blessings section left on a map page, a
+  missing or broken `where:`, a missing or wrong `kind:`, and an
+  `applies-to:` that names no app or package page. 2.5 is still a minor:
   [0035](0035-a-lint-failure-the-same-releases-upgrade-clears-or-names-is-a-minor.md).
 - A list of users is never written by hand: it would go stale, which is
   the drift ZDD exists to stop. The count is only as wide as the metadata.
