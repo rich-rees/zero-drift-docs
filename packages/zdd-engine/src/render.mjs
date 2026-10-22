@@ -12,7 +12,8 @@
 //                    (src/viewers/index.mjs) by config `viewer`
 //   - agent index  — llms.txt-shaped, feature-first, budget ~2k tokens
 //   - ADR index    — one orientation line per ADR
-//   - blessing index — one line per blessing, by trigger question (2.0.0)
+//   - blessing index — one line per blessing in the blessing store, by
+//                    trigger question, with where and why (2.0.0, ZDD-1)
 // Renderings carry no facts of their own and are never edited; if one looks
 // wrong the fix is in a store, the derived layer, or this renderer.
 // Deterministic: same inputs in, byte-identical outputs. Node stdlib only.
@@ -32,6 +33,8 @@ import { changedTerms, parseNameStatus } from "./lib/store-changes.mjs";
 import { refreshOriginBase } from "./lib/fetch-freshness.mjs";
 import { buildAdrIndex } from "./lib/adr-index.mjs";
 import { buildBlessingIndex } from "./lib/blessing-index.mjs";
+import { loadBlessings, usersOf } from "./lib/blessings.mjs";
+import { MAX_STORE_FILE_BYTES } from "./lib/walk-markdown.mjs";
 import { slugify } from "./lib/slug.mjs";
 import { loadConfig, resolveViewer, resolveNonAreaTags, validateRepoBase, absentStoreNotes } from "./lib/config.mjs";
 import { loadViewer, DEFAULT_VIEWER } from "./viewers/index.mjs";
@@ -39,7 +42,7 @@ import { loadViewer, DEFAULT_VIEWER } from "./viewers/index.mjs";
 // Per-run state, set by run() from the adopter's config: repo root, artifact
 // paths, the bundle folder node ids are relative to (the zdd/ folder), the
 // display name, the GitHub base URL for source links, and the base branch.
-let REPO, CONFIG, PATHS, BUNDLE, SEMANTIC, DERIVED, OUT_HTML, OUT_INDEX, OUT_ADR_INDEX, OUT_BLESSING_INDEX, OUT_GRAPH;
+let REPO, CONFIG, PATHS, BUNDLE, SEMANTIC, BLESSINGS, DERIVED, OUT_HTML, OUT_INDEX, OUT_ADR_INDEX, OUT_BLESSING_INDEX, OUT_GRAPH;
 let BUNDLE_NAME, REPO_BASE, BASE_BRANCH, VIEWER, NON_AREA_TAGS, AGENT_INDEX;
 const RECORDS_BY_NODE = new Map(); // node id -> the derived record behind a metadata concept
 
@@ -739,10 +742,22 @@ async function render() {
   // ADR index: the always-load-whole orientation summary of
   // the ADR corpus — one line per ADR, so full bodies are drill-in-when-cited.
   const adrIndex = buildAdrIndex(docs.adrs);
-  // Blessing index (2.0.0): read whole when choosing patterns. Hrefs are
-  // relative to the bundle folder, like the agent index's.
+  // Blessing index (2.0.0, decision 0031): read whole when choosing
+  // patterns. Hrefs are relative to the bundle folder, like the agent
+  // index's. A blessing names map pages by their path under the map folder.
   const adrFile = new Map(docs.adrs.map((a) => [a.num, a.file]));
-  const { text: blessingIndex, count: blessings } = buildBlessingIndex(concepts.filter((c) => c.layer === "map"), (num) => (adrFile.has(num) ? `adr/${adrFile.get(num)}` : null));
+  const mapRel = posixify(relative(BUNDLE, SEMANTIC));
+  const blessingsRel = posixify(relative(BUNDLE, BLESSINGS));
+  const pages = new Map(concepts.filter((c) => c.layer === "map").map((c) => [c.id.startsWith(`${mapRel}/`) ? c.id.slice(mapRel.length + 1) : c.id, c]));
+  const records = [...RECORDS_BY_NODE.values()];
+  const store = loadBlessings(BLESSINGS, REPO);
+  for (const f of store.unreadable) console.error(`WARNING: ${f}: over ${MAX_STORE_FILE_BYTES / 1024} KiB or unreadable — not in the blessing index`);
+  const { text: blessingIndex, count: blessings } = buildBlessingIndex(store.blessings, {
+    adrHref: (num) => (adrFile.has(num) ? `adr/${adrFile.get(num)}` : null),
+    blessingHref: (id) => `${blessingsRel}/${id}.md`,
+    mapPage: (id) => (pages.has(id) ? { title: pages.get(id).title, href: `${pages.get(id).id}.md` } : null),
+    usersOf: (b) => usersOf(b.where, records),
+  });
   // ~4 chars/token; the budget is a warning, not a gate — the fix is trimming
   // semantic link lists, which is a judgment call (spec §4).
   const approxTokens = Math.round(agentIndex.length / 4);
@@ -760,6 +775,7 @@ export async function run(args) {
   PATHS = resolved.paths;
   BUNDLE = resolved.bundleDir;
   SEMANTIC = resolve(REPO, PATHS.mapDir);
+  BLESSINGS = resolve(REPO, PATHS.blessingsDir);
   DERIVED = resolve(REPO, PATHS.metadataDir);
   OUT_HTML = resolve(REPO, PATHS.humanIndex);
   OUT_INDEX = resolve(REPO, PATHS.agentIndex);

@@ -30,6 +30,7 @@ export const DEFAULT_PATHS = {
   glossary: "zdd/glossary.md",
   adrDir: "zdd/adr",
   mapDir: "zdd/map",
+  blessingsDir: "zdd/blessings",
   metadataDir: "zdd/metadata",
   agentIndex: "zdd/agent-index.md",
   adrIndex: "zdd/adr-index.md",
@@ -188,7 +189,7 @@ export const agentIndexAreaDir = (agentIndexRel) => {
   return stripped === agentIndexRel ? `${agentIndexRel}-areas` : stripped;
 };
 export const GENERATED_KEYS = ["metadataDir", "graph", "agentIndex", "adrIndex", "blessingIndex", "humanIndex"];
-export const CURATED_KEYS = ["glossary", "adrDir", "mapDir"];
+export const CURATED_KEYS = ["glossary", "adrDir", "mapDir", "blessingsDir"];
 export const CONFIG_REL = "zdd/config.json";
 // Two repo-relative paths share ground: one is the other, or sits under it.
 // Case is folded where the filesystem folds it (Windows, macOS), as the

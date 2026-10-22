@@ -23,9 +23,8 @@ import { execFileSync } from "node:child_process";
 import { readdirSync, existsSync, lstatSync } from "node:fs";
 import { resolve, relative } from "node:path";
 import { loadConfig } from "./lib/config.mjs";
-import { parseFrontmatter } from "./lib/frontmatter.mjs";
-import { extractBlessings, blessingShape } from "./lib/map-links.mjs";
-import { walkMarkdown, readBounded, MAX_STORE_FILE_BYTES } from "./lib/walk-markdown.mjs";
+import { loadBlessings } from "./lib/blessings.mjs";
+import { readBounded, MAX_STORE_FILE_BYTES } from "./lib/walk-markdown.mjs";
 import { SECTIONS, USE_VERBS, STORE_VERB, BLESSING_VERBS, LOG_FORMAT, recordsInLog, namesIn, glossaryTerms, itemMatcher, printable } from "./lib/zdd-record.mjs";
 
 const git = (cwd, args) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 60_000, maxBuffer: 256 * 1024 * 1024 });
@@ -150,26 +149,19 @@ export function readStores(repoRoot, paths) {
   } catch (e) {
     if (e.code !== "ENOENT") notes.push(`${rel(glossary)}: could not be read (${e.code ?? "error"}) — no term counted as never named`);
   }
+  // The blessing store (decision 0031): one question per blessing file.
   const blessings = [];
   const seenQ = new Set();
-  const mapDir = resolve(repoRoot, paths.mapDir);
-  const state = { depth: 0, entries: 0, skipped: [] };
-  for (const path of existsSync(mapDir) ? walkMarkdown(mapDir, [], state) : []) {
-    const text = readBounded(path, MAX_STORE_FILE_BYTES);
-    if (text === null) {
-      notes.push(`${rel(path)}: over ${MAX_STORE_FILE_BYTES / 1024} KiB or unreadable — its blessings are not in the never-named list`);
-      continue;
-    }
-    const parsed = parseFrontmatter(text);
-    for (const b of extractBlessings(parsed ? parsed.body : text)) {
-      const q = blessingShape(b.text).question;
-      if (q && !seenQ.has(q)) {
-        seenQ.add(q);
-        blessings.push(q);
-      }
+  const store = loadBlessings(resolve(repoRoot, paths.blessingsDir), repoRoot);
+  for (const f of store.unreadable) notes.push(`${f}: over ${MAX_STORE_FILE_BYTES / 1024} KiB or unreadable — not in the never-named list`);
+  for (const b of store.blessings) {
+    const q = b.shape.question;
+    if (q && !seenQ.has(q)) {
+      seenQ.add(q);
+      blessings.push(q);
     }
   }
-  for (const s of state.skipped) notes.push(`${rel(s.path)}: ${s.reason} — blessings there are not in the never-named list`);
+  for (const s of store.skipped) notes.push(`${rel(s.path)}: ${s.reason} — blessings there are not in the never-named list`);
   return { adrs, terms, blessings, notes };
 }
 

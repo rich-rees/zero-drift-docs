@@ -21,6 +21,7 @@ export const DEFAULT_PATHS = {
   glossary: "zdd/glossary.md",
   adrDir: "zdd/adr",
   mapDir: "zdd/map",
+  blessingsDir: "zdd/blessings",
   metadataDir: "zdd/metadata",
   agentIndex: "zdd/agent-index.md",
   adrIndex: "zdd/adr-index.md",
@@ -105,13 +106,13 @@ export function validateRepoBase(repoBase) {
 const OUTPUT_KEYS = ["graph", "humanIndex", "agentIndex", "adrIndex", "blessingIndex"];
 // patternsPlan is the branch's working file (2.0.0): written by a session,
 // never by the engine, so it is kept apart from the outputs like a store.
-const INPUT_KEYS = ["glossary", "adrDir", "mapDir", "metadataDir", "patternsPlan"];
+const INPUT_KEYS = ["glossary", "adrDir", "mapDir", "blessingsDir", "metadataDir", "patternsPlan"];
 export function validatePathLayout(paths, configRel) {
   const label = (key) => (key === "config" ? "the config file" : `paths.${key}`);
   const value = (key) => (key === "config" ? configRel : paths[key]);
   const clash = (a, b, why) => `${label(a)} '${value(a)}' overlaps ${label(b)} '${value(b)}' — ${why}`;
   const metadataWhy = "metadataDir must be a dedicated folder (derive prunes everything in it that is not a current record)";
-  for (const key of ["glossary", "adrDir", "mapDir", "patternsPlan", ...OUTPUT_KEYS, "config"]) {
+  for (const key of ["glossary", "adrDir", "mapDir", "blessingsDir", "patternsPlan", ...OUTPUT_KEYS, "config"]) {
     if (overlaps(paths.metadataDir, value(key))) return clash("metadataDir", key, metadataWhy);
   }
   const outputWhy = "render's outputs must be distinct files, apart from every store and the config it reads";
@@ -140,7 +141,7 @@ export function validatePathLayout(paths, configRel) {
 // WARNING line when any other store (adr, map, metadata, glossary) is
 // present — the bundle is not greenfield, the path is probably wrong. A
 // truly greenfield bundle gets no line. Advisory: exit codes are unchanged.
-const STORE_KEYS = ["adrDir", "mapDir", "metadataDir", "glossary"];
+const STORE_KEYS = ["adrDir", "mapDir", "blessingsDir", "metadataDir", "glossary"];
 export function absentStoreNotes(repoRoot, paths, keys) {
   const present = STORE_KEYS.filter((k) => existsSync(resolve(repoRoot, paths[k])));
   if (!present.length) return [];
