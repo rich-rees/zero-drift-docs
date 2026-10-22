@@ -2374,7 +2374,7 @@ const brief = (s) => {
 export const RETIRED_NAMES = [
   { since: "2.2.0", find: /\bzdd:bootstrap --upgrade\b|\bbootstrap --upgrade\b/g, now: '"upgrade ZDD" (the upgrade skill)' },
   { since: "2.3.0", find: /\bextractorOptions\.services\b|\bmetadata\/service\/|"services"(?=\s*[,\]])/g, now: "the `external-services` extractor and `metadata/external-service/` (the 2.3 rename)" },
-  { since: "2.3.0", find: /\bstrictKinds\b[^\n\]]*"service"|\bservice:[a-z0-9][a-z0-9-]*\b/g, now: "the strict kind `external-service` and `external-service:<id>` ids (the 2.3 rename)" },
+  { since: "2.3.0", find: /\bstrictKinds\b[^\n\]]*"service"|(?<![-\w])service:[a-z0-9][a-z0-9-]*\b/g, now: "the strict kind `external-service` and `external-service:<id>` ids (the 2.3 rename)" },
   { since: "2.3.0", find: /<!-- zdd:begin -->/g, now: "one import line, `@zdd/instructions.md`, in CLAUDE.md (AGENTS.md keeps the block for Codex)", skip: ["AGENTS.md"] },
 ];
 const RETIRED_SCAN_EXT = /\.(md|ya?ml|json|mjs|cjs|js|ts|sh|ps1|toml|txt)$/i;

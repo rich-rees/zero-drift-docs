@@ -14,7 +14,7 @@ import { dirname, resolve, join } from "node:path";
 import { tmpdir, homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
-import { UPGRADE_NOTES, newestTag, INSTRUCTION_RULES, compareVersions, ruleChangedSince, mergeGate, IMPORT_COMMENT } from "../scripts/bootstrap.mjs";
+import { UPGRADE_NOTES, newestTag, INSTRUCTION_RULES, compareVersions, ruleChangedSince, mergeGate, IMPORT_COMMENT, RETIRED_NAMES } from "../scripts/bootstrap.mjs";
 
 const PLUGIN = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SCRIPT = join(PLUGIN, "scripts", "bootstrap.mjs");
@@ -494,5 +494,18 @@ test("Claude Code's folders resolve in order: explicit home, ZDD_HOME, CLAUDE_CO
   } finally {
     for (const k of keys) if (saved[k] === undefined) delete process.env[k];
     else process.env[k] = saved[k];
+  }
+});
+
+test("#28: the retired-name scan never reads the new name as the old one — `external-service:<id>` is not `service:<id>`; no retired pattern matches after a hyphen", () => {
+  const svc = RETIRED_NAMES.find((r) => r.now.includes("external-service:<id>"));
+  const hits = (text) => [...text.matchAll(new RegExp(svc.find.source, svc.find.flags))].map((m) => m[0]);
+  assert.deepEqual(hits('"recordId": "external-service:gemini-live"'), [], "the 2.3 name itself");
+  assert.deepEqual(hits('"recordId": "service:gemini-live"'), ["service:gemini-live"], "the retired name is still found");
+  assert.deepEqual(hits("ids: service:a, my-service:b"), ["service:a"]);
+  for (const r of RETIRED_NAMES) {
+    const re = new RegExp(r.find.source, r.find.flags);
+    const sample = r.find.source.includes("service:") ? "external-service:x" : null;
+    if (sample) assert.equal(re.test(sample), false, `${r.find} matches inside ${sample}`);
   }
 });
