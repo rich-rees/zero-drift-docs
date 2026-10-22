@@ -180,15 +180,19 @@ Read the answers back, then go on.
 ## Step 3 — write
 
 ```
-node "$PLUGIN/scripts/bootstrap.mjs" upgrade [--lock] [--drop=<ids>] [--move-blessings [--kinds=<name>:<copy|extend>,…]]
+node "$PLUGIN/scripts/bootstrap.mjs" upgrade [--lock] [--drop=<ids>] [--move-blessings=<token> [--kinds=<name>:<copy|extend>,…]]
 ```
 
 `--lock` only on a yes to the lock question; `--drop=<id>,<id>` only with the
 ids the plan printed for the sentences the user chose (each id binds the
 sentence's text and its place: if it changed since the plan, the run refuses
-— show the plan again); `--move-blessings` only on a yes to the blessings
-question, with `--kinds=<name>:<kind>` for each kind the person changed (the
-names the plan printed). Relay the ledger in plain words, as in step 2. Its
+— show the plan again); `--move-blessings=<token>` only on a yes to the
+blessings question, with the token the plan printed and `--kinds=<name>:<kind>`
+for each kind the person changed (the names the plan printed). The token
+binds the run to the list the person read: if a blessing was added or
+changed since, the run refuses before writing anything — show the plan again.
+A name already taken in the store, a wrong `--kinds` name or a `paths` value
+the engine would refuse also stops the run before its first write. Relay the ledger in plain words, as in step 2. Its
 notes match the plan's.
 
 ## Step 4 — the questions the notes raise, one at a time
@@ -345,8 +349,12 @@ https://github.com/rich-rees/zero-drift-docs/issues, labelled `finding`.
   holds the groupings and the edges.
 - **The blessing index says where and why** on every line, house rules
   first under their app; an `extend` blessing names who uses its code,
-  worked out from the metadata. `render --check` moves on the bump: render
-  and commit the index in this PR.
+  worked out from the metadata. `render --check` moves on the bump, in up
+  to four files — render and commit them in this PR: `blessing-index.md`
+  (its new format), `graph.json` and `human-index.html` (the map pages'
+  bodies lose their Blessings sections), and `agent-index.md` when a
+  metadata link lived only inside a moved blessing (the feature no longer
+  points at that record — link it from the feature page if it should).
 - **New lint failures**, each cleared by the move or named by it
   (decision 0035, which is why 2.5 is a minor): a Blessings section left on
   a map page; a blessing with no `where:` or one naming no file; no `kind:`

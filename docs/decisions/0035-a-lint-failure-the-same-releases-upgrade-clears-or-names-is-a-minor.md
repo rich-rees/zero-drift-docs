@@ -7,9 +7,10 @@
 The repo's semver rule names a config-schema or metadata-contract break as
 a major, and 0002 adds a new mandatory generated file. 0015 added a third
 by precedent: a new hard lint failure, because an adopter goes red on the
-first lint after upgrading. ZDD 2.5 adds two such failures (a blessing left
-in the map, a blessing with no `where:` or one naming no file) and none of
-the others.
+first lint after upgrading. ZDD 2.5 adds four such failures (a blessing left
+in the map, a blessing with no `where:` or one naming no file, one with no
+`kind:` or a wrong one, an `applies-to:` naming no app or package page) and
+none of the others.
 
 Since [0021](0021-bootstrap-locks-the-release-by-default.md) an adopter
 takes a new engine only through "upgrade ZDD", the same step that runs the

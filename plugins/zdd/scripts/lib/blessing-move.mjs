@@ -16,6 +16,11 @@ const CITATION_RE = /\bADR[-\s]?(\d{4})\b/g;
 
 const normalise = (body) => body.replace(/\r\n?/g, "\n");
 
+// A Markdown link's destination as the engine reads it (map-links.mjs):
+// `<…>`, or a bare destination that may hold balanced brackets —
+// `(app)--_layout.json` — and an optional title (CR-014).
+const DEST = String.raw`(<[^>\n]*>|[^()\s]*(?:\([^()\s]*\)[^()\s]*)*)(?:\s+"[^"]*")?`;
+
 // Mirror of the engine's structuralLines: lines inside a fenced code block
 // or an HTML comment come back empty, so line numbers are kept.
 export function structuralLines(body) {
@@ -178,7 +183,7 @@ export function proposeMove(item, ctx) {
 // span right after it, when it is an identifier, is the symbol.
 function findWhere(text, ctx) {
   const tokens = [];
-  for (const m of text.matchAll(/\]\((<[^>\n]*>|[^)\s]+)(?:\s+"[^"]*")?\)|`([^`\n]+)`/g)) tokens.push(m);
+  for (const m of text.matchAll(new RegExp(String.raw`\]\(${DEST}\)|` + "`([^`\\n]+)`", "g"))) tokens.push(m);
   for (let i = 0; i < tokens.length; i++) {
     const m = tokens[i];
     if (m[1] !== undefined) {
@@ -215,7 +220,8 @@ const under = (p, dir) => p === dir || p.startsWith(`${dir.replace(/\/+$/, "")}/
 // from zdd/blessings/. A URL, an anchor, and a bundle-absolute `/…` link are
 // kept as written.
 export function rebaseLinks(text, fromDir, toDir) {
-  return text.replace(/\]\((?:<([^>\n]*)>|([^)<>\s]+))((?:\s+"[^"]*")?)\)/g, (whole, angled, bare, title) => {
+  return text.replace(/\]\((?:<([^>\n]*)>|([^()<>\s]*(?:\([^()<>\s]*\)[^()<>\s]*)*))((?:\s+"[^"]*")?)\)/g, (whole, angled, bare, title) => {
+    if (!angled && !bare) return whole;
     const dest = angled ?? bare;
     if (/^[a-z][a-z0-9+.-]*:/i.test(dest) || dest.startsWith("/") || dest.startsWith("#")) return whole;
     const [path, frag = ""] = dest.split(/(?=#)/);
@@ -236,10 +242,13 @@ export function blessingFileText(p) {
 // The page with the moved items' lines removed. A Blessings section left
 // with nothing in it but blank lines loses its heading and those lines too;
 // at the end of the page, the blank lines before it go as well. Every other
-// byte of the page is kept.
+// byte of the page is kept, its line endings as they were (CR-004): the
+// page is cut into lines with their own endings, and whole lines are left
+// out.
 export function removeMoved(pageText, found, moved) {
-  const eol = /\r\n/.test(pageText) ? "\r\n" : "\n";
-  const lines = normalise(pageText).split("\n");
+  const pieces = pageText.match(/[^\r\n]*(?:\r\n|\r|\n)|[^\r\n]+$/g) ?? [];
+  const lines = pieces.map((p) => p.replace(/(?:\r\n|\r|\n)$/, ""));
+  if (/(?:\r\n|\r|\n)$/.test(pageText) || !pageText) lines.push("");
   const drop = new Set();
   for (const item of moved) for (let i = item.first; i <= item.last; i++) drop.add(i);
   for (const s of found.sections) {
@@ -252,8 +261,7 @@ export function removeMoved(pageText, found, moved) {
     const atEnd = lines.slice(s.end).every((l) => !l.trim());
     if (atEnd) for (let i = s.heading - 1; i >= 0 && !lines[i].trim(); i--) drop.add(i);
   }
-  const kept = lines.filter((_, i) => !drop.has(i));
-  if (lines[lines.length - 1] === "" && kept[kept.length - 1] !== "") kept.push(""); // the page's last newline
-  while (kept.length > 1 && kept[kept.length - 1] === "" && kept[kept.length - 2] === "") kept.pop();
-  return kept.join(eol);
+  let out = "";
+  for (let i = 0; i < pieces.length; i++) if (!drop.has(i)) out += pieces[i];
+  return out;
 }

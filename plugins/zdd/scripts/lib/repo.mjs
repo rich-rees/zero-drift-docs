@@ -228,6 +228,14 @@ export function artifactPaths(config, { lenient = false } = {}) {
   };
   // Judge every generated key against the values as configured, then apply
   // the fallbacks together, so two keys sharing a value both fall back.
+  // The blessing store is a folder of its own (CR-008), as the engine says.
+  for (const other of ["glossary", "adrDir", "mapDir", "patternsPlan"]) {
+    if (pathsOverlap(out.blessingsDir, out[other])) {
+      if (!lenient) throw new Error(`paths.blessingsDir ${JSON.stringify(out.blessingsDir)} overlaps paths.${other} ${JSON.stringify(out[other])} — the blessing store is a folder of its own (decision 0031)`);
+      out.blessingsDir = DEFAULT_PATHS.blessingsDir;
+      break;
+    }
+  }
   const bad = GENERATED_KEYS.map((key) => [key, overlap(key)]).filter(([, why]) => why);
   for (const [key, why] of bad) {
     if (!lenient) throw new Error(`${why} — a generated path must not overlap a curated one`);

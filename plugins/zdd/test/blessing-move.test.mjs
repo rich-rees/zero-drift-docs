@@ -155,7 +155,7 @@ test("blessingSlug, rebaseLinks and blessingFileText", () => {
   );
 });
 
-test("removeMoved: only the moved items go; an emptied section loses its heading and the blank lines before it; a section with a fenced example or an item left keeps its heading; CRLF is kept", () => {
+test("removeMoved: only the moved items go; an emptied section loses its heading and the blank lines before it; a section with a fenced example or an item left keeps its heading; every other byte, line endings included, is kept", () => {
   const found = findMapBlessings(THINGS_PAGE);
   assert.equal(removeMoved(THINGS_PAGE, found, found.items), THINGS_PAGE.replace(/# Blessings\n[\s\S]*?\n\n(?=# Notes)/, ""), "the blank line before the heading stays, to part the page from the next heading");
   assert.match(removeMoved(THINGS_PAGE, found, [found.items[0]]), /# Blessings\n- Saving a thing\?/);
@@ -165,9 +165,30 @@ test("removeMoved: only the moved items go; an emptied section loses its heading
   const crlf = "x\r\n\r\n# Blessings\r\n- Moved? a\r\n";
   const c = findMapBlessings(crlf);
   assert.equal(removeMoved(crlf, c, c.items), "x\r\n");
+  // CR-004: mixed endings, a CR-only page and blank lines at the end are kept as they were.
+  const mixed = "a\r\nb\n\n# Blessings\r\n- Moved? a\r\n- Kept\n\n# Next\rc\r\r\n\n";
+  const m = findMapBlessings(mixed);
+  assert.equal(removeMoved(mixed, m, [m.items[0]]), "a\r\nb\n\n# Blessings\r\n- Kept\n\n# Next\rc\r\r\n\n");
+  const cr = "a\r\r# Blessings\r- Moved? a\r# Next\r";
+  const k = findMapBlessings(cr);
+  assert.equal(removeMoved(cr, k, k.items), "a\r\r# Next\r");
 });
 
-test("upgrade --plan lists every blessing with what the move would write and writes nothing; a plain upgrade moves none and says how", () => {
+test("CR-014: a link whose path holds brackets — `(app)--_layout.json` — is read and rebased whole", () => {
+  assert.equal(rebaseLinks("Copy [the layout](../../metadata/surface/(app)--_layout.json) here.", "zdd/map/features", "zdd/blessings"), "Copy [the layout](../metadata/surface/(app)--_layout.json) here.");
+  const repo = adopter("brackets");
+  const [item] = findMapBlessings("# Blessings\n- Adding a signed-in page? Copy [the layout](../../metadata/surface/(app)--_layout.json) because it checks the session.\n").items;
+  const p = proposeMove(item, {
+    page: "zdd/map/features/things.md", pageType: "Feature", mapDir: "zdd/map", blessingsDir: "zdd/blessings", bundleDir: "zdd", metadataDir: "zdd/metadata", adrDir: "zdd/adr",
+    isFile: (r) => existsSync(join(repo, r)) && readdirSafe(join(repo, r)) === null,
+    readRecord: (r) => JSON.parse(readFileSync(join(repo, r), "utf8")),
+  });
+  assert.equal(p.where, "src/app/(app)/layout.tsx", "the record behind the bracketed link names the file");
+});
+
+const token = (repo) => runJson(repo, ["upgrade", "--plan"]).blessingMoves.token;
+
+test("upgrade --plan lists every blessing with what the move would write, and a token; it writes nothing; a plain upgrade moves none and says how", () => {
   const repo = adopter("plan");
   const plan = runJson(repo, ["upgrade", "--plan"]);
   assert.deepEqual(plan.blessingMoves.proposals.map((p) => [p.id, p.from, p.where, p.kind, p.appliesTo]), [
@@ -175,20 +196,23 @@ test("upgrade --plan lists every blessing with what the move would write and wri
     ["adding-an-endpoint-for-things", "zdd/map/features/things.md:15", "src/app/api/things/route.ts", "copy", null],
     ["saving-a-thing", "zdd/map/features/things.md:17", "migrations/00002_things.sql", "extend", null],
   ]);
+  assert.match(plan.blessingMoves.token, /^[0-9a-f]{8}$/);
+  assert.equal(token(repo), plan.blessingMoves.token, "the same map, the same token");
   assert.ok(!existsSync(join(repo, "zdd", "blessings")), "nothing written");
   const text = run(repo, ["upgrade", "--plan"]);
+  assert.match(text, new RegExp(`blessings to move — read the list, then run upgrade with --move-blessings=${plan.blessingMoves.token}`), text);
   assert.match(text, /blessing zdd\/map\/features\/things\.md:17: "Saving a thing\?"\n {6}→ zdd\/blessings\/saving-a-thing\.md\n {8}where: migrations\/00002_things\.sql \(save_thing\)\n {8}kind: extend \(proposed — .*--kinds=saving-a-thing:copy\)/, text);
   const plain = runJson(repo, ["upgrade"]);
-  assert.ok(!existsSync(join(repo, "zdd", "blessings")), "a plain upgrade moves no blessing");
-  assert.ok(plain.notes.some((n) => /3 blessings still on map pages .*run upgrade again with --move-blessings/.test(n)), plain.notes.join("\n"));
+  assert.deepEqual(readdirSync(join(repo, "zdd", "blessings")), [".gitkeep"], "a plain upgrade moves no blessing, and leaves the store's folder (CR-005)");
+  assert.ok(plain.notes.some((n) => /3 blessings still on map pages .*run upgrade again with --move-blessings=[0-9a-f]{8}/.test(n)), plain.notes.join("\n"));
   const lint = engine(repo, ["lint"]);
   assert.equal(lint.status, 1, "lint fails while blessings stay in the map");
   assert.match(lint.stderr, /fixture-app\.md: holds 1 blessing under a Blessings heading .*say "upgrade ZDD"/);
 });
 
-test("upgrade --move-blessings writes the confirmed list, a --kinds answer included, and the engine's lint and render are then green", () => {
+test("upgrade --move-blessings=<token> writes the confirmed list, a --kinds answer included, and the engine's lint and render are then green", () => {
   const repo = adopter("move");
-  const r = runJson(repo, ["upgrade", "--move-blessings", "--kinds=adding-an-endpoint-for-things:extend"]);
+  const r = runJson(repo, ["upgrade", `--move-blessings=${token(repo)}`, "--kinds=adding-an-endpoint-for-things:extend"]);
   assert.deepEqual(r.blessingMoves.moved.map((p) => p.id), ["adding-a-page", "adding-an-endpoint-for-things", "saving-a-thing"]);
   assert.equal(
     readFileSync(join(repo, "zdd", "blessings", "adding-an-endpoint-for-things.md"), "utf8"),
@@ -203,24 +227,77 @@ test("upgrade --move-blessings writes the confirmed list, a --kinds answer inclu
   assert.equal(engine(repo, ["render"]).status, 0);
   const index = readFileSync(join(repo, "zdd", "blessing-index.md"), "utf8");
   assert.match(index, /extend: `migrations\/00002_things\.sql` \(save_thing\), used by 1: \/api\/things\/\[id\]/);
-  const again = runJson(repo, ["upgrade", "--move-blessings"]);
-  assert.deepEqual(again.blessingMoves.proposals, [], "a second run finds nothing to move");
-  assert.equal(VERSION.split(".")[0] >= "2", true);
+  assert.deepEqual(runJson(repo, ["upgrade", "--plan"]).blessingMoves.proposals, [], "a second run finds nothing to move");
 });
 
-test("a blessing that cannot move stays on its page and is named; the others move; --kinds is checked", () => {
+const fails = (repo, args) => spawnSync(process.execPath, [SCRIPT, "upgrade", ...args, `--root=${repo}`, `--home=${home}`], { encoding: "utf8" });
+const tree = (dir) => {
+  const out = {};
+  const walk = (d, rel = "") => {
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      const r = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) walk(join(d, e.name), r);
+      else out[r] = readFileSync(join(d, e.name), "utf8");
+    }
+  };
+  walk(dir);
+  return out;
+};
+
+test("the move is judged whole before the first write (CR-002, CR-003, CR-009): a wrong --kinds, a stale token, a bare flag, an invalid store path — each refused with the repo byte for byte as it was", () => {
+  const repo = adopter("judged");
+  const t = token(repo);
+  const before = tree(repo);
+  for (const [args, why] of [
+    [[`--move-blessings=${t}`, "--kinds=no-such-blessing:copy"], /--kinds names no-such-blessing, which this run does not propose/],
+    [["--move-blessings"], /--move-blessings takes the token upgrade --plan printed/],
+    [["--move-blessings=nothex"], /takes the token upgrade --plan printed \(8 hex characters\)/],
+    [["--kinds=adding-a-page:imitate"], /--kinds takes <file name>:<copy\|extend> pairs/],
+  ]) {
+    const r = fails(repo, args);
+    assert.equal(r.status, 1, args.join(" "));
+    assert.match(r.stderr, why);
+    assert.deepEqual(tree(repo), before, `${args.join(" ")}: nothing written`);
+  }
+  // A blessing added after the plan: the token no longer matches.
+  writeFileSync(join(repo, "zdd", "map", "features", "things.md"), THINGS_PAGE.replace("# Notes", "- Deleting a thing? Copy `src/app/page.tsx` because x.\n\n# Notes"));
+  const changed = tree(repo);
+  let r = fails(repo, [`--move-blessings=${t}`]);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /the blessings on the map changed since the plan \(its token is now [0-9a-f]{8}\) — run upgrade --plan again/);
+  assert.deepEqual(tree(repo), changed, "nothing written");
+  // An invalid configured store path: refused, never the default guessed.
+  const cfg = join(repo, "zdd", "config.json");
+  writeFileSync(cfg, JSON.stringify({ ...JSON.parse(readFileSync(cfg, "utf8")), paths: { blessingsDir: "../blessings" } }, null, 2) + "\n");
+  const withBad = tree(repo);
+  r = fails(repo, [`--move-blessings=${token(repo)}`]);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /fix zdd\/config\.json's paths before moving blessings/);
+  assert.deepEqual(tree(repo), withBad, "nothing written");
+});
+
+test("CR-001: a name taken by anything — a folder, say — is skipped for the next free one, and a blessing leaves its page only once its file exists", () => {
+  const repo = adopter("taken");
+  mkdirSync(join(repo, "zdd", "blessings", "adding-a-page.md"), { recursive: true });
+  const plan = runJson(repo, ["upgrade", "--plan"]);
+  assert.equal(plan.blessingMoves.proposals[0].id, "adding-a-page-2", "the folder takes the name");
+  const r = runJson(repo, ["upgrade", `--move-blessings=${plan.blessingMoves.token}`]);
+  assert.deepEqual(r.blessingMoves.moved.map((p) => p.id), ["adding-a-page-2", "adding-an-endpoint-for-things", "saving-a-thing"]);
+  assert.match(readFileSync(join(repo, "zdd", "blessings", "adding-a-page-2.md"), "utf8"), /^---\nwhere: src\/app\/page\.tsx\n/);
+});
+
+test("a blessing that cannot move stays on its page and is named; the others move; a heading left holding prose is named (CR-019)", () => {
   const repo = adopter("left");
   writeFileSync(join(repo, "zdd", "map", "features", "things.md"), THINGS_PAGE.replace("# Notes", "- Copy the audit call, per ADR-0002.\n- Adding a report? Do it the usual way.\n\n# Notes"));
-  const r = runJson(repo, ["upgrade", "--move-blessings"]);
+  const r = runJson(repo, ["upgrade", `--move-blessings=${token(repo)}`]);
   assert.deepEqual(r.blessingMoves.left.map((p) => p.from), ["zdd/map/features/things.md:20", "zdd/map/features/things.md:21"]);
   assert.ok(r.notes.some((n) => /^zdd\/map\/features\/things\.md:20: this blessing cannot move — it opens with no trigger question/.test(n)), r.notes.join("\n"));
   const things = readFileSync(join(repo, "zdd", "map", "features", "things.md"), "utf8");
   assert.match(things, /# Blessings\n\n- Copy the audit call, per ADR-0002\.\n- Adding a report\? Do it the usual way\.\n\n# Notes/, "only the moved items' lines go");
   assert.equal(engine(repo, ["lint"]).status, 1);
-  const bad = spawnSync(process.execPath, [SCRIPT, "upgrade", "--plan", "--kinds=adding-a-page:imitate", `--root=${repo}`, `--home=${home}`], { encoding: "utf8" });
-  assert.equal(bad.status, 1);
-  assert.match(bad.stderr, /--kinds takes <file name>:<copy\|extend> pairs/);
-  const unknown = spawnSync(process.execPath, [SCRIPT, "upgrade", "--plan", "--kinds=no-such-blessing:copy", `--root=${repo}`, `--home=${home}`], { encoding: "utf8" });
-  assert.equal(unknown.status, 1);
-  assert.match(unknown.stderr, /--kinds names no-such-blessing, which this run does not propose/);
+  const prose = adopter("prose");
+  writeFileSync(join(prose, "zdd", "map", "apps", "fixture-app.md"), APP_PAGE + "\nThese are the app's house rules.\n");
+  const p = runJson(prose, ["upgrade", `--move-blessings=${token(prose)}`]);
+  assert.ok(p.notes.some((n) => /^zdd\/map\/apps\/fixture-app\.md: its Blessings heading stays, because something other than a blessing is under it/.test(n)), p.notes.join("\n"));
+  assert.match(engine(prose, ["lint"]).stderr, /fixture-app\.md: has a Blessings heading with no blessing under it/);
 });

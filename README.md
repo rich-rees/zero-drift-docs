@@ -1,7 +1,7 @@
 # Zero-Drift Docs (ZDD)
 
 A documentation architecture for repos built by **human + agent pairs**. ZDD keeps
-seven documentation artifacts *at most one unit of work behind the code* — and, with
+eight documentation artifacts *at most one unit of work behind the code* — and, with
 CI, makes drift in the machine-generated ones **un-mergeable**.
 
 > **Status: 2.4.1.** The plugin installs in Claude Code
