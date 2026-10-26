@@ -249,6 +249,53 @@ asks a question, and an upgrade checks them again:
   words by the check, not as a raw `npx` error mid-install.
 - **No account anywhere.** Nothing in ZDD reads a secret or needs one.
 
+None of it on your machine yet? The next section is the whole list.
+
+### Nothing installed yet
+
+Node.js and git come from one command, and your coding agent can run it for
+you (or read it out while you type). Say yes to the permission prompts it
+raises, and **open a new terminal** when it finishes — the one you ran it in
+does not know about the new programs yet.
+
+- **Windows:** `winget install OpenJS.NodeJS.LTS Git.Git` (`winget` is the
+  installer built into Windows 10 and 11).
+- **Mac**, with [Homebrew](https://brew.sh): `brew install node git`.
+
+`npm` and `npx` are not separate installs: they come with Node.js. In the
+new terminal, `node --version` printing `v20` or higher means all three are
+there.
+
+**One Windows trap.** PowerShell may refuse to run `npx` with an error that
+names the *execution policy* ("running scripts is disabled on this system").
+That is a Windows safety setting, not a ZDD problem, and the fix is one line
+that applies to your own user account only:
+
+```
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
+An agent should explain this one and ask before running it, because it
+changes a setting rather than installing a program: it tells Windows that
+scripts written or installed on this machine may run, while anything
+downloaded still has to be signed — nothing more.
+
+**The app must be a git repository.** If the folder has never been under git
+(there is no `.git` folder in it), make it one, and tell git who you are
+before the first commit:
+
+```
+git init
+git config user.name "Your Name"
+git config user.email "you@example.com"
+```
+
+ZDD reads the repo's history and locks its release by a git tag, so it does
+not run on a plain folder. With these in place, carry on to the install
+commands below: bootstrap opens with a **preflight** that checks every item
+on the list above and names anything missing in plain words. When it reports
+that everything ZDD needs is here, "bootstrap ZDD" is your next step.
+
 Two paths: **adopting** ZDD in a repo (once, by whoever sets it up), and
 **joining** a repo that already uses it (every other developer — the path most
 people take). Each is a short, copy-pasteable sequence; the commands are the
@@ -441,35 +488,37 @@ docs/decisions/                     # this repo's own decision record (ADR forma
 LICENSE   CONTRIBUTING.md   README.md
 ```
 
-## Who needs which parts — solo versus team
+## When ZDD starts to pay
 
-ZDD is a team answer first. A solo developer on a conventional framework is the
-single point of coherence — they *are* the enforcement, and they know when the
-docs are stale. That stops being true with a second person, a second agent, or
-a six-week gap. The table (lifted from an external review of this repo, 2026-09)
-is the honest adoption guide; `bootstrap` offers every part as a yes/no, so
-saying no to a row is a visible choice, not a fork.
+On a small, young codebase a model can read everything it needs in one pass:
+there is one way to do each thing, and the file that does it is the only
+candidate grep returns. ZDD earns little there — and the generated half costs
+almost nothing to keep, so there is no harm in having it from day one. As a
+codebase grows and ages, grep starts guessing. It finds patterns by frequency,
+misses the exemplar you meant, and copies the wrong one with complete
+confidence: the approach you rejected in March comes back because three files
+still carry it. That is where the curated artifacts — the glossary, the ADRs,
+the blessings — and the two indexes pay: they tell the agent which candidate
+is the one you meant, before it looks.
 
-| Component | Solo, conventional stack | Team, or large / unconventional repo |
+The axis is the codebase's **age and size**, not the team's. A one-person repo
+of two years is exactly where this bites, because the agent is the second
+person on every solo project: it has none of your memory, and it rebuilds its
+picture of the repo from grep every session. `bootstrap` offers every opt-in
+as a yes/no, so saying no to one is a visible choice, not a fork.
+
+| Part | Solo developer | Team |
 |---|---|---|
-| ZDD's instructions (`zdd/instructions.md`, one import line in `CLAUDE.md`; a block in `AGENTS.md`) | **Required.** This is the product at solo scale. | Required. |
-| ADRs with the three-part test | **Required.** Solo devs forget their own reasoning within a quarter. | Required. |
-| Constraint comments at the site | Required, and probably already happening. | Required. |
-| Glossary | Start it the first time you correct a word. | **Required.** This is where vocabulary drift actually begins. |
-| Semantic map (groupings, edges) | Skip it. | Worth it when someone will maintain it. |
-| Blessings | Keep one the first time you catch yourself copying the wrong example. | **The part that pays.** The lint keeps them honest. |
-| Generated inventory (metadata) | Skip, or a ten-line pre-commit script. | Useful when the repo is big enough that orientation costs real tokens. |
-| Agent index, auto-injected | Skip; `CLAUDE.md` is already loaded. | Measure first, then decide. |
-| Human index / graph viewer | Skip. | Earns its place when someone must understand a system they didn't build. |
-| `update` finish ritual + Stop prompt | Keep the idea; the Stop prompt is the enforcement that matters. | Same. |
-| "choose patterns" + blessing index *(added in 2.0)* | Once you keep blessings: it is the step that reads them. | Comes with the blessings. |
-| `load` skill / auto-load hook | Redundant without the index. | Comes with the index. |
-| `bootstrap` runbook | Only if installing the rest. | Yes — it's what makes adoption survivable. |
-| `grill` | Optional; plan mode with a good prompt gets most of it. | Useful for greenfield design sessions. |
-| Engine, extractors, viewers, fence, CI check, pins, skew | Skip. | Only with the generated half. |
+| The curated half — glossary, ADRs, blessings, map — and the "choose patterns" step that reads them | Keep. This is what you forget first. | Keep. |
+| The generated half — inventory, agent index, human index — with `load`, `update` and their hooks | Keep. The inventory is what the map claims against, what the indexes render from and what lint checks; drop it and the proof goes with it. | Keep. |
+| The CI check | Skip, and take the pre-push hook: it keeps a forgotten update loud without a merge gate. | Keep — the real guarantee. |
+| The harness ADR set | Skip; one ADR set is enough until the repo carries a harness of its own. | Take it when the repo carries one. |
+| `grill`, `extractor` | As needed. | As needed. |
 
 ## Roadmap
 
+- [ ] Next: a second viewer; Vue / Svelte / Angular extractors on their first
+      real adoption.
 - [x] **2.5.0** — blessings in a store of their own, one file each with
       where and kind, the index saying where and why, an `extend`
       blessing's users worked out for retesting, and "upgrade ZDD" moving
@@ -488,49 +537,65 @@ saying no to a row is a visible choice, not a fork.
       a file of their own, external services, work-shaped blessings,
       background work, the two-level index, and the first-run findings from
       both adopters' moves to 2.2.1 *(2026-10-09, 2.3.0)*.
-
-- [x] Extract the engine (`derive` / `render` / checks + `nextjs-supabase` adapter)
-      from the first adopter's proving instance into `packages/zdd-engine` *(v0.2)*.
-- [x] Decide engine distribution: **npm package** — `@rich-rees/zdd-engine` is the
-      single source both CI (npx, no Claude Code) and the skills call *(v0.2)*.
-- [x] Wire the skills' `TODO(engine)` steps to the real invocations *(v0.2)*.
-- [x] Publish `@rich-rees/zdd-engine` to npm — live at 0.2.0, verified end-to-end
-      via `npx` against the fixture *(2026-08-14)*.
-- [x] **Composed extractors** — the `nextjs-supabase` adapter split into `supabase`
-      + `nextjs` (byte-identical output), plus `fastapi` and `generic`; a declared
-      repo-local extractor directory; greenfield repos derive clean *(engine 0.3.0; [decision 0001](docs/decisions/0001-composed-extractors.md))*.
-- [x] **Graph artifact + pluggable viewers** — `render` writes the map+metadata
-      join as `zdd/graph.json` (schema `zdd-graph/1`) and renders the human index
-      through a viewer selected by config from a registry; the Cytoscape viewer
-      is viewer #1, isolated under its Apache-2.0 notice, and `minimal` is the
-      worked example *(engine 0.4.0;
-      [decision 0002](docs/decisions/0002-graph-artifact-and-viewers.md))*.
-- [x] **Bootstrap runbook, Codex, upgrade** — detect / greenfield modes with
-      evidence, opt-ins written (auto-load, fence, CI or pre-push), `orient` →
-      `load` with an engine-skew warning, `bootstrap --upgrade`, a Codex manifest
-      beside the Claude one *(plugin 0.4.0; decisions
-      [0003](docs/decisions/0003-kernel-and-opt-ins.md),
-      [0004](docs/decisions/0004-pocock-skills-recommended-not-required.md),
-      [0005](docs/decisions/0005-no-zdd-in-the-plugin-repo.md),
-      [0006](docs/decisions/0006-one-repo-two-manifests.md))*.
-- [x] **1.0.0** — live smoke test in both hosts against `rich-rees/zdd-smoke-test`,
-      one review campaign over the whole 0.3.1 → 1.0 diff, tag `v1.0.0`,
-      engine 1.0.0 on npm, repo public (1.0.0).
-- [x] **1.1.0** — the Stop prompt for the curated half (third hook, opt-in,
-      once per session); the blessing-citation lint (a blessing citing a
-      superseded or missing ADR fails `lint` — the map's first hard check); the
-      freshness nudge watches the source behind every metadata link, not just
-      `resource:`; blessings defined, the "knowing tool" framing and the
-      solo-versus-team table lifted from an external review *(engine + plugin
-      1.1.0; [decision 0008](docs/decisions/0008-stop-hook-prompts-the-curated-half.md))*.
-- [x] **1.2.0** — the `react-router` extractor (a route tree declared in
-      code: one surface per leaf route, layout ancestors as guards, a screen's
-      API calls resolved to the API extractor's routes); the unclaimed-records
-      lint (every route, table, function and surface no feature slice links,
-      a warning with the count in the human index header); bootstrap seeds
-      one example feature slice and `update` names the slice as the unit of
-      work's checklist *(engine + plugin 1.2.0;
-      [decision 0009](docs/decisions/0009-unclaimed-records-warn-never-fail.md))*.
+- [x] **2.2.1** — the release and Pocock checks honour `CLAUDE_CONFIG_DIR`,
+      found by 2.2.0's live smoke *(plugin 2.2.1, 2.2.0)*.
+- [x] **2.2.0** — an install and an upgrade a new developer can't get
+      wrong: bootstrap locks the repo to its release; **"upgrade ZDD"** (the
+      `upgrade` skill) checks for a newer release, moves the lock, and on the
+      new release shows every change before writing it, offers what is new
+      with this repo's evidence, names the hand-written instructions the
+      block now covers, and lists the commit; the release check removes a
+      stray user-level declaration before the restart route; the instruction
+      block carries the rules adopters had hand-written; bootstrap asks about
+      Realtime wrappers; the README splits adopting from joining; a release
+      checklist backed by tests binding writers to readers *(plugin 2.2.0; decisions
+      [0021](docs/decisions/0021-bootstrap-locks-the-release-by-default.md)–[0022](docs/decisions/0022-the-pin-move-route-removes-a-stray-declaration-first.md))*.
+- [x] **2.1.1** — fixes from the first real adoption of 2.1 (the second adopter): a
+      subscribes or `.from()` ref reaches a table the migrations named with
+      its schema (`public.audit_events`), and the migration replay treats
+      `things` and `public.things` as one table, so a trigger or ALTER in
+      the other spelling lands; the agent index links a service
+      record as `.json`; a component's description is the comment attached to it, never an earlier JSDoc;
+      the release check prints the route that moves a machine — restart,
+      `claude plugin update`, restart *(engine + plugin 2.1.1)*.
+      **Corrected in 2.2.0:** that route stalls on a machine where the
+      marketplace was once added without a scope; 2.2.0's check adds the
+      missing step there.
+- [x] **2.1.0** — the front end mapped truthfully, and the back end's
+      background work: a variable path segment matches a route parameter and
+      never a fixed word (the `/${plural}` → `/health` bug), with literal
+      unions expanded; typed edges (`facts.edges`, a `verb` on graph edges);
+      four opt-in extractors — `components` (React and React Native),
+      `expo-router` (early), `jobs` (workers and scheduled jobs from
+      manifests), `services` (declared markers, env names only); realtime
+      `subscribes` edges; app membership from the map's Application pages,
+      a UI Components band, component fan-in thresholding and an app filter
+      in the viewer; `claims.strictKinds`; the plugin's session-start
+      release check *(engine + plugin 2.1.0; decisions
+      [0016](docs/decisions/0016-typed-edges-are-additive.md)–[0020](docs/decisions/0020-jobs-from-manifests-services-from-declared-markers.md))*.
+- [x] **2.0.0** — "choose patterns": blessings are read before building.
+      A third verb and skill (`patterns`) between the design and the code; a
+      generated blessing index (one line per blessing, by trigger question,
+      app-level first); a committed pattern plan that `update` reconciles
+      against the final diff, minting the blessings that survived and
+      recording the rest in the commit message; CI's `lint --merge` refuses
+      a merge while the plan exists. Lint now fails a blessing with no
+      trigger question, and warns on one with no reason or over 300
+      characters; an ADR is encouraged, no longer required. Also fixes map
+      links to a bracketed path (a Next.js route-grouped layout such as
+      `(app)--_layout.json`), which were dropped silently *(engine + plugin
+      2.0.0, with a fix from its review;
+      [decision 0015](docs/decisions/0015-choose-patterns-blessings-are-read-before-building.md))*.
+- [x] **1.3.1** — a ZDD release pins and brings in one Pocock release. Matt's
+      1.3 renamed the root `CONTEXT.md` to `GLOSSARY.md` and ZDD adopters lost
+      their glossary silently; now ZDD's marketplace lists `mattpocock-skills`
+      at a pinned tag and commit, `zdd` depends on it, bootstrap writes
+      `docs/agents/domain.md` (his skills' redirect) and the per-repo
+      settings that keep any other copy off, `load` warns when one is on
+      anyway, and `lint` warns about a stray root `GLOSSARY.md`/`CONTEXT.md`.
+      Also fixes the ADR index cutting a markdown link at the length cap
+      *(engine + plugin 1.3.1;
+      [decision 0014](docs/decisions/0014-a-zdd-release-pins-and-brings-in-one-pocock-release.md))*.
 - [x] **1.3.0** — the `extractor` skill: an interview about the convention, a
       scaffold script that writes a local extractor (module, tests, fixture
       folder, config wiring), red to green against the 1.2.0 hardening
@@ -550,67 +615,51 @@ saying no to a row is a visible choice, not a fork.
       [0011](docs/decisions/0011-refs-err-toward-might-touch.md),
       [0012](docs/decisions/0012-strict-claims-are-opt-in.md),
       [0013](docs/decisions/0013-a-missing-routes-file-beside-code-fails-derive.md))*.
-- [x] **1.3.1** — a ZDD release pins and brings in one Pocock release. Matt's
-      1.3 renamed the root `CONTEXT.md` to `GLOSSARY.md` and ZDD adopters lost
-      their glossary silently; now ZDD's marketplace lists `mattpocock-skills`
-      at a pinned tag and commit, `zdd` depends on it, bootstrap writes
-      `docs/agents/domain.md` (his skills' redirect) and the per-repo
-      settings that keep any other copy off, `load` warns when one is on
-      anyway, and `lint` warns about a stray root `GLOSSARY.md`/`CONTEXT.md`.
-      Also fixes the ADR index cutting a markdown link at the length cap
-      *(engine + plugin 1.3.1;
-      [decision 0014](docs/decisions/0014-a-zdd-release-pins-and-brings-in-one-pocock-release.md))*.
-- [x] **2.0.0** — "choose patterns": blessings are read before building.
-      A third verb and skill (`patterns`) between the design and the code; a
-      generated blessing index (one line per blessing, by trigger question,
-      app-level first); a committed pattern plan that `update` reconciles
-      against the final diff, minting the blessings that survived and
-      recording the rest in the commit message; CI's `lint --merge` refuses
-      a merge while the plan exists. Lint now fails a blessing with no
-      trigger question, and warns on one with no reason or over 300
-      characters; an ADR is encouraged, no longer required. Also fixes map
-      links to a bracketed path (a Next.js route-grouped layout such as
-      `(app)--_layout.json`), which were dropped silently *(engine + plugin
-      2.0.0, with a fix from its review;
-      [decision 0015](docs/decisions/0015-choose-patterns-blessings-are-read-before-building.md))*.
-- [x] **2.1.0** — the front end mapped truthfully, and the back end's
-      background work: a variable path segment matches a route parameter and
-      never a fixed word (the `/${plural}` → `/health` bug), with literal
-      unions expanded; typed edges (`facts.edges`, a `verb` on graph edges);
-      four opt-in extractors — `components` (React and React Native),
-      `expo-router` (early), `jobs` (workers and scheduled jobs from
-      manifests), `services` (declared markers, env names only); realtime
-      `subscribes` edges; app membership from the map's Application pages,
-      a UI Components band, component fan-in thresholding and an app filter
-      in the viewer; `claims.strictKinds`; the plugin's session-start
-      release check *(engine + plugin 2.1.0; decisions
-      [0016](docs/decisions/0016-typed-edges-are-additive.md)–[0020](docs/decisions/0020-jobs-from-manifests-services-from-declared-markers.md))*.
-- [x] **2.1.1** — fixes from the first real adoption of 2.1 (the second adopter): a
-      subscribes or `.from()` ref reaches a table the migrations named with
-      its schema (`public.audit_events`), and the migration replay treats
-      `things` and `public.things` as one table, so a trigger or ALTER in
-      the other spelling lands; the agent index links a service
-      record as `.json`; a component's description is the comment attached to it, never an earlier JSDoc;
-      the release check prints the route that moves a machine — restart,
-      `claude plugin update`, restart *(engine + plugin 2.1.1)*.
-      **Corrected in 2.2.0:** that route stalls on a machine where the
-      marketplace was once added without a scope; 2.2.0's check adds the
-      missing step there.
-- [x] **2.2.0** — an install and an upgrade a new developer can't get
-      wrong: bootstrap locks the repo to its release; **"upgrade ZDD"** (the
-      `upgrade` skill) checks for a newer release, moves the lock, and on the
-      new release shows every change before writing it, offers what is new
-      with this repo's evidence, names the hand-written instructions the
-      block now covers, and lists the commit; the release check removes a
-      stray user-level declaration before the restart route; the instruction
-      block carries the rules adopters had hand-written; bootstrap asks about
-      Realtime wrappers; the README splits adopting from joining; a release
-      checklist backed by tests binding writers to readers *(plugin 2.2.0; decisions
-      [0021](docs/decisions/0021-bootstrap-locks-the-release-by-default.md)–[0022](docs/decisions/0022-the-pin-move-route-removes-a-stray-declaration-first.md))*.
-- [x] **2.2.1** — the release and Pocock checks honour `CLAUDE_CONFIG_DIR`,
-      found by 2.2.0's live smoke *(plugin 2.2.1, 2.2.0)*.
-- [ ] Next: a second viewer; Vue / Svelte / Angular extractors on their first
-      real adoption.
+- [x] **1.2.0** — the `react-router` extractor (a route tree declared in
+      code: one surface per leaf route, layout ancestors as guards, a screen's
+      API calls resolved to the API extractor's routes); the unclaimed-records
+      lint (every route, table, function and surface no feature slice links,
+      a warning with the count in the human index header); bootstrap seeds
+      one example feature slice and `update` names the slice as the unit of
+      work's checklist *(engine + plugin 1.2.0;
+      [decision 0009](docs/decisions/0009-unclaimed-records-warn-never-fail.md))*.
+- [x] **1.1.0** — the Stop prompt for the curated half (third hook, opt-in,
+      once per session); the blessing-citation lint (a blessing citing a
+      superseded or missing ADR fails `lint` — the map's first hard check); the
+      freshness nudge watches the source behind every metadata link, not just
+      `resource:`; blessings defined, the "knowing tool" framing and the
+      solo-versus-team table lifted from an external review (the table has
+      since given way to "When ZDD starts to pay", above) *(engine + plugin
+      1.1.0; [decision 0008](docs/decisions/0008-stop-hook-prompts-the-curated-half.md))*.
+- [x] **1.0.0** — live smoke test in both hosts against `rich-rees/zdd-smoke-test`,
+      one review campaign over the whole 0.3.1 → 1.0 diff, tag `v1.0.0`,
+      engine 1.0.0 on npm, repo public (1.0.0).
+- [x] **Before 1.0** — the engine (`derive` / `render` / checks + the
+      `nextjs-supabase` adapter) extracted from the first adopter's proving instance
+      into `packages/zdd-engine` and distributed as the **npm package**
+      `@rich-rees/zdd-engine`, the single source both CI (npx, no Claude
+      Code) and the skills call, with the skills' `TODO(engine)` steps wired
+      to the real invocations and 0.2.0 verified end-to-end via `npx` against
+      the fixture *(2026-08-14)*; **composed extractors** — the adapter split
+      into `supabase` + `nextjs` (byte-identical output), plus `fastapi` and
+      `generic`, a declared repo-local extractor directory, greenfield repos
+      deriving clean *(engine 0.3.0;
+      [decision 0001](docs/decisions/0001-composed-extractors.md))*;
+      the **graph artifact + pluggable viewers** — `zdd/graph.json` (schema
+      `zdd-graph/1`) and the human index rendered through a viewer selected
+      by config from a registry, Cytoscape as viewer #1 under its Apache-2.0
+      notice and `minimal` as the worked example *(engine 0.4.0;
+      [decision 0002](docs/decisions/0002-graph-artifact-and-viewers.md))*;
+      and the **bootstrap runbook, Codex, upgrade** — detect / greenfield
+      modes with evidence, opt-ins written (auto-load, fence, CI or
+      pre-push), `orient` → `load` with an engine-skew warning,
+      `bootstrap --upgrade`, a Codex manifest beside the Claude one
+      *(plugin 0.4.0; decisions
+      [0003](docs/decisions/0003-kernel-and-opt-ins.md),
+      [0004](docs/decisions/0004-pocock-skills-recommended-not-required.md),
+      [0005](docs/decisions/0005-no-zdd-in-the-plugin-repo.md),
+      [0006](docs/decisions/0006-one-repo-two-manifests.md))*. The detail
+      is under Versioning.
 
 ## Versioning
 
