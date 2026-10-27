@@ -173,3 +173,14 @@ test("an old-line pin is behind, never ahead, whatever its number — config, wo
   workflow(VERSION);
   assert.deepEqual(JSON.parse(run("--json")).behind.map((p) => p.where), ["zdd/config.json (engine)"]);
 });
+
+test("CR-154: every pin outside a comment is read — a comment naming this release above an old-line pin never hides it, and two pins in one file are both judged", () => {
+  config({ extractors: ["generic"], release: VERSION });
+  writeFileSync(join(repo, ".github", "workflows", "zdd.yml"), `# documented with @rich-rees/zdd@${VERSION}\nenv:\n  ZDD_ENGINE: "@rich-rees/zdd-engine@2.5.0" # not @rich-rees/zdd@${VERSION}\n`);
+  const j = JSON.parse(run("--json"));
+  assert.deepEqual(j.behind.map((p) => `${p.where} ${p.package}@${p.version}`), [".github/workflows/zdd.yml @rich-rees/zdd-engine@2.5.0"]);
+  assert.equal(j.pins.filter((p) => p.where.endsWith("zdd.yml")).length, 1, "the comments are not pins");
+  writeFileSync(join(repo, ".github", "workflows", "zdd.yml"), `env:\n  ZDD_ENGINE: "@rich-rees/zdd@${VERSION}"\njobs:\n  x:\n    steps:\n      - run: npx -y @rich-rees/zdd@${prev(VERSION)} lint\n`);
+  assert.deepEqual(JSON.parse(run("--json")).behind.map((p) => p.version), [prev(VERSION)]);
+  workflow(VERSION);
+});

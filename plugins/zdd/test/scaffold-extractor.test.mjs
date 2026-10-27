@@ -505,3 +505,45 @@ test("POSIX: a symlinked localExtractorDir is refused — nothing written throug
   assert.deepEqual(readdirSync(outside), []);
   assert.ok(!existsSync(join(outside, "aspnet-routes")));
 });
+
+// Decision 0042 at the scaffold (slice 6 campaign).
+const onRelease = (t, release) => {
+  const repo = adopted(t);
+  const p = join(repo, "zdd", "config.json");
+  const { engine: _e, ...rest } = JSON.parse(readFileSync(p, "utf8"));
+  writeFileSync(p, JSON.stringify({ ...rest, release }, null, 2) + "\n");
+  return repo;
+};
+
+test("CR-152: the scaffold refuses a release pin that is not a version, and both keys, before any write", (t) => {
+  for (const cfg of [{ release: "v0.9.0" }, { release: "0.9.0", engine: "2.5.0" }]) {
+    const repo = adopted(t);
+    const p = join(repo, "zdd", "config.json");
+    const { engine: _e, ...rest } = JSON.parse(readFileSync(p, "utf8"));
+    writeFileSync(p, JSON.stringify({ ...rest, ...cfg }, null, 2) + "\n");
+    const before = snapshot(repo);
+    const r = scaffold(repo, CSHARP);
+    assert.equal(r.status, 1, r.stdout);
+    assert.match(r.stderr, cfg.engine ? /pins both 'release' and the old line's 'engine' — say "upgrade ZDD" first/ : /release pin is not a version/);
+    assert.deepEqual(snapshot(repo), before, JSON.stringify(cfg));
+  }
+});
+
+test("CR-158: on the new line the scaffold says nothing about io, and the scaffolded test runs @rich-rees/zdd at the release pin; on the old line, @rich-rees/zdd-engine at the engine pin", (t) => {
+  const repo = onRelease(t, "0.9.0");
+  const notes = scaffoldJson(repo, CSHARP).notes.join("\n");
+  assert.doesNotMatch(notes, /pins engine|engine pin|not a version/, notes);
+  // The generated test's own pin block, run as written against each config.
+  const text = readFileSync(join(repo, "zdd", "extractors", "aspnet-routes", "aspnet-routes.test.mjs"), "utf8");
+  const block = text.slice(text.indexOf("const CONFIG ="), text.indexOf("const SEMVER"));
+  const pick = (config) => new Function("readFileSync", "join", "repoRoot", `${block}; return { PIN_KEY, PIN, PACKAGE };`)(() => JSON.stringify(config), (...p) => p.join("/"), () => ".");
+  assert.deepEqual(pick({ release: "0.9.0" }), { PIN_KEY: "release", PIN: "0.9.0", PACKAGE: "@rich-rees/zdd" });
+  assert.deepEqual(pick({ engine: "2.5.0" }), { PIN_KEY: "engine", PIN: "2.5.0", PACKAGE: "@rich-rees/zdd-engine" });
+  assert.match(text, /\[npxCli\(\), "-y", `\$\{PACKAGE\}@\$\{PIN\}`/, "the package and pin it picks are what npx runs");
+});
+
+test("CR-153: the extractor skill's precondition accepts any release pin, and asks only an old-line engine pin for 1.3.0", () => {
+  const skill = readFileSync(join(PLUGIN, "skills", "extractor", "SKILL.md"), "utf8");
+  assert.match(skill, /any `release`[^\n]*\n?[^\n]*does; an old-line `engine` pin must be \*\*1\.3\.0 or later\*\*/);
+  assert.doesNotMatch(skill, /^- `engine` in that config is/m);
+});

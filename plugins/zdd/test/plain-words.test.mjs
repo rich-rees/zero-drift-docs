@@ -93,6 +93,7 @@ test("preflight: every requirement checked, each said in plain words with what Z
   assert.match(text, /^  ok +Node\.js \d+\.\d+\.\d+ — ZDD's scripts and its engine run on it \(20 or newer\)/m, text);
   assert.match(text, /^  ok +git — /m);
   assert.match(text, /^  ok +the npm registry .* the engine, @rich-rees\/zdd@[\d.]+, is there to download/m, text);
+  assert.match(text, /^  ok +the npm registry .*ZDD's engine, @rich-rees\/zdd, is downloaded/m, "CR-162: the package it names is the one it downloads");
   assert.match(text, /No account is needed anywhere\./, text);
 });
 

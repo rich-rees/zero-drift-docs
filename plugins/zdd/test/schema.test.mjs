@@ -154,3 +154,12 @@ test("ZDD-3 slice 3: background-declared takes the shared reader options (CR-082
   assert.deepEqual(validate(SCHEMA, cfg({ entries: [{ name: "py", module: "app.worker" }] })), []);
   assert.notDeepEqual(validate(SCHEMA, cfg({ entries: [{ name: "nothing-to-run" }] })), [], "neither module nor file");
 });
+
+test("CR-157 (decision 0042): `release` alone and `engine` alone are valid, both are not; `release` is a version, `engine` is deprecated", () => {
+  assert.deepEqual(validate(SCHEMA, { extractors: ["generic"], release: "0.9.0" }), []);
+  assert.deepEqual(validate(SCHEMA, { extractors: ["generic"], engine: "2.5.0" }), []);
+  assert.ok(validate(SCHEMA, { extractors: ["generic"], release: "0.9.0", engine: "2.5.0" }).some((e) => /forbidden shape/.test(e)));
+  for (const bad of ["v0.9.0", "0.9", "zdd-engine@0.9.0", "00.9.0"]) assert.ok(validate(SCHEMA, { extractors: ["generic"], release: bad }).length, bad);
+  assert.deepEqual(validate(SCHEMA, { extractors: ["generic"], release: "0.9.0-rc.1" }), []);
+  assert.equal(SCHEMA.properties.engine.deprecated, true);
+});
