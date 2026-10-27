@@ -117,7 +117,7 @@ function merge(records) {
   return [...byId.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
 
-// The engine's filename scheme (src/lib/slug.mjs), copied because a local
+// The engine's filename scheme (src/core/lib/slug.mjs), copied because a local
 // extractor cannot import the engine: `/` → `--`, `{p}` → `_p`, `.` → `-`.
 // Two ids that slug alike fail derive loudly — never a silent overwrite.
 function slugify(key) {

@@ -1,4 +1,4 @@
-// Post-merge ref resolution (src/lib/resolve-refs.mjs): every protocol kind,
+// Post-merge ref resolution (src/core/lib/resolve-refs.mjs): every protocol kind,
 // misses, self-refs, dedupe, requireRefs, ambiguity, route specificity.
 // Review CR-008 / CR-009 / CR-015 / CR-023 (0.3.0 campaign).
 // Run: node --test "test/*.test.mjs"

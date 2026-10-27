@@ -23,7 +23,7 @@ export const ENGINE_PACKAGE = "@rich-rees/zdd-engine";
 export const MAX_CONFIG_BYTES = 1024 * 1024; // a config bigger than this is not a config
 export const MAX_INDEX_BYTES = 64 * 1024; // the SessionStart injection is cut here (~16k tokens, 8× render's budget) — CR-086
 
-// Mirror of the engine's DEFAULT_PATHS (src/lib/config.mjs). The engine is
+// Mirror of the engine's DEFAULT_PATHS (src/core/lib/config.mjs). The engine is
 // installed outside the plugin (npx), so the plugin cannot import it — this
 // copy is the contract both sides honour, and config.schema.json documents it.
 export const DEFAULT_PATHS = {

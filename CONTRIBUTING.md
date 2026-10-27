@@ -122,7 +122,7 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
   catalogue (`src/adapters/<name>/`), or from the adopter's declared `localExtractorDir`
   (`<name>.mjs` or `<name>/index.mjs`, the one place config may point at code;
   local names may not shadow built-ins). Try a convention there first, with the
-  skill's scaffold; propose it for the registry once it has run against a real
+  skill's scaffold; propose it for the catalogue once it has run against a real
   repo.
 
 A stack without statically derivable structure keeps thinner metadata and a

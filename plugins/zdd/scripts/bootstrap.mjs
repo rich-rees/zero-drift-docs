@@ -120,7 +120,7 @@ const LEGACY_SNIPPET_HEADING = "## Documentation — Zero-Drift Docs (ZDD)";
 const LEGACY_FINGERPRINT = ["/zdd:orient", "/zdd:update"];
 // Ownership line carried by every file the plugin writes besides config.
 export const OWNER_MARK = "Managed by Zero-Drift Docs (zdd)";
-// Mirrors of the engine's external-services extractor (src/extractors/
+// Mirrors of the engine's external-services adapter (src/adapters/
 // external-services/index.mjs: CANDIDATE_SUFFIXES, BUILT_IN_IGNORE) — the plugin cannot import
 // the engine under npx; a test keeps the two pairs equal.
 export const SERVICE_SUFFIXES = ["_API_KEY", "_DSN", "_SECRET", "_TOKEN", "_URL", "_KEY"];
@@ -134,7 +134,7 @@ const MAX_SCAN_BYTES = 1024 * 1024; // detection never reads a file larger than 
 // reading and says so — a proposal, not an inventory.
 const MAX_PROBE_BYTES = 64 * 1024 * 1024;
 
-// Mirror of the engine's LEGACY_ADAPTERS (src/lib/config.mjs): the one legacy
+// Mirror of the engine catalogue's bundles (src/adapters/catalogue.json): the one legacy
 // adapter and how its options split. The engine expands it at derive time;
 // this is the migration that makes the expansion unnecessary.
 const LEGACY_ADAPTERS = {
@@ -619,8 +619,8 @@ const fail = (msg) => {
   throw new Error(`answers: ${msg}`);
 };
 
-// Mirrors of the ENGINE's rules (src/lib/config.mjs validateRepoBase and
-// src/lib/paths.mjs repoRelative), applied to the answers so a config the
+// Mirrors of the ENGINE's rules (src/core/lib/config.mjs validateRepoBase and
+// src/core/lib/paths.mjs repoRelative), applied to the answers so a config the
 // engine's first derive would refuse is never written (CR-078). The engine's
 // path rule is stricter than the plugin's repoRelative in lib/repo.mjs (no
 // whitespace, no backslash) and looser in one spot (`.` is a valid root — the

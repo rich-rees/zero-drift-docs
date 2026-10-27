@@ -1,4 +1,4 @@
-// Extractor selection + path containment (src/lib/config.mjs, src/lib/paths.mjs).
+// Extractor selection + path containment (src/core/lib/config.mjs, src/core/lib/paths.mjs).
 // Review CR-001 / CR-006 / CR-019 (0.3.0 campaign).
 // Run: node --test "test/*.test.mjs"
 import { test } from "node:test";
