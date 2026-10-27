@@ -47,6 +47,35 @@ refs to a record another adapter minted.
 - The chain-follow is a new core step and a pure function of the merged
   records, so `derive --check` stays deterministic.
 
+## As built (ZDD-3 slice 2)
+
+- **The record** is kind `data-access`, shown as "Data Access" in a lane of its
+  own between the API and the tables (an empty lane takes no space). Its id is
+  namespaced by the adapter that minted it,
+  `data-access:<adapter>/<file>#<function>`, as a table is `table:db/<name>`,
+  so two adapters that read one function mint two records. It is not a
+  claimable kind: no new unclaimed-record warning, no new lint failure.
+- **The join** is a new unresolved ref, `?code:<file>#<function>`, which
+  reaches every data-access record for that file and function. A miss is
+  silent: most functions touch no database.
+- **Absorbed or kept.** A data-access record whose every referrer holds its
+  file is absorbed into them (a handler's own body); one reached from any
+  other file stays as a node. So a stack whose data access is inline reads
+  exactly as before: the FastAPI golden is byte-identical with `supabase-py`
+  added to its config. One hop: a data-access record's own `?code:` refs are
+  not followed.
+- **Python functions** are cut once, in `adapters/python/` (a helper folder,
+  not an adapter), so `fastapi`, `supabase-py` and `sqlalchemy` agree on a
+  function's text: a `def` at any indent and the lines indented deeper.
+- **FastAPI follows the file's imports** for the functions a handler calls,
+  and now for `include_router(<mod>.router)` too: `from app.routes import
+  jobs` names `app/routes/jobs.py` even when a repository module shares the
+  basename. The basename rule runs only when the imports do not settle it.
+- **`sqlalchemy` reads raw SQL only**: a string literal holding SELECT,
+  INSERT, UPDATE, DELETE or WITH, its tables after FROM / JOIN (`reads`) and
+  INTO / UPDATE / DELETE FROM (`writes`), each a `?table:` ref the resolver
+  keeps only when the schema adapter minted it. The ORM is not read.
+
 ## Rejected
 
 - **One adapter writes refs into another's records** (the data-access

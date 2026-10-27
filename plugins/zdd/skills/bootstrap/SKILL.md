@@ -230,7 +230,7 @@ omitted keys take the detection / the defaults):
 ```json
 {
   "name": "My App", "repoBase": "https://github.com/org/repo/tree/main/", "baseBranch": "main",
-  "extractors": ["supabase", "fastapi"], "extractorOptions": { "fastapi": { "roots": ["api"] } },
+  "extractors": ["supabase", "supabase-py", "fastapi"], "extractorOptions": { "fastapi": { "roots": ["api"] }, "supabase-py": { "roots": ["api"] } },
   "stack": ["FastAPI", { "name": "Supabase", "path": "db/migrations" }, "React web", "Expo"],
   "apps": ["Web (React)", "Mobile (Expo)"],
   "optIns": { "autoLoad": true, "fence": true, "stop": true, "ci": true, "prePush": true },

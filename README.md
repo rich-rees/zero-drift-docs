@@ -151,7 +151,9 @@ hook, config schema + example, the seed ADR-0001, and the extractor scaffold).
 | Layer | Extractor | Reads |
 |---|---|---|
 | Database | `supabase` | SQL migrations: tables, functions, triggers, buckets |
-| API | `fastapi` | FastAPI decorators: routes, handlers, the tables a handler names |
+| API | `fastapi` | FastAPI decorators: routes, handlers, and the functions a handler calls (one hop, through the file's imports; an ambiguous target is skipped) |
+| Data access (Python) | `supabase-py` | the Supabase Python client — `.table()`, `.from_()`, `.rpc()` — one record per function |
+| Data access (Python) | `sqlalchemy` | raw SQL in string literals (`text("…")`, any driver): the tables after `FROM` / `JOIN` (**reads**) and `INTO` / `UPDATE` / `DELETE FROM` (**writes**), one record per function; the ORM is not read |
 | API + pages | `nextjs` | the App Router tree: route handlers, pages, layouts, middleware auth, `fetch('/api/…')` and `.from('x')` refs |
 | Pages | `react-router` | a route tree declared in code: one surface per screen, its guards, the API calls one hop away |
 | Native screens | `expo-router` *(early)* | the Expo Router folder tree: screens, layouts, `[id]` segments, platform pairs — namespaced so a native `/jobs` and a web `/jobs` are two surfaces |
@@ -482,7 +484,8 @@ packages/zdd-engine/                # deriver / renderer / checks + extractors +
   bin/zdd-engine.mjs                # the CLI (derive / render / lint / freshness / tally)
   src/core/                         # the stack-free core: derive, render, lint, the stores, the viewers
   src/core/viewers/{cytoscape,minimal}/  # output end: human-index viewers over graph.json
-  src/adapters/{supabase,nextjs,fastapi,react-router,components,expo-router,jobs,external-services,generic}/   # input end: one adapter per convention
+  src/adapters/{supabase,nextjs,fastapi,react-router,components,expo-router,jobs,external-services,supabase-py,sqlalchemy,generic}/   # input end: one adapter per convention
+  src/adapters/python/              # helpers the Python adapters share (no index.mjs: not an adapter)
   test/fixture*/                    # the miniature proving repos
 docs/patterns.md                    # blessings and "choose patterns", the whole system
 docs/decisions/                     # this repo's own decision record (ADR format)
