@@ -15,7 +15,7 @@ of them linked to a table.
 
 1. **Each adapter carries its own detection.** It answers "do I fit this
    repo?" with plain-words evidence ("14 `@router.get` decorators in
-   `app/routes/`"), the options it would use, and the **job** it covers,
+   `app/routes/`"), the options it would use, and the **part** of the app it covers,
    from a stack-free list the core owns: routes, screens, components,
    database access, background tasks, external services. Detection reads through `io`,
    under the same caps.
@@ -32,7 +32,7 @@ of them linked to a table.
    Uncovered parts are built through the `extractor` skill, with fixtures
    and tests.
 3. **Brownfield: check together.** After adapters are attached or built:
-   1. an automated coverage report, with counts per job and the unlinked
+   1. an automated coverage report, with counts per part and the unlinked
       items named ("42 routes; 31 link to tables; 11 link to nothing:
       `/health`, …"); the developer says which gaps are fine and which are
       wrong;
