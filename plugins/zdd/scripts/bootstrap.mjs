@@ -1679,6 +1679,7 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
       continue;
     }
     let next = rel.endsWith("pre-push") ? fresh() : pinEngine(cur, version);
+    const pinMoved = next !== cur; // before the gate, header and suite step change it too
     let gate = null;
     let headerNote = null;
     let suite = null;
@@ -1702,7 +1703,8 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
     }
     if (next !== cur) {
       ledger.overwrite(rel, next);
-      ledger.notes.push(`${rel}: ${rel.endsWith("pre-push") ? "rewritten from the template" : "engine pin updated"} (${version})`);
+      if (rel.endsWith("pre-push")) ledger.notes.push(`${rel}: rewritten from the template (${version})`);
+      else if (pinMoved) ledger.notes.push(`${rel}: engine pin updated (${version})`);
       if (gate?.how === "added") ledger.notes.push(`${rel}: the lint step now runs \`lint --merge\` (2.0) — the merge gate fails while the branch's pattern plan exists`);
       if (headerNote) ledger.notes.push(headerNote);
       if (suite?.how === "added") ledger.notes.push(`${rel}: a step now runs the standard suite on this repo's own adapters (0.9, decision 0040)`);

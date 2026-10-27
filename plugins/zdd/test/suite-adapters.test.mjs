@@ -170,6 +170,21 @@ test("the interview: an adapter behind on a newer contract is asked the core's q
   assert.match(text, /Ask the questions one at a time/);
 });
 
+test("the upgrade adds the suite step to an owned workflow already at this pin, and says the step moved, never the pin (slice 5 dry run: the second adopter)", (t) => {
+  const repo = adopted(t);
+  const wf = join(repo, ".github", "workflows", "zdd.yml");
+  const lines = readFileSync(wf, "utf8").split("\n");
+  const at = lines.findIndex((l) => l.trim() === "- name: Your own adapters pass the standard suite");
+  let from = at;
+  while (lines[from - 1].trim().startsWith("#")) from--;
+  writeFileSync(wf, [...lines.slice(0, from), ...lines.slice(at + 3)].join("\n"));
+  const up = run(repo, ["upgrade"]);
+  assert.equal(up.status, 0, up.stderr);
+  assert.match(up.stdout, /zdd\.yml: a step now runs the standard suite/);
+  assert.doesNotMatch(up.stdout, /zdd\.yml: engine pin updated/);
+  assert.match(readFileSync(wf, "utf8"), /run: npx -y "\$ZDD_ENGINE" suite\n/);
+});
+
 test("the upgrade adds the suite step to an owned workflow from an earlier release, in the template's words; present, it is left; with nothing to anchor on, it is named", () => {
   const lines = TEMPLATE.split("\n");
   const at = lines.findIndex((l) => l.trim() === "- name: Your own adapters pass the standard suite");
