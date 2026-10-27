@@ -67,10 +67,16 @@ refs to a record another adapter minted.
 - **Python functions** are cut once, in `adapters/python/` (a helper folder,
   not an adapter), so `fastapi`, `supabase-py` and `sqlalchemy` agree on a
   function's text: a `def` at any indent and the lines indented deeper.
-- **Within a file, helpers are followed; across files, one hop.** A handler
-  that calls a private helper in its own file (`_end()`), which calls the
-  repository, reaches the repository: same-file helpers are followed as far
-  as they go, once each. A function in another file is one hop.
+- **Within a file, functions are followed by reference; across files, one
+  hop.** A function reaches the same-file functions it refers to by name —
+  called, or passed as a callback (`_write(engine, work)`) — as far as they
+  go, once each; a nested def is its own function, named by its full path
+  (`_add.work`, so two helpers' nested `work` callbacks are two functions),
+  counted toward its outer one only when the outer refers to it. Both sides apply the rule: a route
+  reaches its handler's helpers, and a data-access record carries the SQL of
+  the same-file functions it uses. A function in another file is one hop. A
+  name a function binds itself (a parameter, a plain local) shadows the
+  import of that name. FastAPI's walk is bounded (MAX_REACH functions).
 - **A multi-line signature no longer empties a body.** A `def` whose
   signature runs over several lines and closes at the def's own indent
   (`) -> dict:`) used to read as an empty body, losing its calls and its
@@ -81,9 +87,35 @@ refs to a record another adapter minted.
   jobs` names `app/routes/jobs.py` even when a repository module shares the
   basename. The basename rule runs only when the imports do not settle it.
 - **`sqlalchemy` reads raw SQL only**: a string literal holding SELECT,
-  INSERT, UPDATE, DELETE or WITH, its tables after FROM / JOIN (`reads`) and
-  INTO / UPDATE / DELETE FROM (`writes`), each a `?table:` ref the resolver
-  keeps only when the schema adapter minted it. The ORM is not read.
+  INSERT, UPDATE, DELETE or WITH. SQL comments, single-quoted SQL literals and
+  the arguments of EXTRACT / SUBSTRING / TRIM / OVERLAY / POSITION are blanked
+  first; then the relations after FROM (a comma list) and JOIN (`reads`), and
+  after INTO / UPDATE / DELETE FROM (`writes`), past ONLY and LATERAL, quoted
+  part by part (`public."jobs"`); a CTE's name is not a table, and a name
+  followed by `(` after FROM is a function. Each is a `?table:` ref the
+  resolver keeps only when the schema adapter minted it. The ORM is not read.
+- **The Python text rules are one lexer** (comments, strings, raw-string
+  escapes, f-string expressions kept as code), so a `def` or a call inside a
+  docstring is never one; a one-line function keeps its suite; a docstring's
+  summary may sit on the line after the quotes and may hold an apostrophe.
+  Malformed input stays linear (a signature that never closes is its def
+  line after a bounded scan).
+- **Every Python adapter reads through `io`**, FastAPI included: never a
+  symlink, never past the size caps, so a route and the data-access records
+  for its code see the same files.
+- **Not read, and said so:** SQL held in a module-level constant (a listing
+  spec passed to a generic pager) and a table name chosen at run time
+  (`from public.{table}`). On one adopter's API this leaves 17 of 70 routes
+  unlinked, most of them health, docs and static lists; following
+  `module.CONSTANT` as functions are followed is a possible later step.
+- **A lost link warns.** When the schema has tables, routes name their code
+  and no data-access adapter is configured, every derive prints a
+  `WARNING [data-access]` saying so: an old `["supabase", "fastapi"]` config
+  is never quietly emptied of route → table edges.
+- **An unresolvable router import mounts nothing.** When `<mod>` in
+  `include_router(<mod>.router)` is imported but resolves to no single
+  scanned file, the router is not mounted (a diagnostic says why), rather
+  than falling back to another file of that basename.
 
 ## Rejected
 

@@ -56,7 +56,7 @@ export const RETIRED_BUILT_INS = { services: "external-services" };
 const NAME_RE = /^[a-z][a-z0-9-]*$/; // the engine's NAME_RE
 const KIND_RE = /^[a-z][a-z0-9_-]*$/; // the engine's KIND_RE
 const EXT_RE = /^\.[A-Za-z0-9][A-Za-z0-9._-]*$/;
-const REF_PREFIXES = ["?from:", "?table:", "?bucket:", "?function:", "?route:"];
+const REF_PREFIXES = ["?from:", "?table:", "?bucket:", "?function:", "?route:", "?code:"];
 // `sql` is standard SQL (Postgres): `#` is an operator there. `mysql` adds
 // `#` comments and backslash escapes (1.3.0 CR-014, decision in the skill).
 const SYNTAXES = ["c-like", "sql", "mysql", "python"];

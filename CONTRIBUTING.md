@@ -89,7 +89,11 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
   `?route:<url>` (`*` = one segment the scan could not read; it matches a
   route parameter only, never a fixed word, and a template hole typed as a
   union of literals is expanded before emission — [decision 0019](docs/decisions/0019-a-variable-segment-matches-a-parameter-never-a-fixed-word.md),
-  `src/core/lib/template-paths.mjs`). The deriver resolves them after the
+  `src/core/lib/template-paths.mjs`), and `?code:<file>#<function>` — the
+  code a route or screen runs, which a data-access adapter's `data-access`
+  records answer ([decision 0037](docs/decisions/0037-routes-reach-tables-through-a-data-access-record-joined-on-file-and-function.md):
+  the referrer takes their tables; one in the referrer's own file is
+  absorbed; a miss is silent). The deriver resolves them after the
   merge, drops misses with a diagnostic, and drops a record flagged
   `requireRefs: true` when nothing resolved (how a "module" record means "a file
   that references something"). See `src/core/lib/resolve-refs.mjs`.
