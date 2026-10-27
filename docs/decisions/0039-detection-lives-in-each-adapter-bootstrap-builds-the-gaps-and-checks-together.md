@@ -17,7 +17,7 @@ of them linked to a table.
    repo?" with plain-words evidence ("14 `@router.get` decorators in
    `app/routes/`"), the options it would use, and the **job** it covers,
    from a stack-free list the core owns: routes, screens, components,
-   database access, jobs, external services. Detection reads through `io`,
+   database access, background tasks, external services. Detection reads through `io`,
    under the same caps.
 2. **Bootstrap matches part by part.** It asks every catalogue adapter,
    collects the answers, and names what is covered and what is not.
@@ -43,7 +43,7 @@ of them linked to a table.
 4. **Greenfield: a preview now, the check when code appears.** Bootstrap
    renders the chosen adapters' own fixtures into a temporary human index
    outside the adopter's repo, to show what a map will look like. The first
-   time derive finds real routes, screens or tables, the next session runs
+   time derive finds real routes, screens, tables or background tasks, the next session runs
    the brownfield check once. `zdd/` remembers that it is owed until it is
    done.
 5. **ZDD never writes throwaway code into the adopter's repo** to test

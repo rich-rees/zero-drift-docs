@@ -33,7 +33,8 @@ refs to a record another adapter minted.
    handler calling `.table()` itself) is the same case: the handler *is*
    the data-access function.
 4. **Supabase comes out of every route and screen adapter now**: `nextjs`,
-   `react-router`, `expo-router`, `components`, `jobs` and `fastapi`. Their
+   `react-router`, `expo-router`, `components`, `jobs` (the `background-*`
+   readers, 0038) and `fastapi`. Their
    client scans move into `supabase-js` and `supabase-py`.
 
 ## Consequences
