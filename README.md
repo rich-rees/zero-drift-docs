@@ -159,9 +159,9 @@ hook, config schema + example, the seed ADR-0001, and the extractor scaffold).
 | Pages | `react-router` | a route tree declared in code: one surface per screen, its guards, the API calls and the code it runs one hop away |
 | Native screens | `expo-router` *(early)* | the Expo Router folder tree: screens, layouts, `[id]` segments, platform pairs — namespaced so a native `/jobs` and a web `/jobs` are two surfaces |
 | Components | `components` | React and React Native: exported, capitalised, returning JSX; props as written; **used by** / **uses** / **calls**; shared vs page-private |
-| Background work | `jobs` | everything that runs without a user clicking (2.3): scheduled — Vercel crons (`vercel.json`), Railway `cronSchedule`, Cloudflare `wrangler.toml` triggers, Supabase `pg_cron` in migrations, Trigger.dev scheduled tasks, and GitHub Actions schedules as opt-in housekeeping; workers — Railway, a Procfile, Docker Compose; queues — BullMQ, Inngest, Trigger.dev, SQS, producer and consumer with the queue's name. Each record carries its trigger and what it hits (a route, a function, the module); a package script counts only when a manifest runs it; `reads` / `writes` from the tables a module names; the mode never guessed |
+| Background work | `jobs` | everything that runs without a user clicking (2.3): scheduled — Vercel crons (`vercel.json`), Railway `cronSchedule`, Cloudflare `wrangler.toml` triggers, Supabase `pg_cron` in migrations, Trigger.dev scheduled tasks, and GitHub Actions schedules as opt-in housekeeping; workers — Railway, a Procfile, Docker Compose; queues — BullMQ, Inngest, Trigger.dev, SQS, producer and consumer with the queue's name. Each record carries its trigger and what it hits (a route, a function, the module); a package script counts only when a manifest runs it; `reads` / `writes` from the tables the module's code reaches, as the data-access adapters read it; the mode never guessed |
 | External services | `external-services` (`services` before 2.3) | declared markers — a package import, an env-name prefix (names only, never values); **depends on** from the files that carry a marker — never a file that reaches the provider through a settings object; undeclared candidates warned about on every derive |
-| Realtime | *(in `react-router` / `nextjs`)* | a page's Supabase Realtime subscription — `.on('postgres_changes', { table })` or a helper you name — as a **subscribes** edge |
+| Realtime | *(in `supabase-js`)* | a Supabase Realtime subscription — `.on('postgres_changes', { table })` or a helper you name in `subscribeCalls` — as a **subscribes** edge on the page, screen, component or module whose code makes it |
 
 **A Railway file is read by Railway too.** The `jobs` extractor learns a
 Railway service's start command and schedule from a committed
@@ -410,8 +410,10 @@ merge gate.
 - Vercel Queues are not read yet (the API was not stable enough to pin a
   shape to); BullMQ, Inngest, Trigger.dev and SQS are. Filed as a finding.
 - A Supabase Realtime subscription written as a direct
-  `.on('postgres_changes')` inside a hook yields no `subscribes` edge; name
-  the wrapper in `subscribeCalls`. Filed as a finding.
+  `.on('postgres_changes')` inside a hook gives the hook's own module its
+  `subscribes` edge (0.9), not the Next.js page that uses the hook: Next.js
+  pages are read by folder, not by import. Name the hook in
+  `supabase-js.subscribeCalls` and the page's call to it carries the edge.
 - **Still on 2.2.1? The `services` extractor's default roots read gitignored
   folders**, including the `.claude/worktrees/` folder the Claude desktop app
   creates (a second checkout of the repo): the committed records can name

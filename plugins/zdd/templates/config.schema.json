@@ -182,7 +182,7 @@
     "adapter": {
       "type": "string",
       "deprecated": true,
-      "description": "DEPRECATED (pre-1.0): the single monolithic adapter. Still honoured — `nextjs-supabase` expands to extractors [supabase, nextjs] with adapterOptions split by key — but prints a deprecation note on every derive; \"upgrade ZDD\" migrates it for you.",
+      "description": "DEPRECATED (pre-1.0): the single monolithic adapter. Still honoured — `nextjs-supabase` expands to extractors [supabase, supabase-js, nextjs] with adapterOptions split by key — but prints a deprecation note on every derive; \"upgrade ZDD\" migrates it for you.",
       "examples": ["nextjs-supabase"]
     },
     "adapterOptions": {

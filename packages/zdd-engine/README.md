@@ -90,13 +90,13 @@ version:
 
 | Key | Default | What it is |
 |---|---|---|
-| `extractors` | *(required, unless legacy `adapter`)* | Extractors to run, composed per convention: `supabase`, `nextjs`, `fastapi`, `react-router`, `components`, `expo-router`, `jobs`, `external-services`, `generic` (built-in; `services` is the 2.1–2.2 name of `external-services`, accepted for one more release), or a name from `localExtractorDir`. Names only, never paths |
+| `extractors` | *(required, unless legacy `adapter`)* | Extractors to run, composed per convention: `supabase`, `nextjs`, `fastapi`, `react-router`, `components`, `expo-router`, `jobs`, `external-services`, `supabase-js`, `supabase-py`, `sqlalchemy`, `generic` (built-in; `services` is the 2.1–2.2 name of `external-services`, accepted for one more release), or a name from `localExtractorDir`. Names only, never paths |
 | `extractorOptions` | — | Per-extractor source layout, keyed by name — `supabase`: `migrationNamespaces`, `externalBuckets`; `nextjs`: `appDir`, `apiPrefix`, `middlewarePath`, `authPatterns`, `refs`, `srcAliasRoot`; `supabase-js`: `roots`, `extensions`, `excludeDirs`, `excludeSuffixes`, `subscribeCalls`; `fastapi`: `roots`, `excludeDirs`, `appVar`; `react-router`: `routesFile`, `srcAliasRoot`; `components`: `roots`, `pageDirs`, `sharedDirs`, …; `expo-router`: `appDir`; `jobs`: `roots`, `exclude`, `modes`, `entries`, `includeGithubActions`; `external-services`: `services`, `ignore`, `roots` — all in `config.schema.json` |
 | `agentIndex.budgetTokens` | `2000` | The agent index's size budget in approximate tokens; over it, `render` warns and names the fix (2.3) |
 | `agentIndex.levels` | `1` | `2` lists the areas first and writes one file per area under `zdd/agent-index/`, each feature one hop away — for a repo whose feature list alone does not fit (2.3) |
 | `claims.strictKinds` | `[]` | The opt-in kinds (`component`, `job`, `external-service`) that `claims.strict` also fails on; unlisted they warn (decision 0017) |
 | `localExtractorDir` | — | Repo-relative folder of repo-local extractors (`<name>.mjs` or `<name>/index.mjs`) — the one place config may point at code |
-| `adapter` / `adapterOptions` | *(deprecated)* | The pre-1.0 single adapter; `nextjs-supabase` still expands to `[supabase, nextjs]` with a deprecation note |
+| `adapter` / `adapterOptions` | *(deprecated)* | The pre-1.0 single adapter; `nextjs-supabase` still expands to `[supabase, supabase-js, nextjs]` with a deprecation note |
 | `name` | `"Codebase"` | Display name for the indexes |
 | `repoBase` | `""` | GitHub `/tree/<branch>/` URL prefix for source links in the human index — http(s) only, refused otherwise |
 | `nonAreaTags` | `[]` | Tags that are properties, not product areas (`react-flow`); a record inherits its area from its claiming feature's first tag not listed here. Shapes `graph.json`, so top-level (the old `viewer.nonAreaTags` still works, with a note) |
@@ -167,6 +167,6 @@ three of twelve records), `test/fixture-components/` (a web app, an Expo app
 and a shared component kit over one API), `test/fixture-jobs/` (manifests
 that run processes, a Railway file, a Procfile), `test/fixture-services/`
 (Sentry and Resend by marker, Stripe undeclared) and `test/fixture-greenfield/`
-(config only). `test/golden/` pins v0.3.1 output: the composed `[supabase, nextjs]` pair must
+(config only). `test/golden/` pins v0.3.1 output: the composed `[supabase, supabase-js, nextjs]` must
 reproduce the adapter's metadata byte for byte, and the `cytoscape` viewer must
 embed the same `BUNDLE` the pre-registry renderer did.

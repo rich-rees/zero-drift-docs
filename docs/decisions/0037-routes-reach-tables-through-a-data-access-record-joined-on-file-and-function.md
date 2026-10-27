@@ -60,7 +60,7 @@ refs to a record another adapter minted.
   silent: most functions touch no database.
 - **Absorbed or kept.** A data-access record whose every referrer holds its
   file is absorbed into them (a handler's own body); one reached from any
-  other file stays as a node. So a stack whose data access is inline reads
+  other file stays as a node; one nothing reaches is dropped (slice 2b). So a stack whose data access is inline reads
   exactly as before: the FastAPI golden is byte-identical with `supabase-py`
   added to its config. One hop: a data-access record's own `?code:` refs are
   not followed.
@@ -125,10 +125,21 @@ refs to a record another adapter minted.
   It is the only JS adapter that knows Supabase: `nextjs`, `react-router`,
   `components`, `expo-router` and `jobs` hold no client scan now.
 - **A JS unit** is a top-level declaration by its local name (`export default
-  function Foo` is `Foo`; an anonymous default is `default`), or `<module>`
-  for the module's own top-level code (Python's name for it). Imports, types
-  and export lists are no unit. One record per unit that makes a call, closed
-  over the same-file declarations it mentions, as for Python. The units are
+  function Foo` is `Foo`, `export default abstract class Store` is `Store`;
+  an anonymous default is `default`), or `<module>` for the module's own
+  top-level code (Python's name for it). Imports, types, export lists and
+  erased declarations (`declare …`, `export default interface`) are no unit;
+  an erased one still declares its name, so an import of it narrows, and
+  reaches nothing. A `const a = …, b = …` or a destructuring declares every
+  name it binds, and is one unit named by its first. One record per unit
+  that makes a call, closed over the same-file declarations it mentions, as
+  for Python — a name the unit binds itself (a parameter, a local) shadows
+  the declaration. A constant resolves `.from(NAME)` from the unit's own
+  `const`s first, then the module's top-level ones, never another
+  function's; it may name its schema (`"public.jobs"`). A call on a
+  capitalised static receiver (`Array.from`, `Buffer.from`) is not the
+  client's. A Realtime table is the filter object's own `table` key, never
+  one inside a callback. The units are
   cut once, in `adapters/js/` (a helper folder beside `adapters/python/`),
   from the lexer and statement model `react-router` already had, so a screen
   and `supabase-js` agree on a unit's text.
@@ -144,14 +155,25 @@ refs to a record another adapter minted.
   typed edge from the record (`subscribes`, `sqlalchemy`'s `reads` /
   `writes`) comes as it is. A verb the referrer already had keeps its place
   in `facts.edges`; a new one follows in name order.
+- **The verb rule keeps provenance**: the refs a data-access record leaves
+  untyped are resolved on their own, so a table a unit both queries and
+  subscribes to keeps `reads` beside `subscribes`.
+- **A data-access record nothing reaches is dropped** (Rich's call on the
+  dry runs): it exists to explain a link, so one that explains none — a
+  helper whose caller already carries its tables, a script no page runs —
+  is not a node. This covers the Python adapters too.
+- **Bounded and loud.** Following same-file calls stops past 2²⁰ links in a
+  file (each function keeps its own calls, and a warning says so); a file
+  walk or a read budget that runs out is a warning on every derive, never a
+  quiet diagnostic. A record's filename escapes `~` too, so two paths never
+  share one.
 - **`?at:` never lands on a data-access record.** A record of that kind is a
   view of code another record holds; an external service's `usedBy` folding
   a file's tables into itself was the slice's one dry-run defect.
 - **What moves.** Every golden is byte-identical. On the two adopters,
   branch against 2.5: one adopter's Next.js app moves only where honesty
-  gains: a hook module gets the `subscribes` edge Next.js gave pages alone,
-  and a script outside the Next.js roots shows two uncalled data-access
-  nodes (`supabase-js` scans `"."` by default). The other's React Router
+  gains: a hook module gets the `subscribes` edge Next.js gave pages alone;
+  its graph's node and edge counts are otherwise unchanged. The other's React Router
   screens and components are byte-identical, Realtime edges included.
   `subscribeCalls` moves from `react-router` / `nextjs.refs` to
   `supabase-js`; set in the old place it warns on every derive (the upgrade
