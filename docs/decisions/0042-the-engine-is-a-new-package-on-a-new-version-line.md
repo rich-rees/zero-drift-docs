@@ -33,7 +33,8 @@ not a contract and the exports map is where one would be made.
    line pinned `engine`. A config with `release` is the new line, one with
    `engine` (or neither) the old line, forever, with no guessing. The
    upgrade moves `engine` to `release` where it sat; a config holding both
-   is refused by name, before any write.
+   is refused by name, before any write (amended below: the `engine` is
+   dropped as stale).
 3. **Every old-line release comes before every new-line release**, whatever
    the numbers. In the strings the plugin compares, an old-line release
    carries the old package's name (`zdd-engine@2.5.0`): the old notes and
@@ -67,6 +68,20 @@ not a contract and the exports map is where one would be made.
 - Anything that imported an engine file breaks at 0.9. Nothing ZDD ships
   does: the plugin runs the command, and a local adapter cannot import the
   engine (decision 0010).
+
+## After the slice 6 campaign
+
+Point 2's "a config holding both is refused" was kept for one release of
+reviews only: a teammate whose machine still runs a pre-0.9 plugin, saying
+"upgrade ZDD" on a repo already moved, writes `engine` beside `release`
+(and moves the lock back), and the refusal then left "upgrade ZDD" unable
+to repair it (CR-151, Rich's call). So, beside a `release`, an `engine` pin
+is stale: the upgrade drops it, names it, and carries on; the scaffold asks
+for the upgrade first. A `release` that is not a version (`v0.9.0`, `0.9`,
+`zdd-engine@9.9.9`, a number) is refused before any write, where it had been
+overwritten (CR-149), and a prerelease sorts before its release, so an
+upgrade from `0.9.0-rc.1` still crosses 0.9.0 (CR-150). An `engine` that is
+not a version counts as unknown: the old line is behind whatever it says.
 
 ## Rejected
 

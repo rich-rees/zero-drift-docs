@@ -943,7 +943,9 @@ freezes it.
   (decision 0042); the plugin keeps its marketplace address. Its files can
   no longer be imported (an `exports` map opens `package.json` only): the
   command line is the contract. The config's `engine` pin becomes
-  `release`, and a config holding both is refused. **What moves on the
+  `release`; an `engine` found beside a `release` (written by a teammate's
+  plugin from before 0.9) is dropped and named, and a `release` that is not a
+  version is refused. **What moves on the
   bump**: every pin ZDD owns (config, CI workflow, pre-push hook) names
   `@rich-rees/zdd@0.9.0`; `derive --check` moves wherever a route or screen
   reached a table — routes now reach tables through data-access records,

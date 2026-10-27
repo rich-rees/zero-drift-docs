@@ -10,7 +10,8 @@ graph in the middle.
 > (decision 0042). The engine (`packages/zdd-engine`, on npm as
 > `@rich-rees/zdd`) is what the plugin's skills and adopters' CI
 > both run, and both contracts below — extractors and viewers — are the ones it
-> executes today. Issues and discussion are welcome; the tests are the contract
+> executes today. Pull requests are welcome, and bug reports go to the repo's
+> Discussions ("Bug reports"; decision 0041 — the repo has no Issues); the tests are the contract
 > (`node --test` in `packages/zdd-engine` and over `plugins/zdd/test`), and CI
 > runs both suites on every PR.
 
