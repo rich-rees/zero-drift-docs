@@ -71,7 +71,11 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
   regular file as a sorted, repo-relative POSIX path, never one git ignores.
   It never follows a symlink, caps depth, skips `.git` by default and shares
   one entry budget across every walk, and returns `{ exists, truncated,
-  skipped }`. `io.isIgnored(rel)` (2.3) answers the same veto for an extractor
+  skipped }`. `io.kind(rel)` (0.9) says what sits at a path without reading
+  it — `missing`, `file` (regular, no link on any segment), `directory`,
+  `symlink`, `linked` (a file under a linked folder) or `other` — for an
+  adapter that probes spellings the way a bundler resolves an import.
+  `io.isIgnored(rel)` (2.3) answers the same veto for an extractor
   that walks on its own; `.claude/worktrees/` counts as ignored everywhere. A path that is not
   repo-relative throws. A local extractor cannot import the engine under
   `npx`, which is why `io` is handed in. Decide structure on text with its
@@ -133,6 +137,42 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
   local names may not shadow built-ins). Try a convention there first, with the
   skill's scaffold; propose it for the catalogue once it has run against a real
   repo.
+- **It declares the contract it was written for and passes the standard
+  suite** ([decision 0040](docs/decisions/0040-adapters-declare-a-contract-number-and-pass-one-standard-suite.md)).
+  `export const CONTRACT = 1`, a number of its own that moves only when the
+  table below does, and `export const COMMENT`, the line-comment mark for
+  each kind of file it reads. The suite (`zdd-engine suite`, run on a copy
+  of the adapter's fixture outside any repo) holds every adapter to five
+  checks: byte-identical records on another machine and on a second run, a
+  gitignored path never read, a missing root nothing to inventory,
+  commented-out code (every line of the fixture, by `COMMENT`) never a
+  record, and every read through `io`. A catalogue adapter is listed, with
+  its fixture and options, in `packages/zdd-engine/test/standard-suite.test.mjs`
+  — a new one cannot ship without passing; a local one keeps its `fixture/`
+  beside it and `export const SUITE = { options }`. A check added in a
+  release goes at the end of the list and warns for adopters until "upgrade
+  ZDD" has their adapters pass it (`suiteChecks`).
+
+  | Step | Since | Required | What the core asks |
+  |---|---|---|---|
+  | `CONTRACT` | 1 | yes | `export const CONTRACT = n`: the adapter contract the adapter was written for |
+  | `derive` | 1 | yes | `derive({ repoRoot, options, io })` returns `{ records, diagnostics }`; the same source bytes give byte-identical records |
+  | `io` | 1 | yes | every read and listing through the `io` the engine hands in, never `node:fs`, the environment or the network; a gitignored path is never read |
+  | missing source | 1 | yes | a configured root that does not exist is nothing to inventory: no records and a diagnostic, never an error |
+  | `COMMENT` | 1 | yes | `{ ".ext": "<line comment mark>" }` for each kind of file read (`{}` when none takes one), so the suite can comment out the fixture |
+  | `SUITE` | 1 | yes (an adopter's own) | a `fixture/` folder beside the adapter and `export const SUITE = { options, companions? }`; a catalogue adapter's fixture lives in ZDD's tests |
+  | `FACTS_KEY_ORDER` | 1 | no | facts in a stable order, per kind |
+  | unresolved refs | 1 | no | `?table:<name>`, `?route:<url>`, … for another adapter's records; the core resolves them |
+  | data access | 1 | no | `?code:<file>#<function>` refs, and `data-access` records naming the tables a function reaches (decision 0037) |
+  | typed edges | 1 | no | `facts.edges`, a verb for a ref (decision 0016) |
+  | `warnings` | 1 | no | a list printed on every derive |
+  | detection | 1 | no | `DETECTION` and `detect({ scan, proposed })` (decision 0039; every catalogue adapter has it) |
+
+  Before 1.0 the contract is open (it stays at 1 and may change without
+  interviews). From 1.0 a change is a new row with `since` one higher and
+  `CONTRACT` raised to match (a test holds them together), its interview
+  question in `ask` (`src/core/lib/contract.mjs`); a new **required** step
+  is a major release.
 - **A catalogue adapter carries its own detection**
   ([decision 0039](docs/decisions/0039-detection-lives-in-each-adapter-bootstrap-builds-the-gaps-and-checks-together.md)):
   bootstrap asks every adapter whether it fits a repo, and is never edited to
