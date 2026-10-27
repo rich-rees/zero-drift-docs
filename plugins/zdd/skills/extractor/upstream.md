@@ -32,10 +32,11 @@ A PR is complete when it holds every item:
       (`{ skip: process.platform === "win32" && … }`), and each mask edge the
       dialect has; plus the fixture added to the determinism matrix in
       `test/extractors.test.mjs` (two fresh copies, a second run, `--check`).
-- [ ] **A detection probe** — in `plugins/zdd/scripts/bootstrap.mjs` `detect()`:
-      the evidence it looks for, the options it implies, bounded reads. Proven
-      at the file seam in `plugins/zdd/test/bootstrap.test.mjs` (scripted
-      answers against a fixture, files on disk asserted).
+- [ ] **Its detection** — `DETECTION` and `detect({ scan, proposed })` in the
+      adapter's own folder (decision 0039; the contract is in CONTRIBUTING):
+      the evidence it looks for in plain words, the options it implies, the
+      parts it covers, its option shape. Never a probe in bootstrap. Proven in
+      `packages/zdd-engine/test/detect.test.mjs`.
 - [ ] **The schema block** — `extractorOptions.<name>` in
       `plugins/zdd/templates/config.schema.json`.
 - [ ] **The README rows** — the extractor list and its options in

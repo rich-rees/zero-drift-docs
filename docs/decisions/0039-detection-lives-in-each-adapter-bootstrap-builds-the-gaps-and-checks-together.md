@@ -124,6 +124,23 @@ of them linked to a table.
   offer, the fence's interpreter list, and the scaffold's mirror of the
   catalogue (held equal by its own test). The skills' prose is not checked:
   it talks to a person about their stack.
+- **After the slice 4 campaign (CR-096 to CR-117).** On Windows, outside
+  this checkout, npm's `npx-cli.js` beside node runs the engine with no
+  shell; cmd.exe runs `npx` only when that file is missing, and then an
+  argument it would read differently (a quote, `%`, `^`, `!`, `&`, `|`, `<`,
+  `>`) is refused before anything runs. `ZDD_ENGINE_BIN` is accepted only
+  when it names an engine's own `bin/zdd-engine.mjs`. The options bootstrap
+  writes are checked whatever their source — a detected folder name with a
+  space stops the run before the first write — and an option shape names a
+  call-name grammar (the one supabase-js reads, which now says when it
+  ignores a name) and an object list's required and optional path keys
+  (`background-declared`'s `file` and `cwd`). The scan counts the files it
+  could not read and bootstrap says so. A pyproject or Pipfile string counts
+  as a dependency only inside a dependency array or table. `preview` writes
+  only into a real, empty folder outside `--root`, and refuses a name the
+  catalogue does not hold. `check --status` is silent in a repo with no
+  config and reads metadataDir only inside the checkout, never through a
+  link.
 - **Measured on the adopters (dry runs on throwaway copies).** Detection
   takes about a second on both adopters, and proposes what main's
   bootstrap did, with `jobs` split into the readers each repo uses

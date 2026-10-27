@@ -228,11 +228,11 @@ builds its own private data shape from the graph.
   serve the ritual (not project-specific workflow — ZDD ships mechanism, not
   opinions about how *your* team plans work).
 - **Engine** — determinism fixes, better ref resolution, the renderer, the checks.
-- **The runbook** — a new detection probe in `plugins/zdd/scripts/bootstrap.mjs`
-  (one per extractor convention: what evidence it looks for, what options that
-  implies). Every probe is proven at the file seam: `plugins/zdd/test/` drives
-  the script with a scripted answer set against a fixture and asserts what
-  landed on disk.
+- **Detection** — a catalogue adapter's own `DETECTION` and `detect()`
+  (above; decision 0039): what evidence says it fits, what options that
+  implies. Bootstrap is never edited to learn a stack. Prove it in the
+  engine's suite (`packages/zdd-engine/test/detect.test.mjs`); the plugin's
+  tests drive bootstrap against what the engine answers.
 - **Docs** — clearer setup, worked examples, fixing anything that misled you.
 
 ## What ZDD deliberately does *not* want

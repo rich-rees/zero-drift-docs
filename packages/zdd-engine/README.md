@@ -95,9 +95,11 @@ npx @rich-rees/zdd-engine preview --extractors=<a,b,…> [--out=<empty dir>] [--
   `example/` folders into a new temporary folder outside the repo, derives
   and renders there, and prints where the human index landed.
 
-Every command locates the repo by walking up from the working directory to the
-first folder holding `zdd/config.json` (override with `--root=<dir>` /
-`--config=<file>`).
+Every command but `detect` and `preview` locates the repo by walking up from
+the working directory to the first folder holding `zdd/config.json` (override
+with `--root=<dir>` / `--config=<file>`). `detect` reads the folder `--root`
+names (default: the working directory) and needs no config; `preview` reads
+none, and refuses an output folder inside `--root`.
 
 ## Config (`zdd/config.json`)
 
