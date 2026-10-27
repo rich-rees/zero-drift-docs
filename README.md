@@ -159,11 +159,11 @@ hook, config schema + example, the seed ADR-0001, and the extractor scaffold).
 | Pages | `react-router` | a route tree declared in code: one surface per screen, its guards, the API calls and the code it runs one hop away |
 | Native screens | `expo-router` *(early)* | the Expo Router folder tree: screens, layouts, `[id]` segments, platform pairs — namespaced so a native `/jobs` and a web `/jobs` are two surfaces |
 | Components | `components` | React and React Native: exported, capitalised, returning JSX; props as written; **used by** / **uses** / **calls**; shared vs page-private |
-| Background work | `jobs` | everything that runs without a user clicking (2.3): scheduled — Vercel crons (`vercel.json`), Railway `cronSchedule`, Cloudflare `wrangler.toml` triggers, Supabase `pg_cron` in migrations, Trigger.dev scheduled tasks, and GitHub Actions schedules as opt-in housekeeping; workers — Railway, a Procfile, Docker Compose; queues — BullMQ, Inngest, Trigger.dev, SQS, producer and consumer with the queue's name. Each record carries its trigger and what it hits (a route, a function, the module); a package script counts only when a manifest runs it; `reads` / `writes` from the tables the module's code reaches, as the data-access adapters read it; the mode never guessed |
+| Background work | `background-vercel`, `background-railway`, `background-cloudflare`, `background-procfile`, `background-compose`, `background-pg-cron`, `background-bullmq`, `background-inngest`, `background-trigger-dev`, `background-sqs`, `background-github-actions` (opt-in), `background-declared` | everything that runs without a user clicking, one reader per platform file (0.9, decision 0038): scheduled — Vercel crons (`vercel.json`), Railway `cronSchedule`, Cloudflare `wrangler.toml` triggers, `pg_cron` in migrations, Trigger.dev scheduled tasks, and GitHub Actions schedules as housekeeping; workers — Railway, a Procfile, Docker Compose; queues — BullMQ, Inngest, Trigger.dev, SQS, producer and consumer with the queue's name; tasks declared by hand. One **background task** per task, however many readers see it (the same code, or the same command from the same folder). Each carries its trigger and what it hits (a route, a function, the module); a package script counts only when a manifest runs it; `reads` / `writes` from the tables the module's code reaches, as the data-access adapters read it; the mode never guessed |
 | External services | `external-services` (`services` before 2.3) | declared markers — a package import, an env-name prefix (names only, never values); **depends on** from the files that carry a marker — never a file that reaches the provider through a settings object; undeclared candidates warned about on every derive |
 | Realtime | *(in `supabase-js`)* | a Supabase Realtime subscription — `.on('postgres_changes', { table })` or a helper you name in `subscribeCalls` — as a **subscribes** edge on the page, screen, component or module whose code makes it |
 
-**A Railway file is read by Railway too.** The `jobs` extractor learns a
+**A Railway file is read by Railway too.** `background-railway` learns a
 Railway service's start command and schedule from a committed
 `railway.toml` / `railway.json`, but Railway applies that file as well — its
 values override the dashboard — and Railway is retiring the format (a
@@ -172,7 +172,7 @@ service cannot take it up; its Infrastructure as Code replaces it).
 Commit one only if you mean Railway to apply it; otherwise keep it matching
 what the dashboard runs, as a statement for the map. A start command that
 names build output (`node dist/server.js`) is not a file in the repo: derive
-warns, and a `jobs.entries` line in config names the source file.
+warns, and a `background-declared` entry in config names the source file.
 
 Vue, Svelte and Angular are not read: write a local extractor with the
 `extractor` skill (below) and, once it is proven on a real repo, lift it in.
@@ -487,8 +487,8 @@ packages/zdd-engine/                # deriver / renderer / checks + extractors +
   bin/zdd-engine.mjs                # the CLI (derive / render / lint / freshness / tally)
   src/core/                         # the stack-free core: derive, render, lint, the stores, the viewers
   src/core/viewers/{cytoscape,minimal}/  # output end: human-index viewers over graph.json
-  src/adapters/{supabase,nextjs,fastapi,react-router,components,expo-router,jobs,external-services,supabase-js,supabase-py,sqlalchemy,generic}/   # input end: one adapter per convention
-  src/adapters/{js,python}/         # helpers each language's adapters share (no index.mjs: not adapters)
+  src/adapters/{supabase,nextjs,fastapi,react-router,components,expo-router,background-*,external-services,supabase-js,supabase-py,sqlalchemy,generic}/   # input end: one adapter per convention
+  src/adapters/{js,python,background}/  # helpers adapters share (no index.mjs: not adapters)
   test/fixture*/                    # the miniature proving repos
 docs/patterns.md                    # blessings and "choose patterns", the whole system
 docs/decisions/                     # this repo's own decision record (ADR format)

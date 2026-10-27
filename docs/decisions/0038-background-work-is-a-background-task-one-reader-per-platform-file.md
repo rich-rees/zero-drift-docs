@@ -50,6 +50,65 @@ business's word. The same collision renamed `services` to
 - Lane and display tables in the core change one entry ("Job" becomes
   "Background Task").
 
+## As built (ZDD-3 slice 3)
+
+Three questions settled on 2026-10-27, Rich's calls:
+
+- **One task seen by two readers is one record, and the core joins it.**
+  A Procfile line names a process and a Railway file states its schedule; a
+  task declared by hand and a Railway file run the same thing. After every
+  reader has run, the core (`src/core/lib/background-tasks.mjs`) merges
+  `background-task` records that run **the same command from the same
+  folder** (the shape that survives when the code is build output nobody
+  commits), or **the same code file when one of them is a process** — a
+  queue or a schedule declared in the code a process runs. Two
+  declarations in one file that no process runs (two Trigger.dev tasks in
+  one module) stay two tasks. The rule names no platform. One record names
+  the task: a process (a command a manifest or a declaration runs) before a
+  queue or a schedule declared in its code, and either before a record a
+  reader marks as describing how a task is deployed (Railway's). The others
+  join it: their files are added to its resources, their refs and edges
+  united, a schedule, trigger, target, queue or description it lacks taken.
+  A task whose command names no file in the repo is dropped with its
+  reader's warning, unless another reader names it. Two tasks left with one
+  name are two tasks: the first is kept, the second named in a diagnostic.
+- **One reader per convention, eleven of them.** The five platform files
+  (`background-vercel`, `background-railway`, `background-cloudflare`,
+  `background-procfile`, `background-compose`), plus `background-pg-cron`
+  (`pg_cron` in SQL migrations; `source` is `pg_cron`, the mechanism, where
+  it said `supabase`), one per queue library (`background-bullmq`,
+  `background-inngest`, `background-trigger-dev`, `background-sqs`), and
+  `background-github-actions`. None of the two adopters uses a queue library
+  today; they ship because a new adopter may.
+- **Each reader owns its options.** `background-declared` holds the tasks
+  declared by hand (`entries`, `jobs.entries` before). Every reader takes
+  `roots`, `exclude` and `modes`. The "no stated mode" lint now names the
+  option on the reader that read the task,
+  `extractorOptions["background-procfile"].modes["nightly"]` (CR-010, from
+  slice 1): a record carries its
+  `reader`. Listing `background-github-actions` is its opt-in
+  (`includeGithubActions` before).
+
+What they share lives in `adapters/background/` (a helper folder): the
+command parser, the script and module resolution, the small format readers,
+and the reader that turns candidates into records.
+
+- **What moves.** The kind, ids and folder move from `job` to
+  `background-task`; "Job" becomes "Background Task" in the viewer's lane
+  and palette (the human-index goldens move by that key alone). A queue
+  whose consumer a process runs is now that process's task, not a second
+  one named after the queue: on the engine's fixture, the Compose
+  `transcoder` and the BullMQ `video-transcode` it consumes are one task.
+  `jobs` is a retired name (`catalogue.json`): a config that still lists it
+  stops derive with the readers to list instead. Bootstrap proposes one
+  reader per kind of file it finds; "upgrade ZDD" replaces `jobs` with the
+  readers detection finds (plus `background-declared` and
+  `background-github-actions` when the old options asked for them), moves
+  `roots` / `exclude` / `modes` to the process readers and `entries` to
+  `background-declared`, renames `job` in `claims.strictKinds` and the
+  allow-list, and repairs the map's `metadata/job/` links. The 0.9
+  upgrade notes are slice 6's.
+
 ## Rejected
 
 - **Keep one `jobs` adapter.** No work, one config line, but every platform
