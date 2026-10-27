@@ -98,6 +98,10 @@ function closersOf(mask) {
 // (`live.onInsert`) whose FIRST argument is the table name as a string
 // literal. A table that is a variable is not seen — the same honesty as the
 // call scanners.
+// A call name `subscribeCalls` may hold: dotted JS identifiers (`live.onInsert`).
+// Bootstrap checks answers against the same grammar (DETECTION.optionShape.callName).
+export const CALL_NAME = /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/;
+
 export function scanSubscriptions(text, helpers = []) {
   const m = model(text);
   const out = new Set();
@@ -135,7 +139,7 @@ export function scanSubscriptions(text, helpers = []) {
     if (raw !== null && TABLE_NAME.test(raw)) out.add(raw);
   }
   for (const helper of helpers) {
-    if (typeof helper !== "string" || !/^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/.test(helper)) continue;
+    if (typeof helper !== "string" || !CALL_NAME.test(helper)) continue;
     const re = new RegExp(`(?<![\\w$.])${helper.replace(/[.$]/g, "\\$&")}\\s*\\(\\s*(['"])`, "g");
     for (const hit of m.mask.matchAll(re)) {
       const raw = stringAt(m, hit.index + hit[0].length - 1);
@@ -253,6 +257,7 @@ export function derive({ options, io }) {
     subscribeCalls = [],
   } = options;
   for (const [key, v] of Object.entries({ roots, extensions, excludeDirs, excludeSuffixes, subscribeCalls })) stringList(v, key);
+  for (const name of subscribeCalls) if (!CALL_NAME.test(name)) diagnostics.push(`subscribeCalls: '${name}' is not a call name (dotted identifiers, e.g. "live.onInsert") — ignored`);
   const files = jsFiles(io, roots.map((r) => repoRelative(r, "supabase-js.roots")), { extensions, excludeDirs, excludeSuffixes }, diagnostics, warnings);
   const records = [];
   let overBudget = false;

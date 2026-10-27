@@ -11,6 +11,10 @@
   ],
   "additionalProperties": true,
   "properties": {
+    "mapCheck": {
+      "const": "owed",
+      "description": "The first map check, done with the developer (decision 0039): written \"owed\" by bootstrap at a fresh install, removed by `bootstrap.mjs check --done`. On a repo with no code yet it waits for the first derive that finds records. No engine command reads it."
+    },
     "extractors": {
       "type": "array",
       "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },

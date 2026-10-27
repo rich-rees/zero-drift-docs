@@ -6,7 +6,7 @@
 
 import { posix } from "node:path";
 import { FACTS_KEY_ORDER, backgroundReader, parseCommand, parseCompose } from "../background/shared.mjs";
-import { DETECTION_BASE, backgroundProposal, jobShaped, manifests } from "../background/detect.mjs";
+import { DETECTION_BASE, backgroundProposal, manifests } from "../background/detect.mjs";
 
 export { FACTS_KEY_ORDER };
 

@@ -7,7 +7,7 @@ import { JS_SKIP_DIRS, packageDeps } from "../js/detect.mjs";
 export const DETECTION = {
   parts: ["routes", "screens"],
   order: 20,
-  optionShape: { paths: ["appDir", "middlewarePath", "srcAliasRoot"], pathLists: ["refs.roots"], callLists: ["refs.subscribeCalls"] },
+  optionShape: { paths: ["appDir", "middlewarePath", "srcAliasRoot"], pathLists: ["refs.roots"], callLists: ["refs.subscribeCalls"], callName: "^[A-Za-z_$][\\w$]*(?:\\.[A-Za-z_$][\\w$]*)*$" },
   exampleClaims: ["an API route: `../../metadata/route/things.json`", "a page: `../../metadata/surface/things--_id.json`"],
   skipDirs: JS_SKIP_DIRS,
   stack: [{ rank: 30, match: "next(\\.js)?", options: { appDir: "src/app", apiPrefix: "/api" }, path: ["appDir"] }],

@@ -23,9 +23,10 @@ export function detect({ scan }) {
   }
   if (!counts.size) return null;
   const dirs = [...counts.keys()].sort();
+  const capped = seen > MAX_FILES ? [`detection counted the first ${MAX_FILES} .tsx/.jsx files and stopped — a component root past them is not proposed; add it to roots by hand`] : [];
   return {
     proposal: {
-      evidence: dirs.map((d) => `${counts.get(d)} .tsx/.jsx file${counts.get(d) === 1 ? "" : "s"} under \`${d}\``),
+      evidence: dirs.map((d) => `${counts.get(d)} .tsx/.jsx file${counts.get(d) === 1 ? "" : "s"} under \`${d}\``).concat(capped),
       options: { roots: dirs },
     },
   };

@@ -4,7 +4,7 @@
 export const DETECTION = {
   parts: ["database access"],
   order: 10,
-  optionShape: { objectLists: { migrationNamespaces: "dir" } },
+  optionShape: { objectLists: { migrationNamespaces: { required: ["dir"] } } },
   exampleClaims: ["a table: `../../metadata/table/db--things.json`"],
   stack: [{ rank: 20, match: "supabase|postgres", options: { migrationNamespaces: [{ name: "db", dir: "supabase/migrations" }] }, path: ["migrationNamespaces", 0, "dir"] }],
   example: { options: { migrationNamespaces: [{ name: "db", dir: "supabase/migrations" }] } },

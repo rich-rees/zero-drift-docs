@@ -12,7 +12,7 @@ export const DETECTION = {
   parts: ["database access"],
   order: 11,
   after: true,
-  optionShape: { pathLists: ["roots"], callLists: ["subscribeCalls"] },
+  optionShape: { pathLists: ["roots"], callLists: ["subscribeCalls"], callName: "^[A-Za-z_$][\\w$]*(?:\\.[A-Za-z_$][\\w$]*)*$" },
   companion: { all: ["supabase"], any: JS_READERS },
 };
 

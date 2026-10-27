@@ -13,7 +13,9 @@
 // equal). Such code sits between a `// border: names a stack (<why>)` line and
 // a `// border: end` line, and nowhere else may a stack word appear in the
 // plugin's scripts, in code or in comments. The words are the engine's tripwire list
-// (packages/zdd-engine/test/stack-words.mjs) — a tripwire, not a proof.
+// (packages/zdd-engine/test/stack-words.mjs) — a tripwire, not a proof. The
+// fences are read line by line, not parsed: a fence line inside a template
+// literal would open one (CR-114, accepted) — a reviewer reads every fence.
 // Run: node --test "plugins/zdd/test/*.test.mjs"
 import { test } from "node:test";
 import assert from "node:assert/strict";

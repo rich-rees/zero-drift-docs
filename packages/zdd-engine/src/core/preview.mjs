@@ -5,13 +5,17 @@
 // temporary directory OUTSIDE the adopter's repo, writes a config naming the
 // adapters with the options each example declares (DETECTION.example), and
 // runs derive and render there. It prints where the human index landed.
-// Nothing is written into the adopter's repo (0039 point 5).
+// Nothing is written into the adopter's repo (0039 point 5): the output folder
+// — a new temporary one, or `--out` — must be a real folder (never a link)
+// outside `--root` (default: the current directory), checked on real paths
+// (CR-098). A name the catalogue does not hold is refused, never reported as
+// "no example" (CR-115).
 //
-//   zdd-engine preview --extractors=<a,b,…> [--out=<empty dir>] [--json]
+//   zdd-engine preview --extractors=<a,b,…> [--root=<repo>] [--out=<empty dir>] [--json]
 
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve, isAbsolute } from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { catalogue } from "./lib/catalogue.mjs";
@@ -43,6 +47,48 @@ export async function buildPreview(names, out) {
   return { out, used, skipped, humanIndex: join(out, "zdd", "human-index.html") };
 }
 
+// `inner` is `outer` or under it, on real paths.
+const within = (outer, inner) => {
+  const rel = relative(outer, inner);
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+};
+
+// The folder the preview writes into, checked: a real, empty folder whose real
+// path is outside the repo. `out` absent: a new temporary folder. Throws with
+// the reason; a temporary folder it made and refused is removed.
+export function previewTarget(root, out) {
+  const realRoot = realpathSync(resolve(root));
+  let dir;
+  let made = false;
+  if (out) {
+    dir = resolve(out);
+    let st = null;
+    try {
+      st = lstatSync(dir);
+    } catch {
+      /* not there yet */
+    }
+    // lstat: a link (or a junction) is never a directory, so this refuses both.
+    if (st && !st.isDirectory()) throw new Error(`${dir} is a link or not a folder — the preview writes only into a real, empty folder`);
+    if (st && readdirSync(dir).length) throw new Error(`${dir} is not empty — the preview writes only into an empty folder`);
+    if (!st) {
+      // Check where it would land before making it: its nearest existing parent's real path.
+      let parent = dirname(dir);
+      while (!existsSync(parent) && dirname(parent) !== parent) parent = dirname(parent);
+      if (within(realRoot, resolve(realpathSync(parent), relative(parent, dir)))) throw new Error(`${dir} is inside the repo (${realRoot}) — the preview writes only outside it`);
+      mkdirSync(dir, { recursive: true });
+    }
+  } else {
+    dir = mkdtempSync(join(tmpdir(), "zdd-preview-"));
+    made = true;
+  }
+  if (within(realRoot, realpathSync(dir))) {
+    if (made) rmSync(dir, { recursive: true, force: true });
+    throw new Error(`${dir} is inside the repo (${realRoot}) — the preview writes only outside it${made ? "; the temporary folder is inside it too, so pass --out=<a folder outside the repo>" : ""}`);
+  }
+  return dir;
+}
+
 export async function run(args) {
   const arg = (n) => args.find((a) => a.startsWith(`--${n}=`))?.slice(n.length + 3);
   const names = (arg("extractors") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
@@ -50,15 +96,18 @@ export async function run(args) {
     console.error("preview: --extractors=<a,b,…> names the adapters to preview");
     process.exit(2);
   }
-  let out = arg("out");
-  if (out) {
-    out = resolve(out);
-    mkdirSync(out, { recursive: true });
-    if (readdirSync(out).length) {
-      console.error(`preview: ${out} is not empty — the preview writes only into an empty folder`);
-      process.exit(2);
-    }
-  } else out = mkdtempSync(join(tmpdir(), "zdd-preview-"));
+  const unknown = names.filter((n) => !catalogue().names.has(n));
+  if (unknown.length) {
+    console.error(`preview: ${unknown.join(", ")} ${unknown.length === 1 ? "is not an adapter" : "are not adapters"} in the catalogue (known: ${[...catalogue().names.keys()].join(", ")})`);
+    process.exit(2);
+  }
+  let out;
+  try {
+    out = previewTarget(arg("root") ?? process.cwd(), arg("out"));
+  } catch (e) {
+    console.error(`preview: ${e.message}`);
+    process.exit(2);
+  }
   let r;
   try {
     r = await buildPreview(names, out);

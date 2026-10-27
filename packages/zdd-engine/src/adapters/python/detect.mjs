@@ -6,11 +6,16 @@ export const PY_SKIP_DIRS = ["venv", "__pycache__"];
 const TEST_FILE = /(^|\/)(test_[^/]*\.py|[^/]*_test\.py|conftest\.py)$/;
 
 const norm = (name) => name.toLowerCase().replace(/_/g, "-");
+// A line with its quoted strings blanked: a `]` inside `"pkg[extra]"` closes nothing.
+const unquoted = (line) => line.replace(/"[^"]*"|'[^']*'/g, "");
 
 // dependency name (lowercase, `-` for `_`) -> the first manifest declaring it.
-// Read: requirements*.txt (a name at the start of a line), pyproject.toml and
-// Pipfile (a quoted requirement string, or a `name =` key under a
-// dependencies or packages table).
+// Read: requirements*.txt (a name at the start of a line); in pyproject.toml
+// and Pipfile, a quoted requirement string inside a dependency array (the
+// key `dependencies` under [project], any key under
+// [project.optional-dependencies] or [dependency-groups]) and a `name =` key
+// under a dependencies or packages table. A quoted string anywhere else
+// (`description = "…"`) is never a dependency (CR-105).
 export function pythonDeps(scan) {
   return scan.memo("py:deps", () => {
     const out = new Map();
@@ -28,12 +33,28 @@ export function pythonDeps(scan) {
         for (const m of text.matchAll(/^\s*([A-Za-z0-9][\w.-]*)/gm)) add(m[1], f.rel);
         continue;
       }
-      for (const m of text.matchAll(/["']([A-Za-z0-9][\w.-]*)\s*(?:\[[^\]]*\])?\s*(?:[<>=!~;]|["'])/g)) add(m[1], f.rel);
+      let table = "";
       let inDeps = false;
+      let inArray = false;
+      const requirement = /["']([A-Za-z0-9][\w.-]*)\s*(?:\[[^\]]*\])?\s*(?:[<>=!~;@ ]|["'])/g;
       for (const line of text.split(/\r?\n/)) {
-        const table = /^\s*\[([^\]]+)\]\s*$/.exec(line);
-        if (table) {
-          inDeps = /(^|\.)(dependencies|dev-dependencies|packages|dev-packages)$/.test(table[1].trim()) || /\.group\.[\w-]+\.dependencies$/.test(table[1].trim());
+        if (inArray) {
+          for (const m of line.replace(/#.*$/, "").matchAll(requirement)) add(m[1], f.rel);
+          if (unquoted(line).includes("]")) inArray = false;
+          continue;
+        }
+        const head = /^\s*\[([^\]]+)\]\s*$/.exec(line);
+        if (head) {
+          table = head[1].trim();
+          inDeps = /(^|\.)(dependencies|dev-dependencies|packages|dev-packages)$/.test(table) || /\.group\.[\w-]+\.dependencies$/.test(table);
+          continue;
+        }
+        const arr = /^\s*([A-Za-z0-9][\w.-]*)\s*=\s*\[(.*)$/.exec(line);
+        const depArray = arr && ((table === "project" && arr[1] === "dependencies") || table === "project.optional-dependencies" || table === "dependency-groups");
+        if (depArray) {
+          const rest = arr[2].replace(/#.*$/, "");
+          for (const m of rest.matchAll(requirement)) add(m[1], f.rel);
+          inArray = !unquoted(rest).includes("]");
           continue;
         }
         const key = inDeps && /^\s*([A-Za-z0-9][\w.-]*)\s*=/.exec(line);

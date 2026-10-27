@@ -38,7 +38,10 @@
 // deep, never a symlink, never a gitignored path), `read(rel)` (the text, or
 // null when refused; cached, under the io's caps), `json(rel)`, and
 // `memo(key, fn)`, so adapters sharing a helper compute it once.
-// `overBudget` says the read budget ran out; `truncated` that the walk did.
+// `overBudget` says the read budget ran out; `truncated` that the walk did;
+// `refused` lists the files an adapter asked for and the io would not read
+// (over 1 MiB, unreadable, a link) — evidence there is unseen, so the
+// answer says how many (CR-103).
 
 import { posix } from "node:path";
 import { makeExtractorIo } from "./extractor-io.mjs";
@@ -60,16 +63,21 @@ export function makeScan(io, skipDirs = new Set()) {
   const texts = new Map();
   const memos = new Map();
   let overBudget = false;
+  const refused = new Set();
   const scan = {
     files,
     truncated: walked.truncated,
     get overBudget() {
       return overBudget;
     },
+    get refused() {
+      return [...refused].sort();
+    },
     read(rel) {
       if (texts.has(rel)) return texts.get(rel);
       const r = io.read(rel);
       if (!r.ok && r.code === "over-budget") overBudget = true;
+      else if (!r.ok && r.code !== "missing" && r.code !== "ignored") refused.add(rel);
       const text = r.ok ? r.text : null;
       texts.set(rel, text);
       return text;
@@ -97,12 +105,13 @@ function checkAdapter(name, D) {
 }
 
 // modules: [{ name, mod }] in name order (derive.mjs catalogueModules).
-export function detectRepo(repoRoot, modules) {
+// `caps` lowers the io's limits, for the tests that reach them.
+export function detectRepo(repoRoot, modules, caps = {}) {
   const adapters = modules.filter(({ mod }) => mod.DETECTION);
   for (const { name, mod } of adapters) checkAdapter(name, mod.DETECTION);
   const ignored = gitIgnoredPredicate(repoRoot);
   if (ignored.error) throw new Error(ignored.error);
-  const io = makeExtractorIo(repoRoot, "detect", { ignored, maxDepth: DETECT_DEPTH });
+  const io = makeExtractorIo(repoRoot, "detect", { ignored, maxDepth: DETECT_DEPTH, ...caps });
   const skipDirs = new Set(adapters.flatMap(({ mod }) => mod.DETECTION.skipDirs ?? []));
   const scan = makeScan(io, skipDirs);
 
@@ -161,6 +170,6 @@ export function detectRepo(repoRoot, modules) {
     companions,
     catalogue,
     adapters: shapes,
-    limits: { walkTruncated: scan.truncated, readBudgetSpent: scan.overBudget, depth: DETECT_DEPTH },
+    limits: { walkTruncated: scan.truncated, readBudgetSpent: scan.overBudget, depth: DETECT_DEPTH, refused: scan.refused.length, refusedFirst: scan.refused.slice(0, 5) },
   };
 }

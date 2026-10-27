@@ -64,10 +64,10 @@
 //     "seedAdr": true                                  // ADR-0001 "Adopt Zero-Drift Docs"
 //   }
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, lstatSync, chmodSync, openSync, writeSync, closeSync, rmSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, lstatSync, chmodSync, openSync, writeSync, closeSync, rmSync, opendirSync } from "node:fs";
 import { findMapBlessings, proposeMove, blessingSlug, blessingFileText, removeMoved } from "./lib/blessing-move.mjs";
 import { scopeTag, repointLinks, linksToMoved } from "./lib/adr-split.mjs";
-import { join, dirname, basename, relative, posix } from "node:path";
+import { join, dirname, basename, relative, resolve, posix } from "node:path";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { request as httpRequest } from "node:http";
@@ -145,29 +145,60 @@ const LEGACY_ADAPTERS = {
 // the engine of its own release and reads the answer; it names no stack.
 //
 // Which engine: ZDD_ENGINE_BIN, when set, names an engine checkout's bin (a
-// test, a dry run against another build); else the engine beside this
-// plugin when one ships with it at the same version (this repository's own
-// checkout); else the pinned package under npx, as every skill runs it.
+// test, a dry run against another build) — accepted only when it is an
+// engine's own `bin/zdd-engine.mjs`, a regular file in a package named for
+// the engine (CR-097: whoever sets the environment already chooses PATH, so
+// this is no new boundary, but a stray value is refused, not run); else the
+// engine beside this plugin when one ships with it at the same version (this
+// repository's own checkout); else the pinned package under npx, as every
+// skill runs it. On Windows npx is a .cmd file, and cmd.exe neither keeps a
+// quote inside an argument nor leaves `%NAME%` alone, so npm's own
+// `npx-cli.js` beside node runs instead, with no shell (CR-096); only when it
+// is missing does cmd.exe run npx, and then an argument cmd.exe would change
+// is refused before anything runs.
 // ---------------------------------------------------------------------------
 const SIBLING_ENGINE = join(PLUGIN_ROOT, "..", "..", "packages", "zdd-engine");
-export function engineCommand() {
-  if (process.env.ZDD_ENGINE_BIN) return { cmd: process.execPath, pre: [process.env.ZDD_ENGINE_BIN], shell: false };
-  const bin = join(SIBLING_ENGINE, "bin", "zdd-engine.mjs");
+export function engineCommand({ env = process.env, platform = process.platform, execPath = process.execPath, sibling: siblingDir = SIBLING_ENGINE } = {}) {
+  if (env.ZDD_ENGINE_BIN) {
+    const given = resolve(env.ZDD_ENGINE_BIN);
+    let pkg = null;
+    try {
+      const st = lstatSync(given);
+      if (basename(given) === "zdd-engine.mjs" && basename(dirname(given)) === "bin" && st.isFile()) pkg = readJson(join(dirname(dirname(given)), "package.json"));
+    } catch {
+      pkg = null;
+    }
+    if (pkg?.name !== ENGINE_PACKAGE) throw new Error(`ZDD_ENGINE_BIN (${given}) is not an engine's bin/zdd-engine.mjs in a ${ENGINE_PACKAGE} package — unset it, or point it at one`);
+    return { cmd: execPath, pre: [given], shell: false };
+  }
+  const bin = join(siblingDir, "bin", "zdd-engine.mjs");
   let sibling = null;
   try {
-    sibling = existsSync(bin) ? readJson(join(SIBLING_ENGINE, "package.json")) : null;
+    sibling = existsSync(bin) ? readJson(join(siblingDir, "package.json")) : null;
   } catch {
     sibling = null;
   }
-  if (sibling?.name === ENGINE_PACKAGE && sibling.version === pluginVersion()) return { cmd: process.execPath, pre: [bin], shell: false };
-  const win = process.platform === "win32";
-  return { cmd: win ? "npx.cmd" : "npx", pre: ["-y", `${ENGINE_PACKAGE}@${pluginVersion()}`], shell: win };
+  if (sibling?.name === ENGINE_PACKAGE && sibling.version === pluginVersion()) return { cmd: execPath, pre: [bin], shell: false };
+  const pkg = `${ENGINE_PACKAGE}@${pluginVersion()}`;
+  if (platform !== "win32") return { cmd: "npx", pre: ["-y", pkg], shell: false };
+  const cli = join(dirname(execPath), "node_modules", "npm", "bin", "npx-cli.js");
+  if (existsSync(cli)) return { cmd: execPath, pre: [cli, "-y", pkg], shell: false };
+  return { cmd: "npx.cmd", pre: ["-y", pkg], shell: true };
+}
+// What cmd.exe would change or act on inside a quoted argument.
+const CMD_UNSAFE = /["%^!&|<>\r\n]/;
+// The command line `runEngine` would run: through cmd.exe each argument is
+// quoted, and one cmd.exe would read differently is refused (CR-096).
+export function engineArgv(command, args) {
+  const all = [...command.pre, ...args].map(String);
+  if (!command.shell) return all;
+  const bad = all.find((a) => CMD_UNSAFE.test(a));
+  if (bad !== undefined) throw new Error(`cannot run the engine through cmd.exe with ${JSON.stringify(bad)}: it holds a character cmd.exe would read (a quote, %, ^, !, &, |, <, >) — move the repo to a path without one, or install npm's npx-cli.js beside node`);
+  return all.map((a) => `"${a}"`);
 }
 export function runEngine(args) {
-  const { cmd, pre, shell } = engineCommand();
-  // Through a shell (npx on Windows) every argument is quoted: a root with a space stays one argument.
-  const argv = [...pre, ...args].map((a) => (shell ? `"${String(a).replace(/"/g, '\\"')}"` : a));
-  return execFileSync(cmd, argv, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 * 1024 * 1024, timeout: 300_000, shell });
+  const command = engineCommand();
+  return execFileSync(command.cmd, engineArgv(command, args), { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 * 1024 * 1024, timeout: 300_000, shell: command.shell });
 }
 
 export function detect(root) {
@@ -317,8 +348,12 @@ function validateExtractorOptions(all, adapters = {}) {
     if (!Array.isArray(v)) fail(`${label} must be an array of repo-relative paths`);
     v.forEach((p, i) => enginePath(p, `${label}[${i}]`));
   };
-  const calls = (v, label) => {
+  const calls = (v, label, grammar) => {
     if (v !== undefined && !isCallList(v)) fail(`${label} must be an array of call names (strings), e.g. ["live.onInsert"]`); // CR-011
+    // The adapter's own grammar for a call name (CR-102): a name outside it is ignored by the engine.
+    const re = grammar ? new RegExp(grammar) : null;
+    const bad = v === undefined || !re ? undefined : v.find((s) => !re.test(s));
+    if (bad !== undefined) fail(`${label}: ${JSON.stringify(bad)} is not a call name the adapter reads (dotted identifiers, e.g. "live.onInsert")`);
   };
   for (const [name, opts] of Object.entries(all)) {
     if (!obj(opts)) fail(`extractorOptions.${name} must be an object`);
@@ -337,16 +372,31 @@ function validateExtractorOptions(all, adapters = {}) {
     };
     for (const k of shape.paths ?? []) if (at(k) !== undefined) enginePath(at(k), `${name}.${k}`);
     for (const k of shape.pathLists ?? []) if (at(k) !== undefined) list(at(k), `${name}.${k}`);
-    for (const k of shape.callLists ?? []) calls(at(k), `${name}.${k}`);
-    for (const [k, pathKey] of Object.entries(shape.objectLists ?? {})) {
+    for (const k of shape.callLists ?? []) calls(at(k), `${name}.${k}`, shape.callName);
+    // A list of objects: each `required` key is a repo-relative path, each
+    // `optional` one is when present (CR-101).
+    for (const [k, keys] of Object.entries(shape.objectLists ?? {})) {
       const v = at(k);
       if (v === undefined) continue;
       if (!Array.isArray(v)) fail(`${name}.${k} must be an array`);
       v.forEach((item, i) => {
         if (!obj(item)) fail(`${name}.${k}[${i}] must be an object`);
-        enginePath(item[pathKey], `${name}.${k}[${i}].${pathKey}`);
+        for (const pk of keys.required ?? []) enginePath(item[pk], `${name}.${k}[${i}].${pk}`);
+        for (const pk of keys.optional ?? []) if (item[pk] !== undefined) enginePath(item[pk], `${name}.${k}[${i}].${pk}`);
       });
     }
+  }
+}
+
+// The options about to be written, whatever their source — an answer, the
+// detection, a stated stack — checked as an answer is (CR-100): a detected
+// path the engine would refuse (a folder name with a space) stops the run
+// before the first write, never after.
+function finalOptions(options, adapters) {
+  try {
+    validateExtractorOptions(options, adapters);
+  } catch (e) {
+    throw new Error(`${e.message.replace(/^answers: /, "the extractor options to write: ")} — the engine would refuse this config; nothing was written. Correct it in the answers' extractorOptions`);
   }
 }
 
@@ -1058,6 +1108,7 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
     // the current way, options key and all.
     migrateRenames(config, []);
     migrateJobs(config, [], root);
+    finalOptions(config.extractorOptions, detection.adapters);
     ledger.create("zdd/config.json", JSON.stringify(config, null, 2) + "\n");
   } else {
     // Repair: only an explicit answer changes the config. A pre-1.0 config's
@@ -1103,6 +1154,7 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
         }
       }
       if (moved.length) {
+        finalOptions(Object.fromEntries(moved.map((n) => [n, opts[n]])), detection.adapters);
         existingConfig.extractorOptions = opts;
         repairNotes.push(`zdd/config.json: extractorOptions updated for ${moved.join(", ")}`);
       }
@@ -2693,25 +2745,38 @@ function moveLockOnly(root, version, to, { plan = false, lock = false, remote, h
 // `check --done` clears it; on a greenfield repo it stays owed until the
 // first derive finds records, and `check --status` says so at session start.
 // ---------------------------------------------------------------------------
+// Whether derive has written any record: the configured metadataDir, reached
+// only inside the checkout and never through a link (CR-104), read entry by
+// entry and stopped at the first record or a bounded count.
+const RECORDS_PROBE_ENTRIES = 20_000;
 function hasRecords(root, config) {
-  const dir = join(root, artifactPaths(config, { lenient: true }).metadataDir);
-  let kinds;
-  try {
-    kinds = readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory());
-  } catch {
-    return false;
-  }
-  return kinds.some((k) => {
+  const rel = artifactPaths(config, { lenient: true }).metadataDir;
+  const dir = resolveInside(root, rel, `metadataDir ${rel}`); // throws on an escape or a link
+  let seen = 0;
+  const each = (abs, fn) => {
+    let d;
     try {
-      return readdirSync(join(dir, k.name)).some((f) => f.endsWith(".json"));
+      d = opendirSync(abs);
     } catch {
       return false;
     }
-  });
+    try {
+      for (let e; (e = d.readSync()) !== null; ) {
+        if (++seen > RECORDS_PROBE_ENTRIES) return false;
+        if (fn(e)) return true;
+      }
+      return false;
+    } finally {
+      d.closeSync();
+    }
+  };
+  return each(dir, (k) => k.isDirectory() && each(join(dir, k.name), (f) => f.isFile() && f.name.endsWith(".json")));
 }
 
 export function mapCheck(root, { done = false, status = false } = {}) {
   const cfg = readConfig(root);
+  // A repo that has not adopted ZDD owes no check: --status is silent (CR-099).
+  if (status && cfg.state === "absent") return { owed: false, records: false, due: false };
   if (cfg.state !== "valid") throw new Error(cfg.state === "invalid" ? `${cfg.error} — fix it first` : "no zdd/config.json here — bootstrap first");
   const config = cfg.config;
   const owed = config.mapCheck === "owed";
@@ -2757,11 +2822,11 @@ export function narrateCheck(r) {
 
 // The greenfield preview (0039 point 4): the chosen adapters' own examples,
 // derived and rendered in a temporary folder outside the repo.
-export function preview(names) {
+export function preview(root, names) {
   if (!names.length) throw new Error("preview needs --extractors=<a,b,…>");
   for (const n of names) if (!/^[a-z][a-z0-9-]*$/.test(n)) throw new Error(`preview: '${n}' is not an adapter name`);
   try {
-    return JSON.parse(runEngine(["preview", `--extractors=${names.join(",")}`, "--json"]));
+    return JSON.parse(runEngine(["preview", `--extractors=${names.join(",")}`, `--root=${root}`, "--json"]));
   } catch (e) {
     throw new Error(`the preview could not run — the engine said: ${String(e.stderr || e.message).trim().split(/\r?\n/).slice(-3).join(" ")}`);
   }
@@ -2807,6 +2872,7 @@ export function narrateDetect(d, pocock) {
     }
     if (d.limits?.walkTruncated) out.push(`  (detection reads ${d.limits.depth} folders deep, within one walk budget: code deeper than that was not seen)`);
     if (d.limits?.readBudgetSpent) out.push("  (detection's read budget ran out: some source was not read — confirm the proposals by hand)");
+    if (d.limits?.refused) out.push(`  (${d.limits.refused} file${d.limits.refused === 1 ? "" : "s"} could not be read — over 1 MiB, unreadable or a link: ${d.limits.refusedFirst.map((f) => `\`${f}\``).join(", ")}${d.limits.refused > d.limits.refusedFirst.length ? ", …" : ""} — evidence in ${d.limits.refused === 1 ? "it" : "them"} was not seen)`);
   } else if (d.catalogue) {
     // A greenfield repo with no stack chosen (0039 point 6): the stacks with
     // ready-made adapters, by part, and no recommendation.
@@ -3165,7 +3231,7 @@ if (process.argv[1] && posixify(process.argv[1]).endsWith("/scripts/bootstrap.mj
       const text = narrateCheck(r);
       process.stdout.write(flags.json ? JSON.stringify(r, null, 2) + "\n" : text ? text + "\n" : "");
     } else if (cmd === "preview") {
-      const r = preview(String(flags.extractors ?? "").split(",").map((s) => s.trim()).filter(Boolean));
+      const r = preview(root, String(flags.extractors ?? "").split(",").map((s) => s.trim()).filter(Boolean));
       process.stdout.write(flags.json ? JSON.stringify(r, null, 2) + "\n" : narratePreview(r) + "\n");
     } else if (cmd === "estimate") {
       const e = estimate(root);

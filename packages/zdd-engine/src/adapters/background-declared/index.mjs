@@ -26,6 +26,7 @@ export function derive({ options, io }) {
   return r.finish();
 }
 
-// Detection (decision 0039): none — this reader is chosen by listing it; its
-// options are shaped like every background reader's.
-export { DETECTION_BASE as DETECTION } from "../background/detect.mjs";
+// Detection (decision 0039): none — this reader is chosen by listing it. Its
+// option shape adds the entries' path keys (CR-101).
+import { DETECTION_BASE } from "../background/detect.mjs";
+export const DETECTION = { ...DETECTION_BASE, optionShape: { ...DETECTION_BASE.optionShape, objectLists: { entries: { optional: ["file", "cwd"] } } } };

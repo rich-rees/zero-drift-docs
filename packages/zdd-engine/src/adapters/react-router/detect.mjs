@@ -9,7 +9,7 @@ import { JS_NOT_SOURCE, JS_SKIP_DIRS, packageDeps } from "../js/detect.mjs";
 export const DETECTION = {
   parts: ["screens"],
   order: 40,
-  optionShape: { paths: ["routesFile", "srcAliasRoot"], callLists: ["subscribeCalls"] },
+  optionShape: { paths: ["routesFile", "srcAliasRoot"], callLists: ["subscribeCalls"], callName: "^[A-Za-z_$][\\w$]*(?:\\.[A-Za-z_$][\\w$]*)*$" },
   exampleClaims: ["a screen: `../../metadata/surface/things--_id.json`"],
   skipDirs: JS_SKIP_DIRS,
   // Only an EXPLICIT React Router entry selects the adapter (at its future
