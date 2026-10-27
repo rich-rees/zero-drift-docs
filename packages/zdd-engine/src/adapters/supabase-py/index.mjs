@@ -18,7 +18,7 @@
 // inside a docstring is read as a call (accepted, and visible in the diff).
 
 import { repoRelative } from "../../core/lib/paths.mjs";
-import { DEFAULT_EXCLUDE_DIRS, dataAccessRecord, defs, pythonFiles } from "../python/source.mjs";
+import { DEFAULT_EXCLUDE_DIRS, closeOver, dataAccessRecord, defs, pythonFiles } from "../python/source.mjs";
 
 export const FACTS_KEY_ORDER = {
   "data-access": ["function"],
@@ -44,8 +44,13 @@ export function derive({ options, io }) {
       if (read.code !== "missing" && read.code !== "ignored") diagnostics.push(`${rel}: ${read.reason} — skipped`);
       continue;
     }
-    for (const fn of defs(read.text)) {
-      const refs = scanCalls(fn.body);
+    // A function's calls are its own and those of every same-file function it
+    // uses (a helper it calls, or passes as a callback): the same rule the
+    // route side follows, so a handler's own record carries its helpers'.
+    const fns = defs(read.text);
+    const closed = closeOver(fns, (fn) => scanCalls(fn.body));
+    for (const fn of fns) {
+      const refs = closed.get(fn.name);
       if (!refs.size) continue;
       records.push(dataAccessRecord("supabase-py", rel, fn, refs));
     }

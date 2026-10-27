@@ -324,6 +324,7 @@ test("determinism: derive + render on two fresh copies of every fixture, and twi
     ["fastapi", FIXTURE_FASTAPI, () => {}],
     ["react-router", join(PKG, "test", "fixture-react-router"), () => {}],
     ["greenfield", FIXTURE_GREENFIELD, () => {}],
+    ["sqlalchemy", join(PKG, "test", "fixture-sqlalchemy"), () => {}],
   ];
   for (const [label, fixture, prep] of cases) {
     const a = mkRepo(fixture);
