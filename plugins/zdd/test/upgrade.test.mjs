@@ -116,6 +116,21 @@ test("every upgrade re-runs detection: an opt-in extractor the evidence shows is
   assert.match(notes, /^2\.1 .*`\*` in a scanned url: it no longer matches a fixed route segment/m, notes);
 });
 
+test("every upgrade offers the queue readers detection finds — Inngest, Trigger.dev, SQS — never adding them (decision 0039, CR-110)", () => {
+  const repo = adopted("queues", { extractors: ["generic"] });
+  mkdirSync(join(repo, "src", "trigger"), { recursive: true });
+  mkdirSync(join(repo, "worker"), { recursive: true });
+  writeFileSync(join(repo, "src", "inngest.ts"), 'export const f = inngest.createFunction({ id: "send-digest" }, { event: "user/signed-up" }, async () => {});\n');
+  writeFileSync(join(repo, "src", "trigger", "sync.ts"), 'export const sync = task({ id: "sync-catalogue", run: async () => {} });\n');
+  writeFileSync(join(repo, "worker", "poll.py"), 'resp = sqs.ReceiveMessage(QueueUrl="https://sqs.eu-west-2.amazonaws.com/1/emails")\n');
+  const notes = runJson(repo, ["upgrade", "--plan"]).notes.join("\n");
+  assert.match(notes, /^offers the opt-in extractor `background-inngest` — evidence: `src\/inngest\.ts` declares an Inngest function: `send-digest`/m, notes);
+  assert.match(notes, /^offers the opt-in extractor `background-trigger-dev` — evidence: `src\/trigger\/sync\.ts` declares a Trigger\.dev task: `sync-catalogue`/m, notes);
+  assert.match(notes, /^offers the opt-in extractor `background-sqs` — evidence: `worker\/poll\.py` uses an SQS queue: `emails`/m, notes);
+  runJson(repo, ["upgrade"]);
+  assert.deepEqual(JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8")).extractors, ["generic"], "never added silently");
+});
+
 const CLAUDE_WITH_DUPES = [
   "# Project",
   "",
