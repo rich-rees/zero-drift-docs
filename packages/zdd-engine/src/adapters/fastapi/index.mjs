@@ -14,10 +14,15 @@
 //   appVar       the FastAPI() variable name (default "app")
 // Records: one per full URL path, methods merged across handlers, resource =
 // the defining file(s), description = the first handler docstring's first
-// line. Outbound refs found inside a handler's body — `.table("x")` /
-// `.from_("x")` / `.rpc("x")` — are emitted UNRESOLVED (`?from:x`,
-// `?function:x`) for the deriver to resolve against the supabase extractor's
-// records after the merge. Auth is not derived (FastAPI dependencies are not
+// line. The adapter knows routes, never data access (decision 0037): a
+// route's refs name the code it runs, as `?code:<file>#<function>` — its own
+// handler, and each function the handler calls that resolves to one scanned
+// file: `<mod>.<fn>(` where `<mod>` is imported (`import a.b as mod`,
+// `from a import mod`, relative `from . import mod`), `<fn>(` imported with
+// `from a.mod import fn`, or `<fn>(` defined in the same file. One hop; a
+// target that resolves to no file or to several is skipped, never guessed.
+// A data-access adapter (supabase-py, sqlalchemy, …) mints the records those
+// refs reach, and the core folds their tables into the route. Auth is not derived (FastAPI dependencies are not
 // statically readable without resolving imports); the map says who may call
 // what. Line-oriented: a decorator quoted inside a docstring reads as a route
 // — accepted, and visible in the diff. A missing root is "nothing to
@@ -28,6 +33,7 @@ import { join, basename } from "node:path";
 import { slugify } from "../../core/lib/slug.mjs";
 import { repoRelative } from "../../core/lib/paths.mjs";
 import { walkDir } from "../../core/lib/walk.mjs";
+import { defBody, defs, imports, masked, moduleFiles, resolveModule } from "../python/source.mjs";
 
 const posixify = (p) => p.split(/[\\/]/).join("/");
 const HTTP_METHOD_ORDER = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "TRACE"];
@@ -113,9 +119,7 @@ export function parseFile(text) {
     if (def) {
       if (pending.length) {
         const indent = def[1].length;
-        let end = i + 1;
-        while (end < lines.length && (lines[end].trim() === "" || lines[end].search(/\S/) > indent)) end++;
-        const body = lines.slice(i + 1, end).join("\n");
+        const body = defBody(lines, i, indent);
         const doc = /^\s*(?:r?"""|r?''')\s*([^\n"']*)/.exec(body);
         handlers.push({ name: def[2], decorators: pending, body, docstring: doc ? doc[1].trim() : "" });
       }
@@ -131,10 +135,30 @@ export function parseFile(text) {
   return { routers, includes, handlers };
 }
 
-export function scanHandlerRefs(body) {
-  const refs = new Set();
-  for (const m of body.matchAll(/\.(?:table|from_)\(\s*(['"])([\w-]+)\1\s*\)/g)) refs.add(`?from:${m[2]}`);
-  for (const m of body.matchAll(/\.rpc\(\s*(['"])(\w+)\1/g)) refs.add(`?function:${m[2]}`);
+// The code a handler runs, as `?code:` refs (decision 0037): the handler
+// itself, and the functions it calls that resolve to exactly one scanned
+// file. `file` is { rel, imports, defNames }; `byModule` maps module basenames
+// to scanned files.
+const CALL_ATTR = /(?<![\w.])([A-Za-z_]\w*)\.([A-Za-z_]\w*)\s*\(/g;
+const CALL_BARE = /(?<![\w.])([A-Za-z_]\w*)\s*\(/g;
+const joinModule = (module, member) => (module.endsWith(".") ? `${module}${member}` : `${module}.${member}`);
+export function handlerRefs(handler, file, byModule) {
+  const refs = new Set([`?code:${file.rel}#${handler.name}`]);
+  const body = masked(handler.body);
+  for (const m of body.matchAll(CALL_ATTR)) {
+    const imp = file.imports.get(m[1]);
+    if (!imp) continue;
+    const target = resolveModule(file.rel, imp.member ? joinModule(imp.module, imp.member) : imp.module, byModule);
+    if (target) refs.add(`?code:${target}#${m[2]}`);
+  }
+  for (const m of body.matchAll(CALL_BARE)) {
+    const name = m[1];
+    const imp = file.imports.get(name);
+    if (imp?.member) {
+      const target = resolveModule(file.rel, imp.module, byModule);
+      if (target) refs.add(`?code:${target}#${imp.member}`);
+    } else if (!imp && name !== handler.name && file.defNames.has(name)) refs.add(`?code:${file.rel}#${name}`);
+  }
   return refs;
 }
 
@@ -151,7 +175,10 @@ export function derive({ repoRoot, options, io }) {
   const safeRoots = roots.map((r) => repoRelative(r, "fastapi.roots"));
 
   const files = walkPython(repoRoot, safeRoots, excludeDirs, diagnostics, isIgnored);
-  const parsed = new Map(files.map((rel) => [rel, parseFile(readFileSync(join(repoRoot, rel), "utf8"))]));
+  const texts = new Map(files.map((rel) => [rel, readFileSync(join(repoRoot, rel), "utf8")]));
+  const parsed = new Map(files.map((rel) => [rel, parseFile(texts.get(rel))]));
+  const callFiles = new Map(files.map((rel) => [rel, { rel, imports: imports(texts.get(rel)), defNames: new Set(defs(texts.get(rel)).map((d) => d.name)) }]));
+  const callModules = moduleFiles(files);
 
   // Mount graph: each include is an edge parent -> child router carrying the
   // include prefix. A router's mount prefixes are every path from the app (or
@@ -176,7 +203,14 @@ export function derive({ repoRoot, options, io }) {
       const parts = inc.target.split(".");
       const varName = parts.pop();
       let targetRel = rel;
-      if (parts.length) {
+      // The file's own imports say which module `<mod>.router` is: `from
+      // app.routes import jobs` names app/routes/jobs.py even when another
+      // jobs.py (a repository) shares its basename. Only when the imports do
+      // not settle it does the basename rule below run, as it always has.
+      const imp = parts.length === 1 ? callFiles.get(rel).imports.get(parts[0]) : undefined;
+      const viaImport = imp ? resolveModule(rel, imp.member ? joinModule(imp.module, imp.member) : imp.module, callModules) : null;
+      if (viaImport) targetRel = viaImport;
+      else if (parts.length) {
         const dotted = parts.join(".");
         let candidates = byModule.get(parts[parts.length - 1]) ?? [];
         // Package-qualified (`a.routes.router`): the dotted path names a file
@@ -246,7 +280,7 @@ export function derive({ repoRoot, options, io }) {
           entry.resource.add(rel);
           if (h.docstring) entry.descriptions.push(h.docstring);
           entry.handlers.add(h.name);
-          scanHandlerRefs(h.body).forEach((r) => entry.refs.add(r));
+          handlerRefs(h, callFiles.get(rel), callModules).forEach((r) => entry.refs.add(r));
           routes.set(full, entry);
         }
       }

@@ -1,0 +1,13 @@
+{
+  "name": "Fixture SQLAlchemy",
+  "baseBranch": "main",
+  "extractors": ["supabase", "fastapi", "sqlalchemy"],
+  "render": { "storeChanges": false },
+  "extractorOptions": {
+    "supabase": {
+      "migrationNamespaces": [{ "name": "db", "dir": "supabase/migrations" }]
+    },
+    "fastapi": { "roots": ["app"] },
+    "sqlalchemy": { "roots": ["app"] }
+  }
+}
