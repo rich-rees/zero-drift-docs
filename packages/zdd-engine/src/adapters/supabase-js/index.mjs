@@ -196,6 +196,9 @@ function boundInside(mask, own) {
       else if (d === 1 && c === ",") inDefault = false;
       pattern += inDefault || j === open ? " " : c;
     }
+    // A computed key (`{ [db.name]: client }`) is an expression, never a
+    // binding: blanked with its brackets (CR-075).
+    pattern = pattern.replace(/\[[^\]]*\](?=\s*:)/g, (k) => " ".repeat(k.length));
     for (const id of pattern.matchAll(ID_RE)) if (!/^\s*:/.test(pattern.slice(id.index + id[0].length))) out.add(id[0]);
   }
   for (const h of mask.matchAll(/(?<![\w$.])([A-Za-z_$][\w$]*)\s*=>/g)) out.add(h[1]);
