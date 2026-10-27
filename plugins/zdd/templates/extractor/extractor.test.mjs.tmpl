@@ -113,7 +113,7 @@ function scratchRepo(t, { withFixture = true, options = FIXTURE_OPTIONS, from = 
   const target = join(repo, "zdd", "extractors", NAME);
   walkFiles(HERE, (p) => {
     const rel = relative(HERE, p);
-    if (/^fixture(?:-[^\\/]*)?(?:[\\/]|$)/.test(rel) || rel.endsWith(".test.mjs")) return;
+    if (/^fixture(?:-deep|-trap)?(?:[\\/]|$)/.test(rel) || rel.endsWith(".test.mjs")) return;
     mkdirSync(dirname(join(target, rel)), { recursive: true });
     writeFileSync(join(target, rel), readCapped(p, budget));
   });
@@ -193,7 +193,7 @@ test("the extractor reads through io only: no fs, process, network or environmen
   const budget = { bytes: 0 }; // one total across the scan (CR-008)
   walkFiles(HERE, (p) => {
     const rel = relative(HERE, p);
-    if (!/\.m?js$/.test(p) || /^fixture(?:-[^\\/]*)?(?:[\\/]|$)/.test(rel) || rel.endsWith(".test.mjs")) return;
+    if (!/\.m?js$/.test(p) || /^fixture(?:-deep|-trap)?(?:[\\/]|$)/.test(rel) || rel.endsWith(".test.mjs")) return;
     const text = readCapped(p, budget).toString("utf8");
     for (const [re, what] of banned) if (re.test(text)) problems.push(`${rel} ${what}`);
   });

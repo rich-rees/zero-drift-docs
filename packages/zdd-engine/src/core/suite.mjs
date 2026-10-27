@@ -38,6 +38,19 @@ export function suiteLevel(config) {
   return { level: v };
 }
 
+// Plain data only (CR-143): what JSON can carry, no getters, functions or
+// cycles, bounded — it is copied into a config.
+function plainData(v, budget = { entries: 10_000 }, depth = 0) {
+  if (--budget.entries < 0 || depth > 32) return false;
+  if (v === null || typeof v === "string" || typeof v === "boolean") return true;
+  if (typeof v === "number") return Number.isFinite(v);
+  if (Array.isArray(v)) return v.every((x) => plainData(x, budget, depth + 1));
+  if (typeof v !== "object") return false;
+  const proto = Object.getPrototypeOf(v);
+  if (proto !== Object.prototype && proto !== null) return false;
+  return Object.entries(Object.getOwnPropertyDescriptors(v)).every(([, d]) => "value" in d && plainData(d.value, budget, depth + 1));
+}
+
 // The SUITE export: { options?, companions? } — the options its fixture is
 // read with, and the catalogue adapters that run beside it.
 function suiteSpec(name, mod) {
@@ -46,12 +59,13 @@ function suiteSpec(name, mod) {
   if (!spec || typeof spec !== "object" || Array.isArray(spec)) return { error: `SUITE must be an object { options, companions }` };
   const options = spec.options ?? {};
   if (!options || typeof options !== "object" || Array.isArray(options)) return { error: `SUITE.options must be an object` };
+  if (!plainData(options)) return { error: "SUITE.options must be plain data (strings, numbers, booleans, null, arrays and plain objects — no functions, getters or cycles)" };
   const companions = spec.companions ?? {};
   if (!companions || typeof companions !== "object" || Array.isArray(companions)) return { error: `SUITE.companions must be an object { "<catalogue adapter>": { options } }` };
   const { names } = catalogue();
   for (const [c, o] of Object.entries(companions)) {
     if (!names.has(c)) return { error: `SUITE.companions names '${c}', which is not a catalogue adapter (a companion is one of ZDD's own)` };
-    if (!o || typeof o !== "object" || Array.isArray(o)) return { error: `SUITE.companions['${c}'] must be an options object` };
+    if (!o || typeof o !== "object" || Array.isArray(o) || !plainData(o)) return { error: `SUITE.companions['${c}'] must be an options object of plain data` };
   }
   return { options, companions };
 }
@@ -70,8 +84,15 @@ export async function suiteReport({ repoRoot, config, only = null }) {
   const unknown = [];
   const adapters = [];
   for (const name of wanted) {
-    if (names.has(name) || Object.hasOwn(aliases, name) || Object.hasOwn(retired, name)) {
+    // A catalogue name (or its alias) is checked in ZDD's CI; a retired name
+    // or one localExtractorDir does not hold is not found, and fails the run
+    // (CR-123): a suite that checked nothing must not pass.
+    if (names.has(name) || Object.hasOwn(aliases, name)) {
       skipped.push(name);
+      continue;
+    }
+    if (Object.hasOwn(retired, name)) {
+      unknown.push(name);
       continue;
     }
     if (!local.has(name)) {
@@ -119,15 +140,15 @@ export async function suiteReport({ repoRoot, config, only = null }) {
       checks: r.checks.map((c) => ({ ...c, blocking: !c.ok && c.n <= lvl.level })),
     });
   }
-  const blocking = adapters.some((a) => a.loadError || a.contractFail || a.checks.some((c) => c.blocking));
-  return { suiteChecks: lvl.level, count: SUITE_CHECK_COUNT, checks: SUITE_CHECKS, contract: CONTRACT, table: CONTRACT_TABLE, adapters, skipped, unknown, blocking };
+  const blocking = unknown.length > 0 || adapters.some((a) => a.loadError || a.contractFail || a.checks.some((c) => c.blocking));
+  return { suiteChecks: lvl.level, suiteChecksSet: config.suiteChecks !== undefined, count: SUITE_CHECK_COUNT, checks: SUITE_CHECKS, contract: CONTRACT, table: CONTRACT_TABLE, adapters, skipped, unknown, blocking };
 }
 
 export function narrateSuite(r) {
   const lines = [];
-  const held = r.suiteChecks ? `held to checks 1–${r.suiteChecks} (suiteChecks: ${r.suiteChecks})` : "no check blocks yet (suiteChecks is not set: every check warns)";
+  const held = r.suiteChecks ? `held to checks 1–${r.suiteChecks} (suiteChecks: ${r.suiteChecks})` : r.suiteChecksSet ? "no check blocks (suiteChecks: 0 — every check warns)" : "no check blocks yet (suiteChecks is not set: every check warns)";
   if (!r.adapters.length) {
-    lines.push("No adapters of this repo's own are configured — nothing to check. (Catalogue adapters pass the standard suite in ZDD's own CI.)");
+    lines.push(`No adapters of this repo's own are configured${r.unknown.length ? " and found" : ""} — nothing to check. (Catalogue adapters pass the standard suite in ZDD's own CI.)${r.suiteChecksSet && !r.suiteChecks ? " suiteChecks: 0." : ""}`);
   } else {
     lines.push(`The standard suite (decision 0040) on this repo's own adapters, ${held}:`);
     for (const a of r.adapters) {
@@ -152,7 +173,7 @@ export function narrateSuite(r) {
     }
   }
   if (r.skipped.length) lines.push("", `Catalogue adapters, checked in ZDD's own CI: ${r.skipped.join(", ")}`);
-  if (r.unknown.length) lines.push("", `Not found in localExtractorDir: ${r.unknown.join(", ")}`);
+  if (r.unknown.length) lines.push("", `FAIL: not found in localExtractorDir, or a retired name: ${r.unknown.join(", ")} — the suite cannot check an adapter it cannot find`);
   lines.push("", r.blocking ? "The suite FAILS: fix what is marked FAIL (the extractor skill walks it red to green)." : "The suite passes.");
   return lines.join("\n");
 }

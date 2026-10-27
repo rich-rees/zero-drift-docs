@@ -56,13 +56,15 @@ function walkTree(io, dir, diagnostics) {
   return { files: out, exists: walked.exists };
 }
 
-// A file's text through io, or "" with a diagnostic when it cannot be read
-// (too large, unreadable): the file still exists, so its record does.
-function readText(io, rel, diagnostics) {
+// A route, page or layout's text through io, read once (the refs scan may
+// have read it already — CR-132). One io cannot read stops derive: a record
+// built from no text would say "no methods, public" (CR-129).
+function readText(io, rel, cache) {
+  if (cache.has(rel)) return cache.get(rel);
   const got = io.read(rel);
-  if (got.ok) return got.text;
-  diagnostics.push(`${got.reason}`);
-  return "";
+  if (!got.ok) throw new Error(`nextjs: ${got.reason} — its record needs its text, so derive stops rather than write a partial one`);
+  cache.set(rel, got.text);
+  return got.text;
 }
 
 const stripGroups = (segs) => segs.filter((s) => !/^\(.+\)$/.test(s));
@@ -229,7 +231,8 @@ export function derive({ options, io }) {
 
   // ---- Refs scan ----
   const sourceFiles = walkSourceFiles(io, refsOptions, diagnostics);
-  const scans = scanFiles(io, sourceFiles, diagnostics);
+  const texts = new Map(); // rel -> text, every file read once
+  const scans = scanFiles(io, sourceFiles, diagnostics, texts);
 
   // Attribution: nearest enclosing route dir wins; else nearest page (then
   // layout) dir; else the file becomes its own module record.
@@ -290,9 +293,11 @@ export function derive({ options, io }) {
   if (middlewarePath) {
     const got = io.read(middlewarePath);
     if (got.ok) {
-      // A middleware file with nothing but comments (all of it commented
-      // out) has no matcher to read: no middleware, never a failure.
-      if (lex(got.text).code.trim()) matchers = loadMiddlewareMatchers(got.text, middlewarePath);
+      // The matcher is read from live code only (CR-119): a commented-out one
+      // is none. A middleware file with nothing but comments has no matcher
+      // to read: no middleware, never a failure.
+      const code = lex(got.text).code;
+      if (code.trim()) matchers = loadMiddlewareMatchers(code, middlewarePath);
       else diagnostics.push(`${middlewarePath} holds no code — no middleware auth derived`);
     } else if (got.code === "ignored") diagnostics.push(`${middlewarePath} is gitignored — not source, no middleware auth derived`);
     else if (got.code === "missing") diagnostics.push(`${middlewarePath} not found — no middleware auth derived`);
@@ -300,7 +305,7 @@ export function derive({ options, io }) {
   }
 
   for (const r of routes) {
-    const text = readText(io, r.rel, diagnostics);
+    const text = readText(io, r.rel, texts);
     const code = lex(text).code; // a commented-out handler or auth call is not one
     records.push({
       kind: "route",
@@ -319,7 +324,7 @@ export function derive({ options, io }) {
   }
 
   for (const s of surfaces) {
-    const text = readText(io, s.rel, diagnostics);
+    const text = readText(io, s.rel, texts);
     // Pages strip route groups (they are URLs); layouts keep them (they are
     // file-tree entities — stripping would collide (app)/layout with the root
     // layout) and gain a `/_layout` pseudo-segment, collision-free because
@@ -340,7 +345,7 @@ export function derive({ options, io }) {
         const base = posixify(join(srcAliasRoot, target.slice(2)));
         const hit = [".tsx", ".ts", ".jsx", ".js", "/index.tsx", "/index.ts", "/index.jsx", "/index.js"]
           .map((ext) => base + ext)
-          .find((p) => io.read(p).ok); // an ignored component is not source (CR-408)
+          .find((p) => !io.isIgnored(p) && io.kind(p) === "file"); // an ignored component is not source (CR-408); found, not read (CR-132)
         if (hit) resource.unshift(hit);
         else diagnostics.push(`${s.rel}: wrapper import '${target}' resolves to no file — page kept as primary resource`);
       }
@@ -365,7 +370,7 @@ export function derive({ options, io }) {
   // resolves — `requireRefs` asks the deriver to drop it otherwise (a file
   // whose `?code:` reaches no data-access record, and that calls no API).
   for (const { rel, refs } of moduleFiles.sort((a, b) => (a.rel < b.rel ? -1 : 1))) {
-    const text = readText(io, rel, diagnostics);
+    const text = readText(io, rel, texts);
     records.push({
       kind: "module",
       id: `module:${rel}`,

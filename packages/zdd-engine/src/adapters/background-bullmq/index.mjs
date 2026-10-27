@@ -7,7 +7,7 @@
 // adapters/background/shared.mjs (backgroundReader).
 
 import { posix } from "node:path";
-import { FACTS_KEY_ORDER, backgroundReader, SOURCE_EXT, TEST_FILE, scanQueues, slug } from "../background/shared.mjs";
+import { FACTS_KEY_ORDER, backgroundReader, SOURCE_EXT, TEST_FILE, scanQueues, slug, SOURCE_COMMENT } from "../background/shared.mjs";
 import { DETECTION_BASE, backgroundProposal, queueHits } from "../background/detect.mjs";
 
 export { FACTS_KEY_ORDER };
@@ -47,4 +47,4 @@ export function detect({ scan }) {
 // out a line of each kind of file it reads: what the standard suite needs
 // (decision 0040). `{}`: nothing it reads takes a line comment.
 export const CONTRACT = 1;
-export const COMMENT = { ".ts": "//", ".tsx": "//", ".js": "//", ".jsx": "//", ".mjs": "//", ".cjs": "//", ".py": "#" };
+export const COMMENT = { ...SOURCE_COMMENT };

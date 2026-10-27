@@ -276,7 +276,9 @@ function scanMetadata(metadataDir) {
 
 // Run every configured extractor, merge, resolve refs. Exported so tests can
 // observe records without the filesystem write.
-export async function deriveRecords({ repoRoot, config }) {
+// `contract` ({ contract, table }) is for tests: the contract table derive
+// judges adapters by, in place of this engine's (CR-138).
+export async function deriveRecords({ repoRoot, config, contract }) {
   const selection = resolveExtractors(config);
   if (selection.error) fail(selection.error);
   const diagnostics = [];
@@ -288,13 +290,18 @@ export async function deriveRecords({ repoRoot, config }) {
   // extractor's io.
   const ignored = gitIgnoredPredicate(repoRoot);
   if (ignored.error) fail(ignored.error); // fail closed (CR-403): never read ignored files as source
+  // The standard suite asks which files each adapter read (decision 0040,
+  // CR-118): ZDD_IO_TRACE names a file outside the repo that gets
+  // { "<adapter>": [paths read] }. Unset, nothing is kept.
+  const tracePath = process.env.ZDD_IO_TRACE;
+  const trace = tracePath ? {} : null;
   for (const { name, options, legacyName } of selection.extractors) {
     const extractor = await loadExtractor(name, repoRoot, config);
     if (typeof extractor.derive !== "function") fail(`Extractor '${name}' exports no derive()`);
     // The contract it was written for (decision 0040): newer than this
     // engine, or behind on a required step, stops derive; no CONTRACT line
     // warns; optional steps it is behind on are said under --verbose only.
-    const judged = judgeContract(name, extractor);
+    const judged = judgeContract(name, extractor, contract);
     if (judged.fail) fail(judged.fail);
     if (judged.warning) warnings.push(`WARNING [contract]: ${judged.warning}`);
     for (const r of judged.behind) diagnostics.push(`[contract] ${name} was written for contract ${judged.declared}; it does not have "${r.step}" (contract ${r.since}, optional): ${r.what}`);
@@ -305,7 +312,8 @@ export async function deriveRecords({ repoRoot, config }) {
       // `legacyName`: the retired name the config used (2.3: `services`), so
       // the extractor can keep the old record kind until "upgrade ZDD"
       // renames the key — an engine-only adopter sees nothing move (CR-302).
-      out = extractor.derive({ repoRoot, options, io: makeExtractorIo(repoRoot, name, { ignored }), ...(legacyName ? { legacyName } : {}) });
+      const onRead = trace ? (rel) => (trace[name] ??= []).push(rel) : undefined;
+      out = extractor.derive({ repoRoot, options, io: makeExtractorIo(repoRoot, name, { ignored, onRead }), ...(legacyName ? { legacyName } : {}) });
     } catch (e) {
       fail(`Extractor '${name}' failed: ${e.message}`);
     }
@@ -326,6 +334,7 @@ export async function deriveRecords({ repoRoot, config }) {
       factsOrder[kind] = [...new Set([...(factsOrder[kind] ?? []), ...order])];
     }
   }
+  if (trace) writeFileSync(tracePath, JSON.stringify(trace) + "\n");
   // One task seen by two background readers is one record (decision 0038).
   const bg = mergeBackgroundTasks(records);
   records = bg.records;

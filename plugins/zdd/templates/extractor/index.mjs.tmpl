@@ -32,7 +32,8 @@ export const FACTS_KEY_ORDER = __FACTS_KEY_ORDER__;
 
 // What ZDD's standard suite needs (`zdd-engine suite`, decision 0040): the
 // adapter contract this module was written for, how a line of each kind of
-// file it reads is commented out (the suite comments out every line of the
+// file it reads is commented out (null for one that takes none, such as JSON;
+// the suite comments out every line of the
 // fixture and expects nothing new), and the options its fixture/ is read
 // with. Put a fixture-trap/ folder beside fixture/ (laid out the same way)
 // for declarations written inside strings: they must give nothing either.

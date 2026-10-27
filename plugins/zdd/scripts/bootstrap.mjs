@@ -982,7 +982,14 @@ export function addSuiteStep(text) {
   let head = lint;
   while (head > 0 && !/^\s*-\s/.test(lines[head])) head--;
   const indent = lines[head].match(/^\s*/)[0];
-  lines.splice(lint + 1, 0, "", ...block.map((l) => indent + l));
+  // After the whole lint step (CR-120): its own keys — env, timeout, the rest
+  // of a multi-line run — are every later line indented deeper than its
+  // `- `; the step ends at the first one that is not, blank lines aside.
+  let end = lint + 1;
+  while (end < lines.length && (lines[end].trim() === "" || lines[end].match(/^\s*/)[0].length > indent.length)) end++;
+  while (end > lint + 1 && lines[end - 1].trim() === "") end--;
+  const after = end < lines.length && lines[end].trim() !== "";
+  lines.splice(end, 0, "", ...block.map((l) => indent + l), ...(after ? [""] : []));
   return { text: lines.join(eol), how: "added" };
 }
 const workflowText = (version) => pinEngine(readFileSync(join(TEMPLATES, "zdd.yml"), "utf8"), version);
@@ -1105,7 +1112,7 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
   const optIns = { ...current, ...(answers.optIns ?? {}) };
   // The shipped workflow is GitHub Actions (C6): on another host it would
   // never run and the user would believe they had a merge gate. The opt-in
-  // is recorded as off, the three commands are printed for their own
+  // is recorded as off, the four commands are printed for their own
   // pipeline, and the pre-push hook is offered as the fallback.
   const host = detection.host ?? hostOf(null);
   const ciOffHost = optIns.ci && !["github", "none"].includes(host.kind);
@@ -1260,7 +1267,7 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
   ledger.notes.push(`hooks: autoLoad ${optIns.autoLoad ? "on" : "off"}, fence ${optIns.fence ? "on" : "off"}, stop ${optIns.stop ? "on" : "off"} (recorded in zdd/config.json; the plugin's hooks.json reads it)`);
 
   if (ciOffHost) {
-    ledger.notes.push(`CI workflow not written: this repo's origin is ${host.kind} (${host.remote}), and the workflow ZDD ships runs only on GitHub Actions — a file there would never run. The merge gate for your own pipeline is the three commands the summary prints; the pre-push hook is the local fallback`);
+    ledger.notes.push(`CI workflow not written: this repo's origin is ${host.kind} (${host.remote}), and the workflow ZDD ships runs only on GitHub Actions — a file there would never run. The merge gate for your own pipeline is the four commands the summary prints; the pre-push hook is the local fallback`);
   }
   if (optIns.ci) {
     ensureOwned(ledger, ".github/workflows/zdd.yml", workflowText(version));
@@ -2848,12 +2855,15 @@ export function adapters(root, { raise = false } = {}) {
     const fix = (a.checks ?? []).filter((c) => !c.ok).map((c) => ({ n: c.n, title: r.checks[c.n - 1].title, fix: r.checks[c.n - 1].fix, detail: c.detail, blocking: c.blocking }));
     return { name: a.name, declared: a.declared ?? null, loadError: a.loadError ?? null, contractFail: a.contractFail ?? null, ask, fix };
   });
-  const clean = out.every((a) => !a.loadError && !a.contractFail && a.declared !== null && !a.fix.length);
+  // A configured adapter the suite could not find was checked by nobody
+  // (CR-123): nothing is clean while one is named.
+  const unknown = r.unknown ?? [];
+  const clean = !unknown.length && out.every((a) => !a.loadError && !a.contractFail && a.declared !== null && !a.fix.length);
   const ledger = new Ledger(root);
   let raised = false;
   if (raise) {
     if (!clean) {
-      const left = out.filter((a) => a.loadError || a.contractFail || a.declared === null || a.fix.length).map((a) => a.name);
+      const left = [...unknown.map((n) => `${n} (not found in localExtractorDir)`), ...out.filter((a) => a.loadError || a.contractFail || a.declared === null || a.fix.length).map((a) => a.name)];
       throw new Error(`suiteChecks stays at ${r.suiteChecks}: ${left.join(", ")} ${left.length === 1 ? "does" : "do"} not pass the standard suite yet (or declare no CONTRACT) — fix them through the extractor skill, then --raise again`);
     }
     if (cfg.config.suiteChecks !== r.count) {
@@ -2862,12 +2872,14 @@ export function adapters(root, { raise = false } = {}) {
       raised = true;
     } else ledger.kept.push("zdd/config.json");
   }
-  return { suiteChecks: r.suiteChecks, count: r.count, contract: r.contract, adapters: out, skipped: r.skipped, clean, raised, ...ledgerOut(ledger) };
+  return { suiteChecks: r.suiteChecks, count: r.count, contract: r.contract, adapters: out, skipped: r.skipped, unknown, clean, raised, ...ledgerOut(ledger) };
 }
 
 export function narrateAdapters(r) {
+  const missing = (r.unknown ?? []).map((n) => `${n}: not found in localExtractorDir (or a retired name) — the suite checked nothing for it. Restore the module, or take the name out of zdd/config.json's extractors.`);
+  if (!r.adapters.length && missing.length) return [...missing, ...(r.notes ?? [])].map(printable).join("\n");
   if (!r.adapters.length) return printable(`No adapter of this repo's own is configured: nothing to interview. (ZDD's own adapters are updated by the release and pass the standard suite in ZDD's CI.)${r.notes?.length ? `\n${r.notes.join("\n")}` : ""}`);
-  const out = [`This engine speaks adapter contract ${r.contract}; the standard suite has ${r.count} checks, and ${r.suiteChecks ? `checks 1–${r.suiteChecks} block in CI` : "none blocks in CI yet"}.`];
+  const out = [`This engine speaks adapter contract ${r.contract}; the standard suite has ${r.count} checks, and ${r.suiteChecks ? `checks 1–${r.suiteChecks} block in CI` : "none blocks in CI yet"}.`, ...missing];
   for (const a of r.adapters) {
     out.push("", `${a.name} — written for contract ${a.declared ?? "(not declared)"}`);
     if (a.loadError) out.push(`  It ${a.loadError}.`);
@@ -2998,7 +3010,7 @@ export function narrateDetect(d, pocock) {
   } else {
     out.push(`Mode: EXISTING codebase (${d.sourceFiles} source files). Proposed extractors, with the evidence:`);
   }
-  if (d.host) out.push(`Hosted on: ${d.host.kind === "none" ? "no remote yet (the GitHub default stands; ask where it will live)" : `${d.host.kind} (${d.host.remote})`}${d.host.kind !== "github" && d.host.kind !== "none" ? " — the CI workflow ZDD ships runs only on GitHub Actions; the merge gate is three commands for your own pipeline" : ""}`);
+  if (d.host) out.push(`Hosted on: ${d.host.kind === "none" ? "no remote yet (the GitHub default stands; ask where it will live)" : `${d.host.kind} (${d.host.remote})`}${d.host.kind !== "github" && d.host.kind !== "none" ? " — the CI workflow ZDD ships runs only on GitHub Actions; the merge gate is four commands for your own pipeline" : ""}`);
   if (d.mode !== "greenfield") {
     for (const p of d.proposals) {
       out.push(`  - ${p.name}`);
@@ -3092,9 +3104,9 @@ export function narrateApply(r) {
   if (r.optIns.ci) {
     out.push("One step only you can do: in branch protection, require the `zdd` check to pass and require branches to be up to date before merging. Now stale generated artifacts cannot merge.");
   } else if (r.host && !["github", "none"].includes(r.host.kind)) {
-    out.push(`This repo is hosted on ${r.host.kind}, where the workflow ZDD ships (GitHub Actions) cannot run. The merge gate for your own pipeline is three commands, run on every pull request:`);
+    out.push(`This repo is hosted on ${r.host.kind}, where the workflow ZDD ships (GitHub Actions) cannot run. The merge gate for your own pipeline is four commands, run on every pull request:`);
     for (const c of r.ciCommands ?? ciCommands(r.version)) out.push(`  ${c}`);
-    out.push("Fail the pipeline when any of them fails; the first two say when the generated artifacts are stale, the third refuses a merge while a pattern plan is left behind." + (r.optIns.prePush ? " Until then the pre-push hook makes a forgotten update loud on each developer's machine." : ""));
+    out.push("Fail the pipeline when any of them fails; the first two say when the generated artifacts are stale, the third refuses a merge while a pattern plan is left behind, and the fourth runs the standard suite on this repo's own adapters (it passes when there are none)." + (r.optIns.prePush ? " Until then the pre-push hook makes a forgotten update loud on each developer's machine." : ""));
   } else {
     out.push(
       "CI declined: ZDD runs on the spoken verbs alone" +

@@ -7,7 +7,7 @@
 // adapters/background/shared.mjs (backgroundReader).
 
 import { posix } from "node:path";
-import { FACTS_KEY_ORDER, backgroundReader, scanWorkflow, slug } from "../background/shared.mjs";
+import { FACTS_KEY_ORDER, backgroundReader, scanWorkflow, slug, SOURCE_COMMENT } from "../background/shared.mjs";
 
 export { FACTS_KEY_ORDER };
 
@@ -31,4 +31,4 @@ export { DETECTION_BASE as DETECTION } from "../background/detect.mjs";
 // out a line of each kind of file it reads: what the standard suite needs
 // (decision 0040). `{}`: nothing it reads takes a line comment.
 export const CONTRACT = 1;
-export const COMMENT = { ".yml": "#", ".yaml": "#" };
+export const COMMENT = { ...SOURCE_COMMENT, ".yml": "#", ".yaml": "#" };

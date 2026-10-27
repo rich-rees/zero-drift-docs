@@ -16,6 +16,10 @@ import { leadingComment } from "../js/source.mjs";
 export const MAX_SOURCE_BYTES = 1024 * 1024;
 export const DEFAULT_EXCLUDE = ["dev", "start", "test", "lint", "build", "typecheck", "format", "prepare", "postinstall"];
 export const NEVER_ENTER = new Set([".git", "node_modules", ".venv", "venv", "dist", "build", ".next", ".expo", "coverage", "__pycache__", ".vercel", ".wrangler"]);
+// How a line of each kind of file a background reader may read is commented
+// out — the code a task runs, and package.json for its scripts (null: JSON
+// takes no line comment). Each reader adds its own manifest's (decision 0040).
+export const SOURCE_COMMENT = { ".ts": "//", ".tsx": "//", ".js": "//", ".jsx": "//", ".mjs": "//", ".cjs": "//", ".py": "#", ".json": null };
 export const SOURCE_EXT = /\.(ts|tsx|js|jsx|mjs|cjs|py)$/;
 export const TEST_FILE = /\.(test|spec|stories)\.[cm]?[jt]sx?$|(^|\/)(test_[^/]*\.py|[^/]*_test\.py|conftest\.py)$|\.d\.ts$/;
 

@@ -5,7 +5,8 @@
 #
 # The local stand-in for the CI check: the same deterministic engine checks the
 # CI workflow would run — metadata matches source, indexes match their inputs,
-# stores lint. A failure here makes a forgotten `update` loud before the push,
+# stores lint, and the repo's own adapters pass the standard suite (decision
+# 0040; with none of its own, the suite says so and passes). A failure here makes a forgotten `update` loud before the push,
 # but it is not a merge gate: without CI, ZDD's guarantee is a habit, not a
 # proof. The engine version is PINNED below, in step with the plugin's other
 # pins.
@@ -21,4 +22,5 @@ fi
 
 npx -y "$ZDD_ENGINE" derive --check &&
   npx -y "$ZDD_ENGINE" render --check &&
-  npx -y "$ZDD_ENGINE" lint
+  npx -y "$ZDD_ENGINE" lint &&
+  npx -y "$ZDD_ENGINE" suite

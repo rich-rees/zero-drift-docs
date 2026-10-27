@@ -70,7 +70,9 @@ export function scanFileText(text) {
   return { fetchUrls };
 }
 
-export function scanFiles(io, files, diagnostics = []) {
+// `texts` keeps each text read, so a file the records need again is not read
+// (and charged to io's budget) twice (CR-132).
+export function scanFiles(io, files, diagnostics = [], texts = new Map()) {
   const results = new Map();
   for (const rel of files) {
     const got = io.read(rel);
@@ -78,6 +80,7 @@ export function scanFiles(io, files, diagnostics = []) {
       diagnostics.push(got.reason);
       continue;
     }
+    texts.set(rel, got.text);
     results.set(rel, scanFileText(got.text));
   }
   return results;

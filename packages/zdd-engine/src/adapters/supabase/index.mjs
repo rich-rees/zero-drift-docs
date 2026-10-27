@@ -47,6 +47,11 @@ export function derive({ repoRoot, options, io }) {
     // The folder's own .sql files, through io (decision 0040): a symlink is
     // skipped with a note, never followed or thrown (CR-062), and a
     // gitignored file is never seen.
+    // A gitignored folder is never listed (CR-126).
+    if (isIgnored(dir)) {
+      diagnostics.push(`${ns}: ${dir} is gitignored — not source, nothing to inventory`);
+      continue;
+    }
     const names = [];
     const walked = io.walk(dir, (rel, name) => {
       if (name.endsWith(".sql")) names.push(name);
@@ -56,16 +61,16 @@ export function derive({ repoRoot, options, io }) {
       diagnostics.push(`${ns}: ${dir} not found — nothing to inventory`);
       continue;
     }
-    if (isIgnored(dir)) {
-      diagnostics.push(`${ns}: ${dir} is gitignored — not source, nothing to inventory`);
-      continue;
-    }
+    // A migration listed but not read, or a listing cut short, would replay
+    // an incomplete schema and prune real tables: derive stops (CR-130). A
+    // symlinked migration stays a skip, never followed (decision 0040).
+    if (walked.truncated) throw new Error(`supabase: ${ns}: ${dir} holds more entries than io lists — derive stops rather than replay part of the history`);
     for (const k of walked.skipped) diagnostics.push(`${ns}: ${k.path}: ${k.reason} — skipped`);
     const files = [];
     for (const f of sortMigrations(names)) {
       const got = io.read(`${dir}/${f}`);
-      if (!got.ok) diagnostics.push(`${ns}: ${got.reason} — skipped`);
-      else files.push({ name: `${dir}/${f}`, text: got.text });
+      if (!got.ok) throw new Error(`supabase: ${ns}: ${got.reason} — a migration it cannot read would replay an incomplete schema, so derive stops`);
+      files.push({ name: `${dir}/${f}`, text: got.text });
     }
     const replayed = replayMigrations(files);
     for (const s of replayed.skipped) {

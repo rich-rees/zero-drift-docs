@@ -100,7 +100,7 @@ function directoryInside(root, rel) {
 // per run (lib/ignored.mjs) so N extractors do not ask git N times. Absent,
 // the io asks git itself on first use — a local extractor's unit test and
 // the CLI then veto the same paths.
-export function makeExtractorIo(repoRoot, label = "extractor", { maxEntries = IO_MAX_ENTRIES, maxDepth = IO_MAX_DEPTH, maxTotalBytes = IO_MAX_TOTAL_BYTES, ignored } = {}) {
+export function makeExtractorIo(repoRoot, label = "extractor", { maxEntries = IO_MAX_ENTRIES, maxDepth = IO_MAX_DEPTH, maxTotalBytes = IO_MAX_TOTAL_BYTES, ignored, onRead } = {}) {
   let realRoot = null;
   try {
     // .native: the Windows runner's RUNNER~1 short name must not survive
@@ -157,6 +157,7 @@ export function makeExtractorIo(repoRoot, label = "extractor", { maxEntries = IO
       // pre-open check cannot carry the total past its budget (CR-025).
       if (state.bytes + n > maxTotalBytes) return refuse("over-budget", `would pass this extractor's total read budget of ${maxTotalBytes} bytes — not read`);
       state.bytes += n;
+      onRead?.(clean); // the standard suite's read trace (decision 0040)
       return { ok: true, text: buf.subarray(0, n).toString("utf8") };
     } catch (e) {
       return refuse("unreadable", `could not be read (${e.code ?? e.message}) — not read`);
@@ -167,8 +168,10 @@ export function makeExtractorIo(repoRoot, label = "extractor", { maxEntries = IO
 
   // What sits at a path, without reading it (0.9): "missing", "file" (a
   // regular file physically inside the repo, no link on any segment),
-  // "directory", "symlink" (the path itself is a link — never followed),
-  // "linked" (a file reached through a linked folder) or "other". For an
+  // "directory" (likewise), "symlink" (the path itself is a link — never
+  // followed), "linked" (a file or folder reached through a linked folder,
+  // CR-144), "unreadable" (it could not be examined: never taken for
+  // missing, CR-131) or "other". For an
   // adapter that resolves a name the way a bundler does — probe spellings,
   // take the first real file — without charging a read for each probe.
   // Shape only: the caller asks isIgnored for git's veto.
@@ -179,11 +182,11 @@ export function makeExtractorIo(repoRoot, label = "extractor", { maxEntries = IO
     let st;
     try {
       st = lstatSync(abs);
-    } catch {
-      return "missing";
+    } catch (e) {
+      return e.code === "ENOENT" || e.code === "ENOTDIR" ? "missing" : "unreadable";
     }
     if (st.isSymbolicLink()) return "symlink";
-    if (st.isDirectory()) return "directory";
+    if (st.isDirectory()) return directoryInside(realRoot, clean).ok ? "directory" : "linked";
     if (st.isFile()) return regularFileInside(realRoot, abs) ? "file" : "linked";
     return "other";
   }

@@ -327,6 +327,11 @@ export function derive({ options, io }) {
       const candidate = base + ext;
       const at = io.kind(candidate);
       if (at === "missing") continue; // nothing at this spelling
+      if (at === "unreadable") {
+        if (!reported.has(candidate)) diagnostics.push(`${candidate} cannot be examined — not read`);
+        reported.add(candidate);
+        continue;
+      }
       if (at === "directory") continue; // `./admin` -> admin/index.ts comes later in the list
       if (isIgnored(candidate)) continue; // nothing at this spelling in a clean clone (CR-408): never final, never a shadow
       // "As spelled" is final only when the spelling carries an extension: an
@@ -364,13 +369,16 @@ export function derive({ options, io }) {
     for (const seg of dir === "." ? [] : dir.split("/")) {
       cur = cur ? `${cur}/${seg}` : seg;
       const at = io.kind(cur);
+      if (at === "unreadable") throw new Error(`react-router: '${cur}' cannot be examined — derive stops rather than take the routes file for missing and write every surface away`);
       if (at === "missing") {
         diagnostics.push(`${routesFile} not found — nothing to inventory`);
         return { records: [], diagnostics, warnings };
       }
       if (at !== "directory") notRegular();
     }
-    if (io.kind(routesFile) !== "missing") notRegular();
+    const atPath = io.kind(routesFile);
+    if (atPath === "unreadable") throw new Error(`react-router: routesFile '${routesFile}' cannot be examined — derive stops rather than take it for missing`);
+    if (atPath !== "missing") notRegular();
     if (dir === ".") {
       diagnostics.push(`${routesFile} not found — nothing to inventory`); // the root always exists: greenfield-shaped (decision 0013)
       return { records: [], diagnostics, warnings };
@@ -380,8 +388,9 @@ export function derive({ options, io }) {
   if (isIgnored(routesFile)) throw new Error(`react-router: routesFile '${routesFile}' is gitignored — not source; every surface record hangs on it, so derive stops rather than write them away (un-ignore it, or point extractorOptions.react-router.routesFile at the real one)`);
   // A routes file that exists but cannot be read (over the cap) would derive
   // zero surfaces as if the tree were empty — the same loss (1.3.0 CR-015).
-  const text = readSource(routesFile);
-  if (text === null) throw new Error(`react-router: routesFile '${routesFile}' is over ${MAX_SOURCE_BYTES / 1024} KiB — never read; every surface record hangs on it, so derive stops rather than write them away`);
+  const read = io.read(routesFile, { maxBytes: MAX_SOURCE_BYTES });
+  if (!read.ok) throw new Error(`react-router: routesFile ${read.code === "too-large" ? `'${routesFile}' is over ${MAX_SOURCE_BYTES / 1024} KiB` : read.reason} — never read; every surface record hangs on it, so derive stops rather than write them away`); // the reason io gave (CR-145)
+  const text = read.text;
   const routes = parseRouteTree(text, diagnostics);
   const imports = importMap(text);
 
