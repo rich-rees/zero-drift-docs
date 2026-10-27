@@ -8,6 +8,19 @@ const TEST_FILE = /(^|\/)(test_[^/]*\.py|[^/]*_test\.py|conftest\.py)$/;
 const norm = (name) => name.toLowerCase().replace(/_/g, "-");
 // A line with its quoted strings blanked: a `]` inside `"pkg[extra]"` closes nothing.
 const unquoted = (line) => line.replace(/"[^"]*"|'[^']*'/g, "");
+// A line without its comment: a `#` outside a quoted string (a URL fragment
+// inside `"pkg @ https://…#sha256=…"` is not one).
+const uncommented = (line) => {
+  let quote = null;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (quote) {
+      if (c === quote) quote = null;
+    } else if (c === '"' || c === "'") quote = c;
+    else if (c === "#") return line.slice(0, i);
+  }
+  return line;
+};
 
 // dependency name (lowercase, `-` for `_`) -> the first manifest declaring it.
 // Read: requirements*.txt (a name at the start of a line); in pyproject.toml
@@ -39,8 +52,8 @@ export function pythonDeps(scan) {
       const requirement = /["']([A-Za-z0-9][\w.-]*)\s*(?:\[[^\]]*\])?\s*(?:[<>=!~;@ ]|["'])/g;
       for (const line of text.split(/\r?\n/)) {
         if (inArray) {
-          for (const m of line.replace(/#.*$/, "").matchAll(requirement)) add(m[1], f.rel);
-          if (unquoted(line).includes("]")) inArray = false;
+          for (const m of uncommented(line).matchAll(requirement)) add(m[1], f.rel);
+          if (unquoted(uncommented(line)).includes("]")) inArray = false;
           continue;
         }
         const head = /^\s*\[([^\]]+)\]\s*$/.exec(line);
@@ -52,7 +65,7 @@ export function pythonDeps(scan) {
         const arr = /^\s*([A-Za-z0-9][\w.-]*)\s*=\s*\[(.*)$/.exec(line);
         const depArray = arr && ((table === "project" && arr[1] === "dependencies") || table === "project.optional-dependencies" || table === "dependency-groups");
         if (depArray) {
-          const rest = arr[2].replace(/#.*$/, "");
+          const rest = uncommented(arr[2]);
           for (const m of rest.matchAll(requirement)) add(m[1], f.rel);
           inArray = !unquoted(rest).includes("]");
           continue;

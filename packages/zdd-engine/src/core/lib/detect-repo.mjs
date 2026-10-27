@@ -63,7 +63,9 @@ export function makeScan(io, skipDirs = new Set()) {
   const texts = new Map();
   const memos = new Map();
   let overBudget = false;
-  const refused = new Set();
+  // What the walk would not enter or list (a link, an unreadable folder, a
+  // name the io refuses) is unseen too, and counted with the refused reads.
+  const refused = new Set(walked.skipped.map((s) => s.path));
   const scan = {
     files,
     truncated: walked.truncated,

@@ -97,6 +97,17 @@ test("the read budget, and files the io refuses, are said, never silent (CR-107,
   assert.equal(d.limits.refused, 1);
   assert.deepEqual(d.limits.refusedFirst, ["requirements.txt"]);
   assert.ok(!named(d, "supabase-py"), "evidence in a refused file is unseen, and the count says so");
+  // A link the walk will not follow is counted too (verify CR-103).
+  const linked = repo(t, { "app/main.py": "x = 1\n" });
+  const elsewhere = repo(t, { "api/main.py": "from fastapi import FastAPI\napp = FastAPI()\n" });
+  try {
+    symlinkSync(join(elsewhere, "api"), join(linked, "api"), "junction");
+    const dl = detectRepo(linked, modules);
+    assert.equal(dl.limits.refused, 1);
+    assert.deepEqual(dl.limits.refusedFirst, ["api"]);
+  } catch (e) {
+    if (e.code !== "EPERM") throw e;
+  }
   const tight = detectRepo(repo(t, { "api/main.py": "from fastapi import FastAPI\napp = FastAPI()\n" }), modules, { maxTotalBytes: 8 });
   assert.equal(tight.limits.readBudgetSpent, true);
   assert.ok(!named(tight, "fastapi"));
@@ -141,6 +152,11 @@ test("supabase-py: proposed from a dependency, an import, or its call shape; sql
   const extras = repo(t, { "pyproject.toml": '[project]\nname = "x"\n\n[project.optional-dependencies]\ndb = [\n  "supabase[async]>=2",\n  "sqlalchemy",\n]\n', "x.py": "" });
   const de = detectRepo(extras, modules);
   assert.ok(named(de, "supabase-py") && named(de, "sqlalchemy"), de.proposals.map((p) => p.name).join(","));
+  // A `#` inside a quoted requirement (a URL fragment) is not a comment (verify regression); one after the strings is.
+  const fragment = repo(t, { "pyproject.toml": '[project]\nname = "x"\ndependencies = ["pkg @ https://example.com/p.zip#sha256=abc", "sqlalchemy"]  # "supabase"\n', "x.py": "" });
+  const df = detectRepo(fragment, modules);
+  assert.ok(named(df, "sqlalchemy"), df.proposals.map((p) => p.name).join(","));
+  assert.ok(!named(df, "supabase-py"), "a name in a trailing comment is not a dependency");
   const groups = repo(t, { "pyproject.toml": '[dependency-groups]\ndev = ["SQLAlchemy"]\n', "x.py": "" });
   assert.ok(named(detectRepo(groups, modules), "sqlalchemy"));
   // CR-111: a Pipfile's [packages] and [dev-packages] tables.
