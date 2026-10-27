@@ -226,3 +226,9 @@ export function derive({ options, io }) {
 }
 
 export { DETECTION, detect } from "./detect.mjs";
+
+// The adapter contract this adapter was written for, and how to comment
+// out a line of each kind of file it reads: what the standard suite needs
+// (decision 0040). `{}`: nothing it reads takes a line comment.
+export const CONTRACT = 1;
+export const COMMENT = { ".py": "#" };

@@ -319,15 +319,19 @@ test("CR-108: a repo reached through a symlinked root derives and renders into t
   assert.ok(existsSync(join(real, "zdd", "graph.json")));
   // The same from the real path stays in sync — one tree, two names.
   assert.match(run(real, ["derive", "--check"]), /in sync/);
-  // A scanned root that is a link to an in-repo directory is followed: the
-  // fixture's migrations reached through `db-link` yield the same tables.
+  // A scanned root that is a link — even to an in-repo directory — is never
+  // followed since 0.9 (decision 0040: every read through io, one rule for
+  // every adapter; Rich's call, replacing CR-016's in-repo follow). The
+  // migrations reached only through `db-link` give no tables, and derive
+  // says why under --verbose.
   symlinkSync(join(real, "migrations"), join(real, "db-link"), "junction");
   const config = readConfig(real);
   config.adapterOptions.migrationNamespaces = [{ name: "db", dir: "db-link" }];
   writeConfig(real, config);
-  assert.match(run(real, ["derive"]), /Wrote 16 records/);
-  const things = JSON.parse(readFileSync(join(real, "zdd", "metadata", "table", "db--things.json"), "utf8"));
-  assert.deepEqual(things.resource, ["db-link/00001_init.sql", "db-link/00002_things.sql"], "migrations reached through the link, named by the configured path");
+  const d = spawnSync(process.execPath, [BIN, "derive", "--verbose"], { cwd: real, encoding: "utf8" });
+  assert.equal(d.status, 0, d.stderr);
+  assert.match(d.stderr, /\[supabase\] db: db-link: not a real directory inside the repo/, d.stderr);
+  assert.ok(!existsSync(join(real, "zdd", "metadata", "table", "db--things.json")), "no table read through the link");
   rmSync(real, { recursive: true, force: true });
   rmSync(linkParent, { recursive: true, force: true });
 });

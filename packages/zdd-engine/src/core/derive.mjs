@@ -29,6 +29,7 @@ import { insideRepo } from "./lib/paths.mjs";
 import { makeExtractorIo } from "./lib/extractor-io.mjs";
 import { gitIgnoredPredicate } from "./lib/ignored.mjs";
 import { catalogue } from "./lib/catalogue.mjs";
+import { judgeContract } from "./lib/contract.mjs";
 
 const NAME_RE = /^[a-z][a-z0-9-]*$/;
 
@@ -146,7 +147,7 @@ function validateEdgeShapes(records) {
 // (`<dir>/<name>.mjs` or `<dir>/<name>/index.mjs`). Local names may not
 // shadow a catalogue adapter: a different take on one is a copy under a new
 // name (decision 0036 point 5).
-function localExtractors(repoRoot, dir) {
+export function localExtractors(repoRoot, dir) {
   const found = new Map();
   if (!dir) return found;
   // loadConfig already refused absolute / `..` values; this is the belt
@@ -188,6 +189,10 @@ async function loadExtractor(name, repoRoot, config) {
   const localList = localDir ? `; local ${localDir}: ${[...local.keys()].join(", ") || "(none)"}` : "";
   fail(`Unknown extractor '${name}' (known: ${known}${localList})`);
 }
+
+// A module localExtractors found, for the standard suite (decision 0040):
+// the suite judges a repo's own adapter as derive would load it.
+export const importLocal = (entry) => import(pathToFileURL(entry).href);
 
 // Every catalogue adapter's module, in name order (decision 0039): detection
 // asks each one whether it fits a repo. The one other place a name becomes a
@@ -286,6 +291,13 @@ export async function deriveRecords({ repoRoot, config }) {
   for (const { name, options, legacyName } of selection.extractors) {
     const extractor = await loadExtractor(name, repoRoot, config);
     if (typeof extractor.derive !== "function") fail(`Extractor '${name}' exports no derive()`);
+    // The contract it was written for (decision 0040): newer than this
+    // engine, or behind on a required step, stops derive; no CONTRACT line
+    // warns; optional steps it is behind on are said under --verbose only.
+    const judged = judgeContract(name, extractor);
+    if (judged.fail) fail(judged.fail);
+    if (judged.warning) warnings.push(`WARNING [contract]: ${judged.warning}`);
+    for (const r of judged.behind) diagnostics.push(`[contract] ${name} was written for contract ${judged.declared}; it does not have "${r.step}" (contract ${r.since}, optional): ${r.what}`);
     let out;
     try {
       // A fresh io per extractor: one shared walk budget each, so a greedy

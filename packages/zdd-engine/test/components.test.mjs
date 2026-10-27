@@ -124,7 +124,7 @@ test("fixture: four records — props inline, from a same-file type, from an imp
 test("after the merge: usedBy resolves to the surfaces by their element file, calls to the expanded routes (never /health), uses to the component", () => {
   const io = makeExtractorIo(FIXTURE, "components");
   const api = fastapi({ repoRoot: FIXTURE, options: { roots: ["apps/api"] } });
-  const web = reactRouter({ repoRoot: FIXTURE, options: { routesFile: "apps/web/src/routes.tsx" } });
+  const web = reactRouter({ repoRoot: FIXTURE, io: makeExtractorIo(FIXTURE, "reactRouter"), options: { routesFile: "apps/web/src/routes.tsx" } });
   const comps = derive({ repoRoot: FIXTURE, options: { roots: ["apps/web/src", "packages/ui/src"] }, io });
   const { records } = resolveRefs([...api.records, ...web.records, ...comps.records]);
   const panel = records.find((r) => r.title === "RouteSearchPanel");

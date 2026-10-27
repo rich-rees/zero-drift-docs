@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { makeExtractorIo } from "../src/core/lib/extractor-io.mjs";
 import { derive as nextjs } from "../src/adapters/nextjs/index.mjs";
 import { derive as supabase } from "../src/adapters/supabase/index.mjs";
 import { DEFAULT_REFS } from "../src/adapters/nextjs/refs.mjs";
@@ -30,8 +31,8 @@ test("CR-095: a JavaScript App Router tree (route.js, page.jsx, layout.js) is in
     "src/lib/things-api.test.js": "supabase.from('things')\n",
     "migrations/0001.sql": "create table things (id uuid primary key);\n",
   });
-  const out = nextjs({ repoRoot: root, options: { appDir: "src/app" } });
-  const db = supabase({ repoRoot: root, options: { migrationNamespaces: [{ name: "db", dir: "migrations" }] } });
+  const out = nextjs({ repoRoot: root, io: makeExtractorIo(root, "nextjs"), options: { appDir: "src/app" } });
+  const db = supabase({ repoRoot: root, io: makeExtractorIo(root, "supabase"), options: { migrationNamespaces: [{ name: "db", dir: "migrations" }] } });
   const { records } = resolveRefs([...db.records, ...out.records, ...dataAccessOf(root)]); // supabase-js reads the calls (decision 0037)
   const ids = records.map((r) => r.id).sort();
   assert.deepEqual(ids, ["module:src/lib/things-api.js", "route:/api/things", "surface:/", "surface:/_layout", "surface:/things/[id]", "table:db/things"]);

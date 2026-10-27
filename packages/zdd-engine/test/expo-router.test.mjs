@@ -51,7 +51,7 @@ test("fixture: one surface per screen and per layout, namespaced and titled '(na
 
 test("after the merge: the native /jobs and the web /jobs both call route:/jobs, as two surfaces", () => {
   const api = fastapi({ repoRoot: FIXTURE, options: { roots: ["apps/api"] } });
-  const web = reactRouter({ repoRoot: FIXTURE, options: { routesFile: "apps/web/src/routes.tsx" } });
+  const web = reactRouter({ repoRoot: FIXTURE, io: makeExtractorIo(FIXTURE, "reactRouter"), options: { routesFile: "apps/web/src/routes.tsx" } });
   const native = derive({ repoRoot: FIXTURE, options: { appDir: "apps/mobile/app" }, io: makeExtractorIo(FIXTURE, "expo-router") });
   const { records } = resolveRefs([...api.records, ...web.records, ...native.records]);
   const callers = records.filter((r) => r.kind === "surface" && r.refs.includes("route:/jobs")).map((r) => r.id).sort();

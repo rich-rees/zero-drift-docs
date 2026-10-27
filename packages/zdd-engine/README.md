@@ -19,6 +19,8 @@ npx @rich-rees/zdd-engine tally [--since <ref|date>] [--json]
 npx @rich-rees/zdd-engine detect [--root=<dir>]
 npx @rich-rees/zdd-engine coverage [--json]
 npx @rich-rees/zdd-engine preview --extractors=<a,b,…> [--out=<empty dir>] [--json]
+npx @rich-rees/zdd-engine suite [--extractors=<a,b>] [--json]
+npx @rich-rees/zdd-engine contract [--json]
 ```
 
 - **derive** — run the configured extractors over the repo and write
@@ -95,7 +97,19 @@ npx @rich-rees/zdd-engine preview --extractors=<a,b,…> [--out=<empty dir>] [--
   `example/` folders into a new temporary folder outside the repo, derives
   and renders there, and prints where the human index landed.
 
-Every command but `detect` and `preview` locates the repo by walking up from
+- **suite** — the standard suite (decision 0040) on the adapters this repo
+  wrote itself (`localExtractorDir`), each on a copy of its own `fixture/`
+  outside the repo. Five checks, numbered in the order they were added: the
+  same bytes on another machine and on a second run; a gitignored path never
+  read; a missing root nothing to inventory; commented-out code (every line
+  of the fixture, by the adapter's `COMMENT` marks) and a `fixture-trap/`
+  folder never a record; every read through `io`. A failing check numbered
+  at or below `suiteChecks` fails the run, a newer one warns. Catalogue
+  adapters pass the same suite in this package's tests.
+- **contract** — the adapter contract this engine speaks and its table
+  (below). Reads no repo.
+
+Every command but `detect`, `preview` and `contract` locates the repo by walking up from
 the working directory to the first folder holding `zdd/config.json` (override
 with `--root=<dir>` / `--config=<file>`). `detect` reads the folder `--root`
 names (default: the working directory) and needs no config; `preview` reads
@@ -114,6 +128,7 @@ version:
 | `agentIndex.levels` | `1` | `2` lists the areas first and writes one file per area under `zdd/agent-index/`, each feature one hop away — for a repo whose feature list alone does not fit (2.3) |
 | `claims.strictKinds` | `[]` | The opt-in kinds (`component`, `background-task`, `external-service`) that `claims.strict` also fails on; unlisted they warn (decision 0017) |
 | `localExtractorDir` | — | Repo-relative folder of repo-local extractors (`<name>.mjs` or `<name>/index.mjs`) — the one place config may point at code |
+| `suiteChecks` | absent (every check warns) | How many of the standard suite's checks block for the repo's own adapters (decision 0040); written by bootstrap and raised by "upgrade ZDD" |
 | `adapter` / `adapterOptions` | *(deprecated)* | The pre-1.0 single adapter; `nextjs-supabase` still expands to `[supabase, supabase-js, nextjs]` with a deprecation note |
 | `name` | `"Codebase"` | Display name for the indexes |
 | `repoBase` | `""` | GitHub `/tree/<branch>/` URL prefix for source links in the human index — http(s) only, refused otherwise |
@@ -156,6 +171,33 @@ Extractors are selected by name from the catalogue of adapter folders in `src/ad
 from the declared `localExtractorDir` — never by path. The plugin's `extractor`
 skill scaffolds a local one. To contribute one, see the
 repo's [CONTRIBUTING.md](https://github.com/rich-rees/zero-drift-docs/blob/main/CONTRIBUTING.md).
+
+### The adapter contract
+
+Every adapter declares the contract it was written for, `export const
+CONTRACT = 1`: a number of its own, raised only when what the core asks of
+an adapter changes (decision 0040). `derive` stops on an adapter written for
+a newer contract than the engine speaks, or one behind on a required step;
+it warns on one that declares none; an optional step an adapter lacks is
+said under `--verbose` only, and the adapter keeps working without it.
+Before 1.0 the contract is open and stays at 1; from 1.0 every change is a
+new row here, and "upgrade ZDD" interviews the adopter about the rows their
+own adapters are behind on.
+
+| Step | Since | Required | What the core asks |
+|---|---|---|---|
+| `CONTRACT` | 1 | yes | `export const CONTRACT = n`: the adapter contract the adapter was written for |
+| `derive` | 1 | yes | `derive({ repoRoot, options, io })` returns `{ records, diagnostics }`; the same source bytes give byte-identical records |
+| `io` | 1 | yes | every read and listing through the `io` the engine hands in, never `node:fs`, the environment or the network; a gitignored path is never read |
+| missing source | 1 | yes | a configured root that does not exist is nothing to inventory: no records and a diagnostic, never an error |
+| `COMMENT` | 1 | yes | `{ ".ext": "<line comment mark>" }` for each kind of file read (`{}` when none takes one), so the suite can comment out the fixture |
+| `SUITE` | 1 | yes (an adopter's own) | a `fixture/` folder beside the adapter and `export const SUITE = { options, companions? }`; a catalogue adapter's fixture lives in ZDD's tests |
+| `FACTS_KEY_ORDER` | 1 | no | facts in a stable order, per kind |
+| unresolved refs | 1 | no | `?table:<name>`, `?route:<url>`, … for another adapter's records; the core resolves them |
+| data access | 1 | no | `?code:<file>#<function>` refs, and `data-access` records naming the tables a function reaches (decision 0037) |
+| typed edges | 1 | no | `facts.edges`, a verb for a ref (decision 0016) |
+| `warnings` | 1 | no | a list printed on every derive |
+| detection | 1 | no | `DETECTION` and `detect({ scan, proposed })` (decision 0039; every catalogue adapter has it) |
 
 ## Viewers
 

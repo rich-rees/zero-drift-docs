@@ -165,6 +165,29 @@ export function makeExtractorIo(repoRoot, label = "extractor", { maxEntries = IO
     }
   }
 
+  // What sits at a path, without reading it (0.9): "missing", "file" (a
+  // regular file physically inside the repo, no link on any segment),
+  // "directory", "symlink" (the path itself is a link — never followed),
+  // "linked" (a file reached through a linked folder) or "other". For an
+  // adapter that resolves a name the way a bundler does — probe spellings,
+  // take the first real file — without charging a read for each probe.
+  // Shape only: the caller asks isIgnored for git's veto.
+  function kind(rel) {
+    const clean = ioRelative(rel, `${label}: io.kind path`);
+    if (!realRoot) return "missing";
+    const abs = join(realRoot, clean);
+    let st;
+    try {
+      st = lstatSync(abs);
+    } catch {
+      return "missing";
+    }
+    if (st.isSymbolicLink()) return "symlink";
+    if (st.isDirectory()) return "directory";
+    if (st.isFile()) return regularFileInside(realRoot, abs) ? "file" : "linked";
+    return "other";
+  }
+
   function walk(relDir, onFile, { enter = (_rel, name) => name !== ".git" } = {}) {
     const clean = ioRelative(relDir, `${label}: io.walk directory`);
     const result = { exists: false, truncated: false, skipped: [] };
@@ -238,5 +261,5 @@ export function makeExtractorIo(repoRoot, label = "extractor", { maxEntries = IO
     return result;
   }
 
-  return Object.freeze({ read, walk, isIgnored });
+  return Object.freeze({ read, walk, isIgnored, kind });
 }

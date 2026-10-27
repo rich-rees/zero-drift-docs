@@ -45,6 +45,8 @@
 // Every file is read through `io` (decision 0010). Deterministic.
 
 import { repoRelative } from "../../core/lib/paths.mjs";
+import { lex as jsLex } from "../js/source.mjs";
+import { commentFree as pyCommentFree } from "../python/source.mjs";
 
 export const FACTS_KEY_ORDER = {
   "external-service": ["markers", "usedBy", "edges"],
@@ -58,6 +60,9 @@ export const CANDIDATE_SUFFIXES = ["_API_KEY", "_DSN", "_SECRET", "_TOKEN", "_UR
 // Prefixes that are the database, the platform or the build, never a vendor.
 export const BUILT_IN_IGNORE = ["DATABASE", "SUPABASE", "PG", "POSTGRES", "NODE", "NEXT", "VITE", "EXPO", "PUBLIC", "CI", "GITHUB", "RAILWAY", "VERCEL", "PORT", "HOST", "BASE", "API", "APP", "WEB", "SERVER", "CLIENT", "AUTH", "JWT", "SESSION", "COOKIE", "TEST", "DEV", "LOG"];
 const PUBLIC_PREFIXES = /^(NEXT_PUBLIC_|VITE_|EXPO_PUBLIC_|REACT_APP_|PUBLIC_)/;
+// A file's text with its comments blanked and its strings kept: a
+// commented-out import or env read is not a use (the standard suite, 0040).
+const codeOf = (rel, text) => (rel.endsWith(".py") ? pyCommentFree(text) : jsLex(text).code);
 
 // Every environment variable NAME a file's text reads, in source order, deduped.
 export function scanEnvReads(text) {
@@ -147,8 +152,9 @@ export function derive({ repoRoot, options, io, legacyName }) {
       if (r.code !== "missing") diagnostics.push(`${rel} ${r.reason}`);
       continue;
     }
-    const imports = scanImports(r.text);
-    const env = scanEnvReads(r.text);
+    const code = codeOf(rel, r.text);
+    const imports = scanImports(code);
+    const env = scanEnvReads(code);
     const covered = new Set();
     for (const s of declared) {
       const h = hits.get(s.name);
@@ -216,8 +222,9 @@ export function detect({ scan }) {
   const importSpecs = new Set();
   for (const f of scan.files) {
     if (!DEFAULT_EXTENSIONS.some((e) => f.name.endsWith(e)) || TEST_FILE.test(f.rel)) continue;
-    const text = scan.read(f.rel);
-    if (text === null) continue;
+    const raw = scan.read(f.rel);
+    if (raw === null) continue;
+    const text = codeOf(f.rel, raw);
     for (const spec of scanImports(text)) importSpecs.add(spec);
     for (const envName of scanEnvReads(text)) {
       if (!CANDIDATE_SUFFIXES.some((suf) => envName.endsWith(suf))) continue;
@@ -244,3 +251,9 @@ export function detect({ scan }) {
   evidence.push("names are guessed from the env prefix — confirm or rename each; a prefix that is not a service goes in `ignore`");
   return { proposal: { evidence, options: { services } } };
 }
+
+// The adapter contract this adapter was written for, and how to comment
+// out a line of each kind of file it reads: what the standard suite needs
+// (decision 0040). `{}`: nothing it reads takes a line comment.
+export const CONTRACT = 1;
+export const COMMENT = { ".ts": "//", ".tsx": "//", ".js": "//", ".jsx": "//", ".mjs": "//", ".cjs": "//", ".py": "#" };

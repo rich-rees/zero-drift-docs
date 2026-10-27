@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// ZDD engine CLI — one bin, eight subcommands. Every command but detect and
-// preview reads the adopter repo's zdd/config.json (located by walking up from cwd; override with
+// ZDD engine CLI — one bin, ten subcommands. Every command but detect,
+// preview and contract reads the adopter repo's zdd/config.json (located by walking up from cwd; override with
 // --root=<dir> and/or --config=<file>) and runs deterministically: same source
 // bytes in, byte-identical artifacts out. No LLM anywhere — the agent-side
 // ritual lives in the zdd plugin's skills; this is the mechanical half.
@@ -13,6 +13,8 @@
 //   zdd-engine detect [--root=<dir>]           which adapters fit a repo, as JSON (bootstrap asks this)
 //   zdd-engine coverage [--json]               what the derived records link to, and what links to nothing
 //   zdd-engine preview --extractors=<a,b>      the chosen adapters' examples rendered outside the repo
+//   zdd-engine suite [--extractors=<a,b>] [--json]  the standard suite on this repo's own adapters
+//   zdd-engine contract [--json]               the adapter contract this engine speaks, and its table
 
 const COMMANDS = {
   derive: () => import("../src/core/derive.mjs"),
@@ -23,6 +25,8 @@ const COMMANDS = {
   detect: () => import("../src/core/detect.mjs"),
   coverage: () => import("../src/core/coverage.mjs"),
   preview: () => import("../src/core/preview.mjs"),
+  suite: () => import("../src/core/suite.mjs"),
+  contract: () => import("../src/core/contract.mjs"),
 };
 
 const [cmd, ...rest] = process.argv.slice(2);
@@ -37,7 +41,9 @@ if (!cmd || !(cmd in COMMANDS)) {
       `  tally      the ZDD record counted over git history (--since <ref|date>, --json)\n` +
       `  detect     which adapters fit this repo, with evidence and the parts they cover (JSON)\n` +
       `  coverage   per record kind: what it links to, and what links to nothing (--json)\n` +
-      `  preview    render the chosen adapters' examples outside the repo (--extractors=<a,b>)\n\n` +
+      `  preview    render the chosen adapters' examples outside the repo (--extractors=<a,b>)\n` +
+      `  suite      the standard suite on this repo's own adapters, each on its fixture (--extractors=<a,b>, --json)\n` +
+      `  contract   the adapter contract this engine speaks, and its table (--json)\n\n` +
       `Common options: --root=<repo-root> --config=<path-to-config.json>`,
   );
   process.exit(cmd ? 2 : 0);

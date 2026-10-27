@@ -30,3 +30,9 @@ export function derive({ options, io }) {
 // option shape adds the entries' path keys (CR-101).
 import { DETECTION_BASE } from "../background/detect.mjs";
 export const DETECTION = { ...DETECTION_BASE, optionShape: { ...DETECTION_BASE.optionShape, objectLists: { entries: { optional: ["file", "cwd"] } } } };
+
+// The adapter contract this adapter was written for, and how to comment
+// out a line of each kind of file it reads: what the standard suite needs
+// (decision 0040). `{}`: nothing it reads takes a line comment.
+export const CONTRACT = 1;
+export const COMMENT = {};

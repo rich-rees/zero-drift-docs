@@ -18,12 +18,11 @@
 // (src/core/lib/resolve-refs.mjs). A missing appDir or middleware
 // file is "nothing to inventory" (greenfield), never an error.
 
-import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { walkSourceFiles, scanFiles, DEFAULT_REFS } from "./refs.mjs";
 import { slugify } from "../../core/lib/slug.mjs";
 import { repoRelative } from "../../core/lib/paths.mjs";
-import { walkDir } from "../../core/lib/walk.mjs";
+import { leadingComment, lex } from "../js/source.mjs";
 
 export { slugify };
 
@@ -47,19 +46,23 @@ export const FACTS_KEY_ORDER = {
 // Route & surface walkers
 // ---------------------------------------------------------------------------
 
-// `isIgnored` (io.isIgnored): a gitignored path is never source (pick 1).
-function walkTree(dir, repoRoot, diagnostics, isIgnored, out = []) {
-  const rel = (p) => posixify(p.slice(repoRoot.length + 1));
-  walkDir(
-    dir,
-    (p) => {
-      if (!isIgnored(rel(p))) out.push(p);
-    },
-    new Set(),
-    (p) => !isIgnored(rel(p)),
-    (p, reason) => diagnostics.push(`${posixify(p.slice(repoRoot.length + 1))}: ${reason} — skipped`),
-  );
-  return out;
+// Every file under `dir`, through io (decision 0040): a gitignored path is
+// never seen (pick 1), a symlink is skipped with a note, never followed.
+function walkTree(io, dir, diagnostics) {
+  const out = [];
+  const walked = io.walk(dir, (rel) => out.push(rel), { enter: (_rel, name) => name !== ".git" });
+  for (const k of walked.skipped) diagnostics.push(`${k.path}: ${k.reason} — skipped`);
+  if (walked.truncated) diagnostics.push(`${dir}: the walk hit its entry or depth limit — some files were not read`);
+  return { files: out, exists: walked.exists };
+}
+
+// A file's text through io, or "" with a diagnostic when it cannot be read
+// (too large, unreadable): the file still exists, so its record does.
+function readText(io, rel, diagnostics) {
+  const got = io.read(rel);
+  if (got.ok) return got.text;
+  diagnostics.push(`${got.reason}`);
+  return "";
 }
 
 const stripGroups = (segs) => segs.filter((s) => !/^\(.+\)$/.test(s));
@@ -68,20 +71,7 @@ const dynamicSegments = (segs) =>
     .filter((s) => /^\[.+\]$/.test(s))
     .map((s) => s.replace(/^\[\.\.\.|^\[|\]$/g, ""));
 
-// First leading `//` comment line that is not a file-path echo (repo
-// convention puts `// src/app/api/.../route.ts` on line 1, prose on line 2).
-// That prose line is a code comment — store #3 — doing double duty as the
-// derived description.
-export function leadingComment(text) {
-  for (const line of text.split("\n")) {
-    const t = line.trim();
-    if (!t.startsWith("//")) break;
-    const c = t.replace(/^\/\/\s?/, "").trim();
-    if (!c || /(^|\s)[\w./\[\]-]*\/(route|page|layout)\.(tsx?|jsx?)$/.test(c)) continue;
-    return c;
-  }
-  return "";
-}
+export { leadingComment };
 
 // A page.tsx whose default export does nothing but render one `@/`-imported
 // component is a wrapper — the GitHub link a reader wants is the component,
@@ -137,8 +127,7 @@ export function extractMethods(text) {
 // routes fall through to in-file pattern detection from config.
 // ---------------------------------------------------------------------------
 
-function loadMiddlewareMatchers(repoRoot, middlewarePath) {
-  const text = readFileSync(join(repoRoot, middlewarePath), "utf8");
+function loadMiddlewareMatchers(text, middlewarePath) {
   const start = /matcher\s*:\s*\[/.exec(text);
   if (!start) throw new Error(`No config.matcher found in ${middlewarePath}`);
   // Scan to the matching `]` respecting string literals — the matcher patterns
@@ -182,9 +171,8 @@ function deriveAuth(urlPath, routeText, matchers, authPatterns, apiPrefix) {
 // derive(ctx) — the extractor contract
 // ---------------------------------------------------------------------------
 
-export function derive({ repoRoot, options, io }) {
+export function derive({ options, io }) {
   const diagnostics = [];
-  const isIgnored = io?.isIgnored ?? (() => false);
   const {
     appDir: appDirOpt = "src/app",
     apiPrefix = "/api",
@@ -220,9 +208,9 @@ export function derive({ repoRoot, options, io }) {
   refsOptions.roots = refsOptions.roots.map((r) => repoRelative(r, "nextjs.refs.roots"));
 
   // ---- Route & surface trees ----
-  const appAbs = join(repoRoot, appDir);
-  if (!existsSync(appAbs)) diagnostics.push(`${appDir} not found — nothing to inventory`);
-  const appFiles = walkTree(appAbs, repoRoot, diagnostics, isIgnored).map((p) => posixify(p.slice(repoRoot.length + 1)));
+  const tree = walkTree(io, appDir, diagnostics);
+  if (!tree.exists) diagnostics.push(`${appDir} not found — nothing to inventory`);
+  const appFiles = tree.files;
   const apiDirRel = posixify(join(appDir, apiPrefix.replace(/^\//, "")));
 
   const routes = [];
@@ -240,8 +228,8 @@ export function derive({ repoRoot, options, io }) {
   }
 
   // ---- Refs scan ----
-  const sourceFiles = walkSourceFiles(repoRoot, refsOptions, diagnostics, isIgnored);
-  const scans = scanFiles(repoRoot, sourceFiles);
+  const sourceFiles = walkSourceFiles(io, refsOptions, diagnostics);
+  const scans = scanFiles(io, sourceFiles, diagnostics);
 
   // Attribution: nearest enclosing route dir wins; else nearest page (then
   // layout) dir; else the file becomes its own module record.
@@ -300,13 +288,20 @@ export function derive({ repoRoot, options, io }) {
   const records = [];
   let matchers = [];
   if (middlewarePath) {
-    if (isIgnored(middlewarePath)) diagnostics.push(`${middlewarePath} is gitignored — not source, no middleware auth derived`);
-    else if (existsSync(join(repoRoot, middlewarePath))) matchers = loadMiddlewareMatchers(repoRoot, middlewarePath);
-    else diagnostics.push(`${middlewarePath} not found — no middleware auth derived`);
+    const got = io.read(middlewarePath);
+    if (got.ok) {
+      // A middleware file with nothing but comments (all of it commented
+      // out) has no matcher to read: no middleware, never a failure.
+      if (lex(got.text).code.trim()) matchers = loadMiddlewareMatchers(got.text, middlewarePath);
+      else diagnostics.push(`${middlewarePath} holds no code — no middleware auth derived`);
+    } else if (got.code === "ignored") diagnostics.push(`${middlewarePath} is gitignored — not source, no middleware auth derived`);
+    else if (got.code === "missing") diagnostics.push(`${middlewarePath} not found — no middleware auth derived`);
+    else diagnostics.push(`${got.reason} — no middleware auth derived`);
   }
 
   for (const r of routes) {
-    const text = readFileSync(join(repoRoot, r.rel), "utf8");
+    const text = readText(io, r.rel, diagnostics);
+    const code = lex(text).code; // a commented-out handler or auth call is not one
     records.push({
       kind: "route",
       id: `route:${r.urlPath}`,
@@ -315,16 +310,16 @@ export function derive({ repoRoot, options, io }) {
       resource: [r.rel],
       refs: [...(routeRefs.get(r.rel) ?? [])],
       facts: {
-        methods: extractMethods(text),
+        methods: extractMethods(code),
         dynamicSegments: dynamicSegments(r.segs),
-        auth: deriveAuth(r.urlPath, text, matchers, authPatterns, apiPrefix),
+        auth: deriveAuth(r.urlPath, code, matchers, authPatterns, apiPrefix),
       },
       filename: `${slugify(r.urlPath.slice(apiPrefix.length + 1) || "index")}.json`,
     });
   }
 
   for (const s of surfaces) {
-    const text = readFileSync(join(repoRoot, s.rel), "utf8");
+    const text = readText(io, s.rel, diagnostics);
     // Pages strip route groups (they are URLs); layouts keep them (they are
     // file-tree entities — stripping would collide (app)/layout with the root
     // layout) and gain a `/_layout` pseudo-segment, collision-free because
@@ -338,14 +333,14 @@ export function derive({ repoRoot, options, io }) {
     // list as routing truth.
     const resource = [s.rel];
     if (s.file === "page") {
-      const target = resolveWrapperTarget(text);
+      const target = resolveWrapperTarget(lex(text).code);
       if (target) {
         // `@/` maps to srcAliasRoot (tsconfig paths; configurable because not
         // every repo aliases to appDir's parent).
         const base = posixify(join(srcAliasRoot, target.slice(2)));
         const hit = [".tsx", ".ts", ".jsx", ".js", "/index.tsx", "/index.ts", "/index.jsx", "/index.js"]
           .map((ext) => base + ext)
-          .find((p) => !isIgnored(p) && existsSync(join(repoRoot, p))); // an ignored component is not source (CR-408)
+          .find((p) => io.read(p).ok); // an ignored component is not source (CR-408)
         if (hit) resource.unshift(hit);
         else diagnostics.push(`${s.rel}: wrapper import '${target}' resolves to no file — page kept as primary resource`);
       }
@@ -370,7 +365,7 @@ export function derive({ repoRoot, options, io }) {
   // resolves — `requireRefs` asks the deriver to drop it otherwise (a file
   // whose `?code:` reaches no data-access record, and that calls no API).
   for (const { rel, refs } of moduleFiles.sort((a, b) => (a.rel < b.rel ? -1 : 1))) {
-    const text = readFileSync(join(repoRoot, rel), "utf8");
+    const text = readText(io, rel, diagnostics);
     records.push({
       kind: "module",
       id: `module:${rel}`,
@@ -388,3 +383,9 @@ export function derive({ repoRoot, options, io }) {
 }
 
 export { DETECTION, detect } from "./detect.mjs";
+
+// The adapter contract this adapter was written for, and how to comment
+// out a line of each kind of file it reads: what the standard suite needs
+// (decision 0040). `{}`: nothing it reads takes a line comment.
+export const CONTRACT = 1;
+export const COMMENT = { ".ts": "//", ".tsx": "//", ".js": "//", ".jsx": "//", ".mjs": "//", ".cjs": "//" };

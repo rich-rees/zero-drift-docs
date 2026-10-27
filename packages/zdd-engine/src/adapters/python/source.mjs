@@ -67,6 +67,7 @@ const LOGICAL_MAX_LINES = 256;
 
 function lex(text) {
   let out = "";
+  let code = ""; // comments blanked, strings kept
   const literals = [];
   let i = 0;
   while (i < text.length) {
@@ -75,6 +76,7 @@ function lex(text) {
       const nl = text.indexOf("\n", i);
       const end = nl === -1 ? text.length : nl;
       out += " ".repeat(end - i);
+      code += " ".repeat(end - i);
       i = end;
       continue;
     }
@@ -123,17 +125,27 @@ function lex(text) {
       literals.push({ value: text.slice(open, close), start: i, open });
       const closed = text.startsWith(quote, close);
       out += m[0] + body.slice(0, close - open) + (closed ? quote : "");
-      i = closed ? close + quote.length : close;
+      const next = closed ? close + quote.length : close;
+      code += text.slice(i, next);
+      i = next;
       continue;
     }
     out += c;
+    code += c;
     i++;
   }
-  return { mask: out, literals };
+  return { mask: out, code, literals };
 }
 
 export function masked(text) {
   return lex(text).mask;
+}
+
+// The text with its comments blanked and its strings kept, same offsets:
+// for a scan that reads names inside strings (`os.getenv("X")`), so a
+// commented-out line is never read as code (decision 0040, the suite).
+export function commentFree(text) {
+  return lex(text).code;
 }
 
 export function strings(text) {

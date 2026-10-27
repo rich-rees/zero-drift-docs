@@ -58,8 +58,8 @@ test("react-router (the second adopter's shape): the Activity screen calls live.
     "web/src/services.ts": 'export function useServices() {\n  return {\n    api: { get: (p: string) => p },\n    live: { onInsert: (table: string, cb: (r: unknown) => void) => supabase.channel(`${table}:1`).on("postgres_changes", { schema: "public", table }, cb) },\n  };\n}\n',
   });
   try {
-    const db = supabase({ repoRoot: root, options: { migrationNamespaces: [{ name: "db", dir: "migrations" }] } });
-    const web = reactRouter({ repoRoot: root, options: { routesFile: "web/src/routes.tsx" } });
+    const db = supabase({ repoRoot: root, io: makeExtractorIo(root, "supabase"), options: { migrationNamespaces: [{ name: "db", dir: "migrations" }] } });
+    const web = reactRouter({ repoRoot: root, io: makeExtractorIo(root, "reactRouter"), options: { routesFile: "web/src/routes.tsx" } });
     const { records } = resolveRefs([...db.records, ...web.records, ...dataAccess(root, ["live.onInsert"])]);
     const activity = records.find((r) => r.id === "surface:/activity");
     assert.deepEqual(activity.refs, ["table:db/audit_events"], "the /activity call matches no route here and drops; the subscription stays");
@@ -68,12 +68,12 @@ test("react-router (the second adopter's shape): the Activity screen calls live.
     const jobs = records.find((r) => r.id === "surface:/jobs");
     assert.equal(jobs.facts.edges, undefined);
     // Without the helper named, the services module's own `.on` has a variable table: nothing is seen.
-    const fresh = () => reactRouter({ repoRoot: root, options: { routesFile: "web/src/routes.tsx" } }).records; // resolveRefs works in place
-    const plain = resolveRefs([...supabase({ repoRoot: root, options: { migrationNamespaces: [{ name: "db", dir: "migrations" }] } }).records, ...fresh(), ...dataAccess(root)]).records;
+    const fresh = () => reactRouter({ repoRoot: root, io: makeExtractorIo(root, "reactRouter"), options: { routesFile: "web/src/routes.tsx" } }).records; // resolveRefs works in place
+    const plain = resolveRefs([...supabase({ repoRoot: root, io: makeExtractorIo(root, "supabase"), options: { migrationNamespaces: [{ name: "db", dir: "migrations" }] } }).records, ...fresh(), ...dataAccess(root)]).records;
     assert.equal(plain.find((r) => r.id === "surface:/activity").facts.edges, undefined);
     assert.throws(() => supabaseJs({ repoRoot: root, options: { subscribeCalls: "live.onInsert" }, io: makeExtractorIo(root) }), /subscribeCalls' must be an array/);
     // The option where it lived before 0.9 is a warning, never silently dropped.
-    const old = reactRouter({ repoRoot: root, options: { routesFile: "web/src/routes.tsx", subscribeCalls: ["live.onInsert"] } });
+    const old = reactRouter({ repoRoot: root, io: makeExtractorIo(root, "reactRouter"), options: { routesFile: "web/src/routes.tsx", subscribeCalls: ["live.onInsert"] } });
     assert.match(old.warnings.join("\n"), /'subscribeCalls' is read by the supabase-js adapter since 0\.9/);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -88,14 +88,14 @@ test("nextjs: a page's own .on('postgres_changes', { table: 'things' }) and a na
     "src/app/quiet/page.tsx": "export default function Quiet() { return null }\n",
   });
   try {
-    const db = supabase({ repoRoot: root, options: { migrationNamespaces: [{ name: "db", dir: "migrations" }] } });
-    const out = nextjs({ repoRoot: root, options: { appDir: "src/app" } });
+    const db = supabase({ repoRoot: root, io: makeExtractorIo(root, "supabase"), options: { migrationNamespaces: [{ name: "db", dir: "migrations" }] } });
+    const out = nextjs({ repoRoot: root, io: makeExtractorIo(root, "nextjs"), options: { appDir: "src/app" } });
     const { records } = resolveRefs([...db.records, ...out.records, ...dataAccess(root, ["live.onInsert"])]);
     const home = records.find((r) => r.id === "surface:/");
     assert.deepEqual(home.refs, ["table:db/events", "table:db/things"]);
     assert.deepEqual(home.facts.edges, { subscribes: ["table:db/events", "table:db/things"] });
     assert.equal(records.find((r) => r.id === "surface:/quiet").facts.edges, undefined);
-    const old = nextjs({ repoRoot: root, options: { appDir: "src/app", refs: { subscribeCalls: ["live.onInsert"] } } });
+    const old = nextjs({ repoRoot: root, io: makeExtractorIo(root, "nextjs"), options: { appDir: "src/app", refs: { subscribeCalls: ["live.onInsert"] } } });
     assert.match(old.warnings.join("\n"), /'refs\.subscribeCalls' is read by the supabase-js adapter since 0\.9/);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -109,9 +109,9 @@ test("a subscribes ref resolves against a schema-qualified table (2.1.1): migrat
     "web/src/ActivityPage.tsx": 'export function ActivityPage() {\n  live.onInsert("audit_events", (row) => row);\n  live.onInsert("public.jobs", (row) => row);\n  return <main />;\n}\n',
   });
   try {
-    const db = supabase({ repoRoot: root, options: { migrationNamespaces: [{ name: "db", dir: "migrations" }] } });
+    const db = supabase({ repoRoot: root, io: makeExtractorIo(root, "supabase"), options: { migrationNamespaces: [{ name: "db", dir: "migrations" }] } });
     assert.ok(db.records.some((r) => r.id === "table:db/public.audit_events"), "the table keeps its schema in its id");
-    const web = reactRouter({ repoRoot: root, options: { routesFile: "web/src/routes.tsx" } });
+    const web = reactRouter({ repoRoot: root, io: makeExtractorIo(root, "reactRouter"), options: { routesFile: "web/src/routes.tsx" } });
     const { records, diagnostics } = resolveRefs([...db.records, ...web.records, ...dataAccess(root, ["live.onInsert"])]);
     const activity = records.find((r) => r.id === "surface:/activity");
     assert.deepEqual(activity.facts.edges, { subscribes: ["table:db/public.audit_events", "table:db/public.jobs"] });

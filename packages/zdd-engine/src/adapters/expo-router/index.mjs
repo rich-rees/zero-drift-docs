@@ -26,7 +26,7 @@
 // Every file is read through `io` (decision 0010). A missing appDir is
 // "nothing to inventory". Deterministic: same bytes in, same records out.
 
-import { leadingComment } from "../nextjs/index.mjs";
+import { leadingComment } from "../js/source.mjs";
 import { scanApiCalls } from "../js/source.mjs";
 import { repoRelative } from "../../core/lib/paths.mjs";
 import { slugify } from "../../core/lib/slug.mjs";
@@ -134,3 +134,9 @@ export function derive({ repoRoot, options, io }) {
 }
 
 export { DETECTION, detect } from "./detect.mjs";
+
+// The adapter contract this adapter was written for, and how to comment
+// out a line of each kind of file it reads: what the standard suite needs
+// (decision 0040). `{}`: nothing it reads takes a line comment.
+export const CONTRACT = 1;
+export const COMMENT = { ".ts": "//", ".tsx": "//", ".js": "//", ".jsx": "//", ".mjs": "//", ".cjs": "//" };

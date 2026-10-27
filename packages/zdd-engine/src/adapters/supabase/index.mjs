@@ -11,8 +11,6 @@
 // so they are emitted resolved. A namespace whose directory does not exist is
 // "nothing to inventory" (greenfield), never an error.
 
-import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
-import { join } from "node:path";
 import { replayMigrations, sortMigrations, tableKey } from "./sql-replay.mjs";
 import { repoRelative } from "../../core/lib/paths.mjs";
 
@@ -27,7 +25,7 @@ export const FACTS_KEY_ORDER = {
 export function derive({ repoRoot, options, io }) {
   const diagnostics = [];
   // A gitignored migration file (or folder) is not source (2.3.0, pick 1).
-  const isIgnored = io?.isIgnored ?? (() => false);
+  const isIgnored = io.isIgnored;
   const { migrationNamespaces = [], externalBuckets = [] } = options;
   if (!Array.isArray(migrationNamespaces)) throw new Error(`supabase: 'migrationNamespaces' must be an array of { name, dir }`);
   if (!Array.isArray(externalBuckets)) throw new Error(`supabase: 'externalBuckets' must be an array of { name, namespace }`);
@@ -46,8 +44,15 @@ export function derive({ repoRoot, options, io }) {
       throw new Error(`supabase: migrationNamespaces: name '${ns}' is used twice (${nsDirs.get(ns)} and ${dir}) — every namespace needs its own name`);
     }
     nsDirs.set(ns, dir);
-    const abs = join(repoRoot, dir);
-    if (!existsSync(abs)) {
+    // The folder's own .sql files, through io (decision 0040): a symlink is
+    // skipped with a note, never followed or thrown (CR-062), and a
+    // gitignored file is never seen.
+    const names = [];
+    const walked = io.walk(dir, (rel, name) => {
+      if (name.endsWith(".sql")) names.push(name);
+    }, { enter: () => false });
+    if (!walked.exists) {
+      for (const k of walked.skipped) diagnostics.push(`${ns}: ${k.path}: ${k.reason} — skipped`);
       diagnostics.push(`${ns}: ${dir} not found — nothing to inventory`);
       continue;
     }
@@ -55,20 +60,13 @@ export function derive({ repoRoot, options, io }) {
       diagnostics.push(`${ns}: ${dir} is gitignored — not source, nothing to inventory`);
       continue;
     }
-    // A .sql symlink pointing nowhere is skipped with a note, never thrown
-    // (CR-062); a valid one is read like any migration.
-    const isFile = (f) => {
-      try {
-        return statSync(join(abs, f)).isFile();
-      } catch {
-        diagnostics.push(`${ns}: ${dir}/${f} is a dangling symlink — skipped`);
-        return false;
-      }
-    };
-    const files = sortMigrations(readdirSync(abs).filter((f) => f.endsWith(".sql") && isFile(f) && !isIgnored(`${dir}/${f}`))).map((f) => ({
-      name: `${dir}/${f}`,
-      text: readFileSync(join(abs, f), "utf8"),
-    }));
+    for (const k of walked.skipped) diagnostics.push(`${ns}: ${k.path}: ${k.reason} — skipped`);
+    const files = [];
+    for (const f of sortMigrations(names)) {
+      const got = io.read(`${dir}/${f}`);
+      if (!got.ok) diagnostics.push(`${ns}: ${got.reason} — skipped`);
+      else files.push({ name: `${dir}/${f}`, text: got.text });
+    }
     const replayed = replayMigrations(files);
     for (const s of replayed.skipped) {
       diagnostics.push(`${ns}: unrecognized schema-like statement in ${s.file}: ${s.statement}`);
@@ -189,3 +187,9 @@ export function derive({ repoRoot, options, io }) {
 }
 
 export { DETECTION, detect } from "./detect.mjs";
+
+// The adapter contract this adapter was written for, and how to comment
+// out a line of each kind of file it reads: what the standard suite needs
+// (decision 0040). `{}`: nothing it reads takes a line comment.
+export const CONTRACT = 1;
+export const COMMENT = { ".sql": "--" };

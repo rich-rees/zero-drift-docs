@@ -32,7 +32,7 @@ const scratch = (t, files) => {
 };
 const run = (root, options = {}) => supabaseJs({ repoRoot: root, options, io: makeExtractorIo(root) });
 const MIGRATION = "create table jobs (id uuid primary key);\ncreate table audit_events (id uuid primary key);\ncreate table authors (id uuid primary key);\n";
-const db = (root) => supabase({ repoRoot: root, options: { migrationNamespaces: [{ name: "db", dir: "migrations" }] } }).records;
+const db = (root) => supabase({ repoRoot: root, io: makeExtractorIo(root, "supabase"), options: { migrationNamespaces: [{ name: "db", dir: "migrations" }] } }).records;
 
 test("code units: a declaration by its local name, `export default function Foo` as Foo, an anonymous default as default, other top-level code as <module>; imports, types and export lists are none", () => {
   const text = [
@@ -118,7 +118,7 @@ test("the join: a screen's own file is absorbed, a narrowed one-hop module's uni
     "src/Audit.tsx": 'export function Audit() { supabase.from("audit_events").select(); return <main />; }\n',
     "src/data.ts": "export function listJobs() { return supabase.from('jobs').select(); }\nexport function authors() { return supabase.from('authors').select(); }\n",
   });
-  const web = reactRouter({ repoRoot: root, options: { routesFile: "src/routes.tsx" } });
+  const web = reactRouter({ repoRoot: root, io: makeExtractorIo(root, "reactRouter"), options: { routesFile: "src/routes.tsx" } });
   const { records } = resolveRefs([...db(root), ...web.records, ...run(root).records]);
   const by = (id) => records.find((r) => r.id === id);
   assert.deepEqual(by("surface:/audit").refs, ["table:db/audit_events"], "inline: the screen's own body");
@@ -313,5 +313,5 @@ test("CR-048: a ?code: ref in a record's refs and in its edge counts once in the
 
 test("CR-059: react-router's early returns still say the old subscribeCalls option moved", (t) => {
   const root = scratch(t, { "README.md": "x\n" });
-  assert.match(reactRouter({ repoRoot: root, options: { routesFile: "routes.tsx", subscribeCalls: ["live.onInsert"] } }).warnings.join("\n"), /'subscribeCalls' is read by the supabase-js adapter/);
+  assert.match(reactRouter({ repoRoot: root, io: makeExtractorIo(root, "reactRouter"), options: { routesFile: "routes.tsx", subscribeCalls: ["live.onInsert"] } }).warnings.join("\n"), /'subscribeCalls' is read by the supabase-js adapter/);
 });

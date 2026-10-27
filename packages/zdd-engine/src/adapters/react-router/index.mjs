@@ -51,11 +51,9 @@
 // inside the repo (no symlink on any segment) and under MAX_SOURCE_BYTES,
 // else a diagnostic (CR-001). Deterministic: same bytes in, same records out.
 
-import { readFileSync, lstatSync, realpathSync } from "node:fs";
-import { join, posix } from "node:path";
+import { posix } from "node:path";
 import { slugify } from "../../core/lib/slug.mjs";
 import { repoRelative } from "../../core/lib/paths.mjs";
-import { regularFileInside } from "../../core/lib/walk-markdown.mjs";
 import { MAX_SOURCE_BYTES, RESOLVE_EXTS, codeUnits, firstNonSpace, importMap, localImports, matchBracket, model, narrowModule, scanApiCalls, skipJsx, stringAt, topLevel } from "../js/source.mjs";
 
 // Route-tree nesting the parser will follow; deeper is a diagnostic, never a
@@ -289,9 +287,10 @@ export function parseRouteTree(text, diagnostics = []) {
 // ---------------------------------------------------------------------------
 // derive(ctx) — the extractor contract
 // ---------------------------------------------------------------------------
-export function derive({ repoRoot, options, io }) {
-  // A gitignored file is not source (2.3.0, pick 1): never read, never "exists".
-  const isIgnored = io?.isIgnored ?? (() => false);
+export function derive({ options, io }) {
+  // Every read and every probe goes through io (decision 0040). A gitignored
+  // file is not source (2.3.0, pick 1): never read, never "exists".
+  const isIgnored = io.isIgnored;
   const diagnostics = [];
   const { routesFile: routesOpt = "src/routes.tsx", srcAliasRoot: aliasOpt } = options;
   // Realtime subscriptions are data access (decision 0037): supabase-js reads
@@ -301,28 +300,18 @@ export function derive({ repoRoot, options, io }) {
   if (options.subscribeCalls !== undefined) warnings.push(`'subscribeCalls' is read by the supabase-js adapter since 0.9 — move it to extractorOptions["supabase-js"].subscribeCalls (it is ignored here)`);
   const routesFile = repoRelative(routesOpt, "react-router.routesFile");
   const srcAliasRoot = repoRelative(aliasOpt ?? posix.dirname(routesFile), "react-router.srcAliasRoot");
-  let realRoot;
-  try {
-    realRoot = realpathSync(repoRoot);
-  } catch {
-    diagnostics.push("repo root unreadable — nothing to inventory");
-    return { records: [], diagnostics, warnings };
-  }
-
   // A read is a regular file physically inside the repo (no symlink on any
   // segment), under the byte cap; anything else is null plus one diagnostic.
   const reported = new Set();
   const readSource = (rel) => {
-    const abs = join(realRoot, rel);
-    const why = isIgnored(rel) ? "is gitignored — not source" : !regularFileInside(realRoot, abs) ? "is not a regular file inside the repo (a symlink, a directory, or missing)" : lstatSync(abs).size > MAX_SOURCE_BYTES ? `is over ${MAX_SOURCE_BYTES / 1024} KiB` : null;
-    if (why) {
-      if (!reported.has(rel)) diagnostics.push(`${rel} ${why} — not read`);
-      reported.add(rel);
-      return null;
-    }
-    return readFileSync(abs, "utf8");
+    const got = io.read(rel, { maxBytes: MAX_SOURCE_BYTES });
+    if (got.ok) return got.text;
+    const why = got.code === "ignored" ? "is gitignored — not source" : got.code === "too-large" ? `is over ${MAX_SOURCE_BYTES / 1024} KiB` : got.code === "missing" || got.code === "not-regular" ? "is not a regular file inside the repo (a symlink, a directory, or missing)" : got.reason.slice(rel.length + 1).replace(/ — not read$/, "");
+    if (!reported.has(rel)) diagnostics.push(`${rel} ${why} — not read`);
+    reported.add(rel);
+    return null;
   };
-  const exists = (rel) => !isIgnored(rel) && regularFileInside(realRoot, join(realRoot, rel));
+  const exists = (rel) => !isIgnored(rel) && io.kind(rel) === "file";
   const resolveImport = (fromRel, source) => {
     const base = source.startsWith("@/") ? posix.join(srcAliasRoot, source.slice(2)) : posix.normalize(posix.join(posix.dirname(fromRel), source));
     if (base.startsWith("../") || base === "..") return null;
@@ -336,13 +325,9 @@ export function derive({ repoRoot, options, io }) {
     // is skipped so a linked `data.tsx` cannot shadow a real `data.js` (CR-029).
     for (const ext of ["", ...RESOLVE_EXTS]) {
       const candidate = base + ext;
-      let st = null;
-      try {
-        st = lstatSync(join(realRoot, candidate));
-      } catch {
-        continue; // nothing at this spelling
-      }
-      if (st.isDirectory()) continue; // `./admin` -> admin/index.ts comes later in the list
+      const at = io.kind(candidate);
+      if (at === "missing") continue; // nothing at this spelling
+      if (at === "directory") continue; // `./admin` -> admin/index.ts comes later in the list
       if (isIgnored(candidate)) continue; // nothing at this spelling in a clean clone (CR-408): never final, never a shadow
       // "As spelled" is final only when the spelling carries an extension: an
       // extensionless entry named `data` (a file or a link) is not what
@@ -353,7 +338,7 @@ export function derive({ repoRoot, options, io }) {
         if (exact) return null;
         continue;
       }
-      if (regularFileInside(realRoot, join(realRoot, candidate))) return candidate;
+      if (at === "file") return candidate;
       if (!reported.has(candidate)) diagnostics.push(`${candidate} is not a regular file inside the repo (a symlink, or under one) — not read`);
       reported.add(candidate);
       if (exact) return null;
@@ -375,25 +360,17 @@ export function derive({ repoRoot, options, io }) {
     const notRegular = () => {
       throw new Error(`react-router: routesFile '${routesFile}' is not a regular file inside the repo (a symlink, a directory, or under a link) — never read; fix extractorOptions.react-router.routesFile`);
     };
-    let cur = realRoot;
+    let cur = "";
     for (const seg of dir === "." ? [] : dir.split("/")) {
-      cur = join(cur, seg);
-      let st;
-      try {
-        st = lstatSync(cur);
-      } catch {
+      cur = cur ? `${cur}/${seg}` : seg;
+      const at = io.kind(cur);
+      if (at === "missing") {
         diagnostics.push(`${routesFile} not found — nothing to inventory`);
         return { records: [], diagnostics, warnings };
       }
-      if (st.isSymbolicLink() || !st.isDirectory()) notRegular();
+      if (at !== "directory") notRegular();
     }
-    let atPath = true;
-    try {
-      lstatSync(join(realRoot, routesFile));
-    } catch {
-      atPath = false;
-    }
-    if (atPath) notRegular();
+    if (io.kind(routesFile) !== "missing") notRegular();
     if (dir === ".") {
       diagnostics.push(`${routesFile} not found — nothing to inventory`); // the root always exists: greenfield-shaped (decision 0013)
       return { records: [], diagnostics, warnings };
@@ -517,3 +494,9 @@ export function derive({ repoRoot, options, io }) {
 }
 
 export { DETECTION, detect } from "./detect.mjs";
+
+// The adapter contract this adapter was written for, and how to comment
+// out a line of each kind of file it reads: what the standard suite needs
+// (decision 0040). `{}`: nothing it reads takes a line comment.
+export const CONTRACT = 1;
+export const COMMENT = { ".ts": "//", ".tsx": "//", ".js": "//", ".jsx": "//", ".mjs": "//", ".cjs": "//" };

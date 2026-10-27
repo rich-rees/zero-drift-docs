@@ -11,7 +11,7 @@
 
 import { posix } from "node:path";
 import { repoRelative } from "../../core/lib/paths.mjs";
-import { leadingComment } from "../nextjs/index.mjs";
+import { leadingComment } from "../js/source.mjs";
 
 export const MAX_SOURCE_BYTES = 1024 * 1024;
 export const DEFAULT_EXCLUDE = ["dev", "start", "test", "lint", "build", "typecheck", "format", "prepare", "postinstall"];

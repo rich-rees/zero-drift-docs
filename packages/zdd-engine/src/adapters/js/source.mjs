@@ -662,3 +662,18 @@ export function jsFiles(io, roots, { extensions = DEFAULT_EXTENSIONS, excludeDir
   }
   return [...out].sort();
 }
+
+// First leading `//` comment line that is not a file-path echo (repo
+// convention puts `// src/app/api/.../route.ts` on line 1, prose on line 2).
+// That prose line is a code comment — store #3 — doing double duty as the
+// derived description.
+export function leadingComment(text) {
+  for (const line of text.split("\n")) {
+    const t = line.trim();
+    if (!t.startsWith("//")) break;
+    const c = t.replace(/^\/\/\s?/, "").trim();
+    if (!c || /(^|\s)[\w./\[\]-]*\/(route|page|layout)\.(tsx?|jsx?)$/.test(c)) continue;
+    return c;
+  }
+  return "";
+}
