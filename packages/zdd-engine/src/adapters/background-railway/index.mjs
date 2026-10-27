@@ -10,6 +10,7 @@
 
 import { posix } from "node:path";
 import { FACTS_KEY_ORDER, backgroundReader, parseCommand, parseToml } from "../background/shared.mjs";
+import { DETECTION_BASE, backgroundProposal, jobShaped, manifests } from "../background/detect.mjs";
 
 export { FACTS_KEY_ORDER };
 
@@ -37,4 +38,14 @@ export function derive({ options, io }) {
     if (parsed) r.addProcess({ name: posix.basename(dir === "." ? "root" : dir), command, manifest: rel, dir, parsed, schedule: typeof schedule === "string" ? schedule : undefined, source: "railway", deploys: true });
   }
   return r.finish();
+}
+
+// Detection (decision 0039): the files that say this reader applies.
+export const DETECTION = DETECTION_BASE;
+
+export function detect({ scan }) {
+  const hits = manifests(scan, (f) => f.name === "railway.toml" || f.name === "railway.json")
+    .filter(({ text }) => /startCommand/.test(text))
+    .map(({ rel }) => ({ manifest: rel, scripts: ["startCommand"], what: "runs a process" }));
+  return backgroundProposal("background-railway", hits);
 }

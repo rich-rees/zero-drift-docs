@@ -8,6 +8,7 @@
 
 import { posix } from "node:path";
 import { FACTS_KEY_ORDER, backgroundReader, SOURCE_EXT, TEST_FILE, scanQueues, slug } from "../background/shared.mjs";
+import { DETECTION_BASE, backgroundProposal, queueHits } from "../background/detect.mjs";
 
 export { FACTS_KEY_ORDER };
 
@@ -33,4 +34,11 @@ export function derive({ options, io }) {
     r.add({ name: slug(queue), command: `inngest ${q.schedule ? "scheduled task" : "queue"} "${queue}"`, manifest: file, dir: posix.dirname(file), file, schedule: q.schedule, trigger: q.schedule ? "cron" : q.trigger ? `event ${q.trigger}` : "queue", queue, producers, consumers, source: "inngest", modeHint: q.schedule ? "scheduled" : "queue" });
   }
   return r.finish();
+}
+
+// Detection (decision 0039): the files that say this reader applies.
+export const DETECTION = DETECTION_BASE;
+
+export function detect({ scan }) {
+  return backgroundProposal("background-inngest", queueHits(scan, "inngest", "declares an Inngest function"));
 }

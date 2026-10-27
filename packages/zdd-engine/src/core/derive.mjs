@@ -189,6 +189,15 @@ async function loadExtractor(name, repoRoot, config) {
   fail(`Unknown extractor '${name}' (known: ${known}${localList})`);
 }
 
+// Every catalogue adapter's module, in name order (decision 0039): detection
+// asks each one whether it fits a repo. The one other place a name becomes a
+// module, beside loadExtractor.
+export async function catalogueModules() {
+  const out = [];
+  for (const [name, entry] of catalogue().names) out.push({ name, mod: await import(pathToFileURL(entry).href) });
+  return out;
+}
+
 // The lexical check above is the braces; this is the belt (CR-060). A
 // metadataDir that is itself a symlink, or that sits under one, would carry
 // every write and the prune wherever the link points — a sibling checkout,

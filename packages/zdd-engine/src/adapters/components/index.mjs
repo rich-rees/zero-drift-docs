@@ -458,3 +458,5 @@ export function derive({ repoRoot, options, io }) {
   if (!files.length && roots.length) diagnostics.push(`no ${extensions.join("/")} files under ${roots.join(", ")} — nothing to inventory`);
   return { records, diagnostics };
 }
+
+export { DETECTION, detect } from "./detect.mjs";

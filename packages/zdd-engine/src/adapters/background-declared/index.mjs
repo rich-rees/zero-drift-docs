@@ -25,3 +25,7 @@ export function derive({ options, io }) {
   }
   return r.finish();
 }
+
+// Detection (decision 0039): none — this reader is chosen by listing it; its
+// options are shaped like every background reader's.
+export { DETECTION_BASE as DETECTION } from "../background/detect.mjs";

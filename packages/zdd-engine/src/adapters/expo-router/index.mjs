@@ -132,3 +132,5 @@ export function derive({ repoRoot, options, io }) {
   if (!records.length) diagnostics.push(`no screens under ${appDir} — nothing to inventory`);
   return { records, diagnostics };
 }
+
+export { DETECTION, detect } from "./detect.mjs";

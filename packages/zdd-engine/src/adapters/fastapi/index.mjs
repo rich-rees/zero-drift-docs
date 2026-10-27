@@ -330,3 +330,5 @@ export function derive({ repoRoot, options, io = makeExtractorIo(repoRoot, "fast
   }
   return { records, diagnostics };
 }
+
+export { DETECTION, detect } from "./detect.mjs";

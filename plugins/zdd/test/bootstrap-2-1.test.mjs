@@ -2,8 +2,9 @@
 // on their own evidence — components from .tsx/.jsx roots, expo-router from
 // an app/ folder with a _layout, jobs from manifests that run a process,
 // services from credential-shaped env names read in source, grouped by
-// prefix with matching imports — and the services mirror stays equal to the
-// engine's. Run: node --test "plugins/zdd/test/*.test.mjs"
+// prefix with matching imports. Since 0.9 each adapter carries its own
+// detection (decision 0039), so bootstrap keeps no mirror of the services
+// lists to hold equal. Run: node --test "plugins/zdd/test/*.test.mjs"
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -11,7 +12,6 @@ import { readFileSync, rmSync, mkdtempSync, cpSync, writeFileSync, mkdirSync } f
 import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { SERVICE_SUFFIXES, SERVICE_IGNORE } from "../scripts/bootstrap.mjs";
 
 const PLUGIN = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const ENGINE = resolve(PLUGIN, "..", "..", "packages", "zdd-engine");
@@ -28,12 +28,6 @@ const fresh = (t, fixture) => {
 const detect = (repo) => JSON.parse(execFileSync(process.execPath, [BOOTSTRAP, "detect", "--json", `--root=${repo}`], { encoding: "utf8" }));
 const named = (json, name) => json.proposals.find((p) => p.name === name);
 
-test("the services mirror equals the engine's lists", async () => {
-  const engine = await import(new URL("file:///" + join(ENGINE, "src", "adapters", "external-services", "index.mjs").split("\\").join("/")));
-  assert.deepEqual(SERVICE_SUFFIXES, engine.CANDIDATE_SUFFIXES);
-  assert.deepEqual(SERVICE_IGNORE, engine.BUILT_IN_IGNORE);
-});
-
 test("components fixture: components at the two .tsx roots and the mobile app, expo-router at apps/mobile/app, react-router and fastapi beside them; the Expo app points at the proposal", (t) => {
   const json = detect(fresh(t, "fixture-components"));
   assert.deepEqual(json.proposals.map((p) => p.name), ["fastapi", "react-router", "components", "expo-router"]);
@@ -48,7 +42,8 @@ test("components fixture: components at the two .tsx roots and the mobile app, e
 
 test("background fixture: one reader per kind of file found (decision 0038), each with its evidence and the mode caveat naming its own option; a package script only where a manifest runs it; supabase beside them", (t) => {
   const json = detect(fresh(t, "fixture-jobs"));
-  assert.deepEqual(json.proposals.map((p) => p.name), ["supabase", "background-bullmq", "background-cloudflare", "background-compose", "background-pg-cron", "background-procfile", "background-railway", "background-vercel"]);
+  // 0.9 (decision 0039): each data-access adapter detects itself — the housekeeping module imports SQLAlchemy and calls the Supabase client.
+  assert.deepEqual(json.proposals.map((p) => p.name), ["supabase", "supabase-py", "sqlalchemy", "background-bullmq", "background-cloudflare", "background-compose", "background-pg-cron", "background-procfile", "background-railway", "background-vercel"]);
   const ev = (name) => named(json, name).evidence;
   for (const p of json.proposals.filter((p) => p.name.startsWith("background-"))) {
     assert.deepEqual(p.options, {});

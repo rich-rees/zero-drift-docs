@@ -87,9 +87,11 @@ test("detect: names the evidence for each proposed extractor (FastAPI + Supabase
   assert.match(text, /`APIRouter` under `api\/routes`/);
   assert.match(text, /`FastAPI\(\)` app at the repo root/);
   const json = JSON.parse(bootstrap(repo, ["detect", "--json"]));
-  assert.deepEqual(json.proposals.map((p) => p.name), ["supabase", "fastapi"]);
+  // 0.9 (decision 0039): the handlers' `supabase.table("…")` calls propose supabase-py, which links the routes to their tables.
+  assert.deepEqual(json.proposals.map((p) => p.name), ["supabase", "supabase-py", "fastapi"]);
   assert.deepEqual(json.proposals[0].options, { migrationNamespaces: [{ name: "db", dir: "supabase/migrations" }] });
-  assert.deepEqual(json.proposals[1].options, { roots: ["api", "main.py"] });
+  assert.ok(json.proposals[1].evidence.some((e) => e.includes("`api/routes/jobs.py`")), json.proposals[1].evidence.join("|"));
+  assert.deepEqual(json.proposals[2].options, { roots: ["api", "main.py"] });
   assert.equal(json.pocock.installed, false);
 });
 
@@ -207,9 +209,11 @@ test("apply seeds one example feature slice from the configured stack; a repair 
   bootstrap(custom, ["apply", `--answers=${answersFile("sc", { extractors: ["generic"] })}`]);
   // (paths are not an answer; prove the arithmetic on the exported function instead)
   const { exampleFeature } = await import(pathToFileURL(SCRIPT).href);
-  const text = exampleFeature({ extractors: ["fastapi"], extractorOptions: { fastapi: { roots: ["api"] } } }, { mapDir: "docs/map", metadataDir: "docs/generated/records" });
+  // The records an example may link are each adapter's own (decision 0039), read through detection.
+  const { adapters } = JSON.parse(bootstrap(repo, ["detect", "--json"]));
+  const text = exampleFeature({ extractors: ["fastapi"], extractorOptions: { fastapi: { roots: ["api"] } } }, { mapDir: "docs/map", metadataDir: "docs/generated/records" }, adapters);
   assert.match(text, /an API route: `\.\.\/\.\.\/generated\/records\/route\/things--_id\.json`/);
-  const same = exampleFeature({ extractors: ["fastapi"], extractorOptions: { fastapi: { roots: ["api"] } } }, { mapDir: "zdd/map", metadataDir: "zdd/metadata" });
+  const same = exampleFeature({ extractors: ["fastapi"], extractorOptions: { fastapi: { roots: ["api"] } } }, { mapDir: "zdd/map", metadataDir: "zdd/metadata" }, adapters);
   assert.match(same, /`\.\.\/\.\.\/metadata\/route\/things--_id\.json`/);
   // A features folder that already has a slice (renamed, or the adopter's own) gets no example.
   const own = fastapiRepo("seed-own");
@@ -279,10 +283,11 @@ test("apply on the FastAPI+Supabase fixture with all defaults: config, owned wor
   const out = bootstrap(repo, ["apply", `--answers=${answersFile("existing", { name: "Fixture FastAPI" })}`]);
 
   const config = JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8"));
-  assert.deepEqual(config.extractors, ["supabase", "fastapi"]);
+  assert.deepEqual(config.extractors, ["supabase", "supabase-py", "fastapi"], "0.9: the handlers' client calls bring supabase-py (decision 0039)");
   assert.deepEqual(config.extractorOptions.supabase.migrationNamespaces, [{ name: "db", dir: "supabase/migrations" }]);
   assert.deepEqual(config.extractorOptions.fastapi.roots, ["api", "main.py"]);
   assert.equal(config.engine, PLUGIN_VERSION);
+  assert.equal(config.mapCheck, "owed", "the first map check is owed until it is done together (decision 0039)");
   assert.deepEqual(config.hooks, { autoLoad: true, fence: true, stop: true }, "auto-load + fence + stop registrations recorded");
 
   const wf = readFileSync(join(repo, ".github", "workflows", "zdd.yml"), "utf8");

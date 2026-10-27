@@ -515,3 +515,5 @@ export function derive({ repoRoot, options, io }) {
   records.sort((a, b) => (a.id < b.id ? -1 : 1));
   return { records, diagnostics, warnings };
 }
+
+export { DETECTION, detect } from "./detect.mjs";

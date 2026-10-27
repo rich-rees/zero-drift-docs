@@ -7,3 +7,19 @@ export const FACTS_KEY_ORDER = {};
 export function derive() {
   return { records: [], diagnostics: [] };
 }
+
+// Detection (decision 0039): the fallback. Source in a language with no
+// adapter that fits is still existing code: map-only ZDD until an adapter is
+// built for it. `sourceFile` and `existing` are what make a repo existing
+// code rather than greenfield (a manifest with no source yet counts).
+export const DETECTION = {
+  parts: [],
+  order: 99,
+  fallback: true,
+  sourceFile: /\.(ts|tsx|js|jsx|py|sql|go|rb|rs|java|cs)$/,
+  existing: ["package.json"],
+};
+
+export function detect() {
+  return { proposal: { evidence: ["source present but no known convention found — map-only ZDD; scaffold an extractor for it with the `extractor` skill once bootstrap is done"], options: {} } };
+}

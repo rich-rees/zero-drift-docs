@@ -7,6 +7,7 @@
 
 import { posix } from "node:path";
 import { FACTS_KEY_ORDER, backgroundReader, scanPgCron, slug } from "../background/shared.mjs";
+import { DETECTION_BASE, backgroundProposal, jobShaped, manifests } from "../background/detect.mjs";
 
 export { FACTS_KEY_ORDER };
 
@@ -20,4 +21,15 @@ export function derive({ options, io }) {
     }
   }
   return r.finish();
+}
+
+// Detection (decision 0039): the files that say this reader applies.
+export const DETECTION = DETECTION_BASE;
+
+export function detect({ scan }) {
+  const hits = manifests(scan, (f) => f.name.endsWith(".sql") && /(^|\/)migrations\//.test(f.rel)).flatMap(({ rel, text }) => {
+    const crons = [...text.matchAll(/cron\.schedule\s*\(\s*'([^']+)'/gi)].map((m) => m[1]);
+    return crons.length ? [{ manifest: rel, scripts: crons, what: "schedules (pg_cron)" }] : [];
+  });
+  return backgroundProposal("background-pg-cron", hits);
 }

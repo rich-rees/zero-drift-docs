@@ -6,6 +6,7 @@
 
 import { posix } from "node:path";
 import { FACTS_KEY_ORDER, backgroundReader, parseToml, slug } from "../background/shared.mjs";
+import { DETECTION_BASE, backgroundProposal, jobShaped, manifests } from "../background/detect.mjs";
 
 export { FACTS_KEY_ORDER };
 
@@ -22,4 +23,14 @@ export function derive({ options, io }) {
     r.add({ name: slug(typeof cfg.name === "string" ? cfg.name : posix.basename(dir === "." ? "worker" : dir)), command: main ? `scheduled() in ${main}` : "scheduled()", manifest: rel, dir, schedule: crons.join("; "), trigger: "cron", target: main ?? undefined, source: "cloudflare", file: main && r.exists(main) ? main : null });
   }
   return r.finish();
+}
+
+// Detection (decision 0039): the files that say this reader applies.
+export const DETECTION = DETECTION_BASE;
+
+export function detect({ scan }) {
+  const hits = manifests(scan, (f) => f.name === "wrangler.toml")
+    .filter(({ text }) => /^\s*crons\s*=/m.test(text))
+    .map(({ rel }) => ({ manifest: rel, scripts: ["triggers.crons"], what: "schedules" }));
+  return backgroundProposal("background-cloudflare", hits);
 }

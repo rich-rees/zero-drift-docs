@@ -187,3 +187,5 @@ export function derive({ repoRoot, options, io }) {
 
   return { records, diagnostics };
 }
+
+export { DETECTION, detect } from "./detect.mjs";

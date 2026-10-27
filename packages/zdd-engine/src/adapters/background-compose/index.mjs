@@ -6,6 +6,7 @@
 
 import { posix } from "node:path";
 import { FACTS_KEY_ORDER, backgroundReader, parseCommand, parseCompose } from "../background/shared.mjs";
+import { DETECTION_BASE, backgroundProposal, jobShaped, manifests } from "../background/detect.mjs";
 
 export { FACTS_KEY_ORDER };
 
@@ -22,4 +23,15 @@ export function derive({ options, io }) {
     }
   }
   return r.finish();
+}
+
+// Detection (decision 0039): the files that say this reader applies.
+export const DETECTION = DETECTION_BASE;
+
+export function detect({ scan }) {
+  const hits = manifests(scan, (f) => /^(docker-)?compose\.ya?ml$/.test(f.name)).flatMap(({ rel, text }) => {
+    const svcs = [...text.matchAll(/^\s{2}([A-Za-z0-9_.-]+):\s*$/gm)].map((m) => m[1]).filter((n) => n !== "web");
+    return /^\s+command:/m.test(text) && svcs.length ? [{ manifest: rel, scripts: svcs, what: "runs a service" }] : [];
+  });
+  return backgroundProposal("background-compose", hits);
 }

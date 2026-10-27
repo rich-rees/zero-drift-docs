@@ -7,6 +7,7 @@
 
 import { posix } from "node:path";
 import { FACTS_KEY_ORDER, backgroundReader, slug } from "../background/shared.mjs";
+import { DETECTION_BASE, backgroundProposal, jobShaped, manifests } from "../background/detect.mjs";
 
 export { FACTS_KEY_ORDER };
 
@@ -37,4 +38,15 @@ export function derive({ options, io }) {
     }
   }
   return r.finish();
+}
+
+// Detection (decision 0039): the files that say this reader applies.
+export const DETECTION = DETECTION_BASE;
+
+export function detect({ scan }) {
+  const hits = manifests(scan, (f) => f.name === "vercel.json").flatMap(({ rel, text }) => {
+    const paths = [...text.matchAll(/"path"\s*:\s*"([^"]+)"/g)].map((m) => m[1]);
+    return /"crons"/.test(text) && paths.length ? [{ manifest: rel, scripts: paths, what: "schedules a cron for" }] : [];
+  });
+  return backgroundProposal("background-vercel", hits);
 }

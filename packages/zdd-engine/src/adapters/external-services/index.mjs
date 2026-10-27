@@ -203,3 +203,44 @@ export function derive({ repoRoot, options, io, legacyName }) {
   if (!declared.length) diagnostics.push("no services declared — nothing to inventory (candidates are still reported)");
   return { records, diagnostics, warnings };
 }
+
+// Detection (decision 0039): environment variable NAMES read in source whose
+// suffix says "a credential or an address", grouped by prefix — the same
+// candidates derive warns about, so the proposal and the warning agree.
+// Names only, never a value. The service name is a guess from the prefix,
+// and the evidence says so.
+export const DETECTION = { parts: ["external services"], order: 80, optIn: true, optionShape: { pathLists: ["roots"] } };
+
+export function detect({ scan }) {
+  const candidates = new Map(); // prefix -> { names, files }
+  const importSpecs = new Set();
+  for (const f of scan.files) {
+    if (!DEFAULT_EXTENSIONS.some((e) => f.name.endsWith(e)) || TEST_FILE.test(f.rel)) continue;
+    const text = scan.read(f.rel);
+    if (text === null) continue;
+    for (const spec of scanImports(text)) importSpecs.add(spec);
+    for (const envName of scanEnvReads(text)) {
+      if (!CANDIDATE_SUFFIXES.some((suf) => envName.endsWith(suf))) continue;
+      const prefix = envPrefixOf(envName);
+      if (!prefix || BUILT_IN_IGNORE.includes(prefix)) continue;
+      const c = candidates.get(prefix) ?? { names: new Set(), files: new Set() };
+      c.names.add(envName);
+      c.files.add(f.rel);
+      candidates.set(prefix, c);
+    }
+  }
+  if (!candidates.size) return null;
+  const services = [];
+  const evidence = [];
+  const squash = (s) => s.toLowerCase().replace(/[-_]/g, "");
+  for (const [prefix, c] of [...candidates].sort(([a], [b]) => (a < b ? -1 : 1))) {
+    const imports = [...importSpecs].filter((spec) => squash(spec.replace(/^@/, "").split(/[/.]/)[0]).includes(squash(prefix))).sort();
+    const entry = { name: prefix.charAt(0) + prefix.slice(1).toLowerCase(), env: [`${prefix}_`] };
+    if (imports.length) entry.imports = imports;
+    services.push(entry);
+    evidence.push(`\`${[...c.names].sort().join("`, `")}\` read in ${[...c.files].sort().map((f) => `\`${f}\``).join(", ")}${imports.length ? `; imports ${imports.map((i) => `\`${i}\``).join(", ")}` : ""} → service "${entry.name}"`);
+  }
+  evidence.push("usedBy lists the files carrying a service's marker (its env name or a matching import), never the files that reach the provider through a settings object or a wrapper — say so when proposing");
+  evidence.push("names are guessed from the env prefix — confirm or rename each; a prefix that is not a service goes in `ignore`");
+  return { proposal: { evidence, options: { services } } };
+}

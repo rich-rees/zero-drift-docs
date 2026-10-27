@@ -120,19 +120,8 @@ const LEGACY_SNIPPET_HEADING = "## Documentation — Zero-Drift Docs (ZDD)";
 const LEGACY_FINGERPRINT = ["/zdd:orient", "/zdd:update"];
 // Ownership line carried by every file the plugin writes besides config.
 export const OWNER_MARK = "Managed by Zero-Drift Docs (zdd)";
-// Mirrors of the engine's external-services adapter (src/adapters/
-// external-services/index.mjs: CANDIDATE_SUFFIXES, BUILT_IN_IGNORE) — the plugin cannot import
-// the engine under npx; a test keeps the two pairs equal.
-export const SERVICE_SUFFIXES = ["_API_KEY", "_DSN", "_SECRET", "_TOKEN", "_URL", "_KEY"];
-export const SERVICE_IGNORE = ["DATABASE", "SUPABASE", "PG", "POSTGRES", "NODE", "NEXT", "VITE", "EXPO", "PUBLIC", "CI", "GITHUB", "RAILWAY", "VERCEL", "PORT", "HOST", "BASE", "API", "APP", "WEB", "SERVER", "CLIENT", "AUTH", "JWT", "SESSION", "COOKIE", "TEST", "DEV", "LOG"];
-
-const SKIP_DIRS = new Set(["node_modules", ".git", ".next", "dist", "build", "coverage", ".venv", "venv", "__pycache__", ".expo", "zdd"]);
 const MAX_NAME = 120;
-const MAX_SCAN_BYTES = 1024 * 1024; // detection never reads a file larger than this (CR-091)
-// The react-router probe reads JS/TS source to find a route tree; this is the
-// most it reads in total (1.2.0 review CR-008). Past it, detection stops
-// reading and says so — a proposal, not an inventory.
-const MAX_PROBE_BYTES = 64 * 1024 * 1024;
+const MAX_SCAN_BYTES = 1024 * 1024; // the plugin never reads a repo file larger than this (CR-091)
 
 // Mirror of the engine catalogue's bundles (src/adapters/catalogue.json): the one legacy
 // adapter and how its options split. The engine expands it at derive time;
@@ -148,395 +137,45 @@ const LEGACY_ADAPTERS = {
 };
 
 // ---------------------------------------------------------------------------
-// Detection — one probe per extractor convention, each returning the evidence
-// it found and the options that evidence implies. Purely file-shaped and
-// sorted, so the proposal is the same for the same tree. Symlinks are never
-// followed (CR-004): a link is skipped, whatever it points at.
+// Detection — asked of the adapters (decision 0039). Each catalogue adapter
+// carries its own: the evidence that it fits, the options it would use and
+// the parts of the app it covers. The plugin carries no engine, so it runs
+// the engine of its own release and reads the answer; it names no stack.
+//
+// Which engine: ZDD_ENGINE_BIN, when set, names an engine checkout's bin (a
+// test, a dry run against another build); else the engine beside this
+// plugin when one ships with it at the same version (this repository's own
+// checkout); else the pinned package under npx, as every skill runs it.
 // ---------------------------------------------------------------------------
-function walk(root, onFile, maxDepth = 6) {
-  const rec = (dir, depth) => {
-    if (depth > maxDepth) return;
-    let names;
-    try {
-      names = readdirSync(dir).sort();
-    } catch {
-      return;
-    }
-    for (const name of names) {
-      const p = join(dir, name);
-      let st;
-      try {
-        st = lstatSync(p);
-      } catch {
-        continue;
-      }
-      if (st.isSymbolicLink()) continue;
-      if (st.isDirectory()) {
-        if (!SKIP_DIRS.has(name) && !name.startsWith(".")) rec(p, depth + 1);
-      } else if (st.isFile()) {
-        // A file over the cap is not a convention to inventory (a generated
-        // blob, a vendored bundle) and is never read (CR-091).
-        if (st.size > MAX_SCAN_BYTES) continue;
-        onFile(p, name, posixify(relative(root, p)));
-      }
-    }
-  };
-  rec(root, 0);
-}
-
-function readPackageJson(root) {
-  const p = join(root, "package.json");
+const SIBLING_ENGINE = join(PLUGIN_ROOT, "..", "..", "packages", "zdd-engine");
+export function engineCommand() {
+  if (process.env.ZDD_ENGINE_BIN) return { cmd: process.execPath, pre: [process.env.ZDD_ENGINE_BIN], shell: false };
+  const bin = join(SIBLING_ENGINE, "bin", "zdd-engine.mjs");
+  let sibling = null;
   try {
-    const st = lstatSync(p);
-    if (!st.isFile() || st.size > MAX_SCAN_BYTES) return null; // CR-091: same bound as the walk
-    return readJson(p);
+    sibling = existsSync(bin) ? readJson(join(SIBLING_ENGINE, "package.json")) : null;
   } catch {
-    return null;
+    sibling = null;
   }
+  if (sibling?.name === ENGINE_PACKAGE && sibling.version === pluginVersion()) return { cmd: process.execPath, pre: [bin], shell: false };
+  const win = process.platform === "win32";
+  return { cmd: win ? "npx.cmd" : "npx", pre: ["-y", `${ENGINE_PACKAGE}@${pluginVersion()}`], shell: win };
 }
-
-// Namespace names for several migration dirs: the path above `migrations`,
-// minus the conventional `supabase` segment, made unique (CR-012).
-function namespaceNames(dirs) {
-  if (dirs.length === 1) return ["db"];
-  const names = dirs.map((d) => {
-    const segs = d.split("/").filter((s) => s && s !== "migrations" && s !== "supabase");
-    return segs.length ? segs.join("-") : "db";
-  });
-  return dedupe(names);
-}
-// Unique names, checked against the whole set: a raw `foo-2` sitting next to
-// two `foo`s cannot be collided into (review CR-047).
-function dedupe(names) {
-  const taken = new Set(names); // every raw name is reserved before any suffix is minted
-  const seen = new Set();
-  return names.map((n) => {
-    if (!seen.has(n)) {
-      seen.add(n);
-      return n;
-    }
-    let candidate;
-    for (let i = 2; taken.has((candidate = `${n}-${i}`)); i++);
-    taken.add(candidate);
-    return candidate;
-  });
+export function runEngine(args) {
+  const { cmd, pre, shell } = engineCommand();
+  // Through a shell (npx on Windows) every argument is quoted: a root with a space stays one argument.
+  const argv = [...pre, ...args].map((a) => (shell ? `"${String(a).replace(/"/g, '\\"')}"` : a));
+  return execFileSync(cmd, argv, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 * 1024 * 1024, timeout: 300_000, shell });
 }
 
 export function detect(root) {
-  const sqlDirs = new Map(); // dir -> count
-  const pyRouters = new Map(); // dir -> { routers, apps }
-  const pyRoots = new Set();
-  let appDir = null;
-  let middlewarePath = null;
-  const routesFiles = []; // react-router: files declaring a route tree in code
-  const packageJsons = []; // nested package.json files (workspaces)
-  // ZDD 2.1 (2.1.0): the four opt-in extractors' signals.
-  const tsxFiles = []; // components: every .tsx/.jsx file (bounded); roots are computed after the walk
-  const MAX_TSX = 20_000;
-  const expoAppDirs = new Set(); // expo-router: an `app/` folder holding a `_layout` file
-  const jobManifests = []; // background work: { manifest, scripts, what, reader } with a job-shaped command
-  const envCandidates = new Map(); // services: env prefix -> { names, files, imports }
-  const importSpecs = new Set(); // every package imported anywhere, for the services' import markers
-  let probeBytes = 0;
-  let probeTruncated = false;
-  const skippedRoutesFiles = []; // route trees at paths the engine would refuse
-  let sourceFiles = 0;
-
-  walk(root, (abs, name, rel) => {
-    if (/\.(ts|tsx|js|jsx|py|sql|go|rb|rs|java|cs)$/.test(name)) sourceFiles++;
-    if (name === "package.json" && rel !== "package.json") packageJsons.push(rel);
-    if (name.endsWith(".sql") && /(^|\/)migrations\//.test(rel + "/")) {
-      const dir = posixify(dirname(rel));
-      sqlDirs.set(dir, (sqlDirs.get(dir) ?? 0) + 1);
-    }
-    // components: every .tsx/.jsx file, counted under its nearest `src/`
-    // (or, without one, its top-level folder) — the roots to propose.
-    if (/\.(tsx|jsx)$/.test(name) && !/\.(test|spec|stories|story)\.[tj]sx$/.test(name) && tsxFiles.length < MAX_TSX) tsxFiles.push(rel);
-    // expo-router: a `_layout` file under an `app/` folder (Next.js's is `layout`).
-    if (/^_layout\.(tsx|jsx|ts|js)$/.test(name)) {
-      const segs = posixify(dirname(rel)).split("/");
-      const app = segs.lastIndexOf("app");
-      if (app !== -1) expoAppDirs.add(segs.slice(0, app + 1).join("/"));
-    }
-    // jobs — background work (2.3): a manifest that RUNS a process (a
-    // Procfile line, a Railway file, a Compose service), a schedule (Vercel
-    // crons, a Cloudflare `[triggers]`, a pg_cron line in a migration), or a
-    // queue in source. A package.json script on its own is a hand-run tool,
-    // not background work, and is no longer evidence (2.3.0, pick 6).
-    if (name === "Procfile" || name === "railway.toml" || name === "railway.json" || name === "vercel.json" || name === "wrangler.toml" || /^(docker-)?compose\.ya?ml$/.test(name) || (name.endsWith(".sql") && /(^|\/)migrations\//.test(rel))) {
-      let text = "";
-      try {
-        text = readFileSync(abs, "utf8");
-      } catch {
-        return;
-      }
-      const jobShaped = (cmd) => /(?:^|\s)python[0-9.]*\s+-m\s+[\w.]+/.test(cmd) || /(?:^|\s)(?:node|tsx|ts-node|bun|deno)\s+(?:-[^\s]+\s+)*[\w./-]+\.(?:m?[jt]s|cjs)\b/.test(cmd) || /(?:^|\s)(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?[\w:.-]+/.test(cmd);
-      if (name === "Procfile") {
-        const hits = text.split("\n").map((l) => /^\s*([A-Za-z_][\w-]*)\s*:\s*(.+)$/.exec(l)).filter((m) => m && m[1] !== "web" && jobShaped(m[2])).map((m) => m[1]);
-        if (hits.length) jobManifests.push({ manifest: rel, scripts: hits, what: "runs a process", reader: "background-procfile" });
-      } else if (name === "vercel.json") {
-        const paths = [...text.matchAll(/"path"\s*:\s*"([^"]+)"/g)].map((m) => m[1]);
-        if (/"crons"/.test(text) && paths.length) jobManifests.push({ manifest: rel, scripts: paths, what: "schedules a cron for", reader: "background-vercel" });
-      } else if (name === "wrangler.toml") {
-        if (/^\s*crons\s*=/m.test(text)) jobManifests.push({ manifest: rel, scripts: ["triggers.crons"], what: "schedules", reader: "background-cloudflare" });
-      } else if (/^(docker-)?compose\.ya?ml$/.test(name)) {
-        const svcs = [...text.matchAll(/^\s{2}([A-Za-z0-9_.-]+):\s*$/gm)].map((m) => m[1]).filter((n) => n !== "web");
-        if (/^\s+command:/m.test(text) && svcs.length) jobManifests.push({ manifest: rel, scripts: svcs, what: "runs a service", reader: "background-compose" });
-      } else if (name.endsWith(".sql")) {
-        const crons = [...text.matchAll(/cron\.schedule\s*\(\s*'([^']+)'/gi)].map((m) => m[1]);
-        if (crons.length) jobManifests.push({ manifest: rel, scripts: crons, what: "schedules (pg_cron)", reader: "background-pg-cron" });
-      } else if (/startCommand/.test(text)) jobManifests.push({ manifest: rel, scripts: ["startCommand"], what: "runs a process", reader: "background-railway" });
-    }
-    if (/\.(ts|tsx|js|jsx|mjs|cjs)$/.test(name) && !/\.(test|spec|stories)\.[cm]?[jt]sx?$|\.d\.ts$/.test(name)) {
-      let text = "";
-      try {
-        text = readFileSync(abs, "utf8");
-      } catch {
-        return;
-      }
-      const queues = [...text.matchAll(/new\s+(?:Queue|Worker)\s*\(\s*['"`]([^'"`]+)['"`]/g)].map((m) => m[1]);
-      if (queues.length) jobManifests.push({ manifest: rel, scripts: [...new Set(queues)], what: "names a BullMQ queue", reader: "background-bullmq" });
-    }
-    // external-services: environment variable NAMES read in source whose
-    // suffix says "a credential or an address", grouped by prefix — a mirror
-    // of the engine's extractor (a test pins the two lists together), so
-    // the proposal and the warning agree. Names only, never a value.
-    if (/\.(py|ts|tsx|js|jsx|mjs|cjs)$/.test(name) && !/\.(test|spec|stories)\.[cm]?[jt]sx?$|\.d\.ts$/.test(name) && !/(^|\/)(test_[^/]*\.py|[^/]*_test\.py|conftest\.py)$/.test(rel)) {
-      let text = "";
-      try {
-        text = readFileSync(abs, "utf8");
-      } catch {
-        return;
-      }
-      for (const m of text.matchAll(/^\s*import\s+([\w.]+)\s*(?:#.*)?$/gm)) importSpecs.add(m[1]);
-      for (const m of text.matchAll(/^\s*from\s+([\w.]+)\s+import\b/gm)) importSpecs.add(m[1]);
-      for (const m of text.matchAll(/\bimport\s*(?:[^'"`;]*?\bfrom\s*)?(['"])([^'"]+)\1|\brequire\s*\(\s*(['"])([^'"]+)\3\s*\)/g)) importSpecs.add(m[2] ?? m[4]);
-      const NAME = "([A-Z][A-Z0-9_]{2,})";
-      const reads = [
-        new RegExp(`\\bos\\.environ(?:\\.get)?\\s*[\\[(]\\s*['"]${NAME}['"]`, "g"),
-        new RegExp(`\\bos\\.getenv\\s*\\(\\s*['"]${NAME}['"]`, "g"),
-        new RegExp(`\\.get\\s*\\(\\s*['"]${NAME}['"]`, "g"),
-        new RegExp(`\\bprocess\\.env(?:\\.${NAME}|\\s*\\[\\s*['"]${NAME}['"])`, "g"),
-        new RegExp(`\\bimport\\.meta\\.env(?:\\.${NAME}|\\s*\\[\\s*['"]${NAME}['"])`, "g"),
-        new RegExp(`\\bDeno\\.env\\.get\\s*\\(\\s*['"]${NAME}['"]`, "g"),
-      ];
-      for (const re of reads) {
-        for (const m of text.matchAll(re)) {
-          const envName = m[1] ?? m[2];
-          if (!SERVICE_SUFFIXES.some((suf) => envName.endsWith(suf))) continue;
-          const prefix = envName.replace(/^(NEXT_PUBLIC_|VITE_|EXPO_PUBLIC_|REACT_APP_|PUBLIC_)/, "").split("_")[0];
-          if (!prefix || SERVICE_IGNORE.includes(prefix)) continue;
-          const c = envCandidates.get(prefix) ?? { names: new Set(), files: new Set() };
-          c.names.add(envName);
-          c.files.add(rel);
-          envCandidates.set(prefix, c);
-        }
-      }
-    }
-    if (name.endsWith(".py")) {
-      let text = "";
-      try {
-        text = readFileSync(abs, "utf8");
-      } catch {
-        return;
-      }
-      const routers = /\bAPIRouter\s*\(/.test(text);
-      const app = /\bFastAPI\s*\(/.test(text);
-      if (routers || app) {
-        const dir = posixify(dirname(rel));
-        const cur = pyRouters.get(dir) ?? { routers: 0, apps: 0 };
-        if (routers) cur.routers++;
-        if (app) cur.apps++;
-        pyRouters.set(dir, cur);
-        // The scan root is the top-level file or the first path segment.
-        pyRoots.add(dir === "." ? rel : rel.split("/")[0]);
-      }
-    }
-    if (/^(page|route|layout)\.(tsx|ts|jsx|js)$/.test(name)) {
-      const m = /^(.*?(?:^|\/)app)(\/|$)/.exec(posixify(dirname(rel)) + "/");
-      if (m && (!appDir || m[1].length < appDir.length)) appDir = m[1];
-    }
-    if (/^middleware\.(ts|js)$/.test(name) && rel.split("/").length <= 2) middlewarePath = rel;
-    // A React Router route tree declared in code: the array form or the JSX
-    // form, in a .tsx/.jsx/.ts/.js file that imports react-router.
-    if (/\.(tsx|jsx|ts|js)$/.test(name) && !/\.(test|spec|stories|story)\.[tj]sx?$/.test(name) && !/\.d\.ts$/.test(name)) {
-      let st;
-      try {
-        st = lstatSync(abs);
-      } catch {
-        return;
-      }
-      if (probeBytes + st.size > MAX_PROBE_BYTES) {
-        probeTruncated = true;
-        return;
-      }
-      probeBytes += st.size;
-      let text = "";
-      try {
-        text = readFileSync(abs, "utf8");
-      } catch {
-        return;
-      }
-      // A detected path must be one the engine will accept (CR-009): the
-      // engine's path rule refuses whitespace and control characters.
-      if (/from\s*['"]react-router(-dom)?['"]/.test(text) && /\bcreate(?:Browser|Hash|Memory)Router\s*\(|:\s*RouteObject\[\]\s*=|<Route\b/.test(text)) {
-        try {
-          enginePath(rel, "routesFile");
-          routesFiles.push(rel);
-        } catch {
-          skippedRoutesFiles.push(rel);
-        }
-      }
-    }
-  });
-  routesFiles.sort();
-
-  const pkg = readPackageJson(root);
-  const deps = { ...(pkg?.dependencies ?? {}), ...(pkg?.devDependencies ?? {}) };
-  // Workspace packages' dependencies too (`apps/web/package.json`) — a
-  // monorepo's web app declares react-router in its own manifest.
-  const nestedDeps = new Map(); // dep name -> first workspace dir declaring it (sorted)
-  for (const rel of packageJsons.sort()) {
-    const sub = readPackageJson(join(root, dirname(rel)));
-    for (const d of Object.keys({ ...(sub?.dependencies ?? {}), ...(sub?.devDependencies ?? {}) })) if (!nestedDeps.has(d)) nestedDeps.set(d, posixify(dirname(rel)));
+  let d;
+  try {
+    d = JSON.parse(runEngine(["detect", `--root=${root}`]));
+  } catch (e) {
+    throw new Error(`detection could not run — the engine said: ${String(e.stderr || e.message).trim().split(/\r?\n/).slice(-3).join(" ")}`);
   }
-  const proposals = [];
-
-  if (sqlDirs.size) {
-    const dirs = [...sqlDirs.keys()].sort();
-    const names = namespaceNames(dirs);
-    proposals.push({
-      name: "supabase",
-      evidence: dirs.map((d) => `SQL migrations under \`${d}\` (${sqlDirs.get(d)} file${sqlDirs.get(d) === 1 ? "" : "s"})`),
-      options: { migrationNamespaces: dirs.map((d, i) => ({ name: names[i], dir: d })) },
-    });
-  }
-  if (appDir || deps.next) {
-    const ev = [];
-    if (appDir) ev.push(`App Router tree at \`${appDir}\` (page/route/layout files)`);
-    if (deps.next) ev.push(`\`next\` in package.json dependencies`);
-    if (middlewarePath) ev.push(`\`${middlewarePath}\` present`);
-    const options = { appDir: appDir ?? "src/app", apiPrefix: "/api" };
-    if (middlewarePath) options.middlewarePath = middlewarePath;
-    proposals.push({ name: "nextjs", evidence: ev, options });
-  }
-  if (pyRouters.size) {
-    const ev = [];
-    for (const [dir, c] of [...pyRouters.entries()].sort()) {
-      if (c.apps) ev.push(dir === "." ? "`FastAPI()` app at the repo root" : `\`FastAPI()\` app under \`${dir}\``);
-      if (c.routers) ev.push(`\`APIRouter\` under \`${dir}\``);
-    }
-    proposals.push({ name: "fastapi", evidence: ev, options: { roots: [...pyRoots].sort() } });
-  }
-
-  // react-router: the routes file is the evidence; a bare dependency with no
-  // tree yet is proposed at the convention's default path (like `next`).
-  const rrDeps = ["react-router", "react-router-dom"];
-  const reactRouterDep = rrDeps.some((d) => deps[d] || nestedDeps.has(d));
-  // A dependency-only proposal sits at the convention's default path INSIDE
-  // the workspace package that declares it (CR-021), else the root.
-  const rrDir = rrDeps.some((d) => deps[d]) ? "" : (rrDeps.map((d) => nestedDeps.get(d)).find(Boolean) ?? "");
-  if (routesFiles.length || reactRouterDep || skippedRoutesFiles.length) {
-    const ev = [];
-    if (routesFiles.length) ev.push(`route tree declared in \`${routesFiles[0]}\`${routesFiles.length > 1 ? ` (also: ${routesFiles.slice(1).map((f) => `\`${f}\``).join(", ")} — one routesFile per extractor; confirm which)` : ""}`);
-    if (reactRouterDep) ev.push(`\`react-router\` in ${rrDir ? `\`${rrDir}/package.json\`` : "package.json"} dependencies`);
-    if (skippedRoutesFiles.length) ev.push(`route tree at ${skippedRoutesFiles.map((f) => `\`${f}\``).join(", ")} skipped — the path has whitespace or control characters the engine refuses; rename it`);
-    if (probeTruncated) ev.push(`detection stopped reading source after ${MAX_PROBE_BYTES / (1024 * 1024)} MiB — confirm the routes file by hand`);
-    proposals.push({ name: "react-router", evidence: ev, options: { routesFile: routesFiles[0] ?? posixify(join(rrDir, "src/routes.tsx")) } });
-  }
-
-  // ZDD 2.1's opt-ins (2.1.0). Each is proposed on its own evidence; an
-  // adopter who says no to one sees nothing change.
-  // A component root is the file's nearest `src/`; without one, the nearest
-  // folder holding a package.json (a workspace app); without that, the
-  // top-level folder (or the repo root for a root-level file).
-  const packageDirs = packageJsons.map((rel) => posixify(dirname(rel))).sort((a, b) => b.length - a.length);
-  const tsxDirs = new Map();
-  for (const rel of tsxFiles) {
-    const segs = rel.split("/");
-    const src = segs.lastIndexOf("src");
-    let root;
-    if (src !== -1) root = segs.slice(0, src + 1).join("/");
-    else root = packageDirs.find((d) => rel.startsWith(`${d}/`)) ?? (segs.length > 1 ? segs[0] : ".");
-    tsxDirs.set(root, (tsxDirs.get(root) ?? 0) + 1);
-  }
-  if (tsxDirs.size) {
-    const dirs = [...tsxDirs.keys()].sort();
-    proposals.push({
-      name: "components",
-      evidence: dirs.map((d) => `${tsxDirs.get(d)} .tsx/.jsx file${tsxDirs.get(d) === 1 ? "" : "s"} under \`${d}\``),
-      options: { roots: dirs },
-    });
-  }
-  const expoDirs = [...expoAppDirs].sort();
-  if (expoDirs.length) {
-    proposals.push({
-      name: "expo-router",
-      evidence: [`Expo Router tree at \`${expoDirs[0]}\` (a \`_layout\` file)${expoDirs.length > 1 ? ` — also ${expoDirs.slice(1).map((d) => `\`${d}\``).join(", ")}; one appDir per extractor, confirm which` : ""}`],
-      options: { appDir: expoDirs[0] },
-    });
-  }
-  // Background work (decision 0038): one reader per kind of file found, in
-  // name order; the core joins two readers' sight of one task.
-  jobManifests.sort((a, b) => (a.manifest < b.manifest ? -1 : 1));
-  for (const reader of [...new Set(jobManifests.map((m) => m.reader))].sort()) {
-    proposals.push({
-      name: reader,
-      evidence: jobManifests.filter((m) => m.reader === reader).map((m) => `\`${m.manifest}\` ${m.what}: ${m.scripts.map((s) => `\`${s}\``).join(", ")}`).concat([`the map will show this background work with its trigger and what it hits (a cron → a route, a queue → its worker); the mode (worker or scheduled) is never guessed: a schedule or a Railway file states it, else set extractorOptions["${reader}"].modes after bootstrap — lint names the ones left unknown; a package.json script counts only when a manifest runs it`]),
-      options: {},
-    });
-  }
-  if (envCandidates.size) {
-    const services = [];
-    const evidence = [];
-    for (const [prefix, c] of [...envCandidates].sort(([a], [b]) => (a < b ? -1 : 1))) {
-      const imports = [...importSpecs].filter((spec) => spec.toLowerCase().replace(/^@/, "").split(/[/.]/)[0].replace(/[-_]/g, "").includes(prefix.toLowerCase().replace(/[-_]/g, ""))).sort();
-      const entry = { name: prefix.charAt(0) + prefix.slice(1).toLowerCase(), env: [`${prefix}_`] };
-      if (imports.length) entry.imports = imports;
-      services.push(entry);
-      evidence.push(`\`${[...c.names].sort().join("`, `")}\` read in ${[...c.files].sort().map((f) => `\`${f}\``).join(", ")}${imports.length ? `; imports ${imports.map((i) => `\`${i}\``).join(", ")}` : ""} → service "${entry.name}"`);
-    }
-    evidence.push("usedBy lists the files carrying a service's marker (its env name or a matching import), never the files that reach the provider through a settings object or a wrapper — say so when proposing");
-    evidence.push("names are guessed from the env prefix — confirm or rename each; a prefix that is not a service goes in `ignore`");
-    proposals.push({ name: "external-services", evidence, options: { services } });
-  }
-
-  const apps = [];
-  if (deps.expo || deps["expo-router"] || nestedDeps.has("expo") || nestedDeps.has("expo-router") || expoDirs.length) apps.push({ name: "Mobile (Expo)", evidence: expoDirs.length ? `Expo Router tree at \`${expoDirs[0]}\`` : "`expo` in package.json", extractor: expoDirs.length ? "expo-router (proposed above)" : "expo-router — switched on by an `app/` folder with a `_layout` file (ZDD 2.1, early); map-only until then" });
-  if (routesFiles.length || reactRouterDep || skippedRoutesFiles.length) apps.push({ name: "Web (React)", evidence: routesFiles.length ? `route tree in \`${routesFiles[0]}\`` : reactRouterDep ? "`react-router` in package.json" : `route tree at a refused path (\`${skippedRoutesFiles[0]}\`)`, extractor: "react-router (proposed above)" });
-
-  const host = repoHost(root);
-  const mode = sourceFiles === 0 && !pkg ? "greenfield" : "existing";
-  if (mode === "existing" && !proposals.length) {
-    proposals.push({ name: "generic", evidence: ["source present but no known convention found — map-only ZDD; scaffold an extractor for it with the `extractor` skill once bootstrap is done"], options: {} });
-  }
-  const jsReaders = needsSupabaseJs(proposals.map((p) => p.name));
-  if (jsReaders.length) {
-    proposals.splice(proposals.findIndex((p) => p.name === "supabase") + 1, 0, {
-      name: "supabase-js",
-      evidence: [`Supabase beside JS code (${jsReaders.join(", ")}): the client's \`.from()\` / \`.rpc()\` / Realtime calls are read here and joined to the pages and screens that run them`],
-      options: {},
-    });
-  }
-  // Questions the evidence raises but cannot answer (2.2.0). Supabase beside
-  // a web app: Realtime subscriptions become `subscribes` edges, the client's
-  // own call is seen, a wrapper of the app's own is not until it is named.
-  // One question, naming every web app: since 0.9 the call names live in one
-  // place, supabase-js's options, whichever app makes the call.
-  const questions = [];
-  const names = proposals.map((p) => p.name);
-  const webs = ["react-router", "nextjs"].filter((n) => names.includes(n));
-  if (names.includes("supabase-js") && webs.length) {
-    const apps = webs.map((w) => (w === "nextjs" ? "Next.js" : "React Router")).join(" or the ");
-    questions.push({
-      topic: "realtime",
-      ask:
-        `Does the ${apps} app subscribe to Supabase Realtime through a wrapper of its own (e.g. \`live.onInsert("table", …)\`)? ` +
-        'The client\'s own `.on("postgres_changes", { table })` needs nothing; a wrapper is invisible until its call names are listed in subscribeCalls',
-      records: SUBSCRIBE_CALLS["supabase-js"],
-    });
-  }
-  return { mode, proposals, apps, sourceFiles, questions, host };
+  return { ...d, host: repoHost(root) };
 }
 
 // Where the repo is hosted (2.3.0, C6): the shipped CI workflow runs only on
@@ -563,75 +202,77 @@ function repoHost(root) {
 }
 
 // ---------------------------------------------------------------------------
-// Greenfield: the answers name a stack; map each part to an extractor with
-// its future paths, or to an Application concept for the map when no
-// extractor exists yet.
+// Greenfield: the answers name a stack; each entry selects an adapter at its
+// future path, or names an Application concept for the map when no adapter
+// fits. The rules are the adapters' own (DETECTION.stack, read through the
+// engine's detection), tried in rank order; a companion adapter joins when
+// the stack holds what it needs (supabase-js beside Supabase and a JS app,
+// CR-045). The neutral list of stacks with adapters is the same data.
 // ---------------------------------------------------------------------------
-const STACK_RULES = [
-  { match: /fastapi/i, extractor: "fastapi", options: (path) => ({ roots: [path || "api"] }) },
-  { match: /supabase|postgres/i, extractor: "supabase", options: (path) => ({ migrationNamespaces: [{ name: "db", dir: path || "supabase/migrations" }] }) },
-  { match: /next(\.js)?/i, extractor: "nextjs", options: (path) => ({ appDir: path || "src/app", apiPrefix: "/api" }) },
-  // An EXPLICIT Expo Router entry selects the extractor (at its future app
-  // folder); a bare "Expo" is the Application alone.
-  { match: /expo.?router/i, extractor: "expo-router", options: (path) => ({ appDir: path || "app" }), app: "Mobile (Expo)" },
-  { match: /expo|react.?native/i, app: "Mobile (Expo)" },
-  // Only an EXPLICIT React Router entry selects the extractor (at its future
-  // routes file) — "React web", "Vite", "web" could be Vue, Svelte or another
-  // router (CR-014); those stay an Application concept until the router is
-  // named. Both get the Application.
-  { match: /react.?router/i, extractor: "react-router", options: (path) => ({ routesFile: path || "src/routes.tsx" }), app: "Web (React)" },
-  { match: /react|web|vite/i, app: "Web (React)" },
-];
-
-// Supabase beside JS code that reaches it (decision 0037): the route and
-// screen adapters name the code they run, and supabase-js reads how that code
-// reaches the database — without it, no page links to a table. Detection and
-// a stated stack (greenfield, CR-045) both apply it: the JS readers present
-// when supabase is and supabase-js is not, else none.
-const JS_READERS = ["nextjs", "react-router", "components", "expo-router"];
-function needsSupabaseJs(names) {
-  if (!names.includes("supabase") || names.includes("supabase-js")) return [];
-  return JS_READERS.filter((n) => names.includes(n));
+// Unique names, checked against the whole set: a raw `foo-2` sitting next to
+// two `foo`s cannot be collided into (review CR-047).
+function dedupe(names) {
+  const taken = new Set(names); // every raw name is reserved before any suffix is minted
+  const seen = new Set();
+  return names.map((n) => {
+    if (!seen.has(n)) {
+      seen.add(n);
+      return n;
+    }
+    let candidate;
+    for (let i = 2; taken.has((candidate = `${n}-${i}`)); i++);
+    taken.add(candidate);
+    return candidate;
+  });
 }
 
-function fromStack(stack = []) {
+// Put `value` at `path` (keys and array indexes) inside `obj`.
+function setAt(obj, path, value) {
+  let cur = obj;
+  for (let i = 0; i < path.length - 1; i++) cur = cur[path[i]];
+  cur[path.at(-1)] = value;
+}
+
+function fromStack(stack = [], { stacks = [], companions = [] } = {}) {
   const extractors = [];
   const extractorOptions = {};
   const apps = [];
   for (const entry of stack) {
     const name = typeof entry === "string" ? entry : entry.name;
     const path = typeof entry === "string" || entry.path === undefined ? undefined : repoRelative(entry.path, `stack entry ${name} path`);
-    const rule = STACK_RULES.find((r) => r.match.test(name));
+    const rule = stacks.find((r) => new RegExp(r.match, "i").test(name));
     if (!rule) {
       apps.push(name);
       continue;
     }
     if (rule.app && !apps.includes(rule.app)) apps.push(rule.app);
-    if (rule.extractor) {
-      const opts = rule.options(path);
-      if (!extractors.includes(rule.extractor)) {
-        extractors.push(rule.extractor);
-        extractorOptions[rule.extractor] = opts;
-      } else {
-        // A second entry for the same extractor adds its path (CR-042).
-        const cur = extractorOptions[rule.extractor];
-        for (const [k, v] of Object.entries(opts)) {
-          if (Array.isArray(v) && Array.isArray(cur[k])) {
-            for (const item of v) if (!cur[k].some((x) => JSON.stringify(x) === JSON.stringify(item))) cur[k].push(item);
-          } else if (JSON.stringify(cur[k]) !== JSON.stringify(v)) {
-            fail(`two stack entries give different ${rule.extractor}.${k} (${JSON.stringify(cur[k])} vs ${JSON.stringify(v)}) — an extractor has one ${k}; choose one`);
-          }
+    if (!rule.adapter || !rule.options) continue;
+    const opts = structuredClone(rule.options);
+    if (path !== undefined && rule.path) setAt(opts, rule.path, path);
+    if (!extractors.includes(rule.adapter)) {
+      extractors.push(rule.adapter);
+      extractorOptions[rule.adapter] = opts;
+      continue;
+    }
+    // A second entry for the same adapter adds its path (CR-042).
+    const cur = extractorOptions[rule.adapter];
+    for (const [k, v] of Object.entries(opts)) {
+      if (Array.isArray(v) && Array.isArray(cur[k])) {
+        for (const item of v) if (!cur[k].some((x) => JSON.stringify(x) === JSON.stringify(item))) cur[k].push(item);
+        // Items that carry a name keep the names unique (several migration folders).
+        if (cur[k].every((x) => x && typeof x === "object" && typeof x.name === "string")) {
+          const names = dedupe(cur[k].map((x) => x.name));
+          cur[k].forEach((x, i) => (x.name = names[i]));
         }
-        if (Array.isArray(cur.migrationNamespaces)) {
-          const names = dedupe(cur.migrationNamespaces.map((m) => m.name));
-          cur.migrationNamespaces.forEach((m, i) => (m.name = names[i]));
-        }
+      } else if (JSON.stringify(cur[k]) !== JSON.stringify(v)) {
+        fail(`two stack entries give different ${rule.adapter}.${k} (${JSON.stringify(cur[k])} vs ${JSON.stringify(v)}) — an extractor has one ${k}; choose one`);
       }
     }
   }
-  if (needsSupabaseJs(extractors).length) {
-    extractors.splice(extractors.indexOf("supabase") + 1, 0, "supabase-js");
-    extractorOptions["supabase-js"] = {};
+  for (const c of companions) {
+    if (extractors.includes(c.adapter) || !c.all.every((n) => extractors.includes(n)) || !c.any.some((n) => extractors.includes(n))) continue;
+    extractors.splice(extractors.indexOf(c.all[0]) + 1, 0, c.adapter);
+    extractorOptions[c.adapter] = {};
   }
   return { extractors, extractorOptions, apps };
 }
@@ -661,14 +302,12 @@ function enginePath(value, label) {
   if (value.split("/").some((s) => s === "..")) bad();
   return value;
 }
-// The path-bearing option keys of the built-in extractors, by extractor name.
-// A local extractor's options are its own; only these are inspected.
-// Where Realtime wrapper calls are named: each web extractor's options in
-// ZDD 2.1–2.5, supabase-js's since 0.9 (decision 0037).
-const SUBSCRIBE_CALLS = { nextjs: "extractorOptions.nextjs.refs.subscribeCalls", "react-router": "extractorOptions.react-router.subscribeCalls", "supabase-js": "extractorOptions.supabase-js.subscribeCalls" };
+// The path-bearing option keys of each catalogue adapter come from its own
+// option shape (DETECTION.optionShape, read through the engine's detection).
+// A local extractor's options are its own; only catalogue ones are inspected.
 const isCallList = (v) => Array.isArray(v) && v.every((s) => typeof s === "string" && s.length > 0 && s.length <= MAX_NAME);
 
-function validateExtractorOptions(all) {
+function validateExtractorOptions(all, adapters = {}) {
   const obj = (v) => v && typeof v === "object" && !Array.isArray(v);
   const list = (v, label) => {
     if (!Array.isArray(v)) fail(`${label} must be an array of repo-relative paths`);
@@ -679,41 +318,35 @@ function validateExtractorOptions(all) {
   };
   for (const [name, opts] of Object.entries(all)) {
     if (!obj(opts)) fail(`extractorOptions.${name} must be an object`);
-    if (name === "nextjs") {
-      for (const k of ["appDir", "middlewarePath", "srcAliasRoot"]) if (opts[k] !== undefined) enginePath(opts[k], `nextjs.${k}`);
-      if (opts.refs !== undefined) {
-        if (!obj(opts.refs)) fail("nextjs.refs must be an object");
-        if (opts.refs.roots !== undefined) list(opts.refs.roots, "nextjs.refs.roots");
-        calls(opts.refs.subscribeCalls, "nextjs.refs.subscribeCalls");
+    const shape = adapters[Object.hasOwn(RENAMED_EXTRACTORS, name) ? RENAMED_EXTRACTORS[name] : name]?.optionShape;
+    if (!shape) continue;
+    // A dotted key's value, after checking every parent on the way is an object.
+    const at = (key) => {
+      let cur = opts;
+      const segs = key.split(".");
+      for (let i = 0; i < segs.length - 1; i++) {
+        cur = cur[segs[i]];
+        if (cur === undefined) return undefined;
+        if (!obj(cur)) fail(`${name}.${segs.slice(0, i + 1).join(".")} must be an object`);
       }
-    } else if (name === "react-router") {
-      for (const k of ["routesFile", "srcAliasRoot"]) if (opts[k] !== undefined) enginePath(opts[k], `react-router.${k}`);
-      calls(opts.subscribeCalls, "react-router.subscribeCalls");
-    } else if (name === "supabase-js") {
-      if (opts.roots !== undefined) list(opts.roots, "supabase-js.roots");
-      calls(opts.subscribeCalls, "supabase-js.subscribeCalls");
-    } else if (name === "external-services" || name === "services") {
-      if (opts.roots !== undefined) list(opts.roots, `${name}.roots`);
-    } else if (name.startsWith("background-")) {
-      if (opts.roots !== undefined) list(opts.roots, `${name}.roots`);
-    } else if (name === "expo-router") {
-      for (const k of ["appDir", "srcAliasRoot"]) if (opts[k] !== undefined) enginePath(opts[k], `expo-router.${k}`);
-    } else if (name === "components") {
-      if (opts.roots !== undefined) list(opts.roots, "components.roots");
-      if (opts.srcAliasRoot !== undefined) enginePath(opts.srcAliasRoot, "components.srcAliasRoot");
-    } else if (name === "fastapi") {
-      if (opts.roots !== undefined) list(opts.roots, "fastapi.roots");
-    } else if (name === "supabase" && opts.migrationNamespaces !== undefined) {
-      if (!Array.isArray(opts.migrationNamespaces)) fail("supabase.migrationNamespaces must be an array");
-      opts.migrationNamespaces.forEach((ns, i) => {
-        if (!obj(ns)) fail(`supabase.migrationNamespaces[${i}] must be an object`);
-        enginePath(ns.dir, `supabase.migrationNamespaces[${i}].dir`);
+      return cur[segs.at(-1)];
+    };
+    for (const k of shape.paths ?? []) if (at(k) !== undefined) enginePath(at(k), `${name}.${k}`);
+    for (const k of shape.pathLists ?? []) if (at(k) !== undefined) list(at(k), `${name}.${k}`);
+    for (const k of shape.callLists ?? []) calls(at(k), `${name}.${k}`);
+    for (const [k, pathKey] of Object.entries(shape.objectLists ?? {})) {
+      const v = at(k);
+      if (v === undefined) continue;
+      if (!Array.isArray(v)) fail(`${name}.${k} must be an array`);
+      v.forEach((item, i) => {
+        if (!obj(item)) fail(`${name}.${k}[${i}] must be an object`);
+        enginePath(item[pathKey], `${name}.${k}[${i}].${pathKey}`);
       });
     }
   }
 }
 
-export function validateAnswers(a) {
+export function validateAnswers(a, adapters = {}) {
   if (!a || typeof a !== "object" || Array.isArray(a)) fail("must be a JSON object");
   for (const k of ["name", "repoBase", "baseBranch"]) if (a[k] !== undefined && !isName(a[k])) fail(`${k} must be a single-line string (≤${MAX_NAME} chars)`);
   if (a.repoBase !== undefined && a.repoBase !== "" && !ENGINE_REPO_BASE.test(a.repoBase)) fail("repoBase must be an http(s) URL with no whitespace, or empty (the engine's rule)");
@@ -723,7 +356,7 @@ export function validateAnswers(a) {
   }
   if (a.extractorOptions !== undefined) {
     if (!a.extractorOptions || typeof a.extractorOptions !== "object" || Array.isArray(a.extractorOptions)) fail("extractorOptions must be an object");
-    validateExtractorOptions(a.extractorOptions);
+    validateExtractorOptions(a.extractorOptions, adapters);
   }
   if (a.stack !== undefined) {
     if (!Array.isArray(a.stack)) fail("stack must be an array");
@@ -1348,14 +981,16 @@ function mergeOptions(base, next) {
 }
 
 export function apply(root, rawAnswers, { date = today(), home } = {}) {
-  const answers = validateAnswers(rawAnswers);
+  // Detection first: it writes nothing, and the answers are checked against
+  // the adapters' own option shapes (decision 0039).
+  const detection = detect(root);
+  const answers = validateAnswers(rawAnswers, detection.adapters);
   const ledger = new Ledger(root);
   const version = pluginVersion();
   const cfg = readConfig(root);
   if (cfg.state === "invalid") throw new Error(`${cfg.error} — fix or remove it; bootstrap never replaces a config it cannot read`);
   const existingConfig = cfg.config;
   const paths = artifactPaths(existingConfig); // throws on a bad configured path — before any write
-  const detection = detect(root);
   const mode = existingConfig ? "repair" : detection.mode;
 
   // Opt-ins: fresh adoption defaults all on; repair defaults to the current
@@ -1383,7 +1018,7 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
 
   // --- config.json -------------------------------------------------------
   let config = existingConfig;
-  const stack = fromStack(answers.stack);
+  const stack = fromStack(answers.stack, detection);
   if (!config) {
     let extractors = answers.extractors;
     let extractorOptions = answers.extractorOptions;
@@ -1408,6 +1043,10 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
       extractors,
       extractorOptions: Object.fromEntries(extractors.map((n) => [n, extractorOptions[n] ?? {}])),
       hooks: { autoLoad: optIns.autoLoad, fence: optIns.fence, stop: optIns.stop },
+      // The first map check, done with the developer (decision 0039 points 3
+      // and 4): owed until `bootstrap.mjs check --done` clears it. On a
+      // greenfield repo it waits for the first derive that finds records.
+      mapCheck: "owed",
     };
     if (!hasGit(root)) config.render = { storeChanges: false };
     // A fresh install never writes a retired name (the alias is for configs
@@ -1505,7 +1144,7 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
   if (!existingConfig) {
     const featuresDir = ledger.abs(`${paths.mapDir}/features`);
     const hasSlice = readdirSync(featuresDir).some((f) => /\.md$/i.test(f));
-    if (!hasSlice) ledger.create(`${paths.mapDir}/features/example-feature.md`, exampleFeature(config, paths));
+    if (!hasSlice) ledger.create(`${paths.mapDir}/features/example-feature.md`, exampleFeature(config, paths, detection.adapters));
     else ledger.kept.push(`${paths.mapDir}/features/ (a slice is present — example skipped)`);
   }
   const adrDir = ledger.abs(paths.adrDir);
@@ -1556,22 +1195,17 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
 // The merge gate as three commands, for a pipeline ZDD ships no workflow for.
 export const ciCommands = (version) => [`npx -y ${ENGINE_PACKAGE}@${version} derive --check`, `npx -y ${ENGINE_PACKAGE}@${version} render --check`, `npx -y ${ENGINE_PACKAGE}@${version} lint --merge`];
 
-// The example feature slice's text, from the configured extractors. The
+// The example feature slice's text, from the configured extractors and the
+// records each adapter says an example can link (DETECTION.exampleClaims). The
 // example TARGETS are shown as bare paths, never in the `[x](y.json)` shape:
 // the render's link scanner reads that shape wherever it appears (inline
 // code included), and a link it cannot resolve blocks the render — and at
 // bootstrap no metadata exists yet.
-const EXAMPLE_TARGETS = {
-  supabase: ["a table: `../../metadata/table/db--things.json`"],
-  nextjs: ["an API route: `../../metadata/route/things.json`", "a page: `../../metadata/surface/things--_id.json`"],
-  fastapi: ["an API route: `../../metadata/route/things--_id.json`"],
-  "react-router": ["a screen: `../../metadata/surface/things--_id.json`"],
-};
-export function exampleFeature(config, paths) {
+export function exampleFeature(config, paths, adapters = {}) {
   // Relative to the slice's own folder, whatever the configured layout (CR-022).
   const toMeta = posixify(relative(join(paths.mapDir, "features"), paths.metadataDir)) || ".";
   const targets = [];
-  for (const name of config.extractors ?? []) for (const t of EXAMPLE_TARGETS[name] ?? []) if (!targets.includes(t)) targets.push(t.replaceAll("../../metadata", toMeta));
+  for (const name of config.extractors ?? []) for (const t of adapters[name]?.exampleClaims ?? []) if (!targets.includes(t)) targets.push(t.replaceAll("../../metadata", toMeta));
   if (!targets.length) targets.push(`a record: \`${toMeta}/<kind>/<file>.json\``);
   const roots = [];
   for (const name of config.extractors ?? []) {
@@ -2204,26 +1838,24 @@ function moveBlessings(ledger, paths, { move, kindOf }) {
 // `upgrade` skill carries a matching "Upgrading to X.Y" section. Each note
 // opens with its release so the narration reads as a changelog.
 // ---------------------------------------------------------------------------
-// The background readers (decision 0038) are opt-ins one by one.
-const BACKGROUND_READERS = ["background-bullmq", "background-cloudflare", "background-compose", "background-pg-cron", "background-procfile", "background-railway", "background-vercel"];
-const OPT_IN_EXTRACTORS = ["components", "expo-router", ...BACKGROUND_READERS, "external-services"];
 const extractorsOn = (config) => new Set((Array.isArray(config.extractors) ? config.extractors : []).map((n) => (Object.hasOwn(RENAMED_EXTRACTORS, n) ? RENAMED_EXTRACTORS[n] : n)));
 // Every upgrade re-runs detection and offers each opt-in extractor that is
 // off but has evidence (2.4.1, from the first adopter: the offer lived in the 2.1
 // note, so the first adopter's 2.2.1 → 2.4.0 never saw `jobs`, though 2.3 had widened it
 // to the first adopter's Vercel cron and Railway worker). Never added by upgrade, and a
 // "no" is not remembered: the line comes back while the evidence does.
+// Which adapters are opt-ins is each adapter's word (DETECTION.optIn, 0039).
 function offerOptIns(root, config) {
   const notes = [];
   const have = extractorsOn(config);
-  let proposals = [];
+  let d;
   try {
-    proposals = detect(root).proposals ?? [];
+    d = detect(root);
   } catch {
-    return [`could not re-run detection here — run \`bootstrap.mjs detect\` to see whether the opt-in extractors (${OPT_IN_EXTRACTORS.join(", ")}) apply`];
+    return ["could not re-run detection here — run `bootstrap.mjs detect` to see whether an opt-in extractor applies"];
   }
-  for (const p of proposals) {
-    if (!OPT_IN_EXTRACTORS.includes(p.name) || have.has(p.name)) continue;
+  for (const p of d.proposals ?? []) {
+    if (!d.adapters?.[p.name]?.optIn || have.has(p.name)) continue;
     notes.push(
       `offers the opt-in extractor \`${p.name}\` — evidence: ${(p.evidence ?? []).join("; ")}. ` +
         `Never added by upgrade: on the user's word, a repair apply with it in "extractors" (and its options: ${JSON.stringify(p.options ?? {})})`,
@@ -2259,7 +1891,7 @@ function migrateJobs(config, changes, root) {
   let found = [];
   let detectError = null;
   try {
-    found = (detect(root).proposals ?? []).map((p) => p.name).filter((n) => BACKGROUND_READERS.includes(n));
+    found = (detect(root).proposals ?? []).filter((p) => (p.parts ?? []).includes("background tasks")).map((p) => p.name);
   } catch (e) {
     detectError = e;
   }
@@ -2518,7 +2150,7 @@ export const UPGRADE_NOTES = {
     if (unnamed.length) {
       notes.push(
         '2.1 maps realtime subscriptions as `subscribes` edges: the Supabase client\'s own `.on("postgres_changes", { table })` needs nothing, but a wrapper (e.g. `live.onInsert("table", …)`) is invisible until named — ask whether the app has one, and record it in ' +
-          unnamed.map((w) => SUBSCRIBE_CALLS[w]).join(" / "),
+          unnamed.map((w) => (w === "nextjs" ? "extractorOptions.nextjs.refs.subscribeCalls" : "extractorOptions.react-router.subscribeCalls")).join(" / "),
       );
     }
     if (config.claims?.strict === true && config.claims.strictKinds === undefined) {
@@ -3043,6 +2675,95 @@ function moveLockOnly(root, version, to, { plan = false, lock = false, remote, h
 }
 
 // ---------------------------------------------------------------------------
+// Check it together (decision 0039 points 3 and 4). After the adapters are
+// attached and derive has run, the engine's coverage report names, per record
+// kind, what the records link to and which link to nothing; the developer
+// says which gaps are fine and which are wrong, then opens the human index.
+// Bootstrap records the check as owed (`mapCheck` in the config) and
+// `check --done` clears it; on a greenfield repo it stays owed until the
+// first derive finds records, and `check --status` says so at session start.
+// ---------------------------------------------------------------------------
+function hasRecords(root, config) {
+  const dir = join(root, artifactPaths(config, { lenient: true }).metadataDir);
+  let kinds;
+  try {
+    kinds = readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory());
+  } catch {
+    return false;
+  }
+  return kinds.some((k) => {
+    try {
+      return readdirSync(join(dir, k.name)).some((f) => f.endsWith(".json"));
+    } catch {
+      return false;
+    }
+  });
+}
+
+export function mapCheck(root, { done = false, status = false } = {}) {
+  const cfg = readConfig(root);
+  if (cfg.state !== "valid") throw new Error(cfg.state === "invalid" ? `${cfg.error} — fix it first` : "no zdd/config.json here — bootstrap first");
+  const config = cfg.config;
+  const owed = config.mapCheck === "owed";
+  const records = hasRecords(root, config);
+  if (status) return { owed, records, due: owed && records };
+  if (done) {
+    const ledger = new Ledger(root);
+    if (owed) {
+      const { mapCheck: _, ...rest } = config;
+      ledger.overwrite("zdd/config.json", JSON.stringify(rest, null, 2) + "\n");
+      ledger.notes.push("zdd/config.json: the first map check is done (mapCheck cleared)");
+    } else ledger.kept.push("zdd/config.json");
+    return { owed: false, records, ...ledgerOut(ledger) };
+  }
+  let coverage;
+  try {
+    coverage = JSON.parse(runEngine(["coverage", "--json", `--root=${root}`])).kinds;
+  } catch (e) {
+    throw new Error(`the coverage report could not run — the engine said: ${String(e.stderr || e.message).trim().split(/\r?\n/).slice(-3).join(" ")}`);
+  }
+  return { owed, records, coverage, humanIndex: artifactPaths(config, { lenient: true }).humanIndex };
+}
+
+const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+const namedList = (l) => (l.named.length ? `: ${l.named.map((n) => `\`${n}\``).join(", ")}${l.count > l.named.length ? `, and ${l.count - l.named.length} more` : ""}` : "");
+export function narrateCheck(r) {
+  if (r.coverage === undefined) {
+    if (r.wrote || r.kept) return r.notes?.length ? r.notes.join("\n") : "The first map check was already done.";
+    return r.due ? "The first map check is owed: derive now finds records. Run `bootstrap.mjs check` and go through it with the developer." : "";
+  }
+  if (!r.coverage.length) return "No records yet — derive found nothing to check. The check stays owed until code appears.";
+  const out = ["What derive found, kind by kind — say which gaps are fine and which are wrong:"];
+  for (const k of r.coverage) {
+    const links = Object.entries(k.linksTo).map(([kind, n]) => `${n} link to a ${kind}`);
+    out.push(`  - ${plural(k.count, k.kind)}${links.length ? `; ${links.join("; ")}` : ""}`);
+    if (k.linkNothing.count) out.push(`      ${k.linkNothing.count} link to nothing${namedList(k.linkNothing)}`);
+    if (k.reachedByNothing.count) out.push(`      ${k.reachedByNothing.count} nothing links to${namedList(k.reachedByNothing)}`);
+  }
+  out.push(`Then open ${r.humanIndex} and ask: does this all look right, and is any link missing?`);
+  out.push("Every \"that's wrong\" becomes a fixture test in the adapter before it is fixed. When you are both done: `bootstrap.mjs check --done`.");
+  return out.map(printable).join("\n");
+}
+
+// The greenfield preview (0039 point 4): the chosen adapters' own examples,
+// derived and rendered in a temporary folder outside the repo.
+export function preview(names) {
+  if (!names.length) throw new Error("preview needs --extractors=<a,b,…>");
+  for (const n of names) if (!/^[a-z][a-z0-9-]*$/.test(n)) throw new Error(`preview: '${n}' is not an adapter name`);
+  try {
+    return JSON.parse(runEngine(["preview", `--extractors=${names.join(",")}`, "--json"]));
+  } catch (e) {
+    throw new Error(`the preview could not run — the engine said: ${String(e.stderr || e.message).trim().split(/\r?\n/).slice(-3).join(" ")}`);
+  }
+}
+export function narratePreview(r) {
+  const out = [];
+  if (r.humanIndex) out.push(`A preview of ${r.used.join(", ")}, outside your repo: ${r.humanIndex}`);
+  if (r.skipped.length) out.push(`No example ships for ${r.skipped.join(", ")} — the preview shows the rest.`);
+  return out.map(printable).join("\n");
+}
+
+// ---------------------------------------------------------------------------
 // Narration. Every line is one ledger entry; evidence and paths inside it come
 // from the checkout (directory names, config values), which on POSIX may hold
 // a newline or an ANSI escape. The skill reads this output, so a control
@@ -3067,6 +2788,20 @@ export function narrateDetect(d, pocock) {
     }
     for (const a of d.apps) out.push(`  - map only: ${a.name} — ${a.evidence}; extractor ${a.extractor}`);
     for (const q of d.questions ?? []) out.push(`  ask: ${q.ask} (recorded under ${q.records})`);
+    // Part by part (decision 0039): what an adapter covers, and what nothing does.
+    if (d.coverage) {
+      out.push("Coverage, part by part:");
+      for (const c of d.coverage) if (c.adapters.length) out.push(`  ${c.part}: ${c.adapters.join(", ")}`);
+      const gaps = d.coverage.filter((c) => !c.adapters.length).map((c) => c.part);
+      if (gaps.length) out.push(`  not covered: ${gaps.join(", ")} — no adapter recognises any here. Ask whether the app has them; one in a stack ZDD has no adapter for is built together with the \`extractor\` skill (it takes longer, and is tested with fixtures)`);
+    }
+    if (d.limits?.walkTruncated) out.push(`  (detection reads ${d.limits.depth} folders deep, within one walk budget: code deeper than that was not seen)`);
+    if (d.limits?.readBudgetSpent) out.push("  (detection's read budget ran out: some source was not read — confirm the proposals by hand)");
+  } else if (d.catalogue) {
+    // A greenfield repo with no stack chosen (0039 point 6): the stacks with
+    // ready-made adapters, by part, and no recommendation.
+    out.push("Ready-made adapters, by part (no recommendation — any stack works; an uncovered one gets an adapter built with the `extractor` skill):");
+    for (const c of d.catalogue) if (c.adapters.length) out.push(`  ${c.part}: ${c.adapters.join(", ")}`);
   }
   out.push(narratePocock(pocock));
   return out.map(printable).join("\n");
@@ -3415,6 +3150,13 @@ if (process.argv[1] && posixify(process.argv[1]).endsWith("/scripts/bootstrap.mj
       const p = await preflight(root, { ...(typeof flags.registry === "string" ? { registry: flags.registry } : {}), ...(typeof flags.github === "string" ? { github: flags.github } : {}) });
       process.stdout.write(flags.json ? JSON.stringify(p, null, 2) + "\n" : narratePreflight(p) + "\n");
       if (!p.ok) process.exit(1);
+    } else if (cmd === "check") {
+      const r = mapCheck(root, { done: flags.done === true, status: flags.status === true });
+      const text = narrateCheck(r);
+      process.stdout.write(flags.json ? JSON.stringify(r, null, 2) + "\n" : text ? text + "\n" : "");
+    } else if (cmd === "preview") {
+      const r = preview(String(flags.extractors ?? "").split(",").map((s) => s.trim()).filter(Boolean));
+      process.stdout.write(flags.json ? JSON.stringify(r, null, 2) + "\n" : narratePreview(r) + "\n");
     } else if (cmd === "estimate") {
       const e = estimate(root);
       process.stdout.write(flags.json ? JSON.stringify(e, null, 2) + "\n" : narrateEstimate(e) + "\n");
@@ -3422,7 +3164,7 @@ if (process.argv[1] && posixify(process.argv[1]).endsWith("/scripts/bootstrap.mj
       const s = releaseStatus(root, typeof flags.remote === "string" ? flags.remote : undefined, flags.home);
       process.stdout.write(flags.json ? JSON.stringify(s) + "\n" : printable(narrateReleaseStatus(s)) + "\n");
     } else {
-      process.stderr.write("Usage: bootstrap.mjs <preflight [--registry=<url>] [--github=<url>]|detect|estimate|apply --answers=<file>|upgrade [--plan] [--lock] [--drop=<ids>] [--move-blessings=<token> [--kinds=<name>:<copy|extend>,…]] [--to=vX.Y.Z]|split-adrs [--plan] [--token=<token> --harness=<nums> --application=<nums>] [--dir=<rel> --index=<rel>]|release-status [--remote=<url>]> [--root=<dir>] [--date=YYYY-MM-DD] [--home=<dir>] [--json]\n");
+      process.stderr.write("Usage: bootstrap.mjs <preflight [--registry=<url>] [--github=<url>]|detect|estimate|apply --answers=<file>|check [--status|--done]|preview --extractors=<a,b>|upgrade [--plan] [--lock] [--drop=<ids>] [--move-blessings=<token> [--kinds=<name>:<copy|extend>,…]] [--to=vX.Y.Z]|split-adrs [--plan] [--token=<token> --harness=<nums> --application=<nums>] [--dir=<rel> --index=<rel>]|release-status [--remote=<url>]> [--root=<dir>] [--date=YYYY-MM-DD] [--home=<dir>] [--json]\n");
       process.exit(2);
     }
   } catch (e) {

@@ -73,3 +73,5 @@ export function derive({ options, io }) {
   }
   return { records, diagnostics, warnings };
 }
+
+export { DETECTION, detect } from "./detect.mjs";
