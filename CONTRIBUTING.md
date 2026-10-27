@@ -6,8 +6,9 @@ at **both ends** of the pipeline: **extractors** feed data in (one per
 convention), and **viewers** render it out (one per visualization), with a stable
 graph in the middle.
 
-> **Status.** ZDD is `2.5.0` and public. The engine (`packages/zdd-engine`, on
-> npm as `@rich-rees/zdd-engine`) is what the plugin's skills and adopters' CI
+> **Status.** ZDD is `0.9.0` and public, the first release of a new line
+> (decision 0042). The engine (`packages/zdd-engine`, on npm as
+> `@rich-rees/zdd`) is what the plugin's skills and adopters' CI
 > both run, and both contracts below — extractors and viewers — are the ones it
 > executes today. Issues and discussion are welcome; the tests are the contract
 > (`node --test` in `packages/zdd-engine` and over `plugins/zdd/test`), and CI
@@ -188,7 +189,10 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
   against it), and as it needs them `skipDirs`, `stack` (greenfield rules:
   a case-blind pattern over a stated stack entry, the options, where the
   entry's path goes), `companion`, `exampleClaims`, `example` (its
-  `example/` folder's options, for the greenfield preview) and `optIn` —
+  `example/` folder's options, for the greenfield preview), `optIn` and
+  `upgradeAdds` (`"X.Y.Z"`: an upgrade from an earlier release adds the
+  adapter where detection proposes it and its `companion`s run — for a part
+  an older release's adapters read themselves; decision 0037) —
   and `detect({ scan, proposed })`, returning `null` or `{ proposal:
   { evidence, options }, apps, questions }`. Evidence is plain words
   ("`APIRouter` under `api/routes`"). The `scan` is one walk of the repo
