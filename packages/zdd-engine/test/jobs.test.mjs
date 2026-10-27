@@ -4,7 +4,8 @@
 // Compose files, Vercel crons, a Cloudflare worker's triggers, pg_cron in a
 // migration, GitHub Actions schedules (opt-in, shown apart), BullMQ queues —
 // with the mode never guessed, the module's docstring as the description,
-// reads/writes edges from the tables its text names, and a `calls` edge to
+// the module's code named for the data-access adapters (`?code:<file>#*`,
+// decision 0037; they give the reads/writes edges), and a `calls` edge to
 // the route or function a schedule hits. A package.json script on its own is
 // a hand-run tool, not a job. Run: node --test "test/*.test.mjs"
 import { test } from "node:test";
@@ -14,7 +15,7 @@ import { readFileSync, writeFileSync, rmSync, mkdtempSync, cpSync } from "node:f
 import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { parseCommand, scanTables, describe, derive, parseCompose, scanPgCron, scanQueues, scanWorkflow } from "../src/adapters/jobs/index.mjs";
+import { parseCommand, describe, derive, parseCompose, scanPgCron, scanQueues, scanWorkflow } from "../src/adapters/jobs/index.mjs";
 import { makeExtractorIo } from "../src/core/lib/extractor-io.mjs";
 
 const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -42,20 +43,7 @@ test("parseCommand: python -m through uv/poetry/pipenv, node/tsx/ts-node files, 
   assert.equal(parseCommand(42), null);
 });
 
-test("scanTables: client calls read; SQL literals read or write, a table both read and written counts as written; a docstring's SQL counts too", () => {
-  const text = `
-    rows = await client.table("outbound_messages").select("*")
-    await conn.execute(text("select id from jobs where status = 'x'"))
-    await conn.execute(text("update jobs set status = 'done' where id = :id"))
-    await conn.execute(text("insert into audit_events (job_id) values (:id)"))
-    await conn.execute(text("delete from dead_letters where id = :id"))
-    await conn.execute(text("select * from public.offers o join authors c on c.id = o.carrier_id"))
-    await conn.execute(text(f"update {self._table} set x = 1"))
-  `;
-  assert.deepEqual(scanTables(text), {
-    reads: ["authors", "offers", "outbound_messages"],
-    writes: ["audit_events", "dead_letters", "jobs"],
-  });
+test("describe: a Python module's docstring paragraph, a JS module's leading comment", () => {
   assert.equal(describe('"""First paragraph\nstill first.\n\nSecond paragraph."""\nimport x\n', "a.py"), "First paragraph still first.");
   assert.equal(describe("// The nightly report.\n// Mails it.\nimport x;\n", "a.mjs"), "The nightly report.");
   assert.equal(describe("import x\n", "a.py"), "");
@@ -92,17 +80,17 @@ test("fixture: the background work of a small monorepo — a Railway-scheduled s
   assert.equal(hk.facts.source, "railway");
   assert.deepEqual(hk.resource, ["apps/api/app/housekeeping.py", "apps/api/services/housekeeping/railway.toml"], "the module is resolved from the service folder up to the app root");
   assert.equal(hk.description, "Housekeeping: the sweep that completes a Scheduled job once its deliver-by date has passed, because no outside system reports a delivery.");
-  assert.deepEqual(hk.facts.edges, { writes: ["?table:audit_events", "?table:jobs"] });
+  assert.deepEqual(hk.facts.edges, { reads: ["?code:apps/api/app/housekeeping.py#*"] }, "its module's code, for the data-access adapters");
   const worker = by("worker");
   assert.equal(worker.facts.mode, "worker");
   assert.equal(worker.facts.command, "pnpm run worker", "the Procfile runs the package script; the script's module is the resource");
   assert.deepEqual(worker.resource, ["apps/api/app/outbound/worker.py", "apps/api/Procfile"]);
-  assert.deepEqual(worker.facts.edges, { writes: ["?table:outbound_messages"] });
+  assert.deepEqual(worker.facts.edges, { reads: ["?code:apps/api/app/outbound/worker.py#*"] });
   assert.ok(!by("replay"), "a package script nothing runs is a hand-run tool, not a job");
   const nightly = by("nightly");
   assert.equal(nightly.facts.manifest, "Procfile");
   assert.equal(nightly.facts.mode, "unknown");
-  assert.deepEqual(nightly.facts.edges, { reads: ["?table:jobs"], writes: ["?table:reports"] });
+  assert.deepEqual(nightly.facts.edges, { reads: ["?code:scripts/nightly.mjs#*"] });
   const sweep = by("sweep-stalled");
   assert.deepEqual(sweep.facts, { mode: "scheduled", command: "GET /api/cron/sweep-stalled", schedule: "*/5 * * * *", trigger: "cron", target: "/api/cron/sweep-stalled", source: "vercel", manifest: "apps/web/vercel.json", edges: { calls: ["?route:/api/cron/sweep-stalled"] } });
   assert.deepEqual(sweep.resource, ["apps/web/vercel.json"]);
@@ -124,7 +112,7 @@ test("fixture: the background work of a small monorepo — a Railway-scheduled s
   assert.deepEqual(queue.facts.producers, ["apps/web/src/lib/queues.ts"]);
   assert.deepEqual(queue.facts.consumers, ["scripts/transcode.mjs"]);
   assert.deepEqual(queue.resource, ["scripts/transcode.mjs"], "the consumer is the resource");
-  assert.deepEqual(queue.facts.edges, { usedBy: ["?at:apps/web/src/lib/queues.ts"] });
+  assert.deepEqual(queue.facts.edges, { reads: ["?code:scripts/transcode.mjs#*"], usedBy: ["?at:apps/web/src/lib/queues.ts"] });
   assert.ok(!out.records.some((r) => ["dev", "test", "test:mutation", "missing", "web", "Nightly-mutation"].includes(r.title)));
   assert.ok(!out.diagnostics.some((d) => /declared in .* and again/.test(d)), "the Railway file is one job");
   const withActions = derive({ repoRoot: FIXTURE, options: { modes: { worker: "worker" }, includeGithubActions: true }, io: makeExtractorIo(FIXTURE, "jobs") });
@@ -158,7 +146,8 @@ test("CLI: derive and render are byte-stable; a cron's calls edge reaches its ro
   assert.equal(d.status, 0, d.stderr);
   assert.match(d.stdout, /8 jobs/);
   const hk = JSON.parse(readFileSync(join(repo, "zdd", "metadata", "job", "housekeeping.json"), "utf8"));
-  assert.deepEqual(hk.facts.edges, { writes: ["table:db/audit_events", "table:db/jobs"] });
+  // sqlalchemy reads the sweep's SQL: it reads jobs, and writes jobs and audit_events.
+  assert.deepEqual(hk.facts.edges, { reads: ["table:db/jobs"], writes: ["table:db/audit_events", "table:db/jobs"] });
   const sweep = JSON.parse(readFileSync(join(repo, "zdd", "metadata", "job", "sweep-stalled.json"), "utf8"));
   assert.deepEqual(sweep.facts.edges, { calls: ["route:/api/cron/sweep-stalled"] });
   const digest = JSON.parse(readFileSync(join(repo, "zdd", "metadata", "job", "nightly-digest.json"), "utf8"));

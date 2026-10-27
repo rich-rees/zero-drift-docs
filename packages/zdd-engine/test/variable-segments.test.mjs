@@ -11,7 +11,7 @@ import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { expandTemplatePath, literalValues, parseLiteralUnion, MAX_EXPANSIONS } from "../src/core/lib/template-paths.mjs";
-import { scanApiCalls } from "../src/adapters/react-router/index.mjs";
+import { scanApiCalls } from "../src/adapters/js/source.mjs";
 import { scanFileText } from "../src/adapters/nextjs/refs.mjs";
 import { derive as reactRouter } from "../src/adapters/react-router/index.mjs";
 import { derive as fastapi } from "../src/adapters/fastapi/index.mjs";

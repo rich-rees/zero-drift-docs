@@ -11,10 +11,11 @@
 //                   source files scanned for outbound references
 //   srcAliasRoot    where the tsconfig `@/` alias points (default: appDir's
 //                   parent)
-// Outbound refs (`.from('x')`, `.rpc('x')`, `fetch('/api/..')`) are emitted
-// UNRESOLVED (`?from:x`, `?function:x`, `?route:/api/..`) — the tables and
-// functions belong to the supabase extractor, and the deriver resolves them
-// after the merge (src/core/lib/resolve-refs.mjs). A missing appDir or middleware
+// Outbound refs (`fetch('/api/..')`) are emitted UNRESOLVED (`?route:/api/..`),
+// and each scanned file's code as `?code:<file>#*` (decision 0037): its
+// `.from('x')` / `.rpc('x')` are a data-access adapter's (supabase-js) to
+// read; the deriver resolves and folds both after the merge
+// (src/core/lib/resolve-refs.mjs). A missing appDir or middleware
 // file is "nothing to inventory" (greenfield), never an error.
 
 import { readFileSync, existsSync } from "node:fs";
@@ -212,8 +213,10 @@ export function derive({ repoRoot, options, io }) {
   for (const k of ["roots", "extensions", "excludeDirs", "excludeSuffixes"]) {
     if (!Array.isArray(refsOptions[k])) throw new Error(`nextjs: 'refs.${k}' must be an array`);
   }
-  const subscribeCalls = refsOpt.subscribeCalls ?? [];
-  if (!Array.isArray(subscribeCalls) || subscribeCalls.some((h) => typeof h !== "string")) throw new Error("nextjs: 'refs.subscribeCalls' must be an array of call names");
+  // Realtime subscriptions are data access (decision 0037): supabase-js
+  // reads them now; a config still setting the option here is told.
+  const warnings = [];
+  if (refsOpt.subscribeCalls !== undefined) warnings.push(`'refs.subscribeCalls' is read by the supabase-js adapter since 0.9 — move it to extractorOptions["supabase-js"].subscribeCalls (it is ignored here)`);
   refsOptions.roots = refsOptions.roots.map((r) => repoRelative(r, "nextjs.refs.roots"));
 
   // ---- Route & surface trees ----
@@ -238,7 +241,7 @@ export function derive({ repoRoot, options, io }) {
 
   // ---- Refs scan ----
   const sourceFiles = walkSourceFiles(repoRoot, refsOptions, diagnostics, isIgnored);
-  const scans = scanFiles(repoRoot, sourceFiles, subscribeCalls);
+  const scans = scanFiles(repoRoot, sourceFiles);
 
   // Attribution: nearest enclosing route dir wins; else nearest page (then
   // layout) dir; else the file becomes its own module record.
@@ -262,25 +265,20 @@ export function derive({ repoRoot, options, io }) {
   };
 
   // One file's scan -> unresolved ref strings; the deriver resolves them
-  // against every extractor's records after the merge.
+  // against every extractor's records after the merge. The file's code is
+  // `?code:<file>#*`: whatever a data-access adapter read in it (decision
+  // 0037), folded into the record the file is attributed to.
   const unresolvedRefs = (rel, scan) => {
-    const refs = new Set();
-    for (const name of scan.fromNames) refs.add(`?from:${name}`);
-    for (const name of scan.rpcNames) refs.add(`?function:${name}`);
+    const refs = new Set([`?code:${rel}#*`]);
     for (const url of scan.fetchUrls) refs.add(`?route:${url}`);
-    for (const ident of scan.unresolvedFromIdents) {
-      diagnostics.push(`${rel}: .from(${ident}) — identifier not resolvable file-locally`);
-    }
     return refs;
   };
 
   const routeRefs = new Map(); // route rel -> Set
   const surfaceRefs = new Map(); // surface rel -> Set
-  const surfaceSubs = new Map(); // surface rel -> Set of table names (a `subscribes` edge)
   const moduleFiles = []; // { rel, refs }
   for (const [rel, scan] of scans) {
     const refs = unresolvedRefs(rel, scan);
-    for (const t of scan.subscriptions) refs.add(`?table:${t}`);
     const route = rel.startsWith(apiDirRel + "/") ? nearest(rel, routeDirs) : null;
     if (route) {
       const set = routeRefs.get(route.rel) ?? new Set();
@@ -293,12 +291,9 @@ export function derive({ repoRoot, options, io }) {
       const set = surfaceRefs.get(surface.rel) ?? new Set();
       refs.forEach((r) => set.add(r));
       surfaceRefs.set(surface.rel, set);
-      const subs = surfaceSubs.get(surface.rel) ?? new Set();
-      for (const t of scan.subscriptions) subs.add(t);
-      surfaceSubs.set(surface.rel, subs);
       continue;
     }
-    if (refs.size) moduleFiles.push({ rel, refs });
+    moduleFiles.push({ rel, refs });
   }
 
   // ---- Assemble records ----
@@ -366,14 +361,14 @@ export function derive({ repoRoot, options, io }) {
         file: s.file,
         routeGroups: s.segs.filter((x) => /^\(.+\)$/.test(x)),
         dynamicSegments: dynamicSegments(s.segs),
-        ...(surfaceSubs.get(s.rel)?.size ? { edges: { subscribes: [...surfaceSubs.get(s.rel)].sort().map((t) => `?table:${t}`) } } : {}),
       },
       filename: `${slugify(urlPath)}.json`,
     });
   }
 
   // A module record exists only for a file that references something that
-  // resolves — `requireRefs` asks the deriver to drop it otherwise.
+  // resolves — `requireRefs` asks the deriver to drop it otherwise (a file
+  // whose `?code:` reaches no data-access record, and that calls no API).
   for (const { rel, refs } of moduleFiles.sort((a, b) => (a.rel < b.rel ? -1 : 1))) {
     const text = readFileSync(join(repoRoot, rel), "utf8");
     records.push({
@@ -389,5 +384,5 @@ export function derive({ repoRoot, options, io }) {
     });
   }
 
-  return { records, diagnostics };
+  return { records, diagnostics, warnings };
 }

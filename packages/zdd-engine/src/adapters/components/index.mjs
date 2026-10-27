@@ -19,7 +19,9 @@
 // `usedBy` from this component to the SURFACE whose element file imports it
 // (`?surface:<file>`, resolved by resource after the merge — a surface is
 // another extractor's record), `calls` to the API routes its body calls
-// (`?route:`, decision 0019's expansion), `reads` for `.from()` / `.rpc()`.
+// (`?route:`, decision 0019's expansion), `reads` for the tables and
+// functions its file's code reaches: `?code:<file>#*`, which a data-access
+// adapter (supabase-js) answers and the core folds in (decision 0037).
 // App membership is not here: the renderer derives it from the map's
 // Application pages (decision 0018).
 // Options (extractorOptions.components):
@@ -33,13 +35,13 @@
 //                   (default ["components", "ui"])
 //   srcAliasRoot    where the tsconfig `@/` alias points (default: the first
 //                   root)
-// Purely textual, on the react-router extractor's lexical mask: a component
+// Purely textual, on the shared JS lexical mask (adapters/js): a component
 // spelled inside a comment or a string is not one. Every file is read
 // through `io` (decision 0010): inside the repo, under the cap, never
 // through a link. Deterministic: same bytes in, same records out.
 
 import { posix } from "node:path";
-import { lex, model, localImports, scanApiCalls, scanDataCalls, moduleConsts } from "../react-router/index.mjs";
+import { lex, model, localImports, scanApiCalls } from "../js/source.mjs";
 import { repoRelative } from "../../core/lib/paths.mjs";
 
 export const FACTS_KEY_ORDER = {
@@ -395,10 +397,10 @@ export function derive({ repoRoot, options, io }) {
       if (plat) (rec.facts.platforms ??= []).push(plat.platform);
       // Calls and reads from the whole file: a component's data module is
       // one hop away in the routing extractors; here the file is the unit.
+      // The file's code (decision 0037): a data-access adapter's records for
+      // it fold in as this component's reads.
       for (const p of scanApiCalls(s.text)) rec._calls.add(`?route:${p}`);
-      const data = scanDataCalls(s.text, moduleConsts(s.text));
-      for (const n of data.from) rec._reads.add(`?from:${n}`);
-      for (const n of data.rpc) rec._reads.add(`?function:${n}`);
+      rec._reads.add(`?code:${rel}#*`);
     }
   }
 

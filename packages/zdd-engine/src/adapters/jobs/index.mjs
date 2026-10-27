@@ -31,8 +31,10 @@
 // `scheduled` when a schedule is stated, `worker` when config's `modes` or
 // the manifest's shape says so, `queue` when a queue is named, else
 // `unknown`. A job's description is its module's docstring or leading
-// comment. Refs: `.table("x")` / `.from_("x")` / `.from("x")` and the tables
-// in SQL literals — `reads` and `writes` edges (decision 0016).
+// comment. Refs: the job module's code, `?code:<file>#*` under `reads`
+// (decision 0037) — the data-access adapters (supabase-js, supabase-py,
+// sqlalchemy) say which tables it reads and writes, and the core folds them
+// in (a `writes` edge comes typed from the adapter that tells writes apart).
 // Options (extractorOptions.jobs):
 //   roots                 where manifests and source are looked for (default
 //                         ["."]; dependencies and build output never entered)
@@ -101,21 +103,6 @@ export function parseCommand(command) {
     if (file && /\.(m?[jt]s|cjs)$/.test(file) && !file.includes("..") && !file.startsWith("/")) return { kind: "file", target: file };
   }
   return null;
-}
-
-// The tables a module's text names: client calls and SQL literals.
-export function scanTables(text) {
-  const reads = new Set();
-  const writes = new Set();
-  for (const m of text.matchAll(/\.(?:table|from_|from)\(\s*(['"])([\w-]+)\1\s*\)/g)) reads.add(m[2]);
-  const strings = [];
-  for (const m of text.matchAll(/(?:"""|''')([\s\S]*?)(?:"""|''')|"((?:[^"\\\n]|\\.)*)"|'((?:[^'\\\n]|\\.)*)'|`((?:[^`\\]|\\.)*)`/g)) strings.push(m[1] ?? m[2] ?? m[3] ?? m[4] ?? "");
-  for (const s of strings) {
-    for (const m of s.matchAll(/\b(?:from|join)\s+([a-z_][\w]*(?:\.[a-z_][\w]*)?)\b/gi)) if (!/^(select|where|values)$/i.test(m[1])) reads.add(m[1].split(".").pop());
-    for (const m of s.matchAll(/\b(?:update|insert\s+into|delete\s+from)\s+([a-z_][\w]*(?:\.[a-z_][\w]*)?)\b/gi)) writes.add(m[1].split(".").pop());
-  }
-  for (const w of writes) reads.delete(w);
-  return { reads: [...reads].sort(), writes: [...writes].sort() };
 }
 
 // A Python module docstring's first paragraph, or a JS leading comment.
@@ -627,10 +614,8 @@ export function derive({ repoRoot, options, io }) {
     const rw = c.parsed ? railway.get(c.dir) ?? (file ? railway.get(posix.dirname(file)) : undefined) : undefined;
     const schedule = c.schedule ?? (rw && (rw.command === c.command || rw.command === c.scriptCommand) ? rw.schedule : undefined);
     const mode = schedule ? "scheduled" : (c.mode ?? modes[c.name] ?? c.modeHint ?? "unknown");
-    const tables = file ? scanTables(text) : { reads: [], writes: [] };
     const edges = {};
-    if (tables.reads.length) edges.reads = tables.reads.map((t) => `?table:${t}`);
-    if (tables.writes.length) edges.writes = tables.writes.map((t) => `?table:${t}`);
+    if (file) edges.reads = [`?code:${file}#*`];
     if (c.routeRef) edges.calls = [`?route:${c.routeRef}`];
     if (c.functionRef) edges.calls = [`?function:${c.functionRef}`];
     if (c.producers?.length) edges.usedBy = c.producers.map((f) => `?at:${f}`);

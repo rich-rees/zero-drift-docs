@@ -9,6 +9,7 @@ import { derive as nextjs } from "../src/adapters/nextjs/index.mjs";
 import { derive as supabase } from "../src/adapters/supabase/index.mjs";
 import { DEFAULT_REFS } from "../src/adapters/nextjs/refs.mjs";
 import { resolveRefs } from "../src/core/lib/resolve-refs.mjs";
+import { dataAccessOf } from "./code-reach.mjs";
 
 const scratch = (files) => {
   const root = mkdtempSync(join(tmpdir(), "zdd-next-"));
@@ -31,7 +32,7 @@ test("CR-095: a JavaScript App Router tree (route.js, page.jsx, layout.js) is in
   });
   const out = nextjs({ repoRoot: root, options: { appDir: "src/app" } });
   const db = supabase({ repoRoot: root, options: { migrationNamespaces: [{ name: "db", dir: "migrations" }] } });
-  const { records } = resolveRefs([...db.records, ...out.records]);
+  const { records } = resolveRefs([...db.records, ...out.records, ...dataAccessOf(root)]); // supabase-js reads the calls (decision 0037)
   const ids = records.map((r) => r.id).sort();
   assert.deepEqual(ids, ["module:src/lib/things-api.js", "route:/api/things", "surface:/", "surface:/_layout", "surface:/things/[id]", "table:db/things"]);
   const route = records.find((r) => r.id === "route:/api/things");

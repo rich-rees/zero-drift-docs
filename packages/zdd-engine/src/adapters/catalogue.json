@@ -4,7 +4,7 @@
   },
   "bundles": {
     "nextjs-supabase": {
-      "extractors": ["supabase", "nextjs"],
+      "extractors": ["supabase", "supabase-js", "nextjs"],
       "options": {
         "supabase": { "migrationNamespaces": [], "externalBuckets": [] }
       },

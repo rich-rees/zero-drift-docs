@@ -53,14 +53,20 @@ const assertTreesEqual = (a, b, label) => {
 const composedConfig = (legacy) => {
   const { adapter, adapterOptions, ...rest } = legacy;
   const { migrationNamespaces, externalBuckets, ...nextjs } = adapterOptions;
-  return { ...rest, extractors: ["supabase", "nextjs"], extractorOptions: { supabase: { migrationNamespaces, externalBuckets }, nextjs } };
+  return { ...rest, extractors: ["supabase", "supabase-js", "nextjs"], extractorOptions: { supabase: { migrationNamespaces, externalBuckets }, nextjs } };
 };
 
-test("extractors [supabase, nextjs] reproduce the v0.3.1 adapter output byte-for-byte", () => {
+test("extractors [supabase, supabase-js, nextjs] reproduce the v0.3.1 adapter output byte-for-byte; without supabase-js every derive warns", () => {
   const repo = mkRepo(FIXTURE);
-  writeConfig(repo, composedConfig(readConfig(repo)));
+  const composed = composedConfig(readConfig(repo));
+  writeConfig(repo, composed);
   run(repo, ["derive"]);
   assertTreesEqual(tree(join(repo, "zdd", "metadata")), tree(GOLDEN), "composed vs golden");
+  // The pre-0.9 composition: the client calls are nobody's to read now, and derive says so (CR-013).
+  writeConfig(repo, { ...composed, extractors: ["supabase", "nextjs"] });
+  const { status, stderr } = spawnSync(process.execPath, [BIN, "derive"], { cwd: repo, encoding: "utf8" });
+  assert.equal(status, 0, stderr);
+  assert.match(stderr, /WARNING \[data-access\].*no data-access adapter is configured/);
   rmSync(repo, { recursive: true, force: true });
 });
 

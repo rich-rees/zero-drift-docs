@@ -3,6 +3,9 @@
   "baseBranch": "main",
   "extractors": [
     "supabase",
+    "supabase-js",
+    "supabase-py",
+    "sqlalchemy",
     "nextjs",
     "jobs"
   ],
@@ -30,6 +33,16 @@
           "apps/web/src"
         ]
       }
+    },
+    "supabase-py": {
+      "roots": [
+        "apps/api"
+      ]
+    },
+    "sqlalchemy": {
+      "roots": [
+        "apps/api"
+      ]
     }
   }
 }

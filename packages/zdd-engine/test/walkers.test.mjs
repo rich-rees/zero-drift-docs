@@ -4,6 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { slugify, extractMethods, leadingComment, derive as nextjs } from "../src/adapters/nextjs/index.mjs";
 import { scanFileText, normalizeFetchUrl } from "../src/adapters/nextjs/refs.mjs";
+import { scanDataCalls } from "../src/adapters/supabase-js/index.mjs";
 import { makeRouteMatcher } from "../src/core/lib/resolve-refs.mjs";
 
 test("slugify: dynamic + catch-all + groups + dots", () => {
@@ -47,7 +48,7 @@ test("leadingComment: skips file-path echo, returns prose", () => {
   assert.equal(leadingComment("import a from 'b'\n// later comment"), "");
 });
 
-test("scanFileText: quotes, const indirection, rpc, fetch", () => {
+test("scanFileText and supabase-js scanDataCalls: quotes, const indirection, rpc, fetch", () => {
   const src = `
 const BUCKET = 'survey-media'
 await supabase.from('journeys').select()
@@ -59,13 +60,16 @@ await fetch(\`/api/journeys/\${id}/runs?x=1\`)
 Buffer.from(header, 'base64')
 await db.from(tableVar).select()
 `;
+  // nextjs reads the API calls; the client calls are supabase-js's since 0.9 (decision 0037).
   const scan = scanFileText(src);
-  assert.deepEqual([...scan.fromNames].sort(), ["journeys", "survey-media", "video_assets"]);
-  assert.deepEqual([...scan.rpcNames], ["save_journey_graph"]);
   assert.deepEqual([...scan.fetchUrls].sort(), ["/api/journeys", "/api/journeys/*/runs"]);
+  const data = scanDataCalls(src);
+  assert.deepEqual([...data.from].sort(), ["journeys", "survey-media", "video_assets"]);
+  assert.deepEqual([...data.rpc], ["save_journey_graph"]);
   // Single-arg identifier form is Supabase-shaped and gets flagged; multi-arg
-  // Buffer.from(x, 'base64') is deliberately ignored noise.
-  assert.deepEqual([...scan.unresolvedFromIdents], ["tableVar"]);
+  // Buffer.from(x, 'base64') and a class's static Array.from(xs) are noise.
+  assert.deepEqual([...data.unresolved], ["tableVar"]);
+  assert.deepEqual([...scanDataCalls("const a = Array.from(items);\n").unresolved], []);
 });
 
 test("normalizeFetchUrl: query, trailing slash, template holes", () => {

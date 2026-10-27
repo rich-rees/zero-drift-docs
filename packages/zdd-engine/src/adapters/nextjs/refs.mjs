@@ -1,8 +1,8 @@
 // Static reference scanner for the nextjs ZDD extractor.
 //
-// Finds outbound references in TS/TSX source: Supabase table/bucket access
-// (`.from('name')`), RPC calls (`.rpc('name')`) and internal API calls
-// (`fetch('/api/...')`). Purely textual — no import-graph resolution, no
+// Finds outbound references in TS/TSX source: internal API calls
+// (`fetch('/api/...')`). Data access moved to supabase-js in 0.9 (decision
+// 0037). Purely textual — no import-graph resolution, no
 // type-checking. Wrapper libs (journey-api.ts etc.) keep their refs on their
 // own module record rather than propagating to callers: mechanically true,
 // boring, and honest about what a grep can know.
@@ -11,7 +11,6 @@ import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { walkDir } from "../../core/lib/walk.mjs";
 import { expandTemplatePath } from "../../core/lib/template-paths.mjs";
-import { scanSubscriptions } from "../react-router/index.mjs";
 
 const posixify = (p) => p.split(/[\\/]/).join("/");
 
@@ -67,47 +66,25 @@ export function normalizeFetchUrl(raw) {
   return url;
 }
 
-// Scan one file's text. Returns raw candidate names; the deriver resolves them
-// against every extractor's records after the merge (name-set membership is
-// the whole disambiguation strategy — receivers vary too much to be a signal).
-export function scanFileText(text, subscribeCalls = []) {
-  const fromNames = new Set();
-  const rpcNames = new Set();
+// Scan one file's text for the API calls it makes. Returns raw candidate
+// urls; the deriver resolves them against every extractor's records after
+// the merge. Its data access (`.from`, `.rpc`, Realtime) is a data-access
+// adapter's to read (decision 0037): the file is named by `?code:<file>#*`.
+export function scanFileText(text) {
   const fetchUrls = new Set();
-  const unresolvedFromIdents = new Set();
-
-  // File-local `const NAME = 'literal'` bindings — covers the repo's bucket
-  // constants (BUCKET, SURVEY_MEDIA_BUCKET, MEDIA_HLS_BUCKET). Cross-file
-  // constants are an accepted gap, surfaced via diagnostics.
-  const consts = new Map();
-  for (const m of text.matchAll(/\bconst\s+([A-Za-z_]\w*)\s*=\s*(['"])([^'"]+)\2/g)) {
-    consts.set(m[1], m[3]);
-  }
-
-  for (const m of text.matchAll(/\.from\(\s*(['"])([\w-]+)\1\s*\)/g)) fromNames.add(m[2]);
-  for (const m of text.matchAll(/\.from\(\s*([A-Za-z_]\w*)\s*\)/g)) {
-    const resolved = consts.get(m[1]);
-    if (resolved) fromNames.add(resolved);
-    else unresolvedFromIdents.add(m[1]);
-  }
-  for (const m of text.matchAll(/\.rpc\(\s*(['"])(\w+)\1/g)) rpcNames.add(m[2]);
   // A `${hole}` typed as a union of literals in this file expands to one url
   // per literal; any other hole is `*`, a route parameter only (decision 0019).
   for (const m of text.matchAll(/\bfetch\(\s*(['"`])(\/api\/[^'"`]*)\1/g)) {
     for (const url of expandTemplatePath(m[2], text)) fetchUrls.add(normalizeFetchUrl(url));
   }
-
-  // Realtime subscriptions (2.1.0, item 5): the client's own
-  // `.on("postgres_changes", { table })` and the adopter's named helpers.
-  const subscriptions = scanSubscriptions(text, subscribeCalls);
-  return { fromNames, rpcNames, fetchUrls, unresolvedFromIdents, subscriptions };
+  return { fetchUrls };
 }
 
-export function scanFiles(repoRoot, files, subscribeCalls = []) {
+export function scanFiles(repoRoot, files) {
   const results = new Map();
   for (const rel of files) {
     const text = readFileSync(join(repoRoot, rel), "utf8");
-    results.set(rel, scanFileText(text, subscribeCalls));
+    results.set(rel, scanFileText(text));
   }
   return results;
 }

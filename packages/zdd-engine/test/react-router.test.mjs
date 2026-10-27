@@ -12,9 +12,11 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, cpSync, sy
 import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { derive, parseRouteTree, joinRoutePath, scanApiCalls, normalizeApiPath, importMap, lex, topLevel, narrowModule, MAX_SOURCE_BYTES } from "../src/adapters/react-router/index.mjs";
+import { derive, parseRouteTree, joinRoutePath } from "../src/adapters/react-router/index.mjs";
+import { scanApiCalls, normalizeApiPath, importMap, lex, topLevel, narrowModule, MAX_SOURCE_BYTES } from "../src/adapters/js/source.mjs";
 import { derive as fastapi } from "../src/adapters/fastapi/index.mjs";
 import { resolveRefs } from "../src/core/lib/resolve-refs.mjs";
+import { dataAccessOf, reach, withoutCode } from "./code-reach.mjs";
 import { unclaimedRecords, unclaimedInGraph } from "../src/core/lib/claims.mjs";
 
 const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -66,7 +68,9 @@ test("fixture: one surface per leaf route; index routes take the parent path; la
 
 test("refs: a screen's own API calls and those of the names it imports resolve to the fastapi routes; a guard's calls belong to no surface", () => {
   const web = derive({ repoRoot: FIXTURE, options: { routesFile: ROUTES } });
-  assert.deepEqual(web.records.find((r) => r.id === "surface:/activity").refs, ["?route:/activity"], "unresolved before the merge");
+  // Unresolved before the merge; the screen's own file and the unit it
+  // imports are named as code (decision 0037), for a data-access adapter.
+  assert.deepEqual(web.records.find((r) => r.id === "surface:/activity").refs, ["?code:apps/web/src/pages/ActivityPage.tsx#*", "?code:apps/web/src/services.ts#useServices", "?route:/activity"]);
   const api = fastapi({ repoRoot: FIXTURE, options: { roots: ["apps/api"] } });
   const { records } = resolveRefs([...api.records, ...web.records]);
   const by = (id) => records.find((r) => r.id === id);
@@ -167,7 +171,8 @@ test("1.3.0 CR-018/019/020/021/040: type-only imports bind nothing; Unicode name
   });
   try {
     const { records, diagnostics } = derive({ repoRoot: root, options: { routesFile: "src/routes.tsx" } });
-    assert.deepEqual(records[0].refs, ["?route:/cafe", "?route:/lazy", "?route:/registered"]);
+    assert.deepEqual(withoutCode(records[0].refs), ["?route:/cafe", "?route:/lazy", "?route:/registered"]);
+    assert.deepEqual(reach(records[0].refs, dataAccessOf(root)), ["?route:/cafe", "?route:/lazy", "?route:/registered"], "a data call in a string is no data access either");
     assert.ok(diagnostics.some((d) => /src\/A\.tsx imports src\/lazy\.ts through import\(\) — its calls are attributed whole/.test(d)), diagnostics.join("\n"));
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -193,7 +198,7 @@ test("1.3.0 CR-022: many screens importing different name sets from one large mo
     const { records } = derive({ repoRoot: root, options: { routesFile: "src/routes.tsx" } });
     const ms = Number(process.hrtime.bigint() - started) / 1e6;
     assert.equal(records.length, N);
-    assert.deepEqual(records.find((r) => r.id === "surface:/s7").refs, ["?route:/r7", "?route:/r8"]);
+    assert.deepEqual(withoutCode(records.find((r) => r.id === "surface:/s7").refs), ["?route:/r7", "?route:/r8"]);
     assert.ok(ms < 10_000, `derive took ${ms} ms for ${N} distinct name sets of a ${Math.round(files["src/data.ts"].length / 1024)} KiB module`);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -272,7 +277,9 @@ test("1.3.0: named imports narrow a data module to the bodies they reach — hel
   });
   try {
     const { records, diagnostics } = derive({ repoRoot: root, options: { routesFile: "src/routes.tsx" } });
-    const refs = (path) => records.find((r) => r.id === `surface:${path}`).refs;
+    // What each screen reaches once supabase-js has read the same files.
+    const da = dataAccessOf(root);
+    const refs = (path) => reach(records.find((r) => r.id === `surface:${path}`).refs, da);
     const WHOLE = ["?from:avatars", "?route:/audit-events", "?route:/boot", "?route:/everything", "?route:/tenants", "?route:/users", "?route:/users/*/*"];
     assert.deepEqual(refs("/activity"), ["?route:/audit-events", "?route:/boot"]);
     assert.deepEqual(refs("/tenants"), ["?route:/boot", "?route:/tenants"]);
@@ -433,9 +440,9 @@ export const routes: RouteObject[] = [
   assert.deepEqual(diagnostics, []);
   const by = (id) => records.find((r) => r.id === id);
   assert.deepEqual(by("surface:/reports").resource, ["src/pages/Reports.tsx", "src/routes.tsx"]);
-  assert.deepEqual(by("surface:/reports").refs, ["?route:/reports"], "type-only import of admin/api does not pull its calls in");
+  assert.deepEqual(by("surface:/reports").refs, ["?code:src/pages/Reports.tsx#*", "?route:/reports"], "type-only import of admin/api does not pull its calls in");
   assert.deepEqual(by("surface:/users").resource, ["src/pages/UsersRoute.tsx", "src/routes.tsx"]);
-  assert.deepEqual(by("surface:/users").refs, ["?route:/users"]);
+  assert.deepEqual(by("surface:/users").refs, ["?code:src/pages/UsersRoute.tsx#*", "?route:/users"]);
   assert.equal(by("surface:/users").facts.element, "lazy(./pages/UsersRoute)");
   assert.deepEqual([...importMap(`import A, { b as c, type D } from "./x"; import type { E } from "./t"; import { e } from '@/y';`).entries()], [["A", "./x"], ["c", "./x"], ["e", "@/y"]]);
   rmSync(root, { recursive: true, force: true });
@@ -492,14 +499,14 @@ test("CR-001: a symlinked routes file, element file or one-hop module is never r
   if (process.platform !== "win32") {
     symlinkSync(join(root, "outside.ts"), join(root, "src", "data.ts"));
     const { records, diagnostics } = derive({ repoRoot: root, options: {} });
-    assert.deepEqual(records.find((r) => r.id === "surface:/a").refs, ["?route:/a"], "the linked data module contributes nothing");
+    assert.deepEqual(records.find((r) => r.id === "surface:/a").refs, ["?code:src/A.tsx#*", "?route:/a"], "the linked data module contributes nothing, not even its code");
     assert.ok(diagnostics.some((d) => /src\/data\.ts is not a regular file inside the repo/.test(d)), diagnostics.join("\n"));
     // CR-029: a linked earlier spelling does not shadow a real later one (`./data` -> data.tsx link, data.js real).
     symlinkSync(join(root, "outside.ts"), join(root, "src", "data.tsx"));
     rmSync(join(root, "src", "data.ts"));
     writeFileSync(join(root, "src", "data.js"), `export const x = api.get("/real-data");\n`);
     const again = derive({ repoRoot: root, options: {} });
-    assert.deepEqual(again.records.find((r) => r.id === "surface:/a").refs, ["?route:/a", "?route:/real-data"]);
+    assert.deepEqual(withoutCode(again.records.find((r) => r.id === "surface:/a").refs), ["?route:/a", "?route:/real-data"]);
     // A linked routes file is never read — and, like a renamed one, it stops
     // derive rather than writing every surface record away (1.3.0).
     rmSync(join(root, "src", "routes.tsx"));
@@ -529,7 +536,7 @@ test("CR-001: a symlinked routes file, element file or one-hop module is never r
   writeFileSync(join(root, "src", "data2.tsx"), `export const v = api.get("/data2");\n`);
   writeFileSync(join(root, "src", "B.tsx"), readFileSync(join(root, "src", "B.tsx"), "utf8").replace("export const B", `import { v } from "./data2";\nexport const B`));
   const suffixed = derive({ repoRoot: root, options: {} });
-  assert.deepEqual(suffixed.records.find((r) => r.id === "surface:/b").refs, ["?route:/b", "?route:/data2", "?route:/widget"]);
+  assert.deepEqual(withoutCode(suffixed.records.find((r) => r.id === "surface:/b").refs), ["?route:/b", "?route:/data2", "?route:/widget"]);
   // An oversized routes file is still never read — and since 1.3.0 CR-015
   // it stops derive: an empty tree here would write every surface away.
   assert.throws(() => derive({ repoRoot: root, options: { routesFile: "src/big.tsx" } }), /routesFile 'src\/big\.tsx' is over 1024 KiB — never read/);
@@ -605,7 +612,7 @@ test("missing routes file is nothing to inventory; a path option outside the rep
   });
   const a = derive({ repoRoot: aliased, options: { routesFile: "web/src/app/routes.tsx", srcAliasRoot: "web/src" } });
   assert.deepEqual(a.records[0].resource, ["web/src/screens/Home.tsx", "web/src/app/routes.tsx"]);
-  assert.deepEqual(a.records[0].refs, ["?route:/v1/home"]);
+  assert.deepEqual(a.records[0].refs, ["?code:web/src/screens/Home.tsx#*", "?route:/v1/home"]);
   rmSync(aliased, { recursive: true, force: true });
 });
 
@@ -617,7 +624,7 @@ test("derive: a duplicate path is a diagnostic and the second entry is skipped; 
   const { records, diagnostics } = derive({ repoRoot: root, options: {} });
   assert.equal(records.length, 1);
   assert.deepEqual(records[0].resource, ["src/Users.tsx", "src/routes.tsx"]);
-  assert.deepEqual(records[0].refs, ["?route:/users"]);
+  assert.deepEqual(records[0].refs, ["?code:src/Users.tsx#*", "?route:/users"]);
   assert.match(diagnostics[0], /route \/u declared twice — second entry skipped/);
   rmSync(root, { recursive: true, force: true });
 });

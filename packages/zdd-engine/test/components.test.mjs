@@ -88,6 +88,7 @@ test("fixture: four records — props inline, from a same-file type, from an imp
   assert.equal(panel.facts.propsType, undefined);
   assert.deepEqual(panel.facts.edges, {
     calls: ["?route:/jobs/*/route", "?route:/jobs/*/route-search"],
+    reads: ["?code:apps/web/src/components/RouteSearchPanel.tsx#*"], // its file's code, for a data-access adapter (decision 0037)
     usedBy: ["?surface:apps/web/src/pages/JobsPage.tsx"],
     uses: ["component:apps/web/src/components/Badge.tsx#Badge"],
   });

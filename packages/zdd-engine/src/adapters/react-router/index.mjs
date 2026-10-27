@@ -17,10 +17,7 @@
 //                 0013) — every surface record hangs on this one file
 //   srcAliasRoot  where the tsconfig `@/` alias points (default: routesFile's
 //                 directory)
-//   subscribeCalls  call names whose first string argument is a table the
-//                 screen subscribes to over Realtime (`live.onInsert`), beside
-//                 the client's own `.on("postgres_changes", { table })` — a
-//                 `subscribes` edge (2.1.0, item 5, decision 0016)
+//   (subscribeCalls moved to supabase-js in 0.9: set here, it is a warning)
 // Purely textual — no TypeScript parser — but LEXICALLY honest (review
 // CR-006): one pass masks every comment, string body, template body and
 // regex literal to spaces, and every structural decision (bracket matching,
@@ -41,7 +38,11 @@
 // local modules it imports ONE hop away (a screen's data module:
 // `api.get("/users")`, `fetch("/v1/x")`, any receiver — textual on purpose)
 // are emitted UNRESOLVED (`?route:/users`) for the deriver to resolve against
-// whichever extractor owns the API; `.from('x')` / `.rpc('x')` likewise. A
+// whichever extractor owns the API. The code a screen runs is named the same
+// way, `?code:<file>#<unit>` (decision 0037; adapters/js names the units):
+// the element file whole (`#*`), and in each one-hop module the units the
+// import reaches — how that code reaches the database is a data-access
+// adapter's (supabase-js) to say, and the core folds it in. A
 // named import narrows the module to what the imported names reach — their
 // declarations, the helpers those mention, and top-level code; a default or
 // namespace import, or a name the module does not declare itself, takes the
@@ -55,277 +56,14 @@ import { join, posix } from "node:path";
 import { slugify } from "../../core/lib/slug.mjs";
 import { repoRelative } from "../../core/lib/paths.mjs";
 import { regularFileInside } from "../../core/lib/walk-markdown.mjs";
-import { expandTemplatePath } from "../../core/lib/template-paths.mjs";
+import { MAX_SOURCE_BYTES, RESOLVE_EXTS, codeUnits, firstNonSpace, importMap, localImports, matchBracket, model, narrowModule, scanApiCalls, skipJsx, stringAt, topLevel } from "../js/source.mjs";
 
-const RESOLVE_EXTS = [".tsx", ".ts", ".jsx", ".js", "/index.tsx", "/index.ts", "/index.jsx", "/index.js"];
-export const MAX_SOURCE_BYTES = 1024 * 1024;
 // Route-tree nesting the parser will follow; deeper is a diagnostic, never a
 // stack overflow (CR-004). Real trees are three or four deep.
 const MAX_TREE_DEPTH = 32;
 
 export const FACTS_KEY_ORDER = {
   surface: ["element", "guards", "dynamicSegments", "edges"],
-};
-
-// ---------------------------------------------------------------------------
-// Lexical mask. `lex(text)` returns { code, mask }: `code` has comments and
-// regex literals blanked to spaces (strings kept, for import / call-name
-// scans); `mask` additionally blanks string and template BODIES (delimiters
-// kept), so bracket matching sees only structure. Same length as `text`,
-// same offsets. Iterative, one pass, no recursion.
-// ---------------------------------------------------------------------------
-export function lex(text) {
-  const code = text.split("");
-  const mask = text.split("");
-  const n = text.length;
-  const blank = (arr, from, to) => {
-    for (let k = from; k < to; k++) if (arr[k] !== "\n") arr[k] = " ";
-  };
-  // A `/` starts a regex literal when the previous significant token cannot
-  // end an expression (an operator, an opener, a keyword) — else it divides.
-  const regexAllowed = (i) => {
-    let k = i - 1;
-    while (k >= 0 && /\s/.test(mask[k])) k--;
-    if (k < 0) return true;
-    const ch = mask[k];
-    if (/[(,=:[!&|?{};<>+\-*%^~]/.test(ch)) return true;
-    if (ch === ")") {
-      // `if (x) /re/.test(y)`: the `)` closes a statement head, so what
-      // follows is an expression start (review CR-006, round 2). Find the
-      // matching `(` on the mask and the word before it.
-      let depth = 0;
-      let j = k;
-      for (; j >= 0; j--) {
-        if (mask[j] === ")") depth++;
-        else if (mask[j] === "(" && --depth === 0) break;
-      }
-      const wordBefore = (end) => {
-        let w = end;
-        while (w >= 0 && /\s/.test(mask[w])) w--;
-        let ws = w;
-        while (ws >= 0 && /[A-Za-z_$\d]/.test(mask[ws])) ws--;
-        // `client.if(x)` — or `client. if(x)`, `client./*c*/if(x)` (the mask
-        // has blanked the comment) — is a member call, not a keyword (CR-027).
-        let dot = ws;
-        while (dot >= 0 && /\s/.test(mask[dot])) dot--;
-        return { word: mask[dot] === "." ? "" : text.slice(ws + 1, w + 1), before: ws };
-      };
-      const { word, before } = wordBefore(j - 1);
-      if (["if", "while", "for", "with"].includes(word)) return true;
-      return word === "await" && wordBefore(before).word === "for"; // `for await (...) /re/`
-    }
-    if (/[A-Za-z_$\d\]]/.test(ch)) {
-      let s = k;
-      while (s >= 0 && /[A-Za-z_$\d]/.test(mask[s])) s--;
-      const word = text.slice(s + 1, k + 1);
-      return ["return", "typeof", "case", "do", "else", "in", "of", "instanceof", "void", "delete", "throw", "yield", "await"].includes(word);
-    }
-    return false;
-  };
-  let i = 0;
-  // Template literals nest via `${ ... }`: a stack of "how many braces are
-  // open inside the current interpolation".
-  const tpl = [];
-  const tplOpens = new Set(); // offsets of backticks that OPEN a template (1.3.0 CR-017)
-  while (i < n) {
-    const ch = text[i];
-    const next = text[i + 1];
-    if (tpl.length && ch === "}" && tpl[tpl.length - 1] === 0) {
-      // back into the template body
-      tpl.pop();
-      const start = i + 1;
-      let k = start;
-      for (; k < n; k++) {
-        if (text[k] === "\\") {
-          k++;
-          continue;
-        }
-        if (text[k] === "`") break;
-        if (text[k] === "$" && text[k + 1] === "{") break;
-      }
-      blank(mask, start, k);
-      if (k < n && text[k] === "$") {
-        tpl.push(0);
-        i = k + 2;
-      } else i = k + 1;
-      continue;
-    }
-    if (tpl.length && ch === "{") {
-      tpl[tpl.length - 1]++;
-      i++;
-      continue;
-    }
-    if (tpl.length && ch === "}") {
-      tpl[tpl.length - 1]--;
-      i++;
-      continue;
-    }
-    if (ch === "/" && next === "/") {
-      let k = text.indexOf("\n", i);
-      if (k === -1) k = n;
-      blank(code, i, k);
-      blank(mask, i, k);
-      i = k;
-      continue;
-    }
-    if (ch === "/" && next === "*") {
-      let k = text.indexOf("*/", i + 2);
-      k = k === -1 ? n : k + 2;
-      blank(code, i, k);
-      blank(mask, i, k);
-      i = k;
-      continue;
-    }
-    if (ch === '"' || ch === "'") {
-      let k = i + 1;
-      for (; k < n && text[k] !== ch && text[k] !== "\n"; k++) if (text[k] === "\\") k++;
-      blank(mask, i + 1, Math.min(k, n));
-      i = Math.min(k + 1, n);
-      continue;
-    }
-    if (ch === "`") {
-      tplOpens.add(i);
-      let k = i + 1;
-      for (; k < n; k++) {
-        if (text[k] === "\\") {
-          k++;
-          continue;
-        }
-        if (text[k] === "`") break;
-        if (text[k] === "$" && text[k + 1] === "{") break;
-      }
-      blank(mask, i + 1, Math.min(k, n));
-      if (k < n && text[k] === "$") {
-        tpl.push(0);
-        i = k + 2;
-      } else i = Math.min(k + 1, n);
-      continue;
-    }
-    // A `/` followed by `>` is JSX's self-closing tag, never a regex: after
-    // `name={r} />` the `}` makes a regex "allowed", and the blanked run then
-    // ate the closing braces of every component body (2.1.0).
-    if (ch === "/" && next !== ">" && regexAllowed(i)) {
-      let k = i + 1;
-      let cls = false;
-      for (; k < n && text[k] !== "\n"; k++) {
-        const c = text[k];
-        if (c === "\\") {
-          k++;
-          continue;
-        }
-        if (c === "[") cls = true;
-        else if (c === "]") cls = false;
-        else if (c === "/" && !cls) break;
-      }
-      if (k < n && text[k] === "/") {
-        // flags
-        let e = k + 1;
-        while (e < n && /[a-z]/.test(text[e])) e++;
-        blank(code, i, e);
-        blank(mask, i, e);
-        i = e;
-        continue;
-      }
-    }
-    i++;
-  }
-  return { code: code.join(""), mask: mask.join(""), tplOpens };
-}
-
-// Index just past the bracket closing the one opened at `open`, on the mask.
-function matchBracket(mask, open) {
-  const pairs = { "(": ")", "[": "]", "{": "}" };
-  const closer = pairs[mask[open]];
-  let depth = 0;
-  for (let i = open; i < mask.length; i++) {
-    const ch = mask[i];
-    if (ch === "(" || ch === "[" || ch === "{") depth++;
-    else if (ch === ")" || ch === "]" || ch === "}") {
-      depth--;
-      if (depth === 0) return ch === closer ? i + 1 : i;
-      if (depth < 0) return i;
-    }
-  }
-  return mask.length;
-}
-
-// From a `<` opening a JSX element on the mask, the index just past the element
-// (self-closing, or its matching close tag).
-function skipJsx(mask, i) {
-  let depth = 0;
-  for (; i < mask.length; i++) {
-    const ch = mask[i];
-    if (ch === "{") {
-      i = matchBracket(mask, i) - 1;
-      continue;
-    }
-    if (ch === "<") {
-      if (mask[i + 1] === "/") {
-        depth--;
-        i = mask.indexOf(">", i);
-        if (i === -1) return mask.length;
-        if (depth <= 0) return i + 1;
-      } else depth++;
-      continue;
-    }
-    if (ch === "/" && mask[i + 1] === ">") {
-      depth--;
-      if (depth <= 0) return i + 2;
-      i++;
-    }
-  }
-  return mask.length;
-}
-
-// ---------------------------------------------------------------------------
-// Source model: one file's text, its masks, its line table and the `//`
-// comment block above any offset (one pass — CR-005).
-// ---------------------------------------------------------------------------
-export function model(text) {
-  const { code, mask } = lex(text);
-  const lineStart = [0];
-  for (let i = 0; i < text.length; i++) if (text[i] === "\n") lineStart.push(i + 1);
-  // Per line: the comment text if the line is a bare `//` line, else null.
-  const commentLine = lineStart.map((s, k) => {
-    const e = k + 1 < lineStart.length ? lineStart[k + 1] - 1 : text.length;
-    const t = text.slice(s, e).trim();
-    return t.startsWith("//") ? t.replace(/^\/\/\s?/, "").trim() : null;
-  });
-  const lineOf = (at) => {
-    let lo = 0;
-    let hi = lineStart.length - 1;
-    while (lo < hi) {
-      const mid = (lo + hi + 1) >> 1;
-      if (lineStart[mid] <= at) lo = mid;
-      else hi = mid - 1;
-    }
-    return lo;
-  };
-  // A divider (`----- Section -----`, `=====`, `//// Inputs ////`) heads a
-  // section of the file; it is never prose, so it ends the block, and what
-  // sits above it describes the section, not this declaration.
-  const isDivider = (t) => !/[A-Za-z0-9]/.test(t) || /^[^A-Za-z0-9\s]{3,}.*[^A-Za-z0-9\s]{3,}$/.test(t);
-  const commentAbove = (at) => {
-    const found = [];
-    for (let k = lineOf(at) - 1; k >= 0 && commentLine[k] !== null; k--) {
-      if (commentLine[k] && isDivider(commentLine[k])) break;
-      found.push(commentLine[k]);
-    }
-    return found.reverse().filter(Boolean).join(" ");
-  };
-  return { text, code, mask, commentAbove };
-}
-
-const stringAt = (m, i) => {
-  // `i` is a quote on the mask; the body is the original text up to the next
-  // matching delimiter on the mask.
-  const q = m.mask[i];
-  const end = m.mask.indexOf(q, i + 1);
-  return end === -1 ? null : m.text.slice(i + 1, end);
-};
-const firstNonSpace = (mask, i) => {
-  while (i < mask.length && /\s/.test(mask[i])) i++;
-  return i;
 };
 
 // ---------------------------------------------------------------------------
@@ -549,345 +287,18 @@ export function parseRouteTree(text, diagnostics = []) {
 }
 
 // ---------------------------------------------------------------------------
-// Imports and API-call refs (on the comment-free `code` text)
-// ---------------------------------------------------------------------------
-// local name -> import source: default, named and aliased imports, and
-// `const X = lazy(() => import("./x"))` (CR-017). `import type` is not a
-// runtime dependency and binds nothing here (CR-019).
-export function importMap(text) {
-  const { code } = lex(text);
-  const imports = new Map();
-  for (const m of code.matchAll(/\bimport\s+(?!type\b)([A-Za-z_$][\w$]*)\s*(?:,\s*\{[^}]*\})?\s*from\s*(['"])([^'"]+)\2/g)) imports.set(m[1], m[3]);
-  for (const m of code.matchAll(/\bimport\s+(?!type\b)(?:[A-Za-z_$][\w$]*\s*,\s*)?\{([^}]*)\}\s*from\s*(['"])([^'"]+)\2/g)) {
-    for (const part of m[1].split(",")) {
-      const seg = part.trim();
-      if (!seg || /^type\s/.test(seg)) continue;
-      const aliased = /^([A-Za-z_$][\w$]*)\s+as\s+([A-Za-z_$][\w$]*)$/.exec(seg);
-      imports.set(aliased ? aliased[2] : seg, m[3]);
-    }
-  }
-  for (const m of code.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:React\.)?lazy\(\s*(?:async\s*)?\(\)\s*=>\s*import\(\s*(['"])([^'"]+)\2/g)) imports.set(m[1], m[3]);
-  return imports;
-}
-// Identifiers as ECMAScript spells them — not ASCII only, so
-// `import { café }` is a name, never a silent miss (1.3.0 CR-019).
-const ID = "[\\p{ID_Start}$_][\\p{ID_Continue}$\\u200C\\u200D]*";
-const ID_RE = new RegExp(`^${ID}$`, "u");
-
-// Every local runtime import of a file (relative or `@/`), in first-seen
-// order, with what it binds (1.3.0): `names` is the set of exported names
-// the named imports ask for (`import { a, b as c }` asks for a and b; a
-// side-effect `import "./x"` or `import {} from` asks for none — the
-// module's top-level code still runs), or null when the import takes the
-// module whole — a default or namespace import, a dynamic import(), or a
-// specifier the scan cannot read — with `how` saying which. An import of
-// types only (`import type`, `import { type A }`) is erased by TypeScript
-// and binds nothing (CR-018). Structure is found on the MASK (comments and
-// string bodies blanked), so an import spelled inside a string is not one
-// (CR-020); the module specifier is read from the text at the same offsets.
-export function localImports(text) {
-  const { mask } = lex(text);
-  const out = new Map();
-  const note = (src, names, how) => {
-    if (!(src.startsWith(".") || src.startsWith("@/"))) return;
-    const prev = out.get(src);
-    if (prev && prev.names === null) return;
-    out.set(src, names === null ? { names: null, how } : { names: new Set([...(prev?.names ?? []), ...names]), how: null });
-  };
-  const literal = (q) => {
-    const end = mask.indexOf(mask[q], q + 1);
-    return end === -1 ? null : text.slice(q + 1, end);
-  };
-  const re = /\bimport\s*(?:(type\s+)?([^;'"`]*?)\s*\bfrom\s*|)(['"])|\bimport\(\s*(['"])/g;
-  for (const m of mask.matchAll(re)) {
-    if (m[4] !== undefined) {
-      const src = literal(m.index + m[0].length - 1);
-      if (src !== null) note(src, null, "through import()");
-      continue;
-    }
-    const src = literal(m.index + m[0].length - 1);
-    if (src === null || m[1]) continue; // `import type … from`
-    if (m[2] === undefined) {
-      note(src, [], null); // `import "./x"`: top-level code only
-      continue;
-    }
-    const clause = m[2];
-    const brace = /\{([^}]*)\}/.exec(clause);
-    const outside = clause.replace(/\{[^}]*\}/, "").replace(/,/g, " ").trim();
-    if (/\*\s*as\b/.test(outside)) {
-      note(src, null, "as a namespace");
-      continue;
-    }
-    if (outside) {
-      note(src, null, "by default import");
-      continue;
-    }
-    const specs = (brace ? brace[1] : "").split(",").map((s) => s.trim()).filter(Boolean);
-    if (specs.length && specs.every((s) => /^type\s/.test(s))) continue; // types only: erased
-    const names = [];
-    let unreadable = null;
-    for (const seg of specs) {
-      if (/^type\s/.test(seg)) continue;
-      const [name, ...rest] = seg.split(/\s+as\s+/);
-      if (ID_RE.test(name) && rest.length <= 1 && (!rest.length || ID_RE.test(rest[0]))) names.push(name);
-      else unreadable ??= seg;
-    }
-    if (unreadable !== null) note(src, null, `with a specifier the scan cannot read ('${unreadable.slice(0, 40)}')`);
-    else note(src, names, null);
-  }
-  return out;
-}
-
-// A module's top-level statements, found on the mask. A statement starts on
-// a line at bracket depth 0:
-//   - at column 0, on a character that cannot continue the line before (not
-//     a closer, a dot, or a template's CLOSING backtick — an opening one
-//     starts a statement, CR-017);
-//   - indented, when its first word is a declaration keyword;
-//   - indented, when the line cannot continue the one before: it does not
-//     open with `.`, an operator or a closer, and the line before does not
-//     end with an operator, `=>`, an opener or a comma. An indented
-//     statement that is really a continuation is then counted as `code`,
-//     which only ever adds refs — the "might touch" side (decision 0011).
-// It runs to the next start. Template bodies are blanked on the mask, so a
-// line inside one never starts a statement. Each statement is classified:
-//   decl      a function / class / const / let / var / enum, by local name;
-//             `export default …` declares the local name "default"
-//   exports   `export { a as b }` — exported name → local name
-//   reexport  `export { a } from "…"` / `export * from "…"` — names (or *)
-//             another module declares
-//   code      anything else that is not an import or a type: runs on import
-export function topLevel(text) {
-  const { code, mask, tplOpens } = lex(text);
-  const starts = [];
-  let depth = 0;
-  // How the last non-blank line ENDED: its masked text if it ended at depth
-  // 0, else "{" (a line ending inside brackets is always continued).
-  let lastLineEnd = "";
-  let lineFrom = 0;
-  const CONTINUES_NEXT = /(?:[=+\-*/%&|^,?:(\[{<>!~]|=>|\b(?:return|new|await|yield|typeof|in|of|instanceof|extends|delete|void|throw|case|else))$/;
-  for (let i = 0; i < mask.length; i++) {
-    const ch = mask[i];
-    if (depth === 0 && i === lineFrom) {
-      const eol = mask.indexOf("\n", i);
-      const line = mask.slice(i, eol === -1 ? mask.length : eol);
-      const lead = line.search(/\S/);
-      if (lead === 0) {
-        if (!/[})\].`]/.test(ch) || (ch === "`" && tplOpens.has(i))) starts.push(i);
-      } else if (lead > 0) {
-        const first = line[lead];
-        if (/^(?:export|import|function|async|class|const|let|var|enum)\b/.test(code.slice(i + lead, i + lead + 12))) starts.push(i);
-        else if (!/[.?:+\-*/%&|^=,<>)\]}]/.test(first) && !(first === "`" && !tplOpens.has(i + lead)) && !CONTINUES_NEXT.test(lastLineEnd)) starts.push(i);
-      }
-    }
-    if (ch === "(" || ch === "[" || ch === "{") depth++;
-    else if (ch === ")" || ch === "]" || ch === "}") depth = Math.max(0, depth - 1);
-    if (ch === "\n") {
-      const line = mask.slice(lineFrom, i).trimEnd();
-      if (line.trim()) lastLineEnd = depth === 0 ? line : "{";
-      lineFrom = i + 1;
-    }
-  }
-  const statements = [];
-  const decls = new Map(); // local name -> [statement index]
-  const exportsMap = new Map(); // exported name -> local name
-  const reexported = new Set();
-  let reexportAll = false;
-  const declare = (name, k) => {
-    if (!decls.has(name)) decls.set(name, []);
-    decls.get(name).push(k);
-  };
-  const exportList = (body, fn) => {
-    for (const part of body.split(",")) {
-      const seg = part.trim().replace(/^type\s+/, "");
-      if (!seg) continue;
-      const [local, exported] = seg.split(/\s+as\s+/);
-      fn(local, exported ?? local);
-    }
-  };
-  const DECL = new RegExp(`^(export\\s+)?(?:declare\\s+)?(?:(?:async\\s+)?function\\s*\\*?\\s*|class\\s+|(?:const\\s+)?enum\\s+|(?:const|let|var)\\s+)(${ID})`, "u");
-  const DEFAULT = new RegExp(`^export\\s+default\\s+(?:async\\s+)?(?:function\\s*\\*?|class)\\s*(${ID})?`, "u");
-  starts.forEach((start, k) => {
-    const end = k + 1 < starts.length ? starts[k + 1] : mask.length;
-    const s = code.slice(start, end).trimStart();
-    let kind = "code";
-    let m;
-    if (/^import\b/.test(s) || /^(?:export\s+)?(?:declare\s+)?(?:type|interface)\b/.test(s)) kind = "skip";
-    else if (/^export\s*\*/.test(s)) {
-      kind = "skip";
-      reexportAll = true;
-    } else if ((m = /^export\s*(?:type\s*)?\{([^}]*)\}\s*from\b/.exec(s))) {
-      kind = "skip";
-      exportList(m[1], (_local, exported) => reexported.add(exported));
-    } else if ((m = /^export\s*\{([^}]*)\}/.exec(s))) {
-      kind = "skip";
-      exportList(m[1], (local, exported) => exportsMap.set(exported, local));
-    } else if ((m = DEFAULT.exec(s)) || /^export\s+default\b/.test(s)) {
-      kind = "decl";
-      declare("default", k);
-      exportsMap.set("default", "default");
-      if (m?.[1]) declare(m[1], k);
-    } else if ((m = DECL.exec(s))) {
-      kind = "decl";
-      declare(m[2], k);
-      if (m[1]) exportsMap.set(m[2], m[2]);
-    }
-    statements.push({ start, end, kind });
-  });
-  // The top-level names each statement mentions (on the mask: never in a
-  // comment or a string, never as a property after a dot).
-  const mentionRe = new RegExp(`(?<![.\\p{ID_Continue}$])${ID}`, "gu");
-  for (const st of statements) {
-    st.mentions = new Set();
-    for (const id of mask.slice(st.start, st.end).matchAll(mentionRe)) if (decls.has(id[0])) st.mentions.add(id[0]);
-  }
-  return { text, mask, statements, decls, exportsMap, reexported, reexportAll };
-}
-
-// The statements the named imports `names` reach: every `code` statement
-// (it runs on import whatever is imported), the statements declaring each
-// name, and every top-level declaration any included statement mentions —
-// followed to a fixed point, which a visited set bounds (CR-017: a helper a
-// top-level call reaches counts too). Returns { statements: Set<index> }, or
-// { whole: reason, name } when a name cannot be narrowed: declared by no
-// statement here, or re-exported from another module (one hop).
-export function narrowModule(mod, names) {
-  const include = new Set();
-  const todo = [];
-  const take = (k) => {
-    if (include.has(k)) return;
-    include.add(k);
-    for (const id of mod.statements[k].mentions) todo.push(id);
-  };
-  for (const name of [...names].sort()) {
-    const local = mod.exportsMap.get(name);
-    if (local !== undefined && mod.decls.has(local)) todo.push(local);
-    else if (mod.reexported.has(name) || mod.reexportAll) return { whole: "reexport", name };
-    else return { whole: "missing", name };
-  }
-  mod.statements.forEach((s, k) => s.kind === "code" && take(k));
-  const visited = new Set();
-  while (todo.length) {
-    const local = todo.pop();
-    if (visited.has(local)) continue;
-    visited.add(local);
-    for (const k of mod.decls.get(local) ?? []) take(k);
-  }
-  return { statements: include };
-}
-
-// Data calls in one file: `.from('x')` / `.from(CONST)` (a table or bucket)
-// and `.rpc('x')` (a database function). Call sites are found on the mask —
-// a call spelled inside a string or a comment is not one (1.3.0 CR-020) —
-// and literals read from the text. `consts` resolves `.from(NAME)` against
-// the module's own `const NAME = '…'` bindings.
-export function scanDataCalls(text, consts = moduleConsts(text)) {
-  const m = model(text);
-  const from = new Set();
-  const rpc = new Set();
-  for (const hit of m.mask.matchAll(/\.(from|rpc)\(\s*(?:(['"])|([A-Za-z_$][\w$]*)\s*\))/g)) {
-    if (hit[2]) {
-      const raw = stringAt(m, hit.index + hit[0].length - 1);
-      if (raw === null) continue;
-      if (hit[1] === "from" && /^[\w-]+$/.test(raw)) from.add(raw);
-      if (hit[1] === "rpc" && /^\w+$/.test(raw)) rpc.add(raw);
-    } else if (hit[1] === "from" && consts.has(hit[3])) from.add(consts.get(hit[3]));
-  }
-  return { from, rpc };
-}
-// Realtime subscriptions (2.1.0, item 5): a surface that reads a table over
-// Supabase Realtime bypasses the API, so the dependency is a `subscribes`
-// edge to the table. Two shapes, both on the mask: the client's own
-// `.on("postgres_changes", { …, table: "<name>" })` with a literal table,
-// and any call the adopter names in `subscribeCalls` (`live.onInsert`)
-// whose FIRST argument is the table name as a string literal. A table that
-// is a variable is not seen — the same honesty as the call scanners. A name
-// may carry its schema (`public.audit_events`); the resolver matches it
-// either way (2.1.1).
-const TABLE_NAME = /^(?:[\w-]+\.)?[\w-]+$/;
-export function scanSubscriptions(text, helpers = []) {
-  const m = model(text);
-  const out = new Set();
-  for (const hit of m.mask.matchAll(/\.on\(\s*(['"])/g)) {
-    const q = hit.index + hit[0].length - 1;
-    if (stringAt(m, q) !== "postgres_changes") continue;
-    const open = m.mask.indexOf("(", hit.index);
-    const close = matchBracket(m.mask, open);
-    if (close === -1) continue;
-    const args = m.mask.slice(open, close);
-    const t = /\btable\s*:\s*(['"])/.exec(args);
-    if (!t) continue;
-    const raw = stringAt(m, open + t.index + t[0].length - 1);
-    if (raw !== null && TABLE_NAME.test(raw)) out.add(raw);
-  }
-  for (const helper of helpers) {
-    if (typeof helper !== "string" || !/^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/.test(helper)) continue;
-    const re = new RegExp(`(?<![\\w$.])${helper.replace(/[.$]/g, "\\$&")}\\s*\\(\\s*(['"])`, "g");
-    for (const hit of m.mask.matchAll(re)) {
-      const raw = stringAt(m, hit.index + hit[0].length - 1);
-      if (raw !== null && TABLE_NAME.test(raw)) out.add(raw);
-    }
-  }
-  return out;
-}
-
-// A module's `const NAME = 'literal'` bindings, found on the mask.
-export function moduleConsts(text) {
-  const m = model(text);
-  const out = new Map();
-  for (const hit of m.mask.matchAll(/\bconst\s+([A-Za-z_$][\w$]*)\s*=\s*(['"])/g)) {
-    const raw = stringAt(m, hit.index + hit[0].length - 1);
-    if (raw !== null && /^[\w-]+$/.test(raw)) out.set(hit[1], raw);
-  }
-  return out;
-}
-
-// `${expr}` -> *, a leading `${base}` prefix dropped, query string and
-// trailing slash removed — so `${baseUrl}/users?limit=${n}` reads `/users`.
-export function normalizeApiPath(raw) {
-  let url = raw.replace(/^\$\{[^}]*\}/, "").split("?")[0].replace(/\$\{[^}]*\}/g, "*");
-  if (url.length > 1 && url.endsWith("/")) url = url.slice(0, -1);
-  return url;
-}
-// API paths called from one file: `x.get("/users")` (get/post/put/patch/
-// delete/request on any receiver, an optional TypeScript generic — nested
-// one level — between the method and the call) and `fetch("/v1/x")`, string
-// or template literal, path starting with `/` once a leading `${base}` is
-// dropped. Call sites are found on the mask (never in a comment or a
-// string); the path is read from the original text. A `${hole}` whose type
-// the surrounding text states as a union of string literals expands to one
-// path per literal (decision 0019); `context` is the text that may hold the
-// declaration — the whole module when `text` is one statement of it.
-export function scanApiCalls(text, context = text) {
-  const m = model(text);
-  const out = new Set();
-  // `\bfetch`, but `.get` on ANY receiver — `client().get(…)` has no word
-  // character before the dot (1.3.0).
-  const re = /(?:\bfetch|\.(?:get|post|put|patch|delete|request)(?:<(?:[^<>()]|<[^<>()]*>)*>)?)\(\s*(['"`])/g;
-  for (const hit of m.mask.matchAll(re)) {
-    const q = hit.index + hit[0].length - 1;
-    const raw = stringAt(m, q);
-    if (raw === null) continue;
-    // A leading `${base}` is a host or prefix, never a path segment: dropped
-    // before expansion, so an expandable first hole is still read.
-    const stripped = raw.replace(/^\$\{[^}]*\}(?=\/)/, "");
-    for (const url of expandTemplatePath(stripped, context)) {
-      const path = normalizeApiPath(url);
-      if (path.startsWith("/") && path !== "/") out.add(path);
-    }
-  }
-  return out;
-}
-
-// ---------------------------------------------------------------------------
 // derive(ctx) — the extractor contract
 // ---------------------------------------------------------------------------
 export function derive({ repoRoot, options, io }) {
   // A gitignored file is not source (2.3.0, pick 1): never read, never "exists".
   const isIgnored = io?.isIgnored ?? (() => false);
   const diagnostics = [];
-  const { routesFile: routesOpt = "src/routes.tsx", srcAliasRoot: aliasOpt, subscribeCalls = [] } = options;
-  if (!Array.isArray(subscribeCalls) || subscribeCalls.some((h) => typeof h !== "string")) throw new Error("react-router: 'subscribeCalls' must be an array of call names");
+  const { routesFile: routesOpt = "src/routes.tsx", srcAliasRoot: aliasOpt } = options;
+  // Realtime subscriptions are data access (decision 0037): supabase-js reads
+  // them now. A config that still sets the option here is told, never
+  // silently emptied (the upgrade moves it).
+  const warnings = [];
+  if (options.subscribeCalls !== undefined) warnings.push(`'subscribeCalls' is read by the supabase-js adapter since 0.9 — move it to extractorOptions["supabase-js"].subscribeCalls (it is ignored here)`);
   const routesFile = repoRelative(routesOpt, "react-router.routesFile");
   const srcAliasRoot = repoRelative(aliasOpt ?? posix.dirname(routesFile), "react-router.srcAliasRoot");
   let realRoot;
@@ -997,20 +408,15 @@ export function derive({ repoRoot, options, io }) {
   const routes = parseRouteTree(text, diagnostics);
   const imports = importMap(text);
 
-  // The refs one piece of source text calls out to; `consts` resolves
-  // `.from(NAME)` against the whole module's bindings when the text is one
-  // statement of it.
-  const refsOfText = (body, consts, context = body) => {
-    const refs = new Set();
-    for (const p of scanApiCalls(body, context)) refs.add(`?route:${p}`);
-    const data = scanDataCalls(body, consts);
-    for (const name of data.from) refs.add(`?from:${name}`);
-    for (const name of data.rpc) refs.add(`?function:${name}`);
-    return refs;
-  };
+  // The refs one piece of source text calls out to: its API calls, and the
+  // code it runs (`?code:`, decision 0037) — how that code reaches the
+  // database is a data-access adapter's to say. `context` is the whole
+  // module when the text is one statement of it.
+  const apiRefs = (body, context = body) => new Set([...scanApiCalls(body, context)].map((p) => `?route:${p}`));
   // A one-hop module, memoised: its whole-file refs, its statement model and
   // each statement's refs, scanned ONCE — a narrowed import is then a union
-  // of precomputed sets, never a rescan of the module (1.3.0 CR-022).
+  // of precomputed sets, never a rescan of the module (1.3.0 CR-022). A
+  // statement's refs include the code unit it belongs to (adapters/js).
   const modules = new Map();
   const moduleOf = (rel) => {
     if (!modules.has(rel)) {
@@ -1018,9 +424,13 @@ export function derive({ repoRoot, options, io }) {
       if (body === null) modules.set(rel, null);
       else {
         const model = topLevel(body);
-        const consts = moduleConsts(body);
-        const stmtRefs = model.statements.map((st) => refsOfText(body.slice(st.start, st.end), consts, body));
-        modules.set(rel, { whole: refsOfText(body), model, stmtRefs, narrowed: new Map(), subs: scanSubscriptions(body, subscribeCalls) });
+        const unitOf = codeUnits(model);
+        const stmtRefs = model.statements.map((st, k) => {
+          const refs = apiRefs(body.slice(st.start, st.end), body);
+          if (unitOf[k] !== null) refs.add(`?code:${rel}#${unitOf[k]}`);
+          return refs;
+        });
+        modules.set(rel, { whole: new Set([...apiRefs(body), `?code:${rel}#*`]), model, stmtRefs, narrowed: new Map() });
       }
     }
     return modules.get(rel);
@@ -1030,23 +440,16 @@ export function derive({ repoRoot, options, io }) {
   // diagnostic, when the import cannot be narrowed. One hop: the imported
   // module's own imports are not followed. Memoised per element file.
   const elements = new Map();
-  // Subscriptions per element file: its own, plus every one-hop module's
-  // whole (a subscription helper is called from the screen, and the table
-  // name is at the call — never narrowed away).
-  const subsOfElement = new Map();
   const refsOfElement = (rel) => {
     if (elements.has(rel)) return elements.get(rel);
     const body = readSource(rel);
-    const refs = body === null ? new Set() : refsOfText(body);
+    const refs = body === null ? new Set() : new Set([...apiRefs(body), `?code:${rel}#*`]);
     elements.set(rel, refs);
-    const subs = body === null ? new Set() : scanSubscriptions(body, subscribeCalls);
-    subsOfElement.set(rel, subs);
     if (body === null) return refs;
     for (const [source, { names, how }] of localImports(body)) {
       const target = resolveImport(rel, source);
       const mod = target && moduleOf(target);
       if (!mod) continue;
-      for (const t of mod.subs) subs.add(t);
       let hit = mod.whole;
       if (names === null) diagnostics.push(`${rel} imports ${target} ${how} — its calls are attributed whole`);
       else {
@@ -1080,8 +483,6 @@ export function derive({ repoRoot, options, io }) {
     if (isLocal && !elementFile) diagnostics.push(`${routesFile}: ${r.element ?? "lazy route"} imports '${source}', which resolves to no file — routes file kept as resource`);
     const resource = elementFile ? [elementFile, routesFile] : [routesFile];
     const refs = elementFile ? new Set(refsOfElement(elementFile)) : new Set();
-    const subscribes = elementFile ? [...(subsOfElement.get(elementFile) ?? [])].sort().map((t) => `?table:${t}`) : [];
-    for (const s of subscribes) refs.add(s);
     // Filename: React Router's `:id`, `*` and the optional `?` are not
     // filename characters; spelled the shared slug way (`_id`, `___splat`),
     // an optional marker as a trailing `~` so `task` and `task?` stay distinct.
@@ -1107,11 +508,10 @@ export function derive({ repoRoot, options, io }) {
           .split("/")
           .filter((s) => s.startsWith(":"))
           .map((s) => s.slice(1).replace(/\?$/, "")),
-        ...(subscribes.length ? { edges: { subscribes } } : {}),
       },
       filename: `${slugify(slugPath)}.json`,
     });
   }
   records.sort((a, b) => (a.id < b.id ? -1 : 1));
-  return { records, diagnostics };
+  return { records, diagnostics, warnings };
 }

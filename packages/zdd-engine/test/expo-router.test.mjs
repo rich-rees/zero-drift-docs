@@ -13,6 +13,7 @@ import { derive } from "../src/adapters/expo-router/index.mjs";
 import { derive as fastapi } from "../src/adapters/fastapi/index.mjs";
 import { derive as reactRouter } from "../src/adapters/react-router/index.mjs";
 import { resolveRefs } from "../src/core/lib/resolve-refs.mjs";
+import { withoutCode } from "./code-reach.mjs";
 import { makeExtractorIo } from "../src/core/lib/extractor-io.mjs";
 
 const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -29,12 +30,13 @@ test("fixture: one surface per screen and per layout, namespaced and titled '(na
   assert.equal(jobs.title, "/jobs (native)");
   assert.equal(jobs.description, "The job list, the same endpoint the web page reads.");
   assert.deepEqual(jobs.resource, ["apps/mobile/app/(tabs)/jobs/index.tsx"]);
-  assert.deepEqual(jobs.refs, ["?route:/jobs"]);
-  assert.deepEqual(jobs.facts, { file: "screen", routeGroups: ["(tabs)"], dynamicSegments: [], layouts: ["apps/mobile/app/_layout.tsx", "apps/mobile/app/(tabs)/_layout.tsx"], edges: { calls: ["?route:/jobs"] } });
+  const CODE = "?code:apps/mobile/app/(tabs)/jobs/index.tsx#*"; // the screen's code, for a data-access adapter (decision 0037)
+  assert.deepEqual(jobs.refs, [CODE, "?route:/jobs"]);
+  assert.deepEqual(jobs.facts, { file: "screen", routeGroups: ["(tabs)"], dynamicSegments: [], layouts: ["apps/mobile/app/_layout.tsx", "apps/mobile/app/(tabs)/_layout.tsx"], edges: { calls: ["?route:/jobs"], reads: [CODE] } });
   assert.equal(jobs.filename, "native--jobs.json");
   const job = by("surface:native:/jobs/[id]");
   assert.deepEqual(job.facts.dynamicSegments, ["id"]);
-  assert.deepEqual(job.refs, ["?route:/jobs/*/route"], "the template hole is a parameter, expanded by decision 0019's rule");
+  assert.deepEqual(withoutCode(job.refs), ["?route:/jobs/*/route"], "the template hole is a parameter, expanded by decision 0019's rule");
   const settings = by("surface:native:/settings");
   assert.deepEqual(settings.resource, ["apps/mobile/app/settings.android.tsx", "apps/mobile/app/settings.ios.tsx"]);
   assert.deepEqual(settings.facts.platforms, ["android", "ios"]);

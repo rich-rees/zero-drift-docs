@@ -15,8 +15,10 @@
 // `dynamicSegments`, `layouts` (the `_layout` files above it, root first —
 // the guards and shells a screen sits behind), `platforms` for a pair. The
 // description is the file's leading `//` comment, as in Next.js. Outbound
-// refs — `api.get("/jobs")`, `fetch(...)`, `.from('x')`, `.rpc('x')` in the
-// screen file — are emitted unresolved, with decision 0019's expansion.
+// refs — `api.get("/jobs")`, `fetch(...)` in the screen file — are emitted
+// unresolved, with decision 0019's expansion, and the screen file's code as
+// `?code:<file>#*` under `reads`: a data-access adapter (supabase-js) says
+// what it reaches, and the core folds it in (decision 0037).
 // Options (extractorOptions["expo-router"]):
 //   appDir        repo-relative Expo Router root (default "app")
 //   srcAliasRoot  where the tsconfig `@/` alias points (default: appDir's
@@ -25,7 +27,7 @@
 // "nothing to inventory". Deterministic: same bytes in, same records out.
 
 import { leadingComment } from "../nextjs/index.mjs";
-import { scanApiCalls, scanDataCalls, moduleConsts } from "../react-router/index.mjs";
+import { scanApiCalls } from "../js/source.mjs";
 import { repoRelative } from "../../core/lib/paths.mjs";
 import { slugify } from "../../core/lib/slug.mjs";
 
@@ -100,9 +102,7 @@ export function derive({ repoRoot, options, io }) {
       }
       if (!description) description = leadingComment(r.text);
       for (const p of scanApiCalls(r.text)) refs.add(`?route:${p}`);
-      const data = scanDataCalls(r.text, moduleConsts(r.text));
-      for (const n of data.from) refs.add(`?from:${n}`);
-      for (const n of data.rpc) refs.add(`?function:${n}`);
+      refs.add(`?code:${rel}#*`); // its data access, folded in as reads (decision 0037)
     }
     const calls = [...refs].filter((x) => x.startsWith("?route:")).sort();
     const reads = [...refs].filter((x) => !x.startsWith("?route:")).sort();

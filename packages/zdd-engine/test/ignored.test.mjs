@@ -266,9 +266,10 @@ test("CR-408: a Next.js wrapper page does not take an ignored component as its r
   assert.ok(page, "the page is a surface");
   assert.deepEqual(page.resource, ["src/app/page.tsx"], "the ignored component is not its resource");
   const rr = reactRouter({ repoRoot: root, options: { routesFile: "web/src/routes.tsx" }, io: io() });
+  // The screen names the file it resolved (decision 0037: the call itself is supabase-js's to read).
   const text = JSON.stringify(rr.records);
-  assert.ok(text.includes("tracked_table"), "the tracked .js candidate is the one resolved");
-  assert.ok(!text.includes("ignored_table"), "the ignored .tsx never shadows it");
+  assert.ok(text.includes("?code:web/src/Widget.js#*"), "the tracked .js candidate is the one resolved");
+  assert.ok(!text.includes("Widget.tsx"), "the ignored .tsx never shadows it");
 });
 
 test("CR-525: the built-in worktree veto folds case — `.CLAUDE/Worktrees` is the same folder on a case-insensitive disk", (t) => {
