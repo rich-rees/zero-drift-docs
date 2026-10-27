@@ -56,9 +56,10 @@ export function mergeBackgroundTasks(records) {
   // and each joins the process that runs that file, if one does.
   const byFile = new Map();
   tasks.forEach((t, i) => {
-    if (typeof t.runs !== "string") return;
-    if (!byFile.has(t.runs)) byFile.set(t.runs, []);
-    byFile.get(t.runs).push(i);
+    for (const f of Array.isArray(t.runs) ? t.runs : typeof t.runs === "string" ? [t.runs] : []) {
+      if (!byFile.has(f)) byFile.set(f, []);
+      if (!byFile.get(f).includes(i)) byFile.get(f).push(i);
+    }
   });
   for (const members of byFile.values()) {
     const proc = members.find((i) => Array.isArray(tasks[i].processKeys));
@@ -88,7 +89,7 @@ export function mergeBackgroundTasks(records) {
     const out = { ...lead, resource: [...lead.resource], refs: [...lead.refs], facts: { ...lead.facts, ...(lead.facts.edges ? { edges: { ...lead.facts.edges } } : {}) } };
     for (const m of members) {
       if (m === lead) continue;
-      if (m.unresolved) diagnostics.push(`${m.facts.manifest}: '${m.title}' runs no file in the repo — joined to ${lead.id} (${lead.facts.manifest}), which runs ${lead.runs ?? "the same command"}`);
+      if (m.unresolved) diagnostics.push(`${m.facts.manifest}: '${m.title}' runs no file in the repo — joined to ${lead.id} (${lead.facts.manifest}), which runs ${[].concat(lead.runs ?? []).join(", ") || "the same command"}`);
       for (const f of m.resource) if (!out.resource.includes(f)) out.resource.push(f);
       for (const ref of m.refs) if (!out.refs.includes(ref)) out.refs.push(ref);
       for (const [verb, ids] of Object.entries(m.facts.edges ?? {})) {
@@ -98,8 +99,11 @@ export function mergeBackgroundTasks(records) {
       for (const k of FILL) if (out.facts[k] === undefined && m.facts[k] !== undefined) out.facts[k] = m.facts[k];
       if (!out.description && m.description) out.description = m.description;
     }
-    const stated = members.map((m) => m.facts.mode).find((v) => v && v !== "unknown");
-    out.facts.mode = out.facts.schedule ? "scheduled" : out.facts.mode !== "unknown" ? out.facts.mode : (stated ?? "unknown");
+    // A mode is stated when it names one (CR-079: a missing or empty mode is
+    // not a statement, so another member's stated mode still counts).
+    const isStated = (v) => typeof v === "string" && v !== "" && v !== "unknown";
+    const stated = members.map((m) => m.facts.mode).find(isStated);
+    out.facts.mode = out.facts.schedule ? "scheduled" : isStated(out.facts.mode) ? out.facts.mode : (stated ?? "unknown");
     out.refs.sort();
     // Facts keys keep the lead's order, filled keys in the reader's order:
     // the serializer orders them by the kind's facts key order anyway.

@@ -271,9 +271,9 @@ export const slug = (s) => String(s).replace(/[^A-Za-z0-9._-]+/g, "-").replace(/
 // trigger?, target?, queue?, producers?, consumers?, mode?, modeHint?,
 // description?, housekeeping?, routeRef?, functionRef?, scriptCommand?,
 // deploys? }. Two transient keys go on each record for the core's merge
-// (src/core/lib/background-tasks.mjs), never written: `runs` (the code file
-// it runs) and `processKeys` (the command it runs and the folder it runs it
-// from), and `deploys: true` on a record that says how a task is deployed
+// (src/core/lib/background-tasks.mjs), never written: `runs` (the code
+// files it runs — a queue's every consumer) and `processKeys` (the command
+// it runs and the folder it runs it from), and `deploys: true` on a record that says how a task is deployed
 // rather than what it is (a Railway file). A process whose command names no
 // file in the repo is a record with `unresolved` (the warning to print if no
 // other reader names the same task): build output is never committed.
@@ -298,6 +298,10 @@ export function backgroundReader(reader, { io, options = {} }) {
     const out = [];
     const seen = new Set();
     for (const root of roots) {
+      if (io.isIgnored(root)) {
+        diagnostics.push(`${root} is gitignored — not source, not read`);
+        continue;
+      }
       const walked = io.walk(
         root,
         (rel, name) => {
@@ -445,10 +449,13 @@ export function backgroundReader(reader, { io, options = {} }) {
       if (c.housekeeping) facts.housekeeping = true;
       facts.manifest = c.manifest;
       if (Object.keys(edges).length) facts.edges = edges;
+      // The command each folder really runs (CR-077): the manifest's own
+      // command from the manifest's folder, and — when it runs a package
+      // script — the script's command from the script's folder. Never the
+      // crossings, which no process runs.
       const keys = new Set();
-      for (const d of [c.dir, c.manifestDir].filter((d) => d !== undefined)) {
-        for (const cmd of [c.command, c.scriptCommand].filter((x) => typeof x === "string")) keys.add(`${d}\u0000${norm(cmd)}`);
-      }
+      if (typeof c.command === "string") keys.add(`${c.manifestDir ?? c.dir}\u0000${norm(c.command)}`);
+      if (typeof c.scriptCommand === "string") keys.add(`${c.dir}\u0000${norm(c.scriptCommand)}`);
       records.push({
         kind: "background-task",
         id: `background-task:${c.name}`,
@@ -459,7 +466,9 @@ export function backgroundReader(reader, { io, options = {} }) {
         facts,
         filename: `${c.name.replace(/[^A-Za-z0-9._-]+/g, "-")}.json`,
         // Transient, for the core's merge (never written):
-        ...(c.queue ? (c.consumers?.length ? { runs: c.consumers[0] } : {}) : file ? { runs: file } : {}),
+        // Every consumer file, so a process that runs any of them is this
+        // queue's task (CR-078); a process runs its one file.
+        ...(c.queue ? (c.consumers?.length ? { runs: [...c.consumers] } : {}) : file ? { runs: [file] } : {}),
         ...(c.parsed ? { processKeys: [...keys].sort() } : {}),
         ...(c.deploys ? { deploys: true } : {}),
         ...(unresolved ? { unresolved } : {}),

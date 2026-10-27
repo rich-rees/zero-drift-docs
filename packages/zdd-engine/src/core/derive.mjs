@@ -180,8 +180,10 @@ async function loadExtractor(name, repoRoot, config) {
   // catalogue() refused an alias whose target is not a catalogue adapter, so
   // a retired name never falls through to a local one (CR-002).
   if (Object.hasOwn(aliases, name)) return import(pathToFileURL(names.get(aliases[name])).href);
-  if (local.has(name)) return import(pathToFileURL(local.get(name)).href);
+  // A retired name stops derive before any local extractor of that name runs
+  // (CR-080): a stale config is told, never served by old local code.
   if (Object.hasOwn(retired, name)) fail(`Extractor '${name}' was retired: ${retired[name]}`);
+  if (local.has(name)) return import(pathToFileURL(local.get(name)).href);
   const known = [...names.keys(), ...Object.keys(aliases)].sort().join(", ");
   const localList = localDir ? `; local ${localDir}: ${[...local.keys()].join(", ") || "(none)"}` : "";
   fail(`Unknown extractor '${name}' (known: ${known}${localList})`);
