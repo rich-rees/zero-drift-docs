@@ -49,7 +49,7 @@ export function coverageOf(records) {
   });
 }
 
-const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+const plural = (n, word) => `${n} ${word}${n === 1 ? "" : word.endsWith("s") ? "es" : "s"}`; // a kind ending in s: data-accesses
 const names = (list) => (list.named.length ? `: ${list.named.map((n) => `\`${n}\``).join(", ")}${list.count > list.named.length ? `, and ${list.count - list.named.length} more` : ""}` : "");
 
 export function narrateCoverage(rows) {
