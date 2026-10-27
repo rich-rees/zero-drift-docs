@@ -22,7 +22,7 @@
 //   {
 //     "name": "aspnet-routes",                     // ^[a-z][a-z0-9-]*$, not a built-in
 //     "evidence": "[Route]/[HttpGet] attributes on controller classes",
-//     "shapedLike": "fastapi",                     // supabase | nextjs | fastapi | react-router | generic
+//     "shapedLike": "<adapter>",                   // a catalogue adapter whose template fits, or generic
 //     "kinds": ["route"],                          // record kinds it emits
 //     "idExample": "route:/api/orders/{id}",       // optional, shown in comments
 //     "refs": ["?table:"],                         // unresolved refs it may emit (optional)
@@ -46,10 +46,12 @@ import { Ledger, printable } from "./bootstrap.mjs";
 const TEMPLATES = join(PLUGIN_ROOT, "templates", "extractor");
 // The engine version that first hands extractors `io` (decision 0010).
 export const IO_SINCE = "1.3.0";
+// border: names a stack (a mirror of the engine's catalogue, held equal by a test)
 // Mirror of the engine's catalogue (the adapter folders in
 // packages/zdd-engine/src/adapters/) — a local name may not shadow one. A test
 // holds the two together.
 export const BUILT_INS = ["supabase", "nextjs", "fastapi", "react-router", "components", "expo-router", "background-vercel", "background-railway", "background-cloudflare", "background-procfile", "background-compose", "background-pg-cron", "background-bullmq", "background-inngest", "background-trigger-dev", "background-sqs", "background-github-actions", "background-declared", "external-services", "supabase-js", "supabase-py", "sqlalchemy", "generic"];
+// border: end
 // Names a release retired but the engine still answers to (2.3: `services`
 // is `external-services`, 2.3.0, pick 3) — a local one may not take them.
 export const RETIRED_BUILT_INS = { services: "external-services" };
@@ -61,9 +63,11 @@ const NAME_RE = /^[a-z][a-z0-9-]*$/; // the engine's NAME_RE
 const KIND_RE = /^[a-z][a-z0-9_-]*$/; // the engine's KIND_RE
 const EXT_RE = /^\.[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const REF_PREFIXES = ["?from:", "?table:", "?bucket:", "?function:", "?route:", "?code:"];
+// border: names a stack (SQL dialects a local extractor's source is read as)
 // `sql` is standard SQL (Postgres): `#` is an operator there. `mysql` adds
 // `#` comments and backslash escapes (1.3.0 CR-014, decision in the skill).
 const SYNTAXES = ["c-like", "sql", "mysql", "python"];
+// border: end
 const SYNTAX_BY_EXT = {
   ".cs": "c-like", ".java": "c-like", ".kt": "c-like", ".scala": "c-like", ".go": "c-like", ".rs": "c-like",
   ".swift": "c-like", ".dart": "c-like", ".php": "c-like", ".js": "c-like", ".mjs": "c-like", ".cjs": "c-like",

@@ -13,7 +13,7 @@
 //    file, lib/catalogue.mjs, so an import built from pieces, wrapped in
 //    `new URL`, or hidden behind a comment still has to spell it out there.
 // 2. Words. No core file names a stack, framework, library, platform or
-//    vendor, in code or in comments. STACK_WORDS is a tripwire, not a proof:
+//    vendor, in code or in comments. STACK_WORDS (./stack-words.mjs) is a tripwire, not a proof:
 //    a finite list catches the names ZDD has met, and it lives here because
 //    the core may not hold it. Third-party code vendored into a viewer
 //    (`vendor/`) is outside both rules: it is not ours to word.
@@ -25,22 +25,13 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { catalogue, readCatalogue, splitBundleOptions } from "../src/core/lib/catalogue.mjs";
+import { WORD_RE as WORD_RE_OF } from "./stack-words.mjs";
 
 const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const CORE = join(PKG, "src", "core");
 const ADAPTERS = join(PKG, "src", "adapters");
 
-const STACK_WORDS = [
-  "next.js", "nextjs", "react", "react-router", "expo", "expo-router", "vue", "nuxt", "svelte", "sveltekit", "angular", "remix", "astro", "gatsby", "solidjs",
-  "fastapi", "django", "flask", "rails", "laravel", "express", "nestjs", "hono", "spring", "deno",
-  "supabase", "supabase-js", "supabase-py", "postgres", "postgresql", "mysql", "sqlalchemy", "prisma", "drizzle", "mongodb", "firebase", "redis",
-  "vercel", "railway", "cloudflare", "wrangler", "procfile", "heroku", "netlify", "docker", "fly.io", "aws", "azure", "gcp",
-  "sentry", "resend", "mailgun", "stripe", "twilio", "bullmq", "inngest", "kafka", "rabbitmq", "pg_cron",
-];
-const escape = (w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-// A word ends at anything that is not a letter or digit, so `adapter-react`,
-// `vendor.react` and `next_js`-style joins are still words (CR-004).
-const WORD_RE = new RegExp(`(^|[^a-z0-9])(${STACK_WORDS.map(escape).join("|")})(?=$|[^a-z0-9])`, "gi");
+const WORD_RE = WORD_RE_OF();
 const SOURCE_RE = /\.(mjs|cjs|js|jsx|ts|mts|cts|tsx|css|html|md|json)$/;
 const LOADERS = new Set(["src/core/derive.mjs", "src/core/viewers/index.mjs"]);
 const BRIDGE = "src/core/lib/catalogue.mjs";

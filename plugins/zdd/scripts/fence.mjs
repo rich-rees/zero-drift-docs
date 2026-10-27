@@ -62,7 +62,9 @@ const SIDE_CHECKOUT = /\bgit\b[^;&|\n]*\b(?:checkout|restore)\b[^;&|\n]*\s--(?:t
 // only when a write API is named alongside it (CR-074). `>` inside the script
 // text is deliberately NOT in this list (`=>` and comparisons are everywhere);
 // a redirect outside the quotes is caught by the tokenizer regardless.
+// border: names a stack (interpreters a shell command can run)
 const INTERPRETER = /^(node|nodejs|deno|bun|python3?|py|perl|ruby|php)$/i;
+// border: end
 const WRITE_API =
   /(writeFile|createWriteStream|appendFile|copyFile|open\s*\([^)]*,\s*['"][wax]|Set-Content|Out-File|Add-Content|unlink|\brm(Sync|dir|tree|Dir)?\b|\brename|truncate|write_text|write_bytes|os\.remove|shutil\.(move|copy)|File\.(write|delete)|file_put_contents)/i;
 

@@ -55,9 +55,9 @@
 // Answer set (every key optional):
 //   {
 //     "name": "My App", "repoBase": "https://github.com/o/r/tree/main/", "baseBranch": "main",
-//     "extractors": ["supabase", "fastapi"],          // else derived from `stack`, else the detection
+//     "extractors": ["<adapter>", "<adapter>"],      // else derived from `stack`, else the detection
 //     "extractorOptions": { ... },                     // else defaults per extractor
-//     "stack": ["FastAPI", "Supabase", "React web", "Expo"],   // greenfield answers; strings or {name, path}
+//     "stack": ["<a framework>", "<a database>", "<an app>"],   // greenfield answers; strings or {name, path}, matched by the adapters' rules
 //     "apps": ["Web", "Mobile"],                       // map skeleton (Application concepts); else from `stack` / detection
 //     "optIns": { "autoLoad": true, "fence": true, "stop": true, "ci": true, "prePush": true },   // defaults: all on (repair: current state)
 //     "codex": false,                                  // also write AGENTS.md
@@ -123,6 +123,7 @@ export const OWNER_MARK = "Managed by Zero-Drift Docs (zdd)";
 const MAX_NAME = 120;
 const MAX_SCAN_BYTES = 1024 * 1024; // the plugin never reads a repo file larger than this (CR-091)
 
+// border: names a stack (the pre-1.0 bundle an upgrade migrates)
 // Mirror of the engine catalogue's bundles (src/adapters/catalogue.json): the one legacy
 // adapter and how its options split. The engine expands it at derive time;
 // this is the migration that makes the expansion unnecessary.
@@ -135,6 +136,7 @@ const LEGACY_ADAPTERS = {
     },
   },
 };
+// border: end
 
 // ---------------------------------------------------------------------------
 // Detection — asked of the adapters (decision 0039). Each catalogue adapter
@@ -185,11 +187,13 @@ export function detect(root) {
 export function hostOf(remote) {
   if (typeof remote !== "string" || !remote.trim()) return { kind: "none", remote: null };
   const r = remote.trim();
+  // border: names a stack (git hosts, for the CI offer — not the app's stack)
   const kind = /(^|[@/.])github\.com([:/]|$)/i.test(r) ? "github"
     : /(^|[@/.])gitlab\.com([:/]|$)/i.test(r) ? "gitlab"
     : /dev\.azure\.com|visualstudio\.com/i.test(r) ? "azure"
     : /(^|[@/.])bitbucket\.org([:/]|$)/i.test(r) ? "bitbucket"
     : "other";
+  // border: end
   return { kind, remote: r };
 }
 function repoHost(root) {
@@ -206,8 +210,8 @@ function repoHost(root) {
 // future path, or names an Application concept for the map when no adapter
 // fits. The rules are the adapters' own (DETECTION.stack, read through the
 // engine's detection), tried in rank order; a companion adapter joins when
-// the stack holds what it needs (supabase-js beside Supabase and a JS app,
-// CR-045). The neutral list of stacks with adapters is the same data.
+// the stack holds what it needs (a data-access adapter beside its schema
+// adapter and an app that runs the calls, CR-045). The neutral list of stacks with adapters is the same data.
 // ---------------------------------------------------------------------------
 // Unique names, checked against the whole set: a raw `foo-2` sitting next to
 // two `foo`s cannot be collided into (review CR-047).
@@ -289,8 +293,8 @@ const fail = (msg) => {
 // src/core/lib/paths.mjs repoRelative), applied to the answers so a config the
 // engine's first derive would refuse is never written (CR-078). The engine's
 // path rule is stricter than the plugin's repoRelative in lib/repo.mjs (no
-// whitespace, no backslash) and looser in one spot (`.` is a valid root — the
-// fastapi default), and the option values land in config.json verbatim, so
+// whitespace, no backslash) and looser in one spot (`.` is a valid root — an
+// adapter's default), and the option values land in config.json verbatim, so
 // the engine's rule is the one that applies here.
 const ENGINE_REPO_BASE = /^https?:\/\/\S+$/i;
 function enginePath(value, label) {
@@ -1842,7 +1846,7 @@ const extractorsOn = (config) => new Set((Array.isArray(config.extractors) ? con
 // Every upgrade re-runs detection and offers each opt-in extractor that is
 // off but has evidence (2.4.1, from the first adopter: the offer lived in the 2.1
 // note, so the first adopter's 2.2.1 → 2.4.0 never saw `jobs`, though 2.3 had widened it
-// to the first adopter's Vercel cron and Railway worker). Never added by upgrade, and a
+// to the first adopter's cron and worker). Never added by upgrade, and a
 // "no" is not remembered: the line comes back while the evidence does.
 // Which adapters are opt-ins is each adapter's word (DETECTION.optIn, 0039).
 function offerOptIns(root, config) {
@@ -1870,6 +1874,7 @@ function offerOptIns(root, config) {
 const RENAMED_EXTRACTORS = { services: "external-services" };
 // 0.9 (decision 0038): the record `job` is `background-task`.
 const RENAMED_KINDS = { service: "external-service", job: "background-task" };
+// border: names a stack (the 0.9 migration of `jobs` names the readers that replace it)
 // 0.9 (decision 0038): the `jobs` extractor is one reader per platform file.
 // The readers are the ones detection finds evidence for, plus
 // background-declared when the config declares tasks by hand
@@ -1933,6 +1938,7 @@ function migrateJobs(config, changes, root) {
       : `extractor "jobs" removed (0.9, decision 0038): detection finds no background work here — add the background-* reader for a platform file you commit`,
   );
 }
+// border: end
 
 function migrateRenames(config, changes) {
   // Each step on its own (CR-305): a half-migrated config — the new extractor
@@ -2119,6 +2125,7 @@ function migrateMapLinks(ledger, mapDir, metadataDir = "zdd/metadata") {
   }
   return { touched, skipped };
 }
+// border: names a stack (each release's upgrade note, as that release printed it)
 export const UPGRADE_NOTES = {
   "1.1.0": ({ version }) => [
     "1.1 adds a blocking lint (a blessing citing a superseded or missing ADR fails `lint`) — run `npx -y " + ENGINE_PACKAGE + "@" + version + " lint` before pushing; a red result is the lint doing its job on a stale blessing",
@@ -2208,6 +2215,7 @@ export const UPGRADE_NOTES = {
     "2.5 adds an opt-in harness ADR set (decisions 0033, 0034): how-the-team-builds decisions in a folder and index of their own, on one number line with the product's, so the application index can be handed to a stakeholder as it stands. Upgrading splits nothing; when the team wants it, `split-adrs --plan` proposes a set per ADR (a `Scope:` tag line decides) and the write moves them on the developer's word",
   ],
 };
+// border: end
 
 export function compareVersions(a, b) {
   const pa = String(a).replace(/^v/, "").split(/[.-]/).map(Number);
@@ -2452,7 +2460,9 @@ const RETIRED_SCAN_EXT = /\.(md|ya?ml|json|mjs|cjs|js|ts|sh|ps1|toml|txt)$/i;
 const RETIRED_SKIP_FILES = /(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|CHANGELOG\.md)$/i;
 const MAX_RETIRED_FILES = 3000;
 const MAX_RETIRED_NOTES = 20;
+// border: names a stack (build folders the retired-name sweep never reads)
 const RETIRED_SKIP_DIRS = new Set(["node_modules", ".git", ".next", "dist", "build", "coverage", ".venv", "venv", "__pycache__", ".expo"]);
+// border: end
 // The files swept: git's tracked list where git can answer (deterministic,
 // honours the repo's ignores, never starved by build output — CR-417), else
 // a bounded walk that says when it was cut short.
@@ -2725,7 +2735,7 @@ export function mapCheck(root, { done = false, status = false } = {}) {
   return { owed, records, coverage, humanIndex: artifactPaths(config, { lenient: true }).humanIndex };
 }
 
-const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+const plural = (n, word) => `${n} ${word}${n === 1 ? "" : word.endsWith("s") ? "es" : "s"}`; // a kind ending in s: data-accesses
 const namedList = (l) => (l.named.length ? `: ${l.named.map((n) => `\`${n}\``).join(", ")}${l.count > l.named.length ? `, and ${l.count - l.named.length} more` : ""}` : "");
 export function narrateCheck(r) {
   if (r.coverage === undefined) {

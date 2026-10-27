@@ -52,7 +52,7 @@ export function mergeBackgroundTasks(records) {
     }
   });
   // A code file joins THROUGH A PROCESS only: the queues and schedules one
-  // file declares (two Trigger.dev tasks in one module) are as many tasks,
+  // file declares (two queue consumers in one module) are as many tasks,
   // and each joins the process that runs that file, if one does.
   const byFile = new Map();
   tasks.forEach((t, i) => {
