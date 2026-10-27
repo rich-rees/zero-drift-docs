@@ -219,10 +219,15 @@ test("CR-054: a parameter or a local that shadows a top-level declaration is not
       "export const viaArrow = (db) => db();",
       "export function local() { const db = make(); return db(); }",
       "export function real() { return db(); }",
+      "export function destructured(props) { const { db, other: x = db } = props; return db(); }",
+      "export function keyOnly(props) { const { db: client } = props; return db(); }",
       "",
     ].join("\n"),
   });
   const fns = run(root).records.map((r) => r.facts.function);
+  // `keyOnly` binds `client`, not `db` (a key before `:` binds nothing), so its db() is the module's.
+  assert.ok(fns.includes("keyOnly") && !fns.includes("destructured"), fns.join(", "));
+  fns.splice(fns.indexOf("keyOnly"), 1);
   assert.deepEqual(fns, ["db", "real"]);
 });
 

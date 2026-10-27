@@ -179,6 +179,25 @@ const ID_RE = /[A-Za-z_$][\w$]*/g;
 function boundInside(mask, own) {
   const out = new Set();
   for (const h of mask.matchAll(/\b(?:const|let|var|function\s*\*?)\s+([A-Za-z_$][\w$]*)/g)) out.add(h[1]);
+  // A local destructuring (`const { db } = props`, `let [a, b] = xs`): the
+  // pattern's bound names — a key before `:` and a default after `=` bind
+  // nothing (verify pass 1 on CR-054).
+  for (const h of mask.matchAll(/\b(?:const|let|var)\s*([{[])/g)) {
+    const open = h.index + h[0].length - 1;
+    let d = 0;
+    let inDefault = false;
+    let pattern = "";
+    for (let j = open; j < mask.length; j++) {
+      const c = mask[j];
+      if (c === "(" || c === "[" || c === "{") d++;
+      else if (c === ")" || c === "]" || c === "}") d--;
+      if (d === 0) break;
+      if (d === 1 && c === "=") inDefault = true;
+      else if (d === 1 && c === ",") inDefault = false;
+      pattern += inDefault || j === open ? " " : c;
+    }
+    for (const id of pattern.matchAll(ID_RE)) if (!/^\s*:/.test(pattern.slice(id.index + id[0].length))) out.add(id[0]);
+  }
   for (const h of mask.matchAll(/(?<![\w$.])([A-Za-z_$][\w$]*)\s*=>/g)) out.add(h[1]);
   const params = (from) => {
     let d = 0;
