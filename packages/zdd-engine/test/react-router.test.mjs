@@ -506,7 +506,8 @@ test("CR-001: a symlinked routes file, element file or one-hop module is never r
     rmSync(join(root, "src", "data.ts"));
     writeFileSync(join(root, "src", "data.js"), `export const x = api.get("/real-data");\n`);
     const again = derive({ repoRoot: root, options: {} });
-    assert.deepEqual(withoutCode(again.records.find((r) => r.id === "surface:/a").refs), ["?route:/a", "?route:/real-data"]);
+    // Full arrays (CR-068): the code the screen names is exactly the files the import rules allow.
+    assert.deepEqual(again.records.find((r) => r.id === "surface:/a").refs, ["?code:src/A.tsx#*", "?code:src/data.js#x", "?route:/a", "?route:/real-data"]);
     // A linked routes file is never read — and, like a renamed one, it stops
     // derive rather than writing every surface record away (1.3.0).
     rmSync(join(root, "src", "routes.tsx"));
@@ -536,7 +537,8 @@ test("CR-001: a symlinked routes file, element file or one-hop module is never r
   writeFileSync(join(root, "src", "data2.tsx"), `export const v = api.get("/data2");\n`);
   writeFileSync(join(root, "src", "B.tsx"), readFileSync(join(root, "src", "B.tsx"), "utf8").replace("export const B", `import { v } from "./data2";\nexport const B`));
   const suffixed = derive({ repoRoot: root, options: {} });
-  assert.deepEqual(withoutCode(suffixed.records.find((r) => r.id === "surface:/b").refs), ["?route:/b", "?route:/data2", "?route:/widget"]);
+  // No code ref to a refused candidate (data.tsx.ts, other.mjs, styles.css.tsx, the extensionless data2) — CR-068.
+  assert.deepEqual(suffixed.records.find((r) => r.id === "surface:/b").refs, ["?code:src/B.tsx#*", "?code:src/Widget.client.tsx#w", "?code:src/data.tsx#x", "?code:src/data2.tsx#v", "?route:/b", "?route:/data2", "?route:/widget"]);
   // An oversized routes file is still never read — and since 1.3.0 CR-015
   // it stops derive: an empty tree here would write every surface away.
   assert.throws(() => derive({ repoRoot: root, options: { routesFile: "src/big.tsx" } }), /routesFile 'src\/big\.tsx' is over 1024 KiB — never read/);

@@ -40,6 +40,7 @@ test("fixture: one surface per screen and per layout, namespaced and titled '(na
   const settings = by("surface:native:/settings");
   assert.deepEqual(settings.resource, ["apps/mobile/app/settings.android.tsx", "apps/mobile/app/settings.ios.tsx"]);
   assert.deepEqual(settings.facts.platforms, ["android", "ios"]);
+  assert.deepEqual(settings.facts.edges.reads, ["?code:apps/mobile/app/settings.android.tsx#*", "?code:apps/mobile/app/settings.ios.tsx#*"], "each file of the pair names its code (CR-072)");
   assert.deepEqual(settings.facts.layouts, ["apps/mobile/app/_layout.tsx"]);
   const root = by("surface:native:/_layout");
   assert.equal(root.facts.file, "layout");

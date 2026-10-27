@@ -148,6 +148,13 @@ test("CLI: derive and render are byte-stable; a cron's calls edge reaches its ro
   const hk = JSON.parse(readFileSync(join(repo, "zdd", "metadata", "job", "housekeeping.json"), "utf8"));
   // sqlalchemy reads the sweep's SQL: it reads jobs, and writes jobs and audit_events.
   assert.deepEqual(hk.facts.edges, { reads: ["table:db/jobs"], writes: ["table:db/audit_events", "table:db/jobs"] });
+  // The Python worker: supabase-py's `.table()` read, sqlalchemy's `delete from` write (CR-067).
+  const worker = JSON.parse(readFileSync(join(repo, "zdd", "metadata", "job", "worker.json"), "utf8"));
+  assert.deepEqual(worker.facts.edges, { reads: ["table:db/outbound_messages"], writes: ["table:db/outbound_messages"] });
+  // The JS nightly: supabase-js's `.from("jobs")` read. Its raw `insert into reports`
+  // in a `db.query()` string is no longer read (decision 0037, slice 2b: no JS raw-SQL adapter yet).
+  const nightly = JSON.parse(readFileSync(join(repo, "zdd", "metadata", "job", "nightly.json"), "utf8"));
+  assert.deepEqual(nightly.facts.edges, { reads: ["table:db/jobs"] });
   const sweep = JSON.parse(readFileSync(join(repo, "zdd", "metadata", "job", "sweep-stalled.json"), "utf8"));
   assert.deepEqual(sweep.facts.edges, { calls: ["route:/api/cron/sweep-stalled"] });
   const digest = JSON.parse(readFileSync(join(repo, "zdd", "metadata", "job", "nightly-digest.json"), "utf8"));

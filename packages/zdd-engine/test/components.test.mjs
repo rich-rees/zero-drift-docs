@@ -110,6 +110,7 @@ test("fixture: four records — props inline, from a same-file type, from an imp
   const button = by("Button");
   assert.deepEqual(button.resource, ["packages/ui/src/Button.native.tsx", "packages/ui/src/Button.web.tsx"]);
   assert.deepEqual(button.facts.platforms, ["native", "web"]);
+  assert.deepEqual(button.facts.edges.reads, ["?code:packages/ui/src/Button.native.tsx#*", "?code:packages/ui/src/Button.web.tsx#*"], "each file of the pair names its code (CR-072)");
   assert.equal(button.facts.propsType, "ButtonProps");
   assert.equal(button.facts.propsFrom, "./types");
   assert.deepEqual(button.facts.usedBy, ["apps/web/src/pages/JobsPage.tsx"], "imported by the pair's base name");
