@@ -94,10 +94,13 @@ test("CR-132: nextjs reads each file once, and finds a wrapper's target without 
 test("CR-131: io.kind says unreadable — never missing — when a path cannot be examined, and react-router stops on it (POSIX)", { skip: (!POSIX || process.getuid?.() === 0) && "needs a permission the user cannot bypass" }, (t) => {
   const root = repo(t, { "web/src/routes.tsx": "export const routes = [];\n" });
   chmodSync(join(root, "web"), 0o000);
-  t.after(() => chmodSync(join(root, "web"), 0o755));
-  const io = makeExtractorIo(root, "react-router");
-  assert.equal(io.kind("web/src"), "unreadable");
-  assert.throws(() => reactRouter({ repoRoot: root, io, options: { routesFile: "web/src/routes.tsx" } }), /cannot be examined/);
+  try {
+    const io = makeExtractorIo(root, "react-router");
+    assert.equal(io.kind("web/src"), "unreadable");
+    assert.throws(() => reactRouter({ repoRoot: root, io, options: { routesFile: "web/src/routes.tsx" } }), /cannot be examined/);
+  } finally {
+    chmodSync(join(root, "web"), 0o755); // before the folder is removed
+  }
 });
 
 test("CR-144: io.kind calls a folder under a linked folder linked, never a directory", (t) => {
@@ -127,4 +130,15 @@ test("CR-139: external-services detection proposes nothing from a commented-out 
   const live = repo(t, { "app.py": 'import os\nkey = os.getenv("ACME_API_KEY")\n' });
   const l = JSON.parse(spawnSync(process.execPath, [BIN, "detect", `--root=${live}`], { encoding: "utf8" }).stdout);
   assert.ok(l.proposals.some((p) => p.name === "external-services"), JSON.stringify(l.proposals));
+});
+
+test("CR-130 (verify 1): a migration the listing could not examine stops derive too; a symlinked one stays a skip", (t) => {
+  const root = repo(t, { "supabase/migrations/0001_init.sql": "create table a (id int);\n" });
+  const real = makeExtractorIo(root, "supabase");
+  const withSkip = (reason) => ({ ...real, walk: (rel, onFile, o) => ({ ...real.walk(rel, onFile, o), skipped: [{ path: "supabase/migrations/0002_lost.sql", reason }] }) });
+  const options = { migrationNamespaces: [{ name: "db", dir: "supabase/migrations" }] };
+  assert.throws(() => supabase({ repoRoot: root, io: withSkip("unreadable"), options }), /0002_lost\.sql: unreadable/);
+  const linked = supabase({ repoRoot: root, io: withSkip("symlink — not followed"), options });
+  assert.ok(linked.records.some((r) => r.kind === "table"));
+  assert.match(linked.diagnostics.join("\n"), /0002_lost\.sql: symlink — not followed — skipped/);
 });

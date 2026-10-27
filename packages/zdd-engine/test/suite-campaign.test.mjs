@@ -92,7 +92,9 @@ test("CR-122: an import written inside a comment or a template is not an import"
 });
 
 test("CR-128 / CR-136: check 5 names every banned route — child_process, network, module, vm, os, a package, require, dynamic import, fetch, a helper that reads fs, a file outside the folder, a core module that reaches fs", (t) => {
-  const dir = mkdtempSync(join(tmpdir(), "zdd-io-scan-"));
+  // Beside this file, not in the temp folder: on a CI runner the temp folder
+  // can sit on another drive, where no relative path reaches the core.
+  const dir = mkdtempSync(join(HERE, ".zdd-io-scan-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const scan = (text, extra = {}) => {
     for (const [rel, body] of Object.entries(extra)) {
