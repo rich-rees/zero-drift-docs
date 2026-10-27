@@ -357,6 +357,19 @@ test("newestTag: the highest release tag by semver, ignoring pre-releases and ju
   assert.equal(newestTag(""), null);
 });
 
+test("0.9's retired names — the old package, extractorOptions.jobs, metadata/job/ — are listed in the team's own files, never in ZDD's generated ones, which the regenerate rewrites (slice 6 dry run)", () => {
+  const repo = adopted("retired-0-9", { engine: "2.5.0", settings: { extraKnownMarketplaces: LOCK("v2.5.0") } });
+  mkdirSync(join(repo, "docs"), { recursive: true });
+  mkdirSync(join(repo, "zdd", "agent-index"), { recursive: true });
+  const said = "npx -y @rich-rees/zdd-engine@2.5.0 derive; see extractorOptions.jobs and zdd/metadata/job/nightly.json\n";
+  writeFileSync(join(repo, "docs", "setup.md"), said);
+  for (const g of ["graph.json", "agent-index.md", "human-index.html", "adr-index.md", "blessing-index.md", "agent-index/area.md"]) writeFileSync(join(repo, "zdd", g), said);
+  const retired = runJson(repo, ["upgrade", "--plan"]).notes.filter((n) => / still says /.test(n));
+  assert.ok(retired.some((n) => /^docs\/setup\.md:1 still says `@rich-rees\/zdd-engine` — since 0\.9\.0 that is the engine's package from 0\.9, `@rich-rees\/zdd`/.test(n)), retired.join("\n"));
+  assert.ok(retired.some((n) => /^docs\/setup\.md:1 still says `extractorOptions\.jobs`/.test(n)), retired.join("\n"));
+  assert.deepEqual(retired.filter((n) => /^zdd\//.test(n)), [], "a generated file is rewritten by the regenerate, never the team's to fix");
+});
+
 test("decision 0042: the old line's tags are behind every new-line release — newestTag skips them, compareVersions puts them first, and a 1.x plugin must have dropped the list (the numbers collide from 1.0.0)", () => {
   assert.equal(newestTag(["a\trefs/tags/v2.5.0", "b\trefs/tags/v0.9.0", "c\trefs/tags/v2.4.1"].join("\n")), "v0.9.0");
   assert.equal(newestTag("a\trefs/tags/v2.5.0"), null, "only the old line's tags: no release of this line yet");

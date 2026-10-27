@@ -105,6 +105,7 @@ import {
   isOurDeclaration,
   pluginsDir,
   agentIndexAreaDir,
+  GENERATED_KEYS,
 } from "./lib/repo.mjs";
 
 const TEMPLATES = join(PLUGIN_ROOT, "templates");
@@ -1791,6 +1792,7 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
     oldEngine: fromEngine && fromEngine !== version ? fromEngine.replace("zdd-engine@", "") : null,
     oldLock: lockBefore && lockBefore !== `v${version}` ? lockBefore : null,
     metadataRel: artifactPaths(config, { lenient: true }).metadataDir,
+    generated: generatedArtifacts(artifactPaths(config, { lenient: true })),
   });
   for (const r of retired) ledger.notes.push(r);
   if (stopUnset) ledger.notes.push('hooks.stop is not set (new in 1.1: the Stop hook prompts for the curated half once per session) — it stays OFF until answered: run bootstrap apply with {"optIns":{"stop":true}} (repair mode, keeps every other choice), or add "stop": true inside the existing "hooks" object by hand');
@@ -2758,7 +2760,13 @@ function sweepList(ledger, metadataRel) {
   rec(ledger.root, 0);
   return { files: out, truncated, source: "walk" };
 }
-export function findRetiredNames(ledger, { oldEngine = null, oldLock = null, metadataRel = "zdd/metadata" } = {}) {
+// ZDD's generated files (the graph, the indexes, the agent index's area
+// folder) say whatever the last derive and render wrote: the regenerate this
+// upgrade asks for rewrites them, so a retired name there is never the
+// team's to fix (found by the slice 6 dry run: `metadata/job/` in graph.json
+// and the agent index). The metadata folder is skipped by sweepList.
+const generatedArtifacts = (paths) => [...GENERATED_KEYS.filter((k) => k !== "metadataDir").map((k) => paths[k]), agentIndexAreaDir(paths.agentIndex)].filter((p) => typeof p === "string" && p);
+export function findRetiredNames(ledger, { oldEngine = null, oldLock = null, metadataRel = "zdd/metadata", generated = generatedArtifacts(artifactPaths({})) } = {}) {
   const rules = [...RETIRED_NAMES];
   if (oldLock && /^v\d+\.\d+\.\d+$/.test(oldLock) && oldLock !== `v${oldEngine}`) {
     rules.push({ since: "this upgrade", find: new RegExp(`\\b${oldLock.replace(/\./g, "\\.")}\\b`, "g"), now: `the new release's tag (v${pluginVersion()}) — the lock moved; your repo may hold the old tag somewhere ZDD does not write (a lock test, a setup guide)`, skip: [".claude/settings.json", "zdd/config.json", ".github/workflows/zdd.yml", ".githooks/pre-push"] });
@@ -2772,6 +2780,7 @@ export function findRetiredNames(ledger, { oldEngine = null, oldLock = null, met
   for (const rel of list.files) {
     if (hits.length > MAX_RETIRED_NOTES) break;
     if (written.has(rel) || rel.endsWith(`/${INSTRUCTIONS_NAME}`) || rel === INSTRUCTIONS_NAME) continue;
+    if (generated.some((g) => rel === g || rel.startsWith(`${g}/`))) continue;
     let st;
     try {
       st = lstatSync(ledger.abs(rel));
