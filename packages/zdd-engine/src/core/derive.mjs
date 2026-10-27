@@ -305,6 +305,7 @@ export async function deriveRecords({ repoRoot, config }) {
   const resolved = resolveRefs(records);
   records = resolved.records;
   diagnostics.push(...resolved.diagnostics);
+  warnings.push(...resolved.warnings.map((w) => `WARNING [data-access]: ${w}`));
   validateRecords(records);
   records.sort((a, b) => (a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : a.id < b.id ? -1 : 1));
   return { records, factsOrder, diagnostics, configDiagnostics, warnings };
@@ -396,7 +397,7 @@ export async function run(args) {
     }
     const byKind = {};
     for (const r of records) byKind[r.kind] = (byKind[r.kind] ?? 0) + 1;
-    const plural = (k) => (k.endsWith("s") ? `${k}es` : `${k}s`); // a data-access -> data-accesses
+    const plural = (k) => (k.endsWith("ss") ? `${k}es` : `${k}s`); // data-access -> data-accesses; any other kind as before
     const summary = Object.entries(byKind).map(([k, n]) => `${n} ${plural(k)}`).join(", ") || "nothing to inventory";
     console.log(`Wrote ${records.length} records (${summary}) -> ${metadataRel}`);
   }

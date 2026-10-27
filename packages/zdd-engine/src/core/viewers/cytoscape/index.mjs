@@ -31,6 +31,7 @@ const TYPE_PALETTE = {
   "Module": "#64748b",
   "UI Component": "#9333ea",
   "Job": "#475569",
+  "Data Access": "#0891b2",
 };
 const DEFAULT_NODE_COLOR = "#94a3b8";
 

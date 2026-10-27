@@ -34,7 +34,10 @@ stack names from comments, and its fallback non-area tags (one project's
 `rls-disabled` / `media-project`) became none. No graph byte moved: the
 BUNDLE literal and every metadata golden are unchanged. Slice 2 regenerated it once more for the viewer's new Data Access lane
 (decision 0037), again with no graph byte moved; the FastAPI goldens did not
-move at all, with `supabase-py` added to that fixture's config.
+move at all, with `supabase-py` added to that fixture's config. The slice 2a
+review then regenerated both human-index goldens for the Data Access colour
+(the BUNDLE literal's palette gains one entry) and the two viewer legends
+that now name the data-access step; nothing else in the bundle moved.
 
 ## Regenerating
 

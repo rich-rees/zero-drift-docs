@@ -443,7 +443,7 @@
     LANE_NAMES.forEach((nm, i) => { if (lanes[i].length) addLaneLabel(nm, 0, laneY[i] - 44, true); });
     addLaneLabel("Apps & Services", maxW + 190, -70);
     fitWithFloor(40, 0.65);
-    legendEl.innerHTML = "<b>Architecture view.</b> UI → components → features → API &amp; jobs → tables → functions, top to bottom; apps &amp; external services on the rail. Dashed = subscribes; a component used by many shows the count and lights its edges on hover. Features (◆) are curated vertical slices, not an architectural tier — the Area coupling view shows the feature-first projection. Hover or tap a node to light its connections; high-traffic nodes show edges only then. <span class=\"authdot\"></span>&nbsp;= auth exception — ordinary session auth is stated per endpoint, not drawn.";
+    legendEl.innerHTML = "<b>Architecture view.</b> UI → components → features → API &amp; jobs → data access → tables → functions, top to bottom; apps &amp; external services on the rail. Dashed = subscribes; a component used by many shows the count and lights its edges on hover. Features (◆) are curated vertical slices, not an architectural tier — the Area coupling view shows the feature-first projection. Hover or tap a node to light its connections; high-traffic nodes show edges only then. <span class=\"authdot\"></span>&nbsp;= auth exception — ordinary session auth is stated per endpoint, not drawn.";
     legendEl.hidden = false;
   }
 
@@ -472,7 +472,7 @@
     addAcrs(13);
     AREAS.forEach((a, ci) => addLaneLabel(a, ci * GAPX - 20, -56));
     fitWithFloor(40, 0.65);
-    legendEl.innerHTML = "<b>Area coupling view.</b> One column per product area, each stacked UI → API → tables. Wiring inside an area is assumed (very faint); the darker edges crossing columns are the coupling between areas. <span class=\"authdot\"></span>&nbsp;= auth exception.";
+    legendEl.innerHTML = "<b>Area coupling view.</b> One column per product area, each stacked UI → API → data access → tables. Wiring inside an area is assumed (very faint); the darker edges crossing columns are the coupling between areas. <span class=\"authdot\"></span>&nbsp;= auth exception.";
     legendEl.hidden = false;
   }
 

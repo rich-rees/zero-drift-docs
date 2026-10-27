@@ -135,6 +135,8 @@ const compareFit = (a, b) => a[0] - b[0] || a[1] - b[1];
 
 export function resolveRefs(records) {
   const diagnostics = [];
+  const warnings = [];
+  let codeRefs = 0;
   // name -> [ids], both the short name and the namespace-qualified text.
   const index = { table: new Map(), bucket: new Map(), function: new Map() };
   const add = (map, key, id) => {
@@ -222,6 +224,7 @@ export function resolveRefs(records) {
         return hits ? [...hits].sort() : drop(`surface at '${target}' matches no known surface`);
       }
       case "code":
+        codeRefs++;
         return codeIndex.get(target) ?? null;
       case "at": {
         const hits = (recordsByFile.get(target) ?? []).filter((id) => id !== record.id);
@@ -288,6 +291,12 @@ export function resolveRefs(records) {
     }
     r.refs = [...resolved].sort();
     if (r.facts.unplaced) r.facts.unplaced.sort();
+  }
+  // A schema, routes that name the code they run, and no adapter that reads
+  // how code reaches the database: every route -> table edge is silently gone.
+  // Say so on every derive (CR-013). An app with no tables is not warned.
+  if (codeRefs && !dataAccess.size && index.table.size) {
+    warnings.push(`${codeRefs} ref${codeRefs === 1 ? "" : "s"} name the code a route or screen runs (?code:) and the schema has tables, but no data-access adapter is configured, so no route links to a table — add the adapter for your database layer to "extractors" (see the catalogue in README, "What ZDD reads"), or your own`);
   }
   // Fold and absorb data access (decision 0037; see the head of this file).
   // The data-access records' own refs are final here: every record was
@@ -374,5 +383,5 @@ export function resolveRefs(records) {
     }
   }
   for (const r of kept) delete r.requireRefs;
-  return { records: kept, diagnostics };
+  return { records: kept, diagnostics, warnings };
 }
