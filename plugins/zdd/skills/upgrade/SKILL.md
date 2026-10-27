@@ -219,6 +219,52 @@ recorded by the script, never by hand (the remaining questions of about 5):
 - **The map's `services/` folder** (2.3): the note suggests renaming it to
   `external-services/`; it is theirs and is never renamed for them.
 
+## Step 4b — the repo's own adapters (decision 0040)
+
+Skip this step when the plan names no adapter of the repo's own (no note
+"this repo's own adapters (…)"). Otherwise run:
+
+```
+node "$PLUGIN/scripts/bootstrap.mjs" adapters
+```
+
+It runs ZDD's standard suite on each of the repo's own adapters (on its
+`fixture/`, never on the repo's code) and reads the adapter contract table
+that ships in this release. For each adapter it prints:
+
+- **Ask** lines: a step of the contract the adapter is behind on, with the
+  question to put to the developer, word for word from the release (for
+  example "ZDD can now show message queues; does your stack have any?").
+  Ask them **one at a time**, in plain words, with your recommendation.
+  An optional step never blocks: "no" is a fine answer, and the adapter
+  keeps working without the new ability. A required one is a major release:
+  the adapter must have it before the upgrade is done.
+- **Fails check** lines: a check of the suite the adapter fails, with what
+  to fix. "(warns only)" means CI only warns about it for now.
+
+For every yes and every failing check, update the adapter through the
+**extractor** skill: a fixture case and a test first (red), then the change
+(green). Never edit an adapter without its test going red first. Raise the
+adapter's `CONTRACT` to the contract the engine speaks once it has every
+step it said yes to. Run `adapters` again until it says every adapter
+passes, then:
+
+```
+node "$PLUGIN/scripts/bootstrap.mjs" adapters --raise
+```
+
+`--raise` writes `suiteChecks` in `zdd/config.json` up to the suite's count,
+so every check blocks in CI from now on; it refuses while anything still
+fails. Then do the check together (the coverage report and the human index,
+as at bootstrap) for what the updated adapters now find.
+
+Before 1.0 the contract stays at 1 and there is nothing to ask; the suite's
+checks are the whole step.
+
+Done when `adapters` says every adapter passes and `--raise` has run, or
+the developer has chosen to leave a warning-only check for later (say so in
+the commit's record).
+
 ## Step 5 — regenerate, check, and list the commit
 
 Run the preflight once more — the engine pin may have moved, and a new pin is

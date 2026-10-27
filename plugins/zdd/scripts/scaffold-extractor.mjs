@@ -67,6 +67,8 @@ const REF_PREFIXES = ["?from:", "?table:", "?bucket:", "?function:", "?route:", 
 // `sql` is standard SQL (Postgres): `#` is an operator there. `mysql` adds
 // `#` comments and backslash escapes (1.3.0 CR-014, decision in the skill).
 const SYNTAXES = ["c-like", "sql", "mysql", "python"];
+// What starts a line comment in each, for the module's COMMENT export.
+const LINE_COMMENT = { "c-like": "//", sql: "--", mysql: "#", python: "#" };
 // border: end
 const SYNTAX_BY_EXT = {
   ".cs": "c-like", ".java": "c-like", ".kt": "c-like", ".scala": "c-like", ".go": "c-like", ".rs": "c-like",
@@ -284,6 +286,9 @@ export function scaffold(root, rawAnswers) {
     FACTS_KEY_ORDER: kindsOrder,
     IO_SINCE,
     MASK: readFileSync(join(TEMPLATES, `mask-${a.syntax}.tmpl`), "utf8").trimEnd(),
+    // Each extension's line-comment mark, from the mask the answers chose:
+    // the standard suite comments out every line with it (decision 0040).
+    COMMENT: `{ ${a.extensions.map((e) => `${JSON.stringify(e)}: ${JSON.stringify(LINE_COMMENT[a.syntax])}`).join(", ")} }`,
     TEST_PATH: testPath,
     FIXTURE_OPTIONS: JSON.stringify(options),
     EXPECTED_EXAMPLE: `[${JSON.stringify(a.idExample)}]`,

@@ -31,6 +31,14 @@
 //       app, a mature codebase) and the opt-in backfill: source files,
 //       commits, age, and an honest estimate of the user's review time.
 //
+//   bootstrap.mjs adapters [--raise] [--root=<dir>] [--json]
+//       The adapters this repo wrote itself, through the engine's standard
+//       suite (decision 0040): each one's contract, the steps of the
+//       contract it is behind on with the question to ask about each, and
+//       every check it fails with what to fix. The upgrade skill's interview
+//       reads this. `--raise` writes `suiteChecks` up to the engine's count
+//       once every check passes — from then on the newer checks block in CI.
+//
 //   bootstrap.mjs upgrade [--plan] [--lock] [--drop=<ids>]
 //                         [--move-blessings=<token> [--kinds=<name>:<copy|extend>,…]]
 //                         [--to=vX.Y.Z] [--root=<dir>] [--json]
@@ -944,6 +952,39 @@ const OLD_WORKFLOW_HEADER = /^# Managed by Zero-Drift Docs \(zdd\): written by `
 export function refreshHeader(text) {
   return text.replace(OLD_WORKFLOW_HEADER, (_m, a, b, c) => `# Managed by Zero-Drift Docs (zdd): written by \`zdd:bootstrap\`; "upgrade ZDD"${a}\n# rewrites the engine pin below. Remove this header line to take ownership${b}\n# of the file.${c}`);
 }
+// The standard suite's step (0.9, decision 0040): an owned workflow from an
+// earlier release gains it, in the template's own words, before the
+// freshness step — or, where the team removed that one, after the lint
+// step. A workflow that already runs `suite` outside a comment keeps its
+// shape; one with neither step to anchor on is named for a hand edit.
+const SUITE_STEP_NAME = "- name: Your own adapters pass the standard suite";
+function suiteStepBlock() {
+  const lines = readFileSync(join(TEMPLATES, "zdd.yml"), "utf8").split(/\r?\n/);
+  const at = lines.findIndex((l) => l.trim() === SUITE_STEP_NAME);
+  let from = at;
+  while (from > 0 && lines[from - 1].trim().startsWith("#")) from--;
+  const indent = lines[at].match(/^\s*/)[0];
+  return lines.slice(from, at + 2).map((l) => l.slice(indent.length));
+}
+export function addSuiteStep(text) {
+  if (text.split(/\r?\n/).some((l) => /"\$ZDD_ENGINE"\s+suite\b/.test(stripYamlComment(l)))) return { text, how: "present" };
+  const eol = text.includes("\r\n") ? "\r\n" : "\n";
+  const lines = text.split(/\r?\n/);
+  const block = suiteStepBlock();
+  const fresh = lines.findIndex((l) => /^\s*-\s+name:\s*Semantic-map freshness/.test(l));
+  if (fresh !== -1) {
+    const indent = lines[fresh].match(/^\s*/)[0];
+    lines.splice(fresh, 0, ...block.map((l) => indent + l), "");
+    return { text: lines.join(eol), how: "added" };
+  }
+  const lint = lines.findIndex((l) => /^\s*(?:-\s+)?run:\s*npx -y "\$ZDD_ENGINE" lint\b/.test(stripYamlComment(l)));
+  if (lint === -1) return { text, how: "absent" };
+  let head = lint;
+  while (head > 0 && !/^\s*-\s/.test(lines[head])) head--;
+  const indent = lines[head].match(/^\s*/)[0];
+  lines.splice(lint + 1, 0, "", ...block.map((l) => indent + l));
+  return { text: lines.join(eol), how: "added" };
+}
 const workflowText = (version) => pinEngine(readFileSync(join(TEMPLATES, "zdd.yml"), "utf8"), version);
 const prePushText = (version) => pinEngine(readFileSync(join(TEMPLATES, "pre-push"), "utf8"), version);
 
@@ -1101,6 +1142,9 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
       // and 4): owed until `bootstrap.mjs check --done` clears it. On a
       // greenfield repo it waits for the first derive that finds records.
       mapCheck: "owed",
+      // Every check of the standard suite blocks from day one (decision
+      // 0040): a fresh install has no adapter of its own that predates one.
+      suiteChecks: SUITE_CHECK_COUNT,
     };
     if (!hasGit(root)) config.render = { storeChanges: false };
     // A fresh install never writes a retired name (the alias is for configs
@@ -1248,8 +1292,8 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
   const pocock = findPocock(root, home);
   return { mode, version, date, config, optIns, pocock, detection, host, ciCommands: ciCommands(version), ...ledgerOut(ledger) };
 }
-// The merge gate as three commands, for a pipeline ZDD ships no workflow for.
-export const ciCommands = (version) => [`npx -y ${ENGINE_PACKAGE}@${version} derive --check`, `npx -y ${ENGINE_PACKAGE}@${version} render --check`, `npx -y ${ENGINE_PACKAGE}@${version} lint --merge`];
+// The merge gate as four commands, for a pipeline ZDD ships no workflow for.
+export const ciCommands = (version) => [`npx -y ${ENGINE_PACKAGE}@${version} derive --check`, `npx -y ${ENGINE_PACKAGE}@${version} render --check`, `npx -y ${ENGINE_PACKAGE}@${version} lint --merge`, `npx -y ${ENGINE_PACKAGE}@${version} suite`];
 
 // The example feature slice's text, from the configured extractors and the
 // records each adapter says an example can link (DETECTION.exampleClaims). The
@@ -1598,6 +1642,15 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
     changes.push(`engine pin ${typeof config.engine === "string" ? config.engine : "(none)"} → ${version}`);
     config.engine = version;
   }
+  // The standard suite (decision 0040): with no adapter of the repo's own,
+  // every check blocks at once — there is nothing a new check could turn
+  // red. With some, the number stays where it is (absent: every check
+  // warns) until `bootstrap.mjs adapters --raise`, after the interview.
+  const own = ownAdapters(root, config);
+  if (!own.length && config.suiteChecks !== SUITE_CHECK_COUNT) {
+    changes.push(`suiteChecks ${config.suiteChecks ?? "(none)"} → ${SUITE_CHECK_COUNT}: no adapter of this repo's own, so every check of the standard suite blocks (decision 0040)`);
+    config.suiteChecks = SUITE_CHECK_COUNT;
+  }
   // The Stop hook (plugin 1.1, decision 0008) is a new opt-in; upgrade names
   // it but never answers it — the skill asks, and a repair `apply` records it.
   const stopUnset = !(config.hooks && typeof config.hooks === "object" && !Array.isArray(config.hooks) && typeof config.hooks.stop === "boolean");
@@ -1628,6 +1681,7 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
     let next = rel.endsWith("pre-push") ? fresh() : pinEngine(cur, version);
     let gate = null;
     let headerNote = null;
+    let suite = null;
     if (rel.endsWith("zdd.yml")) {
       gate = mergeGate(next);
       next = gate.text;
@@ -1642,12 +1696,16 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
         next = head;
         headerNote = `${rel}: its header comment now names "upgrade ZDD" (it named the retired \`zdd:bootstrap --upgrade\`)`;
       }
+      suite = addSuiteStep(next);
+      next = suite.text;
+      if (suite.how === "absent") ledger.notes.push(`${rel}: no lint or freshness step to place it beside — add a step that runs \`npx -y "$ZDD_ENGINE" suite\` by hand (the standard suite on this repo's own adapters, decision 0040)`);
     }
     if (next !== cur) {
       ledger.overwrite(rel, next);
       ledger.notes.push(`${rel}: ${rel.endsWith("pre-push") ? "rewritten from the template" : "engine pin updated"} (${version})`);
       if (gate?.how === "added") ledger.notes.push(`${rel}: the lint step now runs \`lint --merge\` (2.0) — the merge gate fails while the branch's pattern plan exists`);
       if (headerNote) ledger.notes.push(headerNote);
+      if (suite?.how === "added") ledger.notes.push(`${rel}: a step now runs the standard suite on this repo's own adapters (0.9, decision 0040)`);
     } else ledger.kept.push(rel);
   }
   // Links in the map move whenever any still point at a renamed kind's folder
@@ -1719,6 +1777,7 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
     }
   }
   ledger.notes.push(...offerOptIns(root, config));
+  if (own.length) ledger.notes.push(`this repo's own adapters (${own.join(", ")}): run \`bootstrap.mjs adapters\` — the standard suite on each one's fixture, and the steps of the adapter contract each is behind on (decision 0040); fix what it names through the extractor skill, then \`bootstrap.mjs adapters --raise\` (suiteChecks stays at ${config.suiteChecks ?? "0, every check warning,"} until then)`);
   ledger.notes.push("curated artifacts (glossary, ADRs, map pages, metadata) untouched — upgrade never writes them, save two mechanical moves named above: a map link to a record whose kind a release renamed, and blessings moved out of the map on --move-blessings");
   ledger.notes.push("if the engine pin moved: run `derive` and `render`, then `lint`, and commit the regenerated artifacts in the same PR");
   return { version, plan, ...ledgerOut(ledger), duplicates, blessingMoves };
@@ -2737,6 +2796,89 @@ function moveLockOnly(root, version, to, { plan = false, lock = false, remote, h
 }
 
 // ---------------------------------------------------------------------------
+// The standard suite and the adapter contract (decision 0040).
+// ---------------------------------------------------------------------------
+// How many checks the engine's suite has: a mirror the upgrade uses without
+// running the engine, held equal to the engine's SUITE_CHECK_COUNT by a test.
+export const SUITE_CHECK_COUNT = 5;
+
+// The adapters config selects that the repo wrote itself: a name with a
+// module in localExtractorDir (`<name>.mjs` or `<name>/index.mjs`). The
+// engine refuses a local name that shadows a catalogue one, so a module
+// there is the repo's own.
+export function ownAdapters(root, config) {
+  const dir = typeof config.localExtractorDir === "string" ? config.localExtractorDir : null;
+  if (!dir || !Array.isArray(config.extractors)) return [];
+  let abs;
+  try {
+    abs = resolveInside(root, dir, `localExtractorDir ${dir}`);
+  } catch {
+    return [];
+  }
+  return config.extractors.filter((n) => typeof n === "string" && /^[a-z][a-z0-9-]*$/.test(n) && (existsSync(join(abs, `${n}.mjs`)) || existsSync(join(abs, n, "index.mjs"))));
+}
+
+// The interview's material: the engine's suite report, turned into what to
+// ask and what to fix, per adapter. `raise` writes suiteChecks up to the
+// engine's count, and only when every check of every adapter passes.
+export function adapters(root, { raise = false } = {}) {
+  const cfg = readConfig(root);
+  if (cfg.state !== "valid") throw new Error(cfg.state === "invalid" ? `${cfg.error} — fix it first` : "no zdd/config.json here — bootstrap first");
+  let r;
+  try {
+    r = JSON.parse(runEngine(["suite", "--json", `--root=${root}`]));
+  } catch (e) {
+    // The suite exits 1 with its report on stdout when a check blocks.
+    try {
+      r = JSON.parse(String(e.stdout ?? ""));
+    } catch {
+      throw new Error(`the standard suite could not run — the engine said: ${String(e.stderr || e.message).trim().split(/\r?\n/).slice(-3).join(" ")}`);
+    }
+  }
+  const rows = new Map(r.table.map((row) => [row.step, row]));
+  const out = r.adapters.map((a) => {
+    const ask = [];
+    if (a.declared === null && !a.loadError && rows.get("CONTRACT")?.ask) ask.push({ step: "CONTRACT", required: true, ask: rows.get("CONTRACT").ask });
+    for (const step of a.behind ?? []) {
+      const row = rows.get(step);
+      if (row?.ask) ask.push({ step, required: row.required, since: row.since, ask: row.ask });
+    }
+    const fix = (a.checks ?? []).filter((c) => !c.ok).map((c) => ({ n: c.n, title: r.checks[c.n - 1].title, fix: r.checks[c.n - 1].fix, detail: c.detail, blocking: c.blocking }));
+    return { name: a.name, declared: a.declared ?? null, loadError: a.loadError ?? null, contractFail: a.contractFail ?? null, ask, fix };
+  });
+  const clean = out.every((a) => !a.loadError && !a.contractFail && a.declared !== null && !a.fix.length);
+  const ledger = new Ledger(root);
+  let raised = false;
+  if (raise) {
+    if (!clean) {
+      const left = out.filter((a) => a.loadError || a.contractFail || a.declared === null || a.fix.length).map((a) => a.name);
+      throw new Error(`suiteChecks stays at ${r.suiteChecks}: ${left.join(", ")} ${left.length === 1 ? "does" : "do"} not pass the standard suite yet (or declare no CONTRACT) — fix them through the extractor skill, then --raise again`);
+    }
+    if (cfg.config.suiteChecks !== r.count) {
+      ledger.overwrite("zdd/config.json", JSON.stringify({ ...cfg.config, suiteChecks: r.count }, null, 2) + "\n");
+      ledger.notes.push(`zdd/config.json: suiteChecks ${cfg.config.suiteChecks ?? "(none)"} → ${r.count} — every check of the standard suite now blocks in CI`);
+      raised = true;
+    } else ledger.kept.push("zdd/config.json");
+  }
+  return { suiteChecks: r.suiteChecks, count: r.count, contract: r.contract, adapters: out, skipped: r.skipped, clean, raised, ...ledgerOut(ledger) };
+}
+
+export function narrateAdapters(r) {
+  if (!r.adapters.length) return printable(`No adapter of this repo's own is configured: nothing to interview. (ZDD's own adapters are updated by the release and pass the standard suite in ZDD's CI.)${r.notes?.length ? `\n${r.notes.join("\n")}` : ""}`);
+  const out = [`This engine speaks adapter contract ${r.contract}; the standard suite has ${r.count} checks, and ${r.suiteChecks ? `checks 1–${r.suiteChecks} block in CI` : "none blocks in CI yet"}.`];
+  for (const a of r.adapters) {
+    out.push("", `${a.name} — written for contract ${a.declared ?? "(not declared)"}`);
+    if (a.loadError) out.push(`  It ${a.loadError}.`);
+    if (a.contractFail) out.push(`  Derive stops on it: ${a.contractFail}`);
+    for (const q of a.ask) out.push(`  Ask (${q.required ? "required" : "optional"}, ${q.step}): ${q.ask}`);
+    for (const f of a.fix) out.push(`  Fails check ${f.n}${f.blocking ? " (blocks CI)" : " (warns only)"}: ${f.title}.`, `    ${String(f.detail).split("\n")[0]}`, `    Fix: ${f.fix}.`);
+    if (!a.ask.length && !a.fix.length && !a.contractFail && !a.loadError) out.push("  Passes every check; nothing to ask.");
+  }
+  out.push("", r.clean ? (r.raised ? "Every adapter passes: suiteChecks raised." : r.suiteChecks === r.count ? "Every adapter passes, and every check already blocks." : "Every adapter passes: run `bootstrap.mjs adapters --raise` to make every check block in CI.") : "Ask the questions one at a time, update each adapter through the extractor skill (its tests red, then green), run this again, then `--raise`.");
+  if (r.notes?.length) out.push(...r.notes);
+  return out.map(printable).join("\n");
+}
+
 // Check it together (decision 0039 points 3 and 4). After the adapters are
 // attached and derive has run, the engine's coverage report names, per record
 // kind, what the records link to and which link to nothing; the developer
@@ -3230,6 +3372,9 @@ if (process.argv[1] && posixify(process.argv[1]).endsWith("/scripts/bootstrap.mj
       const r = mapCheck(root, { done: flags.done === true, status: flags.status === true });
       const text = narrateCheck(r);
       process.stdout.write(flags.json ? JSON.stringify(r, null, 2) + "\n" : text ? text + "\n" : "");
+    } else if (cmd === "adapters") {
+      const r = adapters(root, { raise: flags.raise === true });
+      process.stdout.write(flags.json ? JSON.stringify(r, null, 2) + "\n" : narrateAdapters(r) + "\n");
     } else if (cmd === "preview") {
       const r = preview(root, String(flags.extractors ?? "").split(",").map((s) => s.trim()).filter(Boolean));
       process.stdout.write(flags.json ? JSON.stringify(r, null, 2) + "\n" : narratePreview(r) + "\n");
@@ -3240,7 +3385,7 @@ if (process.argv[1] && posixify(process.argv[1]).endsWith("/scripts/bootstrap.mj
       const s = releaseStatus(root, typeof flags.remote === "string" ? flags.remote : undefined, flags.home);
       process.stdout.write(flags.json ? JSON.stringify(s) + "\n" : printable(narrateReleaseStatus(s)) + "\n");
     } else {
-      process.stderr.write("Usage: bootstrap.mjs <preflight [--registry=<url>] [--github=<url>]|detect|estimate|apply --answers=<file>|check [--status|--done]|preview --extractors=<a,b>|upgrade [--plan] [--lock] [--drop=<ids>] [--move-blessings=<token> [--kinds=<name>:<copy|extend>,…]] [--to=vX.Y.Z]|split-adrs [--plan] [--token=<token> --harness=<nums> --application=<nums>] [--dir=<rel> --index=<rel>]|release-status [--remote=<url>]> [--root=<dir>] [--date=YYYY-MM-DD] [--home=<dir>] [--json]\n");
+      process.stderr.write("Usage: bootstrap.mjs <preflight [--registry=<url>] [--github=<url>]|detect|estimate|apply --answers=<file>|check [--status|--done]|adapters [--raise]|preview --extractors=<a,b>|upgrade [--plan] [--lock] [--drop=<ids>] [--move-blessings=<token> [--kinds=<name>:<copy|extend>,…]] [--to=vX.Y.Z]|split-adrs [--plan] [--token=<token> --harness=<nums> --application=<nums>] [--dir=<rel> --index=<rel>]|release-status [--remote=<url>]> [--root=<dir>] [--date=YYYY-MM-DD] [--home=<dir>] [--json]\n");
       process.exit(2);
     }
   } catch (e) {

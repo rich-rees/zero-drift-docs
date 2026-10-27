@@ -322,7 +322,7 @@ test("the written workflow: exact ordered command list, the pin once in env, rea
   const wf = readFileSync(join(repo, ".github", "workflows", "zdd.yml"), "utf8");
   const lines = wf.split("\n");
   const runs = lines.filter((l) => /^\s*run:\s/.test(l)).map((l) => l.replace(/^\s*run:\s*/, "").trim());
-  assert.deepEqual(runs, ['npx -y "$ZDD_ENGINE" derive --check', 'npx -y "$ZDD_ENGINE" render --check', 'npx -y "$ZDD_ENGINE" lint --merge', 'npx -y "$ZDD_ENGINE" freshness >> "$GITHUB_STEP_SUMMARY"']);
+  assert.deepEqual(runs, ['npx -y "$ZDD_ENGINE" derive --check', 'npx -y "$ZDD_ENGINE" render --check', 'npx -y "$ZDD_ENGINE" lint --merge', 'npx -y "$ZDD_ENGINE" suite', 'npx -y "$ZDD_ENGINE" freshness >> "$GITHUB_STEP_SUMMARY"']);
   const pins = lines.filter((l) => l.includes("@rich-rees/zdd-engine@"));
   assert.deepEqual(pins, [`  ZDD_ENGINE: "@rich-rees/zdd-engine@${PLUGIN_VERSION}"`], "the pin appears exactly once, in env");
   // A contributor's local extractor runs in this job (decision 0001): the token

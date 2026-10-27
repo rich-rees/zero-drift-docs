@@ -15,6 +15,11 @@
       "const": "owed",
       "description": "The first map check, done with the developer (decision 0039): written \"owed\" by bootstrap at a fresh install, removed by `bootstrap.mjs check --done`. On a repo with no code yet it waits for the first derive that finds records. No engine command reads it."
     },
+    "suiteChecks": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "How many of the standard suite's checks block for this repo's own adapters (decision 0040): `zdd-engine suite` fails on a failing check numbered at or below it and warns on a newer one. Written by bootstrap at a fresh install (every check), raised by \"upgrade ZDD\" where the repo has no adapter of its own, and by `bootstrap.mjs adapters --raise` once its own adapters pass. Absent: every check warns."
+    },
     "extractors": {
       "type": "array",
       "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },

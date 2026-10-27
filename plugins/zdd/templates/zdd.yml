@@ -59,5 +59,13 @@ jobs:
       - name: Store lints (supersession symmetry, blessings, no pattern plan left)
         run: npx -y "$ZDD_ENGINE" lint --merge
 
+      # The adapters this repo wrote itself (localExtractorDir) pass the
+      # standard suite, each on its own fixture, never on your code (decision
+      # 0040). A check newer than zdd/config.json's suiteChecks only warns
+      # until "upgrade ZDD" has your adapter pass it. With no adapter of your
+      # own this says so and passes; ZDD's adapters pass it in ZDD's own CI.
+      - name: Your own adapters pass the standard suite
+        run: npx -y "$ZDD_ENGINE" suite
+
       - name: Semantic-map freshness (advisory)
         run: npx -y "$ZDD_ENGINE" freshness >> "$GITHUB_STEP_SUMMARY"

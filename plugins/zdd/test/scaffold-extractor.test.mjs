@@ -167,14 +167,15 @@ test("the scaffolded test is red until EXPECTED_IDS and a fixture exist, and gre
   const green = runTests(repo, testFile);
   assert.equal(green.status, 0, green.stdout + green.stderr);
   // Exact counts per platform (1.3.0 CR-012): a hardening test deleted or
-  // newly skipped must turn this red. Nine tests — the POSIX file-symlink one
-  // skips on Windows; the recursion one passes once CONVENTION_RECURSES is answered.
+  // newly skipped must turn this red. Ten tests — the POSIX file-symlink one
+  // skips on Windows; the recursion one passes once CONVENTION_RECURSES is answered;
+  // the last runs the standard suite (decision 0040).
   const count = (what) => Number(new RegExp(`^# ${what} (\\d+)$`, "m").exec(green.stdout)?.[1]);
-  assert.equal(count("tests"), 9, green.stdout);
+  assert.equal(count("tests"), 10, green.stdout);
   assert.equal(count("fail"), 0, green.stdout);
   assert.equal(count("todo"), 0, green.stdout);
   assert.equal(count("skipped"), POSIX ? 0 : 1, green.stdout);
-  assert.equal(count("pass"), POSIX ? 9 : 8, green.stdout);
+  assert.equal(count("pass"), POSIX ? 10 : 9, green.stdout);
 });
 
 test("refusals: every bad answer or repo state stops before the first write", (t) => {

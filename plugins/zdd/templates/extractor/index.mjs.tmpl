@@ -30,6 +30,16 @@ import { fileURLToPath } from "node:url";
 
 export const FACTS_KEY_ORDER = __FACTS_KEY_ORDER__;
 
+// What ZDD's standard suite needs (`zdd-engine suite`, decision 0040): the
+// adapter contract this module was written for, how a line of each kind of
+// file it reads is commented out (the suite comments out every line of the
+// fixture and expects nothing new), and the options its fixture/ is read
+// with. Put a fixture-trap/ folder beside fixture/ (laid out the same way)
+// for declarations written inside strings: they must give nothing either.
+export const CONTRACT = 1;
+export const COMMENT = __COMMENT__;
+export const SUITE = { options: __FIXTURE_OPTIONS__ };
+
 const DEFAULT_ROOTS = __ROOTS__;
 const DEFAULT_EXTENSIONS = __EXTENSIONS__;
 // Folders never walked: dependencies, build output, the zdd bundle.
