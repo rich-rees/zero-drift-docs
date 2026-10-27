@@ -93,7 +93,12 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
   code a route or screen runs, which a data-access adapter's `data-access`
   records answer ([decision 0037](docs/decisions/0037-routes-reach-tables-through-a-data-access-record-joined-on-file-and-function.md):
   the referrer takes their tables; one in the referrer's own file is
-  absorbed; a miss is silent). The deriver resolves them after the
+  absorbed; a miss is silent). `?code:<file>#*` is every data-access record
+  in the file, for a referrer whose unit is the whole file. A JS unit is a
+  top-level declaration by its local name, or `<module>` for the module's
+  own top-level code (`src/adapters/js/source.mjs`). Put the `?code:` ref
+  under a verb (`edges.reads`) and the tables the data-access record leaves
+  untyped take that verb. The deriver resolves them after the
   merge, drops misses with a diagnostic, and drops a record flagged
   `requireRefs: true` when nothing resolved (how a "module" record means "a file
   that references something"). See `src/core/lib/resolve-refs.mjs`.

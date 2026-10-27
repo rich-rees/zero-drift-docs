@@ -16,8 +16,8 @@
       "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
       "minItems": 1,
       "uniqueItems": true,
-      "description": "Extractors to run, composed: one per convention in the stack (built-in: supabase, nextjs, fastapi, react-router, components, expo-router, jobs, external-services, supabase-py, sqlalchemy, generic; `services` is the pre-2.3 name of external-services). Selected by NAME from the engine's registry or from localExtractorDir — never by path. Records from every extractor are merged and cross-extractor refs resolved after the merge.",
-      "examples": [["supabase", "nextjs"], ["supabase", "supabase-py", "fastapi"], ["supabase", "fastapi", "sqlalchemy"], ["fastapi", "react-router"], ["generic"]],
+      "description": "Extractors to run, composed: one per convention in the stack (built-in: supabase, nextjs, fastapi, react-router, components, expo-router, jobs, external-services, supabase-js, supabase-py, sqlalchemy, generic; `services` is the pre-2.3 name of external-services). Selected by NAME from the engine's registry or from localExtractorDir — never by path. Records from every extractor are merged and cross-extractor refs resolved after the merge.",
+      "examples": [["supabase", "supabase-js", "nextjs"], ["supabase", "supabase-py", "fastapi"], ["supabase", "fastapi", "sqlalchemy"], ["fastapi", "react-router"], ["generic"]],
       "not": { "allOf": [{ "contains": { "const": "services" } }, { "contains": { "const": "external-services" } }] }
     },
     "extractorOptions": {
@@ -58,7 +58,7 @@
                 "extensions": { "type": "array", "items": { "type": "string" }, "default": [".ts", ".tsx", ".js", ".jsx"] },
                 "excludeDirs": { "type": "array", "items": { "type": "string" }, "default": ["node_modules"] },
                 "excludeSuffixes": { "type": "array", "items": { "type": "string" }, "default": [".test.ts", ".test.tsx", ".test.js", ".test.jsx", ".d.ts"] },
-                "subscribeCalls": { "type": "array", "items": { "type": "string" }, "default": [], "description": "Call names whose first string argument is a table a page subscribes to over Supabase Realtime, beside .on(\"postgres_changes\", { table }) — a `subscribes` edge (ZDD 2.1)." }
+                "subscribeCalls": { "type": "array", "items": { "type": "string" }, "deprecated": true, "description": "Read by supabase-js since 0.9 (decision 0037): set here, it is ignored with a warning — move it to extractorOptions.supabase-js.subscribeCalls." }
               }
             }
           }
@@ -70,6 +70,18 @@
             "roots": { "type": "array", "items": { "type": "string" }, "default": ["."], "description": "Files or directories scanned for .py handlers." },
             "excludeDirs": { "type": "array", "items": { "type": "string" } },
             "appVar": { "type": "string", "default": "app" }
+          }
+        },
+        "supabase-js": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Data access through the Supabase JavaScript client (.from / .rpc / Realtime), one record per top-level declaration, the module's own top-level code as <module> (decision 0037). The route and screen extractors name the code they run; the core joins the two.",
+          "properties": {
+            "roots": { "type": "array", "items": { "type": "string" }, "default": ["."], "description": "Files or directories scanned for JS / TS source." },
+            "extensions": { "type": "array", "items": { "type": "string" }, "default": [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"] },
+            "excludeDirs": { "type": "array", "items": { "type": "string" }, "default": ["node_modules", ".git", ".next", "dist", "build", "coverage"] },
+            "excludeSuffixes": { "type": "array", "items": { "type": "string" }, "default": [".test.ts", ".test.tsx", ".test.js", ".test.jsx", ".spec.ts", ".spec.tsx", ".spec.js", ".spec.jsx", ".d.ts"] },
+            "subscribeCalls": { "type": "array", "items": { "type": "string" }, "default": [], "description": "Call names whose first string argument is a table the code subscribes to over Supabase Realtime (e.g. \"live.onInsert\"), beside the client's own .on(\"postgres_changes\", { table }) — a `subscribes` edge (ZDD 2.1; on the web extractors before 0.9)." }
           }
         },
         "supabase-py": {
@@ -96,7 +108,7 @@
           "properties": {
             "routesFile": { "type": "string", "default": "src/routes.tsx", "description": "The file declaring the route tree in code: a RouteObject[] / createBrowserRouter([...]) array, or <Route> elements. One surface per route with a path; layout ancestors become facts.guards." },
             "srcAliasRoot": { "type": "string", "description": "Where the tsconfig @/ alias points; default the routes file's directory." },
-            "subscribeCalls": { "type": "array", "items": { "type": "string" }, "default": [], "description": "Call names whose first string argument is a table the screen subscribes to over Supabase Realtime (e.g. \"live.onInsert\"), beside the client's own .on(\"postgres_changes\", { table }) — a `subscribes` edge (ZDD 2.1)." }
+            "subscribeCalls": { "type": "array", "items": { "type": "string" }, "deprecated": true, "description": "Read by supabase-js since 0.9 (decision 0037): set here, it is ignored with a warning — move it to extractorOptions.supabase-js.subscribeCalls." }
           }
         },
         "components": {

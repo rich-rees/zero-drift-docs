@@ -152,10 +152,11 @@ hook, config schema + example, the seed ADR-0001, and the extractor scaffold).
 |---|---|---|
 | Database | `supabase` | SQL migrations: tables, functions, triggers, buckets |
 | API | `fastapi` | FastAPI decorators: routes, handlers, and the functions a handler calls (one hop, through the file's imports; an ambiguous target is skipped) |
+| Data access (JS / TS) | `supabase-js` | the Supabase JavaScript client — `.from()`, `.rpc()`, Realtime `.on("postgres_changes")` and the wrapper calls named in `subscribeCalls` — one record per top-level declaration (the module's own top-level code as `<module>`) |
 | Data access (Python) | `supabase-py` | the Supabase Python client — `.table()`, `.from_()`, `.rpc()` — one record per function |
 | Data access (Python) | `sqlalchemy` | raw SQL in string literals (`text("…")`, any driver): the tables after `FROM` / `JOIN` (**reads**) and `INTO` / `UPDATE` / `DELETE FROM` (**writes**), one record per function; the ORM is not read |
-| API + pages | `nextjs` | the App Router tree: route handlers, pages, layouts, middleware auth, `fetch('/api/…')` and `.from('x')` refs |
-| Pages | `react-router` | a route tree declared in code: one surface per screen, its guards, the API calls one hop away |
+| API + pages | `nextjs` | the App Router tree: route handlers, pages, layouts, middleware auth, `fetch('/api/…')` refs, and the code each file runs (for a data-access adapter) |
+| Pages | `react-router` | a route tree declared in code: one surface per screen, its guards, the API calls and the code it runs one hop away |
 | Native screens | `expo-router` *(early)* | the Expo Router folder tree: screens, layouts, `[id]` segments, platform pairs — namespaced so a native `/jobs` and a web `/jobs` are two surfaces |
 | Components | `components` | React and React Native: exported, capitalised, returning JSX; props as written; **used by** / **uses** / **calls**; shared vs page-private |
 | Background work | `jobs` | everything that runs without a user clicking (2.3): scheduled — Vercel crons (`vercel.json`), Railway `cronSchedule`, Cloudflare `wrangler.toml` triggers, Supabase `pg_cron` in migrations, Trigger.dev scheduled tasks, and GitHub Actions schedules as opt-in housekeeping; workers — Railway, a Procfile, Docker Compose; queues — BullMQ, Inngest, Trigger.dev, SQS, producer and consumer with the queue's name. Each record carries its trigger and what it hits (a route, a function, the module); a package script counts only when a manifest runs it; `reads` / `writes` from the tables a module names; the mode never guessed |
@@ -484,8 +485,8 @@ packages/zdd-engine/                # deriver / renderer / checks + extractors +
   bin/zdd-engine.mjs                # the CLI (derive / render / lint / freshness / tally)
   src/core/                         # the stack-free core: derive, render, lint, the stores, the viewers
   src/core/viewers/{cytoscape,minimal}/  # output end: human-index viewers over graph.json
-  src/adapters/{supabase,nextjs,fastapi,react-router,components,expo-router,jobs,external-services,supabase-py,sqlalchemy,generic}/   # input end: one adapter per convention
-  src/adapters/python/              # helpers the Python adapters share (no index.mjs: not an adapter)
+  src/adapters/{supabase,nextjs,fastapi,react-router,components,expo-router,jobs,external-services,supabase-js,supabase-py,sqlalchemy,generic}/   # input end: one adapter per convention
+  src/adapters/{js,python}/         # helpers each language's adapters share (no index.mjs: not adapters)
   test/fixture*/                    # the miniature proving repos
 docs/patterns.md                    # blessings and "choose patterns", the whole system
 docs/decisions/                     # this repo's own decision record (ADR format)
