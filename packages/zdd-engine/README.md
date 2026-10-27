@@ -16,6 +16,9 @@ npx @rich-rees/zdd-engine render [--check]
 npx @rich-rees/zdd-engine lint [--merge] [--tempstate]
 npx @rich-rees/zdd-engine freshness [--base <ref>]
 npx @rich-rees/zdd-engine tally [--since <ref|date>] [--json]
+npx @rich-rees/zdd-engine detect [--root=<dir>]
+npx @rich-rees/zdd-engine coverage [--json]
+npx @rich-rees/zdd-engine preview --extractors=<a,b,…> [--out=<empty dir>] [--json]
 ```
 
 - **derive** — run the configured extractors over the repo and write
@@ -78,6 +81,19 @@ npx @rich-rees/zdd-engine tally [--since <ref|date>] [--json]
   refused. `--json` prints the same as one object, for a host harness to
   copy. Deterministic: same history, stores and arguments in, same bytes
   out; no dates of its own, no judgment.
+- **detect** — which catalogue adapters fit a repo (decision 0039), as one
+  JSON object: each proposal with its plain-words evidence, options and the
+  parts of the app it covers; coverage part by part and the parts nothing
+  covers; the greenfield stack rules and the ready-made adapters by part.
+  Each adapter answers for itself over one shared walk of the repo. Reads no
+  config and writes nothing; bootstrap asks it.
+- **coverage** — the automated half of the first map check: derives in
+  memory (writes nothing) and prints, per record kind, the count, what its
+  records link to, and by name the ones that link to nothing and the ones
+  nothing links to.
+- **preview** — for a repo with no code yet: copies the named adapters'
+  `example/` folders into a new temporary folder outside the repo, derives
+  and renders there, and prints where the human index landed.
 
 Every command locates the repo by walking up from the working directory to the
 first folder holding `zdd/config.json` (override with `--root=<dir>` /

@@ -60,6 +60,79 @@ of them linked to a table.
   questions). That is the price of naming gaps instead of hoping someone
   spots them.
 
+## As built (ZDD-3 slice 4)
+
+- **The engine runs detection; bootstrap runs the engine of its own
+  release.** The plugin carries no engine and cannot import an adapter, so
+  `zdd-engine detect` asks every catalogue adapter and prints one JSON
+  answer (`src/core/lib/detect-repo.mjs`), and `bootstrap.mjs detect` runs
+  it: `ZDD_ENGINE_BIN` when set (a test, a dry run), else the engine beside
+  the plugin when it is the same version (this repository's checkout), else
+  the pinned package under `npx`, as every skill runs it. Until the 0.9
+  engine is published, an install outside this checkout has no engine that
+  knows `detect`; slice 6 ships them together.
+- **The contract.** An adapter exports `DETECTION` (data: `parts`, `order`,
+  `optionShape`, and as it needs them `skipDirs`, `stack`, `companion`,
+  `exampleClaims`, `example`, `optIn`, and for the fallback `sourceFile` /
+  `existing`) and `detect({ scan, proposed })` (CONTRIBUTING). Everything
+  bootstrap knew about a stack moved there: the evidence, the greenfield
+  stack rules, the option checks it runs on answers, the records the
+  example feature slice shows, and which adapters an upgrade offers again.
+  A rule whose proposal depends on others' (supabase-js beside Supabase and
+  a JS app) answers in a second pass that sees their names (`after`).
+- **One walk, one budget.** The core walks the repo once (six folders deep,
+  as bootstrap did; dot folders, `zdd/` and the union of the adapters'
+  `skipDirs` skipped; gitignored paths never seen) and hands every adapter
+  the same `scan`, with reads cached and charged to one io: 50,000 entries
+  and 64 MiB of reads for all of detection, where bootstrap capped only the
+  routes-file probe. The answer says when the walk or the reads ran out, and
+  bootstrap says it aloud.
+- **Parts.** The six of the decision. A schema adapter (`supabase`) reports
+  `database access`, with the data-access adapters: the tables are what
+  access reaches. `generic` covers none.
+- **New proposals.** `supabase-py` (the client as a dependency, an import,
+  or its own call shape — `.table("x")` / `.from_("x")` in Python, as on
+  the engine's FastAPI fixture, whose client is never imported), `sqlalchemy`
+  (a dependency in `requirements*.txt`, `pyproject.toml` or `Pipfile`, or an
+  import), and the queue readers `background-inngest`,
+  `background-trigger-dev` and `background-sqs` from their declarations in
+  source. Every other proposal on the engine's fixtures is what bootstrap
+  proposed before, evidence text and all; the services detection now uses
+  the adapter's own scanners, so bootstrap's mirror of its lists is gone.
+  The queue readers are opt-ins, offered by every upgrade; the data-access
+  adapters are not (adding them to an old config is slice 6's upgrade).
+- **The coverage report** is `zdd-engine coverage` (derive in memory,
+  nothing written): per record kind, the count, the kinds its records link
+  to (refs and typed edges to records that exist), and by name (up to 20)
+  the records that link to nothing and the ones nothing links to.
+  `bootstrap.mjs check` reads it out with the two questions; `check --done`
+  ends it.
+- **What is owed** is `"mapCheck": "owed"` in `zdd/config.json`, written at
+  a fresh install and cleared by `check --done`. `load` runs
+  `check --status`, which says one line when the check is owed and derive
+  has found records — the greenfield case — and nothing otherwise.
+- **The preview** is `zdd-engine preview --extractors=…` (and
+  `bootstrap.mjs preview`): the chosen adapters' `example/` folders (today
+  `supabase`, `fastapi`, `nextjs`, `react-router`, `expo-router`) copied into
+  a new temporary folder outside the repo, with a config naming them, then
+  derive and render there. An adapter with no example is named, not faked.
+- **The plugin's border** is a test (`plugins/zdd/test/plugin-border.test.mjs`):
+  no plugin script names a stack, by the engine's tripwire list, outside a
+  fenced region that says why — the upgrade's migrations from earlier
+  releases (the pre-1.0 bundle, the 0.9 `jobs` split, each release's note,
+  the retired-name sweep's build folders), the git hosts behind the CI
+  offer, the fence's interpreter list, and the scaffold's mirror of the
+  catalogue (held equal by its own test). The skills' prose is not checked:
+  it talks to a person about their stack.
+- **Measured on the adopters (dry runs on throwaway copies).** Detection
+  takes about a second on both adopters, and proposes what main's
+  bootstrap did, with `jobs` split into the readers each repo uses
+  (the first adopter `background-railway` and `background-vercel`, the second adopter
+  `background-railway`), `supabase-js` on both, and `sqlalchemy` on
+  the second adopter. Added to their configs, those two bring the first adopter's 14 missing
+  modules back (no broken map links) and give the second adopter 68 data-access
+  records: 53 of its 70 routes now link to a table, where none did.
+
 ## Rejected
 
 - **Detection stays in bootstrap, as one table of probes.** Less work now,

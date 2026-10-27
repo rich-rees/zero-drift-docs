@@ -65,6 +65,18 @@ under `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` your shell has neither, so trust the
 session-start line over this run when they disagree. Silent when they match or the repo locks nothing;
 do not mention it then. (The session-start hook prints the same line.)
 
+Then, the same way:
+
+```
+node "$PLUGIN/scripts/bootstrap.mjs" check --status
+```
+
+The first map check (decision 0039) is owed from bootstrap until it is done
+together; on a greenfield repo it waits for code. This prints one line when
+it is owed and derive now finds records. **Relay it as the next line of your
+reply** and offer to run it — the bootstrap skill's step 5, "Check it
+together". Silent otherwise; do not mention it then.
+
 ## Steps
 
 The paths below are the defaults. The repo's `zdd/config.json` may move any of

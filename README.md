@@ -484,7 +484,7 @@ plugins/zdd/
     adr-0001-adopt-zero-drift-docs.md   # seeded as the adopter's first ADR
   test/                             # seam 2: the runbook and hooks observed as files + processes
 packages/zdd-engine/                # deriver / renderer / checks + extractors + viewers
-  bin/zdd-engine.mjs                # the CLI (derive / render / lint / freshness / tally)
+  bin/zdd-engine.mjs                # the CLI (derive / render / lint / freshness / tally / detect / coverage / preview)
   src/core/                         # the stack-free core: derive, render, lint, the stores, the viewers
   src/core/viewers/{cytoscape,minimal}/  # output end: human-index viewers over graph.json
   src/adapters/{supabase,nextjs,fastapi,react-router,components,expo-router,background-*,external-services,supabase-js,supabase-py,sqlalchemy,generic}/   # input end: one adapter per convention

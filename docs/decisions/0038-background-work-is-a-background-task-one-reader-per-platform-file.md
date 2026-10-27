@@ -89,6 +89,16 @@ Three questions settled on 2026-10-27, Rich's calls:
   `reader`. Listing `background-github-actions` is its opt-in
   (`includeGithubActions` before).
 
+- **Each reader walks on its own io, and the total is bounded** (slice 3
+  review CR-086, settled in slice 4). derive gives every extractor a fresh
+  io, so each listed reader walks its `roots` under its own caps (50,000
+  entries, 64 MiB of reads, never a gitignored path or a build folder):
+  the cost is at most the readers listed times those caps. Detection
+  (decision 0039) proposes only the readers a repo has evidence for —
+  the first adopter two, the second adopter one — and on those repos derive took 2.3 s and
+  1.2 s; with all eleven readers listed, 4.9 s and 2.6 s. Narrowing a
+  reader's `roots` is the lever for a repo where it matters.
+
 What they share lives in `adapters/background/` (a helper folder): the
 command parser, the script and module resolution, the small format readers,
 and the reader that turns candidates into records.

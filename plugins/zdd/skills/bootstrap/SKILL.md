@@ -113,7 +113,10 @@ node "$PLUGIN/scripts/bootstrap.mjs" detect
 ```
 
 It prints the mode, where the repo is hosted (that decides the CI offer in
-step 3), and whether Matt Pocock's skills are installed (used in step 7):
+step 3), and whether Matt Pocock's skills are installed (used in step 7).
+The detection is the adapters' own (decision 0039): each one in the engine's
+catalogue says whether it fits, with its evidence, and the engine runs them
+(bootstrap runs the engine of its own release; detection writes nothing):
 
 - **EXISTING codebase** — a proposed extractor set, and for each one the
   **evidence** it found ("SQL migrations under `supabase/migrations`",
@@ -137,10 +140,14 @@ step 3), and whether Matt Pocock's skills are installed (used in step 7):
      with a `_layout` file), one `background-*` reader per kind of background
      work found (decision 0038: a Procfile, Railway, Compose, Vercel or
      Cloudflare file that runs or schedules a process, pg_cron in a
-     migration, a BullMQ queue in source — a package script counts only when
-     one of those runs it) and `external-services` (environment names
+     migration, a queue in source: BullMQ, Inngest, Trigger.dev or SQS — a
+     package script counts only when one of those runs it) and `external-services` (environment names
      read in source — `RESEND_API_KEY` — grouped by prefix into one
      third-party system each, with any import whose package matches).
+     The Python data-access adapters propose themselves too (0.9): `supabase-py`
+     where the Supabase client is a dependency, an import or a `.table("…")`
+     call, and `sqlalchemy` where SQLAlchemy is a dependency or an import —
+     without one, no route links to a table.
      **External services are guessed by name:** show each and ask the person
      to confirm or rename it, and to say which prefixes are not a service
      (they go in `ignore`). Never add a vendor the evidence did not show.
@@ -152,12 +159,40 @@ step 3), and whether Matt Pocock's skills are installed (used in step 7):
   when Supabase sits beside a web app, whether the app subscribes to
   Realtime through a wrapper of its own. Record a named wrapper's call names
   in the answer set under the key the line names (`subscribeCalls`).
+
+  Then read the **coverage, part by part** block aloud: the parts of the app
+  (routes, screens, components, database access, background tasks, external
+  services), which adapter covers each, and the ones **not covered**. For
+  each part not covered, ask whether the app has it, and say plainly what
+  happens: "Your routes are FastAPI, and I have an adapter for that. Your
+  database layer is Prisma, and I don't yet, so I'll build a `prisma`
+  adapter with you. That takes a bit longer, and we'll test it together."
+  An adapter that almost fits is copied under a new name and changed ("I'll
+  copy the `fastapi` adapter and change it to understand your decorator").
+  Both are built after bootstrap with the `extractor` skill, with fixtures
+  and tests. If detection says it stopped at its depth or read budget, say
+  so: a part deeper in the tree was not seen, and the person may know it.
 - **GREENFIELD** — no source to read. Ask for the intended stack, one
   question at a time: what serves the API, what holds the data, what the apps
   are (web, mobile), and where each will live. Every part maps to an extractor
   at its stated future path, or to an app page in the map skeleton. Nothing
   is guessed silently; a path the person did not state gets the convention's
-  default and is said aloud.
+  default and is said aloud. **No stack chosen yet?** Read out the
+  "ready-made adapters, by part" list detection printed — the stacks with
+  adapters today — with **no recommendation**: any stack works, and one
+  without an adapter gets one built with the `extractor` skill.
+
+  Once the stack is chosen, **show what the map will look like**:
+
+  ```
+  node "$PLUGIN/scripts/bootstrap.mjs" preview --extractors=<the chosen adapters, comma-separated>
+  ```
+
+  It renders the chosen adapters' own examples into a temporary folder
+  **outside the repo** and prints where the human index landed; open it with
+  the person. ZDD never writes throwaway code into their repo to test itself.
+  The real check comes later: the first time derive finds code, the next
+  session runs it once (the config records it as owed).
 
 If `zdd/` already exists the script reports **repair** mode: it will fill only
 what is missing, and an opt-in you do not answer keeps its current state —
@@ -320,7 +355,26 @@ is written into the host's settings.
    citation and trigger question. A failure here is fixed now, not discovered
    on the first PR. It also prints the **unclaimed records** — on day one
    that is the whole inventory, and it is the mapping session's worklist.
-4. **The mapping session** (the only AI-heavy step, paid once; skip on
+4. **Check it together** (an existing codebase; on a greenfield repo it
+   waits for code — `load` says when it is due). Missing links are what eyes
+   miss on a map, so the check starts with the automated half:
+
+   ```
+   node "$PLUGIN/scripts/bootstrap.mjs" check
+   ```
+
+   It names, kind by kind, how many records derive found, what they link to,
+   and **by name** the ones that link to nothing and the ones nothing links
+   to ("2 routes; 1 links to a table; 1 links to nothing: `/health`").
+   Go through it with the person: which gaps are fine (`/health` touches no
+   table) and which are wrong. Then open the human index and ask: **"does
+   this all look right, and is any link missing?"** Every "that's wrong"
+   becomes a **fixture test in the adapter before it is fixed** — in a local
+   adapter, with the `extractor` skill; in a catalogue adapter, it is a ZDD
+   defect: say so in plain words and offer the ready-written report for the
+   repo's Discussions (decision 0041). When you are both done:
+   `node "$PLUGIN/scripts/bootstrap.mjs" check --done`.
+5. **The mapping session** (the only AI-heavy step, paid once; skip on
    greenfield beyond the declared apps). With the glossary and ADRs loaded,
    scan the code and **propose the feature groupings as one reviewable
    file** (`zdd/map/features/` pages, proposed in one message or one scratch

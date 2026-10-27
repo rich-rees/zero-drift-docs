@@ -133,6 +133,24 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
   local names may not shadow built-ins). Try a convention there first, with the
   skill's scaffold; propose it for the catalogue once it has run against a real
   repo.
+- **A catalogue adapter carries its own detection**
+  ([decision 0039](docs/decisions/0039-detection-lives-in-each-adapter-bootstrap-builds-the-gaps-and-checks-together.md)):
+  bootstrap asks every adapter whether it fits a repo, and is never edited to
+  learn a stack. It exports `DETECTION` — `parts` (from
+  `src/core/lib/parts.mjs`: routes, screens, components, database access,
+  background tasks, external services), `order` (where its proposal sits),
+  `optionShape` (which option keys hold a repo-relative path, a list of
+  them, call names, or objects with a path key — bootstrap checks answers
+  against it), and as it needs them `skipDirs`, `stack` (greenfield rules:
+  a case-blind pattern over a stated stack entry, the options, where the
+  entry's path goes), `companion`, `exampleClaims`, `example` (its
+  `example/` folder's options, for the greenfield preview) and `optIn` —
+  and `detect({ scan, proposed })`, returning `null` or `{ proposal:
+  { evidence, options }, apps, questions }`. Evidence is plain words
+  ("`APIRouter` under `api/routes`"). The `scan` is one walk of the repo
+  shared by every adapter (six folders deep, gitignored paths never seen,
+  under one io's caps): `files`, `read(rel)`, `json(rel)` and `memo(key,
+  fn)`. `zdd-engine detect` prints what they all answer.
 
 A stack without statically derivable structure keeps thinner metadata and a
 larger semantic map — the *contract* is fixed, not the coverage. When in doubt,
