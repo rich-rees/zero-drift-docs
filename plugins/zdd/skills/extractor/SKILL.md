@@ -40,7 +40,7 @@ Run everything from the adopter's repo root.
 
 - `zdd/config.json` exists. If not, stop: adopt first with `zdd:bootstrap`.
 - `engine` in that config is **1.3.0 or later** — the version that hands
-  extractors `io`. Older: say "upgrade ZDD" first. A local extractor may not take a built-in's name, nor a retired one the engine still answers to (`services`, the pre-2.3 name of `external-services`). A scaffolded
+  extractors `io`. Older: say "upgrade ZDD" first. A local extractor may not take a built-in's name, nor a retired one the engine still reserves (`services`, the pre-2.3 name of `external-services`; `jobs`, split into the `background-*` readers in 0.9). A scaffolded
   extractor stops `derive` on an older engine by design.
 - The convention is not already a built-in: `supabase` (SQL migrations),
   `nextjs` (App Router), `fastapi` (decorators), `react-router` (a route tree
@@ -97,7 +97,7 @@ the sample. Wait for each answer.
    | Vue Router / Angular route arrays, a route table in one file | `react-router` | surface |
    | Blazor `@page`, SvelteKit, Nuxt, Remix — the file tree is the route tree | `nextjs` | surface, route |
    | Vue / Svelte single-file components, Angular `@Component` classes | `components` | component |
-   | A cron table, Celery beat, a systemd timer — a manifest that names a process | `background-procfile` | background-task |
+   | A cron table, Celery beat, a systemd timer — a manifest that names a process | a local reader modelled on `background-procfile` (it reads only files named `Procfile`) | background-task |
    | Anything else | `generic` (the minimal example) | — |
 
 6. **Options** — `roots` (folders to walk) and `extensions` (suffixes

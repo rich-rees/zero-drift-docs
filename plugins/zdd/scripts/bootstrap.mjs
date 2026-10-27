@@ -2242,9 +2242,14 @@ const RENAMED_KINDS = { service: "external-service", job: "background-task" };
 // The readers are the ones detection finds evidence for, plus
 // background-declared when the config declares tasks by hand
 // (`jobs.entries`) and background-github-actions when it opted in
-// (`includeGithubActions`). `roots`, `exclude` and `modes` go to each reader
-// that reads processes; `entries` to background-declared. Written where
-// `jobs` sat, in name order.
+// (`includeGithubActions`). `roots` goes to every reader (each walks it);
+// `exclude` and `modes` to the readers that read processes; `entries` and
+// `modes` to background-declared (an entry's mode may live in `modes`,
+// CR-081). Written where `jobs` sat, in name order. A reader's options that
+// already exist are kept when they hold the same values, else the upgrade
+// stops before writing (CR-085). When `jobs` is listed and no reader can be
+// named — detection failed or found nothing — the upgrade stops rather than
+// write a config with no reader in its place (CR-084).
 const PROCESS_READERS = new Set(["background-procfile", "background-compose", "background-railway"]);
 function migrateJobs(config, changes, root) {
   const listed = Array.isArray(config.extractors) && config.extractors.includes("jobs");
@@ -2252,12 +2257,19 @@ function migrateJobs(config, changes, root) {
   if (!listed && !hasOpts) return;
   const o = hasOpts && isPlainObject(config.extractorOptions.jobs) ? config.extractorOptions.jobs : {};
   let found = [];
+  let detectError = null;
   try {
     found = (detect(root).proposals ?? []).map((p) => p.name).filter((n) => BACKGROUND_READERS.includes(n));
-  } catch {
-    /* detection unreadable here: only what the options say */
+  } catch (e) {
+    detectError = e;
   }
   const readers = [...new Set([...found, ...(Array.isArray(o.entries) && o.entries.length ? ["background-declared"] : []), ...(o.includeGithubActions === true ? ["background-github-actions"] : [])])].sort();
+  if (listed && !readers.length) {
+    throw new Error(
+      `zdd/config.json lists "jobs", which 0.9 splits into one background-* reader per platform file (decision 0038), but ${detectError ? `detection could not run here (${detectError.message})` : "detection finds no background work under the repo (it reads six folders deep)"} — nothing was written. ` +
+        `Replace "jobs" in "extractors" by hand with the readers for the files you commit (background-procfile, background-railway, background-vercel, background-cloudflare, background-compose, background-pg-cron, background-bullmq, background-inngest, background-trigger-dev, background-sqs, background-github-actions, background-declared), move extractorOptions.jobs to them, and run the upgrade again`,
+    );
+  }
   if (listed) {
     const at = config.extractors.indexOf("jobs");
     const rest = config.extractors.filter((n) => n !== "jobs");
@@ -2265,9 +2277,17 @@ function migrateJobs(config, changes, root) {
     config.extractors = [...rest.slice(0, at), ...add, ...rest.slice(at)];
   }
   if (hasOpts) {
-    const shared = {};
-    for (const k of ["roots", "exclude", "modes"]) if (o[k] !== undefined) shared[k] = o[k];
-    const optionsFor = (n) => (n === "background-declared" ? { entries: o.entries } : n === "background-github-actions" ? (o.roots !== undefined ? { roots: o.roots } : {}) : PROCESS_READERS.has(n) ? shared : o.roots !== undefined ? { roots: o.roots } : {});
+    const pick = (keys) => Object.fromEntries(keys.filter((k) => o[k] !== undefined).map((k) => [k, o[k]]));
+    const optionsFor = (n) => (n === "background-declared" ? pick(["roots", "entries", "modes"]) : PROCESS_READERS.has(n) ? pick(["roots", "exclude", "modes"]) : pick(["roots"]));
+    // A reader whose options already exist (a half-migrated config): kept
+    // when every moved value is already there unchanged, else stop (CR-085).
+    for (const n of readers) {
+      if (!Object.hasOwn(config.extractorOptions, n)) continue;
+      const have = isPlainObject(config.extractorOptions[n]) ? config.extractorOptions[n] : {};
+      const moved = optionsFor(n);
+      const differs = Object.keys(moved).filter((k) => JSON.stringify(have[k]) !== JSON.stringify(moved[k]));
+      if (differs.length) throw new Error(`zdd/config.json has both extractorOptions.jobs and extractorOptions["${n}"], and they disagree on ${differs.join(", ")} — merge them by hand into "${n}", delete extractorOptions.jobs, then run the upgrade again; nothing was written`);
+    }
     const next = {};
     for (const [k, v] of Object.entries(config.extractorOptions)) {
       if (k !== "jobs") next[k] = v;

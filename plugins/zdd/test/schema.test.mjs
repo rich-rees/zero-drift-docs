@@ -147,3 +147,10 @@ test("CR-516/CR-517: the schema refuses what the engine refuses — an external 
   assert.deepEqual(validate(SCHEMA, budget(200)), []);
   assert.doesNotMatch(engineRejects(budget(200), "render") ?? "", /budgetTokens/);
 });
+
+test("ZDD-3 slice 3: background-declared takes the shared reader options (CR-082); a declared entry needs a module or a file, as the engine does (CR-083)", () => {
+  const cfg = (declared) => ({ extractors: ["background-declared"], extractorOptions: { "background-declared": declared } });
+  assert.deepEqual(validate(SCHEMA, cfg({ roots: ["."], exclude: ["release"], modes: { nightly: "scheduled" }, entries: [{ name: "nightly", file: "src/nightly.ts" }] })), []);
+  assert.deepEqual(validate(SCHEMA, cfg({ entries: [{ name: "py", module: "app.worker" }] })), []);
+  assert.notDeepEqual(validate(SCHEMA, cfg({ entries: [{ name: "nothing-to-run" }] })), [], "neither module nor file");
+});

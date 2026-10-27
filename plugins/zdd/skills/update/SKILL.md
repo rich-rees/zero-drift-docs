@@ -92,8 +92,8 @@ Run this as the definition of done for every unit of work — the spoken form is
      along with a stale `allowUnclaimed` entry and any claim file lint could
      not read. The unit of work is not finished until lint is green: link the
      record from one slice, move a double claim to one owner, or allow-list
-     genuine plumbing. A component, job or external service (kind
-     `external-service`) is a failure only when `claims.strictKinds` names
+     genuine plumbing. A component, background task (kind `background-task`)
+     or external service (kind `external-service`) is a failure only when `claims.strictKinds` names
      its kind; otherwise it is a warning, so that
      switching an extractor on never turns a green lint red by itself.
    ```

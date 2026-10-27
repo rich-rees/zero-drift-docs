@@ -510,3 +510,72 @@ test("the retired-name scan never reads the new name as the old one — `externa
     if (sample) assert.equal(re.test(sample), false, `${r.find} matches inside ${sample}`);
   }
 });
+
+// ---- ZDD-3 slice 3: `jobs` → the background-* readers (decision 0038; CR-081, CR-084, CR-085, CR-092) ----
+const withConfig = (repo, config) => writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify(config, null, 2) + "\n");
+const upgradeFails = (repo) => {
+  try {
+    run(repo, ["upgrade"]);
+  } catch (e) {
+    return String(e.stderr);
+  }
+  assert.fail("expected the upgrade to stop");
+};
+
+test("upgrade: every old jobs option lands on the reader that owns it; job ids, strict kinds and every map-link form move to background-task; a second upgrade changes nothing", () => {
+  const repo = adopted("jobs-matrix", { fixture: "fixture-jobs", engine: "2.5.0", settings: { extraKnownMarketplaces: LOCK("v2.5.0") } });
+  withConfig(repo, {
+    extractors: ["supabase", "jobs"],
+    engine: "2.5.0",
+    extractorOptions: {
+      supabase: { migrationNamespaces: [{ name: "db", dir: "supabase/migrations" }] },
+      jobs: { roots: ["."], exclude: ["release"], modes: { worker: "worker", nightly: "scheduled" }, includeGithubActions: true, entries: [{ name: "sweeper", module: "app.housekeeping", cwd: "apps/api" }] },
+    },
+    claims: { strict: true, strictKinds: ["job"], allowUnclaimed: ["job:nightly", "route:/health"] },
+  });
+  mkdirSync(join(repo, "zdd", "map", "features"), { recursive: true });
+  writeFileSync(join(repo, "zdd", "map", "features", "bg.md"), "---\ntype: Feature\ntitle: Bg\n---\n\n- [Worker](../../metadata/job/worker.json)\n- [Angled](<../../metadata/job/nightly.json>)\n- [Frag](../../metadata/job/edge.json#facts)\n- [Bundle](/metadata/job/sweep-stalled.json)\n\n```\n[example](../../metadata/job/worker.json)\n```\n");
+  const json = runJson(repo, ["upgrade"]);
+  const cfg = JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8"));
+  assert.deepEqual(cfg.extractors, ["supabase", "background-bullmq", "background-cloudflare", "background-compose", "background-declared", "background-github-actions", "background-pg-cron", "background-procfile", "background-railway", "background-vercel"]);
+  const o = cfg.extractorOptions;
+  assert.equal(o.jobs, undefined);
+  assert.deepEqual(o["background-procfile"], { roots: ["."], exclude: ["release"], modes: { worker: "worker", nightly: "scheduled" } }, "a process reader takes roots, exclude and modes");
+  assert.deepEqual(o["background-railway"], o["background-procfile"]);
+  assert.deepEqual(o["background-compose"], o["background-procfile"]);
+  assert.deepEqual(o["background-vercel"], { roots: ["."] }, "a schedule reader walks roots too, and nothing else");
+  assert.deepEqual(o["background-github-actions"], { roots: ["."] }, "includeGithubActions became the listing");
+  assert.deepEqual(o["background-declared"], { roots: ["."], entries: [{ name: "sweeper", module: "app.housekeeping", cwd: "apps/api" }], modes: { worker: "worker", nightly: "scheduled" } }, "entries, and the modes an entry may rely on (CR-081)");
+  assert.deepEqual(cfg.claims.strictKinds, ["background-task"]);
+  assert.deepEqual(cfg.claims.allowUnclaimed, ["background-task:nightly", "route:/health"]);
+  const page = readFileSync(join(repo, "zdd", "map", "features", "bg.md"), "utf8");
+  for (const form of ["(../../metadata/background-task/worker.json)", "(<../../metadata/background-task/nightly.json>)", "(../../metadata/background-task/edge.json#facts)", "(/metadata/background-task/sweep-stalled.json)"]) assert.ok(page.includes(form), `${form}\n${page}`);
+  assert.ok(page.includes("```\n[example](../../metadata/job/worker.json)\n```"), "a fenced example is left as written");
+  assert.ok(json.notes.some((n) => /extractor "jobs" → .*"background-procfile"/.test(n)), json.notes.join("\n"));
+  const before = readFileSync(join(repo, "zdd", "config.json"), "utf8");
+  runJson(repo, ["upgrade"]);
+  assert.equal(readFileSync(join(repo, "zdd", "config.json"), "utf8"), before, "idempotent");
+});
+
+test("upgrade: a half-migrated config keeps a reader's options that agree with the old jobs ones, and stops before writing when they disagree (CR-085)", () => {
+  const agree = adopted("jobs-half-agree", { fixture: "fixture-jobs", engine: "2.5.0", settings: { extraKnownMarketplaces: LOCK("v2.5.0") } });
+  withConfig(agree, { extractors: ["jobs", "background-procfile"], engine: "2.5.0", extractorOptions: { jobs: { modes: { worker: "worker" } }, "background-procfile": { modes: { worker: "worker" }, roots: ["apps"] } } });
+  runJson(agree, ["upgrade"]);
+  const cfg = JSON.parse(readFileSync(join(agree, "zdd", "config.json"), "utf8"));
+  assert.deepEqual(cfg.extractorOptions["background-procfile"], { modes: { worker: "worker" }, roots: ["apps"] }, "kept as it was");
+  assert.equal(cfg.extractorOptions.jobs, undefined);
+  const differ = adopted("jobs-half-differ", { fixture: "fixture-jobs", engine: "2.5.0", settings: { extraKnownMarketplaces: LOCK("v2.5.0") } });
+  const config = { extractors: ["jobs", "background-procfile"], engine: "2.5.0", extractorOptions: { jobs: { roots: ["apps"], exclude: ["release"] }, "background-procfile": {} } };
+  withConfig(differ, config);
+  const text = readFileSync(join(differ, "zdd", "config.json"), "utf8");
+  assert.match(upgradeFails(differ), /has both extractorOptions\.jobs and extractorOptions\["background-procfile"\], and they disagree on roots, exclude — merge them by hand/);
+  assert.equal(readFileSync(join(differ, "zdd", "config.json"), "utf8"), text, "nothing written");
+});
+
+test("upgrade: jobs listed where detection finds no background work stops before writing, rather than leave no reader in its place (CR-084)", () => {
+  const repo = adopted("jobs-none", { engine: "2.5.0", settings: { extraKnownMarketplaces: LOCK("v2.5.0") } });
+  withConfig(repo, { extractors: ["jobs"], engine: "2.5.0", extractorOptions: { jobs: { modes: { worker: "worker" } } } });
+  const text = readFileSync(join(repo, "zdd", "config.json"), "utf8");
+  assert.match(upgradeFails(repo), /lists "jobs", which 0\.9 splits into one background-\* reader per platform file .* detection finds no background work .* nothing was written\. Replace "jobs" in "extractors" by hand/);
+  assert.equal(readFileSync(join(repo, "zdd", "config.json"), "utf8"), text);
+});

@@ -13,7 +13,7 @@ import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, re
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { BUILT_INS, RETIRED_BUILT_INS, IO_SINCE } from "../scripts/scaffold-extractor.mjs";
+import { BUILT_INS, RETIRED_BUILT_INS, REMOVED_BUILT_INS, IO_SINCE } from "../scripts/scaffold-extractor.mjs";
 
 const PLUGIN = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SCRIPT = join(PLUGIN, "scripts", "scaffold-extractor.mjs");
@@ -259,8 +259,9 @@ test("the local-name guard mirrors the engine's catalogue", () => {
   const dir = join(ENGINE, "src", "adapters");
   const names = readdirSync(dir).filter((n) => existsSync(join(dir, n, "index.mjs")));
   assert.deepEqual([...BUILT_INS].sort(), names.sort());
-  const { aliases } = JSON.parse(readFileSync(join(dir, "catalogue.json"), "utf8"));
+  const { aliases, retired } = JSON.parse(readFileSync(join(dir, "catalogue.json"), "utf8"));
   assert.deepEqual(RETIRED_BUILT_INS, aliases);
+  assert.deepEqual([...REMOVED_BUILT_INS].sort(), Object.keys(retired ?? {}).sort(), "the names the engine stops on (CR-080)");
 });
 
 // The masks, lifted out of their templates and run on text that tries to
