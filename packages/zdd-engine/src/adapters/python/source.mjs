@@ -55,7 +55,7 @@
 // def line alone after HEADER_MAX_LINES lines, and an import list that never
 // closes stops joining after LOGICAL_MAX_LINES.
 
-import { slugify } from "../../core/lib/slug.mjs";
+export { closeOver, dataAccessRecord } from "../../core/lib/data-access.mjs";
 
 // The directories a Python walk skips unless the adopter says otherwise.
 export const DEFAULT_EXCLUDE_DIRS = ["node_modules", ".venv", "venv", "__pycache__", ".git", "tests", "test"];
@@ -327,70 +327,6 @@ export function defsByLine(entries) {
   return entries.byLine ?? new Map();
 }
 
-// Close a per-function set over the same-file references: name -> its own
-// set united with every function's it reaches, transitively, each function
-// once. Strongly connected functions (mutual recursion) share one result
-// (Tarjan's algorithm, iterative), so a long chain or a cycle stays linear in
-// the number of functions plus references.
-export function closeOver(entries, own) {
-  const byName = new Map(entries.map((e) => [e.name, e]));
-  const succOf = (n) => [...byName.get(n).refers].filter((r) => byName.has(r));
-  const index = new Map();
-  const low = new Map();
-  const onStack = new Set();
-  const stack = [];
-  const result = new Map();
-  let next = 0;
-  const visit = (n) => {
-    index.set(n, next);
-    low.set(n, next++);
-    stack.push(n);
-    onStack.add(n);
-  };
-  for (const start of byName.keys()) {
-    if (index.has(start)) continue;
-    visit(start);
-    const work = [[start, succOf(start), 0]];
-    while (work.length) {
-      const frame = work[work.length - 1];
-      const [v, succ] = frame;
-      if (frame[2] < succ.length) {
-        const w = succ[frame[2]++];
-        if (!index.has(w)) {
-          visit(w);
-          work.push([w, succOf(w), 0]);
-        } else if (onStack.has(w)) low.set(v, Math.min(low.get(v), index.get(w)));
-        continue;
-      }
-      work.pop();
-      if (work.length) {
-        const u = work[work.length - 1][0];
-        low.set(u, Math.min(low.get(u), low.get(v)));
-      }
-      if (low.get(v) !== index.get(v)) continue;
-      // v roots a component: its members share one set; every successor
-      // outside it is already closed.
-      const members = new Set();
-      let w;
-      do {
-        w = stack.pop();
-        onStack.delete(w);
-        members.add(w);
-      } while (w !== v);
-      const set = new Set();
-      for (const m of members) {
-        for (const x of own(byName.get(m))) set.add(x);
-        for (const r of byName.get(m).refers) {
-          if (members.has(r) || !result.has(r)) continue;
-          for (const x of result.get(r)) set.add(x);
-        }
-      }
-      for (const m of members) result.set(m, set);
-    }
-  }
-  return result;
-}
-
 // ---- imports ----
 
 export function imports(text) {
@@ -502,27 +438,4 @@ export function resolveModule(rel, module, byModule) {
   if (candidates.length > 1) return null;
   const loose = byModule.get(parts[parts.length - 1]) ?? [];
   return parts.length === 1 && loose.length === 1 ? loose[0] : null;
-}
-
-// ---- the record ----
-
-// A data-access record, shaped the same by every Python data-access adapter.
-// The id is namespaced by the adapter (`data-access:supabase-py/<file>#<fn>`,
-// as a table is `table:db/<name>`), so two adapters that both read one
-// function mint two records; `?code:<file>#<fn>` reaches both (decision 0037).
-// A source path may hold characters a metadata filename may not (a space, a
-// `#`): each is written `~<hex>~`, so a valid path never aborts derive (CR-031).
-const FILENAME_SAFE = /[^A-Za-z0-9._~()[\]-]/g;
-export function dataAccessRecord(adapter, rel, fn, refs, edges) {
-  return {
-    kind: "data-access",
-    id: `data-access:${adapter}/${rel}#${fn.name}`,
-    title: `${fn.name} (${rel})`,
-    description: fn.docstring,
-    resource: [rel],
-    refs: [...refs].sort(),
-    facts: { function: fn.name, ...(edges ? { edges } : {}) },
-    filename: `${adapter}--${slugify(rel)}--${fn.name}.json`.replace(FILENAME_SAFE, (c) => `~${c.codePointAt(0).toString(16)}~`),
-    requireRefs: true,
-  };
 }

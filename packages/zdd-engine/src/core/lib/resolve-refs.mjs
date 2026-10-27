@@ -35,13 +35,17 @@
 //                     (decision 0037): how a route or screen names the code
 //                     it runs — its own handler, and the functions it calls —
 //                     without knowing how that code reaches the database. A
-//                     miss is silent: most functions touch no database
+//                     miss is silent: most functions touch no database.
+//                     `?code:<file>#*` is every data-access record in <file>:
+//                     a referrer whose unit is the whole file
 //
 // Data access, after resolution (decision 0037). A `data-access` record is
 // one function that touches the database, minted by a data-access adapter
 // with refs to the tables, buckets and functions it reaches. A record that
 // reaches one through `?code:` takes its refs and typed edges as its own
-// (the route → table edge). A data-access record whose every referrer holds
+// (the route → table edge); one that reaches it through a typed edge of its
+// own (a component's `reads: ["?code:…"]`) also gives that verb to every ref
+// the data-access record does not type itself. A data-access record whose every referrer holds
 // its file — a handler's own body — is ABSORBED: its refs live on the
 // referrer and the record itself goes, so inline data access reads exactly
 // as it did before data access was its own adapter. One that some referrer
@@ -170,7 +174,11 @@ export function resolveRefs(records) {
     for (const f of r.resource) {
       // A service's resource is the file that declares it, not a file that
       // "uses" it: a service never resolves as another service's dependant.
-      if (r.kind !== "external-service" && r.kind !== "service") {
+      // Nor is a data-access record: it is a view of code another record
+      // already holds (a route, a screen, a module), reached only through
+      // `?code:` — `?at:` landing on one would fold its tables into a
+      // service's `usedBy` (slice 2b dry run).
+      if (r.kind !== "external-service" && r.kind !== "service" && r.kind !== "data-access") {
         if (!recordsByFile.has(f)) recordsByFile.set(f, []);
         recordsByFile.get(f).push(r.id);
       }
@@ -181,10 +189,12 @@ export function resolveRefs(records) {
   }
   const dataAccess = new Map(records.filter((r) => r.kind === "data-access").map((r) => [r.id, r]));
   // file#function -> the data-access ids for it: one per adapter that read it.
+  // `file#*` -> every data-access id in the file (the whole file's code).
   const codeIndex = new Map();
+  const index1 = (key, id) => codeIndex.set(key, [...(codeIndex.get(key) ?? []), id].sort());
   for (const d of dataAccess.values()) {
-    const key = `${d.resource[0]}#${d.facts?.function}`;
-    codeIndex.set(key, [...(codeIndex.get(key) ?? []), d.id].sort());
+    index1(`${d.resource[0]}#${d.facts?.function}`, d.id);
+    index1(`${d.resource[0]}#*`, d.id);
   }
   const routes = records
     .filter((r) => r.kind === "route")
@@ -312,15 +322,25 @@ export function resolveRefs(records) {
         (referrers.get(id) ?? referrers.set(id, []).get(id)).push(r);
         const d = dataAccess.get(id);
         for (const t of d.refs) if (t !== r.id && !dataAccess.has(t)) refs.add(t);
-        const dEdges = d.facts?.edges;
-        if (!dEdges) continue;
-        const edges = (r.facts.edges ??= {});
-        for (const [verb, ids] of Object.entries(dEdges)) {
+        const dEdges = d.facts?.edges ?? {};
+        // The verbs the referrer itself gives the link (`reads`, …), and the
+        // refs the data-access record leaves untyped: those take the verbs.
+        const verbs = Object.keys(r.facts?.edges ?? {}).filter((v) => r.facts.edges[v].includes(id));
+        const typed = new Set(Object.values(dEdges).flat());
+        const untyped = d.refs.filter((t) => !typed.has(t));
+        const carried = Object.entries(dEdges).concat(verbs.map((v) => [v, untyped]));
+        const edges = { ...(r.facts.edges ?? {}) };
+        const added = new Set();
+        for (const [verb, ids] of carried) {
           const keep = ids.filter((t) => t !== r.id && !dataAccess.has(t));
-          if (keep.length) edges[verb] = [...new Set([...(edges[verb] ?? []), ...keep])].sort();
+          if (!keep.length) continue;
+          if (!(verb in edges)) added.add(verb);
+          edges[verb] = [...new Set([...(edges[verb] ?? []), ...keep])].sort();
         }
-        if (Object.keys(edges).length) r.facts.edges = Object.fromEntries(Object.keys(edges).sort().map((v) => [v, edges[v]]));
-        else delete r.facts.edges;
+        if (!Object.keys(edges).length) continue;
+        // A verb the referrer already had keeps its place (its adapter's
+        // order is in the bytes); a new one follows, in name order.
+        r.facts.edges = Object.fromEntries([...Object.keys(edges).filter((v) => !added.has(v)), ...[...added].sort()].map((v) => [v, edges[v]]));
       }
       r.refs = [...refs].sort();
     }
