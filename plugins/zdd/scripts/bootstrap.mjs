@@ -508,14 +508,9 @@ export function detect(root) {
   if (mode === "existing" && !proposals.length) {
     proposals.push({ name: "generic", evidence: ["source present but no known convention found — map-only ZDD; scaffold an extractor for it with the `extractor` skill once bootstrap is done"], options: {} });
   }
-  // Supabase beside JS code that reaches it (decision 0037): the route and
-  // screen adapters name the code they run, and supabase-js reads how that
-  // code reaches the database — without it, no page links to a table.
-  const JS_READERS = ["nextjs", "react-router", "components", "expo-router"];
-  const jsReaders = JS_READERS.filter((n) => proposals.some((p) => p.name === n));
-  const at = proposals.findIndex((p) => p.name === "supabase");
-  if (at !== -1 && jsReaders.length) {
-    proposals.splice(at + 1, 0, {
+  const jsReaders = needsSupabaseJs(proposals.map((p) => p.name));
+  if (jsReaders.length) {
+    proposals.splice(proposals.findIndex((p) => p.name === "supabase") + 1, 0, {
       name: "supabase-js",
       evidence: [`Supabase beside JS code (${jsReaders.join(", ")}): the client's \`.from()\` / \`.rpc()\` / Realtime calls are read here and joined to the pages and screens that run them`],
       options: {},
@@ -586,6 +581,17 @@ const STACK_RULES = [
   { match: /react|web|vite/i, app: "Web (React)" },
 ];
 
+// Supabase beside JS code that reaches it (decision 0037): the route and
+// screen adapters name the code they run, and supabase-js reads how that code
+// reaches the database — without it, no page links to a table. Detection and
+// a stated stack (greenfield, CR-045) both apply it: the JS readers present
+// when supabase is and supabase-js is not, else none.
+const JS_READERS = ["nextjs", "react-router", "components", "expo-router"];
+function needsSupabaseJs(names) {
+  if (!names.includes("supabase") || names.includes("supabase-js")) return [];
+  return JS_READERS.filter((n) => names.includes(n));
+}
+
 function fromStack(stack = []) {
   const extractors = [];
   const extractorOptions = {};
@@ -620,6 +626,10 @@ function fromStack(stack = []) {
         }
       }
     }
+  }
+  if (needsSupabaseJs(extractors).length) {
+    extractors.splice(extractors.indexOf("supabase") + 1, 0, "supabase-js");
+    extractorOptions["supabase-js"] = {};
   }
   return { extractors, extractorOptions, apps };
 }

@@ -122,6 +122,15 @@ test("the schema's documented refs defaults are the engine's defaults (CR-116)",
   assert.deepEqual(doc.excludeDirs?.default ?? refs.DEFAULT_REFS.excludeDirs, refs.DEFAULT_REFS.excludeDirs);
 });
 
+test("the schema's documented supabase-js defaults are the engine's (ZDD-3 slice 2b, CR-073)", async () => {
+  const js = await import(pathToFileURL(resolve(PLUGIN, "..", "..", "packages", "zdd-engine", "src", "adapters", "js", "source.mjs")).href);
+  const doc = SCHEMA.properties.extractorOptions.properties["supabase-js"].properties;
+  assert.deepEqual(doc.extensions.default, js.DEFAULT_EXTENSIONS);
+  assert.deepEqual(doc.excludeDirs.default, js.DEFAULT_EXCLUDE_DIRS);
+  assert.deepEqual(doc.excludeSuffixes.default, js.DEFAULT_EXCLUDE_SUFFIXES);
+  assert.deepEqual(doc.roots.default, ["."]);
+});
+
 test("CR-516/CR-517: the schema refuses what the engine refuses — an external service with no nonblank marker or a name with no letter or digit, an agent-index budget under 200 — and accepts what it accepts", () => {
   const svc = (s) => ({ extractors: ["external-services"], extractorOptions: { "external-services": { services: [s] } } });
   for (const bad of [{ name: "Sentry", imports: [] }, { name: "Sentry", env: ["   "] }, { name: " ", env: ["SENTRY_"] }, { name: "!!!", env: ["X_"] }, { name: "Sentry" }]) {

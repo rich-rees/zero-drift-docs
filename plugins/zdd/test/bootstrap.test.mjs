@@ -892,3 +892,44 @@ test("CR-013 (decision 0031): bootstrap writes the blessing store — at its def
   const custom = applyJson(repo, "bs3", {});
   assert.ok(custom.wrote.includes("docs/blessings/.gitkeep"), custom.wrote.join("\n"));
 });
+
+// ---- ZDD-3 slice 2b: supabase-js beside every JS reader (CR-045, CR-070) ----
+
+test("greenfield: a stated Supabase + JS-app stack writes supabase-js after supabase, for each JS reader; Supabase alone or with FastAPI does not (CR-045)", () => {
+  const cases = [
+    [["Supabase", "Next.js"], ["supabase", "supabase-js", "nextjs"]],
+    [["Supabase", "React Router web"], ["supabase", "supabase-js", "react-router"]],
+    [["Supabase", "Expo Router"], ["supabase", "supabase-js", "expo-router"]],
+    [["FastAPI", "Supabase"], ["fastapi", "supabase"]],
+    [["Next.js"], ["nextjs"]],
+  ];
+  for (const [i, [stack, want]] of cases.entries()) {
+    const repo = fresh(`gf-sbjs-${i}`);
+    bootstrap(repo, ["apply", `--answers=${answersFile(`gf-sbjs-${i}`, { stack })}`]);
+    const config = JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8"));
+    assert.deepEqual(config.extractors, want, JSON.stringify(stack));
+    if (want.includes("supabase-js")) assert.deepEqual(config.extractorOptions["supabase-js"], {});
+  }
+});
+
+test("detect: supabase-js is proposed once beside Supabase and each JS reader on its own — Next.js, React Router, components, Expo Router (CR-070)", () => {
+  const readers = {
+    nextjs: { "package.json": JSON.stringify({ dependencies: { next: "15" } }) },
+    "react-router": { "package.json": JSON.stringify({ dependencies: { "react-router-dom": "7" } }), "src/routes.tsx": 'import { createBrowserRouter } from "react-router-dom";\nexport const router = createBrowserRouter([]);\n' },
+    components: { "src/components/Badge.tsx": "export function Badge() { return <span />; }\n" },
+    "expo-router": { "package.json": JSON.stringify({ dependencies: { expo: "52", "expo-router": "4" } }), "app/_layout.tsx": "export default function Layout() { return null; }\n", "app/index.tsx": "export default function Home() { return null; }\n" },
+  };
+  for (const [reader, files] of Object.entries(readers)) {
+    const repo = fresh(`detect-sbjs-${reader}`);
+    mkdirSync(join(repo, "supabase", "migrations"), { recursive: true });
+    writeFileSync(join(repo, "supabase", "migrations", "001_init.sql"), "create table things (id int);\n");
+    for (const [rel, text] of Object.entries(files)) {
+      mkdirSync(join(repo, rel, ".."), { recursive: true });
+      writeFileSync(join(repo, rel), text);
+    }
+    const names = JSON.parse(bootstrap(repo, ["detect", "--json"])).proposals.map((p) => p.name);
+    assert.ok(names.includes(reader), `${reader}: ${names.join(", ")}`);
+    assert.equal(names.filter((n) => n === "supabase-js").length, 1, `${reader}: ${names.join(", ")}`);
+    assert.equal(names.indexOf("supabase-js"), names.indexOf("supabase") + 1, "right after supabase");
+  }
+});
