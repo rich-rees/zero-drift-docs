@@ -146,6 +146,7 @@ test("mature codebase: an Express API, a React Router web app, a Python archiver
   cfg.extractors = ["react-router", "jobs", "services"];
   cfg.extractorOptions.services = cfg.extractorOptions["external-services"];
   delete cfg.extractorOptions["external-services"];
+  delete cfg.release; // the old line's pin (decision 0042)
   cfg.engine = "2.2.1";
   writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + "\n");
   // The repo's lock sat at v2.1.0 (its own lock test still says so, in docs/setup.md).
@@ -239,7 +240,7 @@ test("hosted off GitHub: no workflow is written, the four commands are printed, 
 
 test("the preflight's messages: a dead registry, a dead GitHub, no repository — each named in plain words; all present passes", async () => {
   const ok = await new Promise((r) => {
-    const s = createServer((req, res) => res.writeHead(req.url === `/@rich-rees%2fzdd-engine/${VERSION}` ? 200 : req.url === "/" ? 200 : 404).end("{}"));
+    const s = createServer((req, res) => res.writeHead(req.url === `/@rich-rees%2fzdd/${VERSION}` ? 200 : req.url === "/" ? 200 : 404).end("{}"));
     s.listen(0, "127.0.0.1", () => r({ url: `http://127.0.0.1:${s.address().port}`, close: () => s.close() }));
   });
   try {

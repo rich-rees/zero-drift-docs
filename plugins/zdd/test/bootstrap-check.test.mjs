@@ -151,8 +151,11 @@ test("the engine bootstrap runs: ZDD_ENGINE_BIN only when it is an engine's own 
   const other = tmp(t, "zdd-otherengine-");
   mkdirSync(join(other, "bin"));
   writeFileSync(join(other, "bin", "zdd-engine.mjs"), "");
-  writeFileSync(join(other, "package.json"), JSON.stringify({ name: "@rich-rees/zdd-engine", version: "0.0.1" }));
+  writeFileSync(join(other, "package.json"), JSON.stringify({ name: "@rich-rees/zdd", version: "0.0.1" }));
   assert.deepEqual(engineCommand({ env: { ZDD_ENGINE_BIN: join(other, "bin", "zdd-engine.mjs") } }).pre, [join(other, "bin", "zdd-engine.mjs")]);
+  // The old line's package is not this release's engine (decision 0042).
+  writeFileSync(join(other, "package.json"), JSON.stringify({ name: "@rich-rees/zdd-engine", version: "2.5.0" }));
+  assert.throws(() => engineCommand({ env: { ZDD_ENGINE_BIN: join(other, "bin", "zdd-engine.mjs") } }), /in a @rich-rees\/zdd package/);
   writeFileSync(join(other, "package.json"), JSON.stringify({ name: "not-the-engine" }));
   assert.throws(() => engineCommand({ env: { ZDD_ENGINE_BIN: join(other, "bin", "zdd-engine.mjs") } }), /is not an engine's bin\/zdd-engine\.mjs/);
   writeFileSync(join(other, "evil.mjs"), "");
@@ -168,7 +171,7 @@ test("the engine bootstrap runs: ZDD_ENGINE_BIN only when it is an engine's own 
 test("outside this checkout: npx on POSIX, npm's npx-cli.js with node on Windows (no shell), and cmd.exe only as a last resort that refuses what it would change (CR-096)", async (t) => {
   const { engineCommand, engineArgv } = await import(pathToFileURL(BOOTSTRAP).href);
   const VERSION = JSON.parse(readFileSync(join(PLUGIN, ".claude-plugin", "plugin.json"), "utf8")).version;
-  const pkg = `@rich-rees/zdd-engine@${VERSION}`;
+  const pkg = `@rich-rees/zdd@${VERSION}`;
   const none = join(tmp(t, "zdd-nosibling-"), "engine");
   assert.deepEqual(engineCommand({ env: {}, platform: "linux", sibling: none }), { cmd: "npx", pre: ["-y", pkg], shell: false });
   const nodeDir = tmp(t, "zdd-nodedir-");

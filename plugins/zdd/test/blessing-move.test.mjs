@@ -310,8 +310,9 @@ test("CR-024: upgrading from 2.4.1, the text pass shows an adopter's own paragra
   assert.ok(hit, JSON.stringify(plan.duplicates));
   assert.ok(hit.rules.includes("blessings"), hit.rules.join(","));
   const cfg = join(repo, "zdd", "config.json");
-  writeFileSync(cfg, JSON.stringify({ ...JSON.parse(readFileSync(cfg, "utf8")), engine: VERSION }, null, 2) + "\n");
-  assert.ok(!runJson(repo, ["upgrade", "--plan"]).duplicates.some((d) => /Our blessings live/.test(d.text)), "a repo already on 2.5 is not asked again");
+  const { engine: _old, ...rest } = JSON.parse(readFileSync(cfg, "utf8"));
+  writeFileSync(cfg, JSON.stringify({ ...rest, release: VERSION }, null, 2) + "\n");
+  assert.ok(!runJson(repo, ["upgrade", "--plan"]).duplicates.some((d) => /Our blessings live/.test(d.text)), "a repo already on this release (the new line, after every old-line release, decision 0042) is not asked again");
 });
 
 test("dry-run finding: a path written relative to its app is taken when exactly one repo file ends with it; two is a question, a folder is named, a span's arguments are not its path", () => {

@@ -28,7 +28,7 @@ test("the instructions carry the adopter rules (2.2.0, 2.3.0)", () => {
   assert.match(BODY, /claude plugin install mattpocock-skills@zero-drift-docs --scope project/);
   assert.match(BODY, /claude plugin install zdd@zero-drift-docs --scope project/);
   assert.match(BODY, /zero-drift-docs#readme/);
-  assert.match(BODY, /zero-drift-docs\/issues/);
+  assert.match(BODY, /zero-drift-docs\/discussions/, "decision 0041");
   assert.doesNotMatch(BODY, /zdd:begin|zdd:end/, "the body carries no markers; the writers add them for AGENTS.md");
 });
 

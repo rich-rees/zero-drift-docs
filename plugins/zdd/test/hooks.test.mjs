@@ -474,7 +474,7 @@ test("pre-push hook runs derive --check, render --check, lint, suite in order an
   fake("never");
   rmSync(log, { force: true });
   assert.equal(run().status, 0);
-  assert.deepEqual(readFileSync(log, "utf8").trim().split("\n"), ["-y @rich-rees/zdd-engine@" + version() + " derive --check", "-y @rich-rees/zdd-engine@" + version() + " render --check", "-y @rich-rees/zdd-engine@" + version() + " lint", "-y @rich-rees/zdd-engine@" + version() + " suite"]); // the suite since 0.9 (CR-134)
+  assert.deepEqual(readFileSync(log, "utf8").trim().split("\n"), ["-y @rich-rees/zdd@" + version() + " derive --check", "-y @rich-rees/zdd@" + version() + " render --check", "-y @rich-rees/zdd@" + version() + " lint", "-y @rich-rees/zdd@" + version() + " suite"]); // the suite since 0.9 (CR-134)
   fake("render --check");
   rmSync(log);
   assert.notEqual(run().status, 0, "render failure propagates");
@@ -537,7 +537,12 @@ test("every engine pin in the plugin (skills, templates) equals the plugin versi
     for (const n of readdirSync(d)) {
       const p = join(d, n);
       if (statSync(p).isDirectory()) rec(p);
-      else for (const m of readFileSync(p, "utf8").matchAll(/@rich-rees\/zdd-engine@([0-9][^"'\s`]*)/g)) pins.push({ file: p, version: m[1] });
+      else {
+        const text = readFileSync(p, "utf8");
+        for (const m of text.matchAll(/@rich-rees\/zdd@([0-9][^"'\s`]*)/g)) pins.push({ file: p, version: m[1] });
+        // The old line's package is never pinned by the plugin (decision 0042).
+        for (const m of text.matchAll(/@rich-rees\/zdd-engine@([0-9][^"'\s`]*)/g)) pins.push({ file: p, version: `old line: ${m[0]}` });
+      }
     }
   };
   rec(join(PLUGIN, "skills"));

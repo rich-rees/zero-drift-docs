@@ -59,7 +59,7 @@ cadence. The user publishes the engine under their own npm scope and points
 the plugin at it:
 
 - [ ] Rename the package in `packages/zdd-engine/package.json`
-      (`@<scope>/zdd-engine`) and publish it.
+      (`@<scope>/zdd`) and publish it.
 - [ ] Repin `ENGINE_PACKAGE` in `plugins/zdd/scripts/lib/repo.mjs`.
 - [ ] Repin the CI template (`plugins/zdd/templates/zdd.yml`), the pre-push
       template (`plugins/zdd/templates/pre-push`) and every skill's `npx` line.

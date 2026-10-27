@@ -12,6 +12,8 @@ export const DETECTION = {
   parts: ["database access"],
   order: 11,
   after: true,
+  // Before 0.9 the route and screen adapters read these calls (decision 0037).
+  upgradeAdds: "0.9.0",
   optionShape: { pathLists: ["roots"], callLists: ["subscribeCalls"], callName: "^[A-Za-z_$][\\w$]*(?:\\.[A-Za-z_$][\\w$]*)*$" },
   companion: { all: ["supabase"], any: JS_READERS },
 };

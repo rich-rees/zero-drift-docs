@@ -286,12 +286,13 @@ test("apply on the FastAPI+Supabase fixture with all defaults: config, owned wor
   assert.deepEqual(config.extractors, ["supabase", "supabase-py", "fastapi"], "0.9: the handlers' client calls bring supabase-py (decision 0039)");
   assert.deepEqual(config.extractorOptions.supabase.migrationNamespaces, [{ name: "db", dir: "supabase/migrations" }]);
   assert.deepEqual(config.extractorOptions.fastapi.roots, ["api", "main.py"]);
-  assert.equal(config.engine, PLUGIN_VERSION);
+  assert.equal(config.release, PLUGIN_VERSION);
+  assert.equal(config.engine, undefined, "the new line pins `release` (decision 0042)");
   assert.equal(config.mapCheck, "owed", "the first map check is owed until it is done together (decision 0039)");
   assert.deepEqual(config.hooks, { autoLoad: true, fence: true, stop: true }, "auto-load + fence + stop registrations recorded");
 
   const wf = readFileSync(join(repo, ".github", "workflows", "zdd.yml"), "utf8");
-  assert.ok(wf.includes(`@rich-rees/zdd-engine@${PLUGIN_VERSION}`));
+  assert.ok(wf.includes(`@rich-rees/zdd@${PLUGIN_VERSION}`));
   assert.ok(wf.includes(OWNER), "workflow carries the ownership line");
   assert.ok(!existsSync(join(repo, ".githooks", "pre-push")), "pre-push not written when CI accepted");
 
@@ -323,8 +324,8 @@ test("the written workflow: exact ordered command list, the pin once in env, rea
   const lines = wf.split("\n");
   const runs = lines.filter((l) => /^\s*run:\s/.test(l)).map((l) => l.replace(/^\s*run:\s*/, "").trim());
   assert.deepEqual(runs, ['npx -y "$ZDD_ENGINE" derive --check', 'npx -y "$ZDD_ENGINE" render --check', 'npx -y "$ZDD_ENGINE" lint --merge', 'npx -y "$ZDD_ENGINE" suite', 'npx -y "$ZDD_ENGINE" freshness >> "$GITHUB_STEP_SUMMARY"']);
-  const pins = lines.filter((l) => l.includes("@rich-rees/zdd-engine@"));
-  assert.deepEqual(pins, [`  ZDD_ENGINE: "@rich-rees/zdd-engine@${PLUGIN_VERSION}"`], "the pin appears exactly once, in env");
+  const pins = lines.filter((l) => l.includes("@rich-rees/zdd@") || l.includes("@rich-rees/zdd-engine"));
+  assert.deepEqual(pins, [`  ZDD_ENGINE: "@rich-rees/zdd@${PLUGIN_VERSION}"`], "the pin appears exactly once, in env");
   // A contributor's local extractor runs in this job (decision 0001): the token
   // it can reach is read-only and is not left in the checkout.
   const job = wf.slice(wf.indexOf("jobs:"));
@@ -517,7 +518,7 @@ test("CI declined: no workflow, owned pre-push written, closing text says the gu
   const hook = readFileSync(join(repo, ".githooks", "pre-push"), "utf8");
   assert.ok(hook.startsWith("#!/bin/sh"));
   assert.ok(hook.includes(OWNER));
-  assert.ok(hook.includes(`@rich-rees/zdd-engine@${PLUGIN_VERSION}`));
+  assert.ok(hook.includes(`@rich-rees/zdd@${PLUGIN_VERSION}`));
   assert.match(out, /weaker without CI/);
   assert.match(out, /core\.hooksPath/, "no .git in the fixture → the git config step is printed");
 });
@@ -623,7 +624,7 @@ const legacySnippet = readFileSync(join(PLUGIN, "test", "fixtures", "v0.3.1", "c
 test("upgrade replaces the pre-0.4 section only when it IS the v0.3.1 snippet modulo whitespace; an adopter's line inside it keeps the section (CR-080)", () => {
   const stock = fresh("legacy-stock");
   mkdirSync(join(stock, "zdd"));
-  writeFileSync(join(stock, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], engine: PLUGIN_VERSION }));
+  writeFileSync(join(stock, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], release: PLUGIN_VERSION }));
   // Reflowed and CRLF: whitespace differences alone do not make it the adopter's.
   const reflowed = legacySnippet.replace(/ +\n/g, "\n").replace(/([a-z,])\n([a-z`])/g, "$1 $2").replace(/\n/g, "\r\n");
   writeFileSync(join(stock, "CLAUDE.md"), "# Repo\r\n\r\n" + reflowed + "## After\r\n\r\nkeep\r\n");
@@ -634,7 +635,7 @@ test("upgrade replaces the pre-0.4 section only when it IS the v0.3.1 snippet mo
 
   const edited = fresh("legacy-edited");
   mkdirSync(join(edited, "zdd"));
-  writeFileSync(join(edited, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], engine: PLUGIN_VERSION }));
+  writeFileSync(join(edited, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], release: PLUGIN_VERSION }));
   const mine = legacySnippet.trimEnd() + "\n- **House rule:** ADRs need two reviewers.\n\n";
   const before = "# Repo\n\n" + mine + "## After\n\nkeep\n";
   writeFileSync(join(edited, "CLAUDE.md"), before);
@@ -661,7 +662,7 @@ test("upgrade a v0.3.1 repo: adapter → extractors, every owned file rewritten 
   mkdirSync(join(repo, ".github", "workflows"), { recursive: true });
   writeFileSync(join(repo, ".github", "workflows", "zdd.yml"), `# ${OWNER}\nenv:\n  ZDD_ENGINE: "@rich-rees/zdd-engine@0.3.1"\n`);
   mkdirSync(join(repo, ".githooks"), { recursive: true });
-  writeFileSync(join(repo, ".githooks", "pre-push"), readFileSync(join(PLUGIN, "templates", "pre-push"), "utf8").replace(/@rich-rees\/zdd-engine@[0-9.]+/, "@rich-rees/zdd-engine@0.3.1"));
+  writeFileSync(join(repo, ".githooks", "pre-push"), readFileSync(join(PLUGIN, "templates", "pre-push"), "utf8").replace(/@rich-rees\/zdd@[0-9.]+/, "@rich-rees/zdd-engine@0.3.1"));
   const CANARY = ["glossary.md", "adr", "map", "metadata", "graph.json", "agent-index.md", "adr-index.md", "human-index.html"];
   const untouched = CANARY.map((p) => hashTree(join(repo, "zdd", p)));
   assert.ok(!untouched.includes("absent"), "every canary exists before upgrade");
@@ -672,7 +673,7 @@ test("upgrade a v0.3.1 repo: adapter → extractors, every owned file rewritten 
   const json = JSON.parse(bootstrap(repo, ["upgrade", "--json"])); // second run: nothing to do
   // 1.1's two migration notes: the unanswered Stop opt-in, and the lint that can newly go red (CR-031, CR-027).
   assert.ok(crossing.notes.some((n) => /hooks\.stop is not set .*stays OFF until answered/.test(n)), crossing.notes.join("\n"));
-  assert.ok(crossing.notes.some((n) => n.includes(`@rich-rees/zdd-engine@${PLUGIN_VERSION} lint`) && /blessing/.test(n)), "the lint note names the pinned command");
+  assert.ok(crossing.notes.some((n) => n.includes(`@rich-rees/zdd@${PLUGIN_VERSION} lint`) && /blessing/.test(n)), "the lint note names the pinned command");
 
   const config = JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8"));
   assert.deepEqual(config.extractors, ["supabase", "supabase-js", "nextjs"]);
@@ -684,12 +685,13 @@ test("upgrade a v0.3.1 repo: adapter → extractors, every owned file rewritten 
   assert.equal(config.extractorOptions.nextjs.migrationNamespaces, undefined);
   assert.deepEqual(config.nonAreaTags, ["react-flow"]);
   assert.deepEqual(config.viewer, { defaultFocus: "map/features/things" });
-  assert.equal(config.engine, PLUGIN_VERSION);
+  assert.equal(config.release, PLUGIN_VERSION);
+  assert.equal(config.engine, undefined, "the new line pins `release` (decision 0042)");
 
   for (const f of ["zdd/config.json", ".github/workflows/zdd.yml", ".githooks/pre-push", "CLAUDE.md"]) assert.match(out, new RegExp(`changed ${f.replace(/[./]/g, "\\$&")}`), out);
   assert.match(out, /adapter "nextjs-supabase" → extractors/);
-  assert.ok(readFileSync(join(repo, ".github", "workflows", "zdd.yml"), "utf8").includes(`@rich-rees/zdd-engine@${PLUGIN_VERSION}`));
-  assert.ok(readFileSync(join(repo, ".githooks", "pre-push"), "utf8").includes(`@rich-rees/zdd-engine@${PLUGIN_VERSION}`));
+  assert.ok(readFileSync(join(repo, ".github", "workflows", "zdd.yml"), "utf8").includes(`@rich-rees/zdd@${PLUGIN_VERSION}`));
+  assert.ok(readFileSync(join(repo, ".githooks", "pre-push"), "utf8").includes(`@rich-rees/zdd@${PLUGIN_VERSION}`));
   const claude = readFileSync(join(repo, "CLAUDE.md"), "utf8");
   assert.ok(claude.includes("@zdd/instructions.md") && !claude.includes("/zdd:orient") && claude.includes("## Other section\n\nkeep me"), claude);
   assert.ok(existsSync(join(repo, "zdd", "instructions.md")), "the instructions file is written by the upgrade");
@@ -705,7 +707,7 @@ test("upgrade a v0.3.1 repo: adapter → extractors, every owned file rewritten 
 test("upgrade leaves alone what it does not own: a customised legacy section, an unmarked pre-push, malformed markers", () => {
   const repo = fresh("upgrade-unowned");
   mkdirSync(join(repo, "zdd"));
-  writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], engine: PLUGIN_VERSION }));
+  writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], release: PLUGIN_VERSION }));
   const custom = "# Repo\n\n## Documentation — Zero-Drift Docs (ZDD)\n\nOur own house rules about docs, nothing to do with the stock snippet.\n\n## Next\n\nx\n";
   writeFileSync(join(repo, "CLAUDE.md"), custom);
   mkdirSync(join(repo, ".githooks"));
@@ -751,19 +753,19 @@ test("upgrade recognises the exact v0.3.1 workflow (no owner line, floating npx)
   ]) {
     const repo = fresh(`upgrade-v031-${label.replace(/\s/g, "-")}`);
     mkdirSync(join(repo, "zdd"));
-    writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], engine: PLUGIN_VERSION }));
+    writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], release: PLUGIN_VERSION }));
     mkdirSync(join(repo, ".github", "workflows"), { recursive: true });
     writeFileSync(join(repo, ".github", "workflows", "zdd.yml"), text);
     const out = bootstrap(repo, ["upgrade"]);
     assert.equal(readFileSync(join(repo, ".github", "workflows", "zdd.yml"), "utf8"), template, label);
     assert.match(out, /changed \.github\/workflows\/zdd\.yml/, label);
     assert.match(out, /v0\.3\.1 workflow.*replaced/i, label);
-    assert.ok(template.includes(`@rich-rees/zdd-engine@${PLUGIN_VERSION}`) && template.includes(OWNER));
+    assert.ok(template.includes(`@rich-rees/zdd@${PLUGIN_VERSION}`) && template.includes(OWNER));
   }
   // One edit away from v0.3.1 is the adopter's: left untouched and called out.
   const edited = fresh("upgrade-v031-edited");
   mkdirSync(join(edited, "zdd"));
-  writeFileSync(join(edited, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], engine: PLUGIN_VERSION }));
+  writeFileSync(join(edited, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], release: PLUGIN_VERSION }));
   mkdirSync(join(edited, ".github", "workflows"), { recursive: true });
   const mine = v031.replace("node-version: \"20\"", "node-version: \"22\"");
   writeFileSync(join(edited, ".github", "workflows", "zdd.yml"), mine);
@@ -822,7 +824,7 @@ test("docs/agents/domain.md honours paths.* from zdd/config.json", () => {
   mkdirSync(join(repo, "zdd"));
   writeFileSync(
     join(repo, "zdd", "config.json"),
-    JSON.stringify({ extractors: ["generic"], engine: PLUGIN_VERSION, paths: { glossary: "docs/zdd/terms.md", adrDir: "docs/decisions", adrIndex: "docs/zdd/decisions.md" } }),
+    JSON.stringify({ extractors: ["generic"], release: PLUGIN_VERSION, paths: { glossary: "docs/zdd/terms.md", adrDir: "docs/decisions", adrIndex: "docs/zdd/decisions.md" } }),
   );
   applyJson(repo, "domain-paths", {});
   const doc = readFileSync(join(repo, "docs", "agents", "domain.md"), "utf8");
@@ -849,7 +851,7 @@ test("a hand-written docs/agents/domain.md is kept byte for byte by apply and by
 test("upgrade offers docs/agents/domain.md to an existing adopter: written when absent and narrated, kept on the next run", () => {
   const repo = fresh("domain-upgrade");
   mkdirSync(join(repo, "zdd"));
-  writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], engine: PLUGIN_VERSION }));
+  writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], release: PLUGIN_VERSION }));
   const out = bootstrap(repo, ["upgrade"]);
   assert.match(out, /changed docs\/agents\/domain\.md/, out);
   assert.match(out, /note\s+docs\/agents\/domain\.md: .*Pocock/, out);
@@ -866,9 +868,10 @@ test("upgrade (2.0.0, 2.0): an owned workflow's bare lint step gains --merge and
   const repo = fresh("upgrade-merge-gate");
   applyJson(repo, "mg", { extractors: ["generic"], optIns: { autoLoad: true, fence: true, stop: true, ci: true } });
   const wf = join(repo, ".github", "workflows", "zdd.yml");
-  writeFileSync(wf, readFileSync(wf, "utf8").replace("lint --merge", "lint").replace(/@rich-rees\/zdd-engine@[0-9.]+/, "@rich-rees/zdd-engine@1.3.1"));
+  writeFileSync(wf, readFileSync(wf, "utf8").replace("lint --merge", "lint").replace(/@rich-rees\/zdd@[0-9.]+/, "@rich-rees/zdd-engine@1.3.1"));
   const cfgPath = join(repo, "zdd", "config.json");
-  writeFileSync(cfgPath, JSON.stringify({ ...JSON.parse(readFileSync(cfgPath, "utf8")), engine: "1.3.1" })); // a 1.3.1 repo: this run crosses 2.0
+  const { release: _r, ...cfg } = JSON.parse(readFileSync(cfgPath, "utf8"));
+  writeFileSync(cfgPath, JSON.stringify({ ...cfg, engine: "1.3.1" })); // a 1.3.1 repo (the old line's `engine` pin): this run crosses 2.0
   const json = JSON.parse(bootstrap(repo, ["upgrade", "--json"]));
   assert.ok(readFileSync(wf, "utf8").includes('run: npx -y "$ZDD_ENGINE" lint --merge'));
   assert.ok(json.notes.some((n) => /zdd\.yml: the lint step now runs `lint --merge` \(2\.0\)/.test(n)), json.notes.join("\n"));

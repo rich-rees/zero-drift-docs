@@ -101,7 +101,11 @@ test("the instructions carry the rules the findings asked for (13, C11, C12, C13
   assert.match(body, /mint the blessings that survived, record the rest in the commit\s+message, delete the plan/, "C13: reconcile, spelled out");
   assert.match(body, /built on Matt\s+Pocock's skills/, "C14: why");
   assert.match(body, /https:\/\/github\.com\/rich-rees\/zero-drift-docs#readme/, "C14: the README's URL");
-  assert.match(body, /https:\/\/github\.com\/rich-rees\/zero-drift-docs\/issues/, "decision 7: the findings home");
+  // The findings home moved to Discussions (decision 0041): the developer
+  // hears it in plain words first, then gets a report to post.
+  assert.match(body, /https:\/\/github\.com\/rich-rees\/zero-drift-docs\/discussions/, "decision 0041: the findings home");
+  assert.match(body, /explained to the developer first, in plain words[\s\S]*ready-written report[\s\S]*"Bug reports"/, "decision 0041: plain words, then a report");
+  assert.doesNotMatch(body, /zero-drift-docs\/issues|labelled `finding`/, "decision 0041: Issues are off");
   assert.doesNotMatch(body, /zdd:bootstrap --upgrade|bootstrap --upgrade/);
   for (const rule of INSTRUCTION_RULES) assert.ok(rule.match.test(body), `rule ${rule.id} does not match the instructions themselves`);
 });

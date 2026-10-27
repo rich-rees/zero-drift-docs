@@ -1,4 +1,4 @@
-# @rich-rees/zdd-engine
+# @rich-rees/zdd
 
 The mechanical half of [Zero-Drift Docs](https://github.com/rich-rees/zero-drift-docs):
 derive the codebase metadata, render the agent + human indexes, and run the drift
@@ -8,19 +8,24 @@ half (curating the glossary, ADRs, comments, map and blessings) lives in the `zd
 Code plugin's skills; both call this engine, so CI and the agent can never
 disagree about what "fresh" means.
 
+From 0.9.0 the engine is this package, on a new version line; before it was
+`@rich-rees/zdd-engine`, 0.2.0 to 2.5.0 (decision 0042). The command line is
+its whole contract: an `exports` map opens `package.json` and no source
+file.
+
 ## Commands
 
 ```
-npx @rich-rees/zdd-engine derive [--check] [--verbose]
-npx @rich-rees/zdd-engine render [--check]
-npx @rich-rees/zdd-engine lint [--merge] [--tempstate]
-npx @rich-rees/zdd-engine freshness [--base <ref>]
-npx @rich-rees/zdd-engine tally [--since <ref|date>] [--json]
-npx @rich-rees/zdd-engine detect [--root=<dir>]
-npx @rich-rees/zdd-engine coverage [--json]
-npx @rich-rees/zdd-engine preview --extractors=<a,b,…> [--out=<empty dir>] [--json]
-npx @rich-rees/zdd-engine suite [--extractors=<a,b>] [--json]
-npx @rich-rees/zdd-engine contract [--json]
+npx @rich-rees/zdd derive [--check] [--verbose]
+npx @rich-rees/zdd render [--check]
+npx @rich-rees/zdd lint [--merge] [--tempstate]
+npx @rich-rees/zdd freshness [--base <ref>]
+npx @rich-rees/zdd tally [--since <ref|date>] [--json]
+npx @rich-rees/zdd detect [--root=<dir>]
+npx @rich-rees/zdd coverage [--json]
+npx @rich-rees/zdd preview --extractors=<a,b,…> [--out=<empty dir>] [--json]
+npx @rich-rees/zdd suite [--extractors=<a,b>] [--json]
+npx @rich-rees/zdd contract [--json]
 ```
 
 - **derive** — run the configured extractors over the repo and write

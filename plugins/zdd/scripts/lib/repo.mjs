@@ -19,7 +19,41 @@ import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 
 export const PLUGIN_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
-export const ENGINE_PACKAGE = "@rich-rees/zdd-engine";
+export const ENGINE_PACKAGE = "@rich-rees/zdd";
+
+// Two release lines (decision 0042). Up to 2.5.0 the engine was
+// `@rich-rees/zdd-engine` and a repo's config pinned it as `engine`; from
+// 0.9.0 it is `@rich-rees/zdd`, pinned as `release`. The numbers restart, so
+// a number alone never says which line it is on (1.0.0 is on both): the
+// config's key says it, and in the strings this plugin compares an old-line
+// release carries the old package's name (`zdd-engine@2.5.0`). Every
+// old-line release comes before every new-line one.
+export const OLD_ENGINE_PACKAGE = "@rich-rees/zdd-engine";
+const OLD_LINE = "zdd-engine@";
+export const oldLine = (v) => `${OLD_LINE}${v}`;
+export const isOldLine = (r) => typeof r === "string" && r.startsWith(OLD_LINE);
+// The release a config pins, as compareReleases reads it: `release` → its
+// version; `engine` → the old line's; neither → null (a config from before
+// pins, on the old line too). Both keys is a shape no release writes.
+export function configRelease(config) {
+  const has = (k) => config && Object.hasOwn(config, k);
+  if (has("release") && has("engine")) throw new Error("zdd/config.json has both 'engine' (the old line's pin, before 0.9) and 'release' — keep 'release' and delete 'engine' by hand (decision 0042)");
+  if (has("release")) return typeof config.release === "string" ? config.release : null;
+  if (has("engine")) return typeof config.engine === "string" ? oldLine(config.engine) : null;
+  return null;
+}
+// A config is on the new line exactly when it pins `release`.
+export const onNewLine = (config) => Boolean(config && Object.hasOwn(config, "release") && !Object.hasOwn(config, "engine"));
+// Line first, then X.Y.Z (a leading `v`, a tag's, is ignored; a prerelease
+// or build suffix is not read here — callers that care read it themselves).
+export function compareReleases(a, b) {
+  const [la, lb] = [isOldLine(a) ? 0 : 1, isOldLine(b) ? 0 : 1];
+  if (la !== lb) return la - lb;
+  const nums = (s) => String(s).replace(OLD_LINE, "").replace(/^v/, "").split(/[.+-]/).slice(0, 3).map(Number);
+  const [pa, pb] = [nums(a), nums(b)];
+  for (let i = 0; i < 3; i++) if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) - (pb[i] || 0);
+  return 0;
+}
 export const MAX_CONFIG_BYTES = 1024 * 1024; // a config bigger than this is not a config
 export const MAX_INDEX_BYTES = 64 * 1024; // the SessionStart injection is cut here (~16k tokens, 8× render's budget) — CR-086
 

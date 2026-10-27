@@ -40,11 +40,12 @@
 import { readFileSync, lstatSync, fstatSync, openSync, readSync, writeSync, closeSync, rmSync, mkdirSync, renameSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { join, dirname } from "node:path";
-import { PLUGIN_ROOT, parseArgs, adopterRoot, readConfig, artifactPaths, repoRelative, resolveInside, pathsOverlap, CONFIG_REL, posixify } from "./lib/repo.mjs";
+import { PLUGIN_ROOT, parseArgs, adopterRoot, readConfig, artifactPaths, repoRelative, resolveInside, pathsOverlap, CONFIG_REL, posixify, onNewLine } from "./lib/repo.mjs";
 import { Ledger, printable } from "./bootstrap.mjs";
 
 const TEMPLATES = join(PLUGIN_ROOT, "templates", "extractor");
-// The engine version that first hands extractors `io` (decision 0010).
+// The old line's engine version that first hands extractors `io` (decision
+// 0010); every release of the new line does (decision 0042).
 export const IO_SINCE = "1.3.0";
 // border: names a stack (a mirror of the engine's catalogue, held equal by a test)
 // Mirror of the engine's catalogue (the adapter folders in
@@ -416,9 +417,13 @@ export function scaffold(root, rawAnswers) {
   if (next.extractors.includes("generic") && next.extractors.length > 1) {
     ledger.notes.push("'generic' is still listed in extractors — it emits nothing; remove it now that a real extractor runs");
   }
-  const older = olderThan(next.engine, IO_SINCE);
-  if (older === true) ledger.notes.push(`zdd/config.json pins engine ${next.engine}; this extractor needs ${IO_SINCE} or later and will stop derive until then — say "upgrade ZDD"`);
-  else if (older === null) ledger.notes.push(`zdd/config.json's engine pin (${printable(String(next.engine))}) is not a version this can compare — this extractor needs ${IO_SINCE} or later`);
+  if (onNewLine(next)) {
+    if (olderThan(next.release, "0.0.0") === null) ledger.notes.push(`zdd/config.json's release pin (${printable(String(next.release))}) is not a version — "upgrade ZDD" rewrites it`);
+  } else {
+    const older = olderThan(next.engine, IO_SINCE);
+    if (older === true) ledger.notes.push(`zdd/config.json pins engine ${next.engine}; this extractor needs ${IO_SINCE} or later and will stop derive until then — say "upgrade ZDD"`);
+    else if (older === null) ledger.notes.push(`zdd/config.json's engine pin (${printable(String(next.engine))}) is not a version this can compare — this extractor needs ${IO_SINCE} or later`);
+  }
   // Every root, judged without following links (1.3.0 CR-042).
   for (const r of a.roots) {
     const st = lstatOrNull(join(root, ...r.split("/")));

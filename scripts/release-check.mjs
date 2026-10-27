@@ -6,7 +6,7 @@
 //   node scripts/release-check.mjs vX.Y.Z
 //
 // Exit 1 with the first pin that disagrees. The pins: the engine's
-// package.json, both plugin manifests, the marketplace entry, the CI and
+// package.json (and its name: the new line's package, decision 0042), both plugin manifests, the marketplace entry, the CI and
 // pre-push templates, every skill's npx line, and the README's status line.
 import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
@@ -27,18 +27,19 @@ const expect = (what, found) => {
 };
 
 expect("packages/zdd-engine/package.json version", json("packages/zdd-engine/package.json").version);
+if (json("packages/zdd-engine/package.json").name !== "@rich-rees/zdd") problems.push(`packages/zdd-engine/package.json name: ${json("packages/zdd-engine/package.json").name} — the engine publishes as @rich-rees/zdd (decision 0042)`);
 expect("plugins/zdd/.claude-plugin/plugin.json version", json("plugins/zdd/.claude-plugin/plugin.json").version);
 expect("plugins/zdd/.codex-plugin/plugin.json version", json("plugins/zdd/.codex-plugin/plugin.json").version);
 const market = json(".claude-plugin/marketplace.json");
 const zdd = (market.plugins ?? []).find((p) => p.name === "zdd");
 expect(".claude-plugin/marketplace.json zdd version", zdd?.version);
 for (const rel of ["plugins/zdd/templates/zdd.yml", "plugins/zdd/templates/pre-push"]) {
-  const m = /@rich-rees\/zdd-engine@(\S+?)["'\s]/.exec(read(rel));
+  const m = /@rich-rees\/zdd@(\S+?)["'\s]/.exec(read(rel));
   expect(`${rel} engine pin`, m ? m[1] : null);
 }
 for (const skill of readdirSync(join(ROOT, "plugins/zdd/skills"), { withFileTypes: true }).filter((d) => d.isDirectory())) {
   const text = read(`plugins/zdd/skills/${skill.name}/SKILL.md`);
-  for (const m of text.matchAll(/@rich-rees\/zdd-engine@(\S+?)\s/g)) expect(`plugins/zdd/skills/${skill.name}/SKILL.md npx pin`, m[1]);
+  for (const m of text.matchAll(/@rich-rees\/zdd(?:-engine)?@(\S+?)\s/g)) expect(`plugins/zdd/skills/${skill.name}/SKILL.md npx pin`, m[1]);
 }
 const readme = read("README.md");
 const status = /\*\*Status: (\d+\.\d+\.\d+)\.\*\*/.exec(readme);

@@ -118,7 +118,7 @@ test("fail loudly: without io the scaffolded module throws, naming the engine ve
   const repo = adopted(t);
   scaffoldJson(repo, CSHARP);
   const mod = await import(pathToFileURL(join(repo, "zdd", "extractors", "aspnet-routes", "index.mjs")).href);
-  assert.throws(() => mod.derive({ repoRoot: repo, options: {} }), new RegExp(`aspnet-routes needs @rich-rees/zdd-engine ${IO_SINCE.replace(/\./g, "\\.")} or later \\(io was not passed\\) — say "upgrade ZDD"`));
+  assert.throws(() => mod.derive({ repoRoot: repo, options: {} }), new RegExp(`aspnet-routes needs an engine that passes io — any @rich-rees/zdd, or @rich-rees/zdd-engine ${IO_SINCE.replace(/\./g, "\\.")} or later \\(io was not passed\\) — say "upgrade ZDD"`));
 });
 
 test("the scaffolded test is red until EXPECTED_IDS and a fixture exist, and green once fromSource() is written", (t) => {

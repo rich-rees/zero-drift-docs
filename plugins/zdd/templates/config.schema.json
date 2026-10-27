@@ -9,6 +9,7 @@
     { "required": ["extractors"], "not": { "anyOf": [{ "required": ["adapter"] }, { "required": ["adapterOptions"] }] } },
     { "required": ["adapter"], "not": { "anyOf": [{ "required": ["extractors"] }, { "required": ["extractorOptions"] }] } }
   ],
+  "not": { "required": ["engine", "release"] },
   "additionalProperties": true,
   "properties": {
     "mapCheck": {
@@ -261,11 +262,18 @@
       "description": "DEPRECATED (pre-1.0): options for the single `adapter`. Use extractorOptions.",
       "additionalProperties": true
     },
-    "engine": {
+    "release": {
       "type": "string",
       "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(\\.(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*))?(\\+([0-9a-zA-Z-]+(\\.[0-9a-zA-Z-]+)*))?$",
-      "description": "The @rich-rees/zdd-engine version this repo was bootstrapped for — written by bootstrap, rewritten by \"upgrade ZDD\", compared against the plugin by load (skew warning). Mirrors the pin in the CI workflow / pre-push hook so a repo without CI still has one.",
-      "examples": ["2.2.1"]
+      "description": "The ZDD release this repo is on (decision 0042): the plugin and the engine, @rich-rees/zdd, share its number. Written by bootstrap, rewritten by \"upgrade ZDD\", compared against the plugin by load (skew warning). Mirrors the pin in the CI workflow / pre-push hook so a repo without CI still has one.",
+      "examples": ["0.9.0"]
+    },
+    "engine": {
+      "type": "string",
+      "deprecated": true,
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(\\.(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*))?(\\+([0-9a-zA-Z-]+(\\.[0-9a-zA-Z-]+)*))?$",
+      "description": "DEPRECATED (before 0.9): the old line's pin, a version of @rich-rees/zdd-engine (0.2.0 to 2.5.0). \"upgrade ZDD\" replaces it with `release`; a config holding both is refused (decision 0042).",
+      "examples": ["2.5.0"]
     },
     "hooks": {
       "type": "object",

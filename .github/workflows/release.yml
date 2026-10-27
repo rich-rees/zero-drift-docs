@@ -65,13 +65,13 @@ jobs:
         id: npm
         run: |
           V="${GITHUB_REF_NAME#v}"
-          if npm view "@rich-rees/zdd-engine@${V}" version >/dev/null 2>&1; then
-            HEAD="$(npm view "@rich-rees/zdd-engine@${V}" gitHead 2>/dev/null || true)"
+          if npm view "@rich-rees/zdd@${V}" version >/dev/null 2>&1; then
+            HEAD="$(npm view "@rich-rees/zdd@${V}" gitHead 2>/dev/null || true)"
             if [ "${HEAD}" = "${GITHUB_SHA}" ]; then
-              echo "@rich-rees/zdd-engine@${V} is already published from this commit — resuming after the publish"
+              echo "@rich-rees/zdd@${V} is already published from this commit — resuming after the publish"
               echo "published=true" >> "$GITHUB_OUTPUT"
             else
-              echo "@rich-rees/zdd-engine@${V} is already published from ${HEAD:-an unknown commit} — a version is immutable; bump the version instead"; exit 1
+              echo "@rich-rees/zdd@${V} is already published from ${HEAD:-an unknown commit} — a version is immutable; bump the version instead"; exit 1
             fi
           else
             echo "published=false" >> "$GITHUB_OUTPUT"
@@ -94,10 +94,10 @@ jobs:
           V="${GITHUB_REF_NAME#v}"
           cd "$(mktemp -d)"
           for i in 1 2 3 4 5 6; do
-            if npx -y "@rich-rees/zdd-engine@${V}" 2>&1 | grep -q "derive"; then exit 0; fi
+            if npx -y "@rich-rees/zdd@${V}" 2>&1 | grep -q "derive"; then exit 0; fi
             sleep 20
           done
-          echo "@rich-rees/zdd-engine@${V} did not become fetchable in two minutes"; exit 1
+          echo "@rich-rees/zdd@${V} did not become fetchable in two minutes"; exit 1
 
       - name: GitHub release, notes from the README's Versioning entry
         env:

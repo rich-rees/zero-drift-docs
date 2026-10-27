@@ -395,7 +395,7 @@ function main() {
   const owned = generated.find((g) => g.rel === target)?.owned === true;
   const reason = owned
     ? `ZDD fence: ${target} is ZDD's own instructions file, rewritten by "upgrade ZDD" — never hand-edit it. ` +
-      `A rule of your own goes in CLAUDE.md (everything there outside ZDD's one import line is yours); a ZDD defect goes to https://github.com/rich-rees/zero-drift-docs/issues. ` +
+      `A rule of your own goes in CLAUDE.md (everything there outside ZDD's one import line is yours); a ZDD defect goes to ZDD's Discussions, under Bug reports: https://github.com/rich-rees/zero-drift-docs/discussions. ` +
       `To lift the fence for this repo set "hooks": { "fence": false } in zdd/config.json.`
     : `ZDD fence: ${target} is a generated artifact — never hand-edit it. ` +
       `Run the ZDD update ritual ("update ZDD" / the \`update\` skill) to regenerate it ` +

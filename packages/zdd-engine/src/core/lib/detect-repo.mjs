@@ -27,6 +27,9 @@
 //                named key is a path; bootstrap checks answers against it
 //     exampleClaims: lines the example feature slice shows as records to link
 //     optIn:     true — every upgrade offers it again where detection finds it
+//     upgradeAdds: "X.Y.Z" — an upgrade from an earlier release adds it
+//                where detection proposes it (a part an older release's
+//                adapters read and this one's need it for)
 //   }
 //   detect({ scan, proposed }) -> null | {
 //     proposal:  { evidence: [plain words], options }   (absent: not proposed)
@@ -158,7 +161,7 @@ export function detectRepo(repoRoot, modules, caps = {}) {
   const shapes = Object.fromEntries(
     adapters.map(({ name, mod }) => [
       name,
-      { parts: mod.DETECTION.parts, optionShape: mod.DETECTION.optionShape ?? {}, exampleClaims: mod.DETECTION.exampleClaims ?? [], optIn: Boolean(mod.DETECTION.optIn && typeof mod.detect === "function") },
+      { parts: mod.DETECTION.parts, optionShape: mod.DETECTION.optionShape ?? {}, exampleClaims: mod.DETECTION.exampleClaims ?? [], optIn: Boolean(mod.DETECTION.optIn && typeof mod.detect === "function"), ...(typeof mod.DETECTION.upgradeAdds === "string" && /^\d+\.\d+\.\d+$/.test(mod.DETECTION.upgradeAdds) ? { upgradeAdds: mod.DETECTION.upgradeAdds } : {}) },
     ]),
   );
 

@@ -35,7 +35,12 @@ function repoRoot() {
     if (dirname(dir) === dir) throw new Error("no zdd/config.json above this test — run it inside the adopting repo");
   }
 }
-const PIN = JSON.parse(readFileSync(join(repoRoot(), "zdd", "config.json"), "utf8")).engine;
+// The release pin (`release`, from 0.9: @rich-rees/zdd) or, before 0.9, the
+// old line's `engine` pin (@rich-rees/zdd-engine) — decision 0042.
+const CONFIG = JSON.parse(readFileSync(join(repoRoot(), "zdd", "config.json"), "utf8"));
+const PIN_KEY = Object.hasOwn(CONFIG, "release") ? "release" : "engine";
+const PIN = CONFIG[PIN_KEY];
+const PACKAGE = PIN_KEY === "release" ? "@rich-rees/zdd" : "@rich-rees/zdd-engine";
 const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
 // npm's own npx script, run by this node — no shell, so no quoting to get
@@ -51,8 +56,8 @@ function npxCli() {
 // the test, never hangs it (1.3.0 CR-045).
 function engine(repo, args, env = process.env, timeout = 300_000) {
   const local = process.env.ZDD_ENGINE_BIN;
-  if (!local && !SEMVER.test(String(PIN))) throw new Error(`zdd/config.json 'engine' must be a version like 1.3.0, got ${JSON.stringify(PIN)}`);
-  const argv = local ? [local, ...args, `--root=${repo}`] : [npxCli(), "-y", `@rich-rees/zdd-engine@${PIN}`, ...args, `--root=${repo}`];
+  if (!local && !SEMVER.test(String(PIN))) throw new Error(`zdd/config.json '${PIN_KEY}' must be a version like 0.9.0, got ${JSON.stringify(PIN)}`);
+  const argv = local ? [local, ...args, `--root=${repo}`] : [npxCli(), "-y", `${PACKAGE}@${PIN}`, ...args, `--root=${repo}`];
   const r = spawnSync(process.execPath, argv, { encoding: "utf8", env, timeout, killSignal: "SIGKILL" });
   const timedOut = r.error?.code === "ETIMEDOUT" ? `\n(killed after ${timeout / 1000} s — derive did not terminate)` : "";
   return { status: r.status, out: `${r.stdout ?? ""}${r.stderr ?? ""}${timedOut}` };

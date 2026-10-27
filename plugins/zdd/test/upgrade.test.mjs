@@ -14,7 +14,8 @@ import { dirname, resolve, join } from "node:path";
 import { tmpdir, homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
-import { UPGRADE_NOTES, newestTag, INSTRUCTION_RULES, compareVersions, ruleChangedSince, mergeGate, IMPORT_COMMENT, RETIRED_NAMES } from "../scripts/bootstrap.mjs";
+import { UPGRADE_NOTES, newestTag, INSTRUCTION_RULES, compareVersions, ruleChangedSince, mergeGate, IMPORT_COMMENT, RETIRED_NAMES, OLD_LINE_TAGS } from "../scripts/bootstrap.mjs";
+import { oldLine } from "../scripts/lib/repo.mjs";
 
 const PLUGIN = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SCRIPT = join(PLUGIN, "scripts", "bootstrap.mjs");
@@ -38,7 +39,7 @@ const fails = (root, args) => {
   assert.equal(r.status, 1, `expected failure: ${r.stdout}`);
   return r.stderr;
 };
-const adopted = (name, { engine = "2.0.0", extractors = ["generic"], claude, settings = { extraKnownMarketplaces: LOCK("v2.0.0") }, fixture } = {}) => {
+const adopted = (name, { engine = "2.0.0", release, extractors = ["generic"], claude, settings = { extraKnownMarketplaces: LOCK("v2.0.0") }, fixture } = {}) => {
   const repo = join(scratch, name);
   if (fixture) {
     cpSync(join(ENGINE_FIXTURES, fixture), repo, { recursive: true });
@@ -46,7 +47,8 @@ const adopted = (name, { engine = "2.0.0", extractors = ["generic"], claude, set
   }
   mkdirSync(join(repo, "zdd"), { recursive: true });
   mkdirSync(join(repo, ".claude"), { recursive: true });
-  writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify({ extractors, ...(engine ? { engine } : {}) }, null, 2) + "\n");
+  // `release` is the new line's pin, `engine` the old line's (decision 0042).
+  writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify({ extractors, ...(release ? { release } : engine ? { engine } : {}) }, null, 2) + "\n");
   if (settings) writeFileSync(join(repo, ".claude", "settings.json"), JSON.stringify(settings, null, 2) + "\n");
   if (claude !== undefined) writeFileSync(join(repo, "CLAUDE.md"), claude);
   return repo;
@@ -87,7 +89,8 @@ test("every release from 1.1 on (the README's Versioning list) has an upgrade no
   const readme = readFileSync(join(PLUGIN, "..", "..", "README.md"), "utf8");
   const released = [...readme.matchAll(/^- \*\*`(\d+\.\d+\.\d+)` —/gm)].map((m) => m[1]).filter((v) => v !== "1.0.0");
   assert.ok(released.includes("1.2.0") && released.includes("1.3.1") && released.includes(VERSION), released.join(", "));
-  for (const v of released) assert.ok(UPGRADE_NOTES[v], `UPGRADE_NOTES has no entry for ${v}`);
+  // A release the old line tagged is keyed as the old line's (decision 0042).
+  for (const v of released) assert.ok(UPGRADE_NOTES[OLD_LINE_TAGS.includes(`v${v}`) ? oldLine(v) : v], `UPGRADE_NOTES has no entry for ${v}`);
   const skill = readFileSync(join(PLUGIN, "skills", "upgrade", "SKILL.md"), "utf8");
   assert.match(skill, new RegExp(`^#+ Upgrading to ${MINOR.replace(".", "\\.")}\\b`, "m"), `skills/upgrade/SKILL.md needs an "Upgrading to ${MINOR}" section`);
 });
@@ -112,7 +115,7 @@ test("every upgrade re-runs detection: an opt-in extractor the evidence shows is
   const notes = json.notes.join("\n");
   assert.match(notes, /^offers the opt-in extractor `background-procfile`.*`Procfile` runs a process/m, notes);
   assert.match(notes, /^offers the opt-in extractor `background-vercel`.*`apps\/web\/vercel\.json` schedules a cron/m, notes);
-  assert.deepEqual(JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8")).extractors, ["supabase"], "never added silently");
+  assert.deepEqual(JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8")).extractors, ["supabase", "supabase-py", "sqlalchemy"], "the opt-ins are never added; the data-access adapters crossing 0.9 are (decision 0037)");
   assert.match(notes, /^2\.1 .*`\*` in a scanned url: it no longer matches a fixed route segment/m, notes);
 });
 
@@ -329,13 +332,13 @@ test("2.4.1 CR-020: the opt-in offer is quiet for an extractor already on", () =
 
 test("2.4.1, finding 3: each rule's `since` is a release no later than this plugin, and moves with what the rule says — change `says`, then bump `since` and this table together", () => {
   const PINNED = {
-    load: "2.4.0", patterns: "2.3.0", update: "2.4.0", upgrade: "2.3.0", skew: "2.3.0", generated: "2.4.1",
-    merge: "2.4.1", renumber: "2.4.1", install: "2.3.0", grill: "2.3.0", findings: "2.3.0", record: "2.4.1", blessings: "2.5.0",
+    load: oldLine("2.4.0"), patterns: oldLine("2.3.0"), update: oldLine("2.4.0"), upgrade: oldLine("2.3.0"), skew: oldLine("2.3.0"), generated: oldLine("2.4.1"),
+    merge: oldLine("2.4.1"), renumber: oldLine("2.4.1"), install: oldLine("2.3.0"), grill: oldLine("2.3.0"), findings: "0.9.0", record: oldLine("2.4.1"), blessings: oldLine("2.5.0"),
   };
   const VERSION = JSON.parse(readFileSync(join(PLUGIN, ".claude-plugin", "plugin.json"), "utf8")).version;
   const SAYS_SHA = {};
   for (const rule of INSTRUCTION_RULES) {
-    assert.match(rule.since ?? "", /^\d+\.\d+\.\d+$/, rule.id);
+    assert.match(rule.since ?? "", /^(?:zdd-engine@)?\d+\.\d+\.\d+$/, rule.id);
     assert.ok(compareVersions(rule.since, VERSION) <= 0, `${rule.id}: since ${rule.since} is later than the plugin (${VERSION})`);
     assert.equal(rule.since, PINNED[rule.id], `${rule.id}: since moved — update the table`);
     SAYS_SHA[rule.id] = createHash("sha256").update(rule.says).digest("hex").slice(0, 12);
@@ -343,7 +346,7 @@ test("2.4.1, finding 3: each rule's `since` is a release no later than this plug
   assert.deepEqual(Object.keys(SAYS_SHA).sort(), Object.keys(PINNED).sort());
   const SAYS_PINNED = {
     load: "f5ab5c09cab0", patterns: "ce86483b2454", update: "0143764c1f10", upgrade: "1f328adcb3f1", skew: "c0a3cd59c82f", generated: "d342fc5876db",
-    merge: "98d4b51c843c", renumber: "d1f96292c08e", install: "df690ac41ed2", grill: "474fe1670736", findings: "85cf9aed5169", record: "3767c173ae7e", blessings: "5d7a511af2c2",
+    merge: "98d4b51c843c", renumber: "d1f96292c08e", install: "df690ac41ed2", grill: "474fe1670736", findings: "c6a5958dbb61", record: "3767c173ae7e", blessings: "5d7a511af2c2",
   };
   assert.deepEqual(SAYS_SHA, SAYS_PINNED, "a rule's `says` changed — bump its `since` to this release, then copy the new hashes here");
 });
@@ -352,6 +355,17 @@ test("newestTag: the highest release tag by semver, ignoring pre-releases and ju
   const lines = ["abc\trefs/tags/v2.1.1", "def\trefs/tags/v2.10.0", "123\trefs/tags/v2.9.9", "456\trefs/tags/v3.0.0-rc.1", "789\trefs/tags/nightly", "000\trefs/tags/v2.2.0^{}"];
   assert.equal(newestTag(lines.join("\n")), "v2.10.0");
   assert.equal(newestTag(""), null);
+});
+
+test("decision 0042: the old line's tags are behind every new-line release — newestTag skips them, compareVersions puts them first, and a 1.x plugin must have dropped the list (the numbers collide from 1.0.0)", () => {
+  assert.equal(newestTag(["a\trefs/tags/v2.5.0", "b\trefs/tags/v0.9.0", "c\trefs/tags/v2.4.1"].join("\n")), "v0.9.0");
+  assert.equal(newestTag("a\trefs/tags/v2.5.0"), null, "only the old line's tags: no release of this line yet");
+  assert.ok(compareVersions(oldLine("2.5.0"), "0.9.0") < 0);
+  assert.ok(compareVersions(oldLine("9.9.9"), "0.0.1") < 0);
+  assert.ok(compareVersions(oldLine("2.4.1"), oldLine("2.5.0")) < 0);
+  assert.equal(compareVersions("v0.9.1", "0.9.1"), 0);
+  assert.ok(OLD_LINE_TAGS.includes("v2.5.0") && OLD_LINE_TAGS.includes("v1.0.0"));
+  if (Number(VERSION.split(".")[0]) >= 1) assert.deepEqual(OLD_LINE_TAGS.filter((t) => compareVersions(t, "1.0.0") >= 0), [], "a new-line 1.x tag would read as the old line's — retire OLD_LINE_TAGS (decision 0042)");
 });
 
 test("release-status reads the lock, the running plugin and the newest tag on the remote (a local repo stands in for GitHub)", () => {
@@ -398,7 +412,8 @@ test("upgrade --to refuses before writing: a tag the remote does not have, one b
   const repo = adopted("to-refuse", { settings: { extraKnownMarketplaces: LOCK("v9.1.0") } });
   const bytes = readFileSync(join(repo, ".claude", "settings.json"), "utf8");
   assert.match(fails(repo, ["upgrade", "--to=v9.2.0", `--remote=${remote()}`]), /v9\.2\.0 is not a release tag on/);
-  assert.match(fails(repo, ["upgrade", "--to=v1.0.0", `--remote=${remote()}`]), /older than this plugin/);
+  assert.match(fails(repo, ["upgrade", "--to=v0.8.0", `--remote=${remote()}`]), /older than this plugin/);
+  assert.match(fails(repo, ["upgrade", "--to=v2.5.0", `--remote=${remote()}`]), /v2\.5\.0 is a release of the old line \(@rich-rees\/zdd-engine\), before every 0\.9 release/, "decision 0042");
   assert.match(fails(repo, ["upgrade", "--to=v9.0.0", `--remote=${remote()}`]), /older than this repo's lock \(v9\.1\.0\)/);
   assert.match(fails(repo, ["upgrade", "--to=latest", `--remote=${remote()}`]), /--to must be a release tag/);
   assert.equal(readFileSync(join(repo, ".claude", "settings.json"), "utf8"), bytes);
@@ -426,19 +441,80 @@ test("a plain upgrade never moves a repo backwards: a lock or engine pin newer t
   const before = snapshot(ahead);
   assert.match(fails(ahead, ["upgrade"]), /locks v9\.0\.0, newer than this plugin .*update this machine first/);
   assert.deepEqual(snapshot(ahead), before);
-  const pinned = adopted("ahead-engine", { engine: "9.0.0" });
-  assert.match(fails(pinned, ["upgrade"]), /engine pin 9\.0\.0 is newer than this plugin/);
+  const pinned = adopted("ahead-release", { release: "9.0.0" });
+  assert.match(fails(pinned, ["upgrade"]), /release pin 9\.0\.0 is newer than this plugin/);
+  // The old line is behind every new-line release, whatever its number
+  // (decision 0042): a 2.5.0 lock and a 9.0.0 engine pin both upgrade.
+  const old = adopted("old-line", { engine: "9.0.0", settings: { extraKnownMarketplaces: LOCK("v2.5.0") } });
+  const plan = runJson(old, ["upgrade", "--plan"]);
+  assert.ok(plan.notes.some((n) => n === `zdd/config.json: engine pin 9.0.0 → release ${VERSION} (the engine is @rich-rees/zdd from 0.9, a new line numbered from 0.9.0 — decision 0042)`), plan.notes.join("\n"));
+  // Both keys is no release's shape: refused by name, before any write.
+  const both = adopted("both-keys");
+  writeFileSync(join(both, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], engine: "2.5.0", release: VERSION }));
+  const bytes = snapshot(both);
+  assert.match(fails(both, ["upgrade"]), /has both 'engine' .* and 'release' — keep 'release' and delete 'engine' by hand/);
+  assert.deepEqual(snapshot(both), bytes);
 });
 
-test("a malformed subscribeCalls already in config never crashes an upgrade halfway: notes are computed safely, and the Realtime note is per web extractor (CR-011, CR-009)", () => {
+test("a malformed subscribeCalls already in config never stops an upgrade: the good list moves to supabase-js, the bad one stays where it is and is named (CR-011, CR-009; decision 0037)", () => {
   const repo = adopted("bad-subscribe", { extractors: ["supabase", "nextjs", "react-router"] });
   const cfg = JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8"));
   cfg.extractorOptions = { nextjs: { refs: { subscribeCalls: { oops: true } } }, "react-router": { subscribeCalls: ["live.onInsert"] } };
   writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify(cfg, null, 2) + "\n");
-  const json = runJson(repo, ["upgrade", "--plan"]);
-  const realtime = json.notes.filter((n) => /^2\.1 maps realtime/.test(n));
-  assert.equal(realtime.length, 1, realtime.join("\n"));
-  assert.match(realtime[0], /nextjs\.refs\.subscribeCalls/, "the Next.js app's wrapper is still unnamed; React Router's is named");
+  const json = runJson(repo, ["upgrade"]);
+  const after = JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8"));
+  assert.deepEqual(after.extractorOptions["supabase-js"], { subscribeCalls: ["live.onInsert"] });
+  assert.equal(after.extractorOptions["react-router"].subscribeCalls, undefined);
+  assert.deepEqual(after.extractorOptions.nextjs.refs.subscribeCalls, { oops: true }, "left where it was");
+  assert.ok(after.extractors.includes("supabase-js"));
+  assert.ok(json.notes.some((n) => /^zdd\/config\.json: extractorOptions\.nextjs\.refs\.subscribeCalls was not moved — it is not a list of call names/.test(n)), json.notes.join("\n"));
+  assert.ok(json.notes.some((n) => /extractorOptions\.react-router\.subscribeCalls → extractorOptions\["supabase-js"\]\.subscribeCalls/.test(n)), json.notes.join("\n"));
+  assert.ok(!json.notes.some((n) => /^2\.1 maps realtime/.test(n)), "a name is recorded, so 2.1's question is answered");
+});
+
+test("0.9 moves subscribeCalls from both old places into supabase-js, each name once in first-seen order; 2.1's question then names the one place (decision 0037)", () => {
+  const repo = adopted("move-subscribe", { extractors: ["supabase", "nextjs", "react-router"] });
+  const cfg = JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8"));
+  cfg.extractorOptions = { nextjs: { refs: { subscribeCalls: ["live.on", "rt.sub"] } }, "react-router": { subscribeCalls: ["rt.sub", "live.onInsert"] }, "supabase-js": { subscribeCalls: ["mine"] } };
+  writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify(cfg, null, 2) + "\n");
+  runJson(repo, ["upgrade"]);
+  const after = JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8"));
+  assert.deepEqual(after.extractorOptions["supabase-js"].subscribeCalls, ["mine", "rt.sub", "live.onInsert", "live.on"]);
+  assert.equal(after.extractorOptions.nextjs.refs, undefined, "an emptied refs block goes");
+  assert.equal(after.extractors.filter((n) => n === "supabase-js").length, 1);
+  const again = runJson(repo, ["upgrade", "--plan"]);
+  assert.ok(!again.wrote.includes("zdd/config.json"), "a second upgrade changes nothing");
+  const none = adopted("none-subscribe", { extractors: ["supabase", "nextjs"] });
+  const notes = runJson(none, ["upgrade", "--plan"]).notes.join("\n");
+  assert.match(notes, /^2\.1 maps realtime .*ask whether the nextjs app has one, and record it in extractorOptions\["supabase-js"\]\.subscribeCalls \(there since 0\.9\)/m, notes);
+});
+
+test("0.9 adds the data-access adapters detection proposes, with its evidence, to a config from before 0.9 — and only where their companions run, and never from 0.9 on (decision 0037; Rich's call, slice 6)", () => {
+  const app = (name, cfg) => {
+    const repo = adopted(name, cfg);
+    mkdirSync(join(repo, "supabase", "migrations"), { recursive: true });
+    writeFileSync(join(repo, "supabase", "migrations", "0001_init.sql"), "create table public.things (id int);\n");
+    mkdirSync(join(repo, "src", "app", "things"), { recursive: true });
+    writeFileSync(join(repo, "package.json"), JSON.stringify({ dependencies: { next: "15.0.0", "@supabase/supabase-js": "2.0.0" } }));
+    writeFileSync(join(repo, "src", "app", "things", "page.tsx"), 'export default async function Page() { await supabase.from("things").select(); return null; }\n');
+    return repo;
+  };
+  const repo = app("da-add", { extractors: ["supabase", "nextjs"], engine: "2.5.0", settings: { extraKnownMarketplaces: LOCK("v2.5.0") } });
+  const plan = runJson(repo, ["upgrade", "--plan"]);
+  assert.ok(plan.notes.some((n) => /^zdd\/config\.json: extractor "supabase-js" added \(0\.9\.0, decision 0037: the database access the route and screen adapters stopped reading\) — detection: Supabase beside JS code \(nextjs/.test(n)), plan.notes.join("\n"));
+  runJson(repo, ["upgrade"]);
+  const cfg = JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8"));
+  assert.deepEqual(cfg.extractors, ["supabase", "nextjs", "supabase-js"]);
+  assert.equal(cfg.release, VERSION);
+  assert.equal(cfg.engine, undefined);
+  // A team that left the schema adapter out gets no reader of client calls to join to it.
+  const noSchema = app("da-noschema", { extractors: ["nextjs"], engine: "2.5.0" });
+  runJson(noSchema, ["upgrade"]);
+  assert.deepEqual(JSON.parse(readFileSync(join(noSchema, "zdd", "config.json"), "utf8")).extractors, ["nextjs"]);
+  // From 0.9 on, removing one is the team's choice: no later upgrade adds it back.
+  const onNew = app("da-new", { extractors: ["supabase", "nextjs"], release: VERSION, settings: { extraKnownMarketplaces: LOCK(`v${VERSION}`) } });
+  const kept = runJson(onNew, ["upgrade", "--plan"]);
+  assert.ok(!kept.notes.some((n) => /extractor "supabase-js" added/.test(n)), kept.notes.join("\n"));
 });
 
 test("a malformed extraKnownMarketplaces says plainly the repo is NOT locked (CR-012)", () => {
@@ -552,7 +628,7 @@ test("upgrade: every old jobs option lands on the reader that owns it; job ids, 
   writeFileSync(join(repo, "zdd", "map", "features", "bg.md"), "---\ntype: Feature\ntitle: Bg\n---\n\n- [Worker](../../metadata/job/worker.json)\n- [Angled](<../../metadata/job/nightly.json>)\n- [Frag](../../metadata/job/edge.json#facts)\n- [Bundle](/metadata/job/sweep-stalled.json)\n\n```\n[example](../../metadata/job/worker.json)\n```\n");
   const json = runJson(repo, ["upgrade"]);
   const cfg = JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8"));
-  assert.deepEqual(cfg.extractors, ["supabase", "background-bullmq", "background-cloudflare", "background-compose", "background-declared", "background-github-actions", "background-pg-cron", "background-procfile", "background-railway", "background-vercel"]);
+  assert.deepEqual(cfg.extractors, ["supabase", "background-bullmq", "background-cloudflare", "background-compose", "background-declared", "background-github-actions", "background-pg-cron", "background-procfile", "background-railway", "background-vercel", "supabase-py", "sqlalchemy"]);
   const o = cfg.extractorOptions;
   assert.equal(o.jobs, undefined);
   assert.deepEqual(o["background-procfile"], { roots: ["."], exclude: ["release"], modes: { worker: "worker", nightly: "scheduled" } }, "a process reader takes roots, exclude and modes");

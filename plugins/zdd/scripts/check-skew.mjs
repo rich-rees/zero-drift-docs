@@ -15,25 +15,32 @@
 // different bytes — CR-037); the numeric compare only labels the direction.
 // Pin values are untrusted text and are never echoed raw: a value that is not
 // a well-formed version is reported as such, in one fixed line (CR-021).
+//
+// Two lines (decision 0042): a pin of the old package (@rich-rees/zdd-engine,
+// the config's `engine`) is behind every release of the new one
+// (@rich-rees/zdd, the config's `release`), whatever its number — 2.5.0 is
+// older than 0.9.0. Its fix is the same: "upgrade ZDD".
 
 import { readFileSync, lstatSync } from "node:fs";
 import { join } from "node:path";
-import { parseArgs, adopterRoot, readConfig, pluginVersion, ENGINE_PACKAGE } from "./lib/repo.mjs";
+import { parseArgs, adopterRoot, readConfig, pluginVersion, ENGINE_PACKAGE, OLD_ENGINE_PACKAGE } from "./lib/repo.mjs";
 
 // The semver.org grammar: no leading zeros, well-formed prerelease identifiers.
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
 
+const esc = (s) => s.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
 export function findPins(root) {
   const pins = [];
   const { state, config } = readConfig(root);
-  if (state === "valid" && config.engine !== undefined) pins.push({ where: "zdd/config.json (engine)", raw: config.engine });
-  const pkg = ENGINE_PACKAGE.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
-  const re = new RegExp(pkg + "@([^\"'\\s]*)");
+  if (state === "valid" && config.release !== undefined) pins.push({ where: "zdd/config.json (release)", raw: config.release, pkg: ENGINE_PACKAGE });
+  if (state === "valid" && config.engine !== undefined) pins.push({ where: "zdd/config.json (engine)", raw: config.engine, pkg: OLD_ENGINE_PACKAGE, old: true });
+  // Either package: `@rich-rees/zdd@` is never inside the old name's pin.
+  const re = new RegExp(`(${esc(OLD_ENGINE_PACKAGE)}|${esc(ENGINE_PACKAGE)})@([^"'\\s]*)`);
   // The package name with no `@<version>` after it — the v0.3.1 workflow's
   // `npx -y @rich-rees/zdd-engine derive` — floats to whatever npm serves
   // today (CR-081). A longer package name or a path into the package is not
   // an invocation of it.
-  const floating = new RegExp(pkg + "(?![@/\\w-])");
+  const floating = new RegExp(`(?:${esc(OLD_ENGINE_PACKAGE)}|${esc(ENGINE_PACKAGE)})(?![@/\\w-])`);
   for (const rel of [".github/workflows/zdd.yml", ".githooks/pre-push"]) {
     const p = join(root, rel);
     let text;
@@ -45,10 +52,10 @@ export function findPins(root) {
       continue;
     }
     const m = re.exec(text);
-    if (m) pins.push({ where: rel, raw: m[1] });
+    if (m) pins.push({ where: rel, raw: m[2], pkg: m[1], old: m[1] === OLD_ENGINE_PACKAGE });
     else if (floating.test(text)) pins.push({ where: rel, raw: undefined, unpinned: true });
   }
-  return pins.map((p) => ({ where: p.where, version: typeof p.raw === "string" && SEMVER.test(p.raw) ? p.raw : null, ...(p.unpinned ? { unpinned: true } : {}) }));
+  return pins.map((p) => ({ where: p.where, version: typeof p.raw === "string" && SEMVER.test(p.raw) ? p.raw : null, ...(p.pkg ? { package: p.pkg } : {}), ...(p.old ? { oldLine: true } : {}), ...(p.unpinned ? { unpinned: true } : {}) }));
 }
 
 // Direction only — major.minor.patch, no prerelease precedence (CR-104). Skew
@@ -73,8 +80,8 @@ function main() {
   const pins = findPins(root);
   const unpinned = pins.filter((p) => p.unpinned);
   const invalid = pins.filter((p) => p.version === null && !p.unpinned);
-  const behind = pins.filter((p) => p.version !== null && p.version !== plugin && compareSemver(p.version, plugin) <= 0);
-  const ahead = pins.filter((p) => p.version !== null && p.version !== plugin && compareSemver(p.version, plugin) > 0);
+  const behind = pins.filter((p) => p.version !== null && (p.oldLine || (p.version !== plugin && compareSemver(p.version, plugin) <= 0)));
+  const ahead = pins.filter((p) => p.version !== null && !p.oldLine && p.version !== plugin && compareSemver(p.version, plugin) > 0);
   const upgrade = 'Say "upgrade ZDD" (the upgrade skill) to rewrite every pin, then run `render` and commit the result in the same PR.';
 
   if (flags.json) {
@@ -83,12 +90,12 @@ function main() {
   }
   // One line per kind of skew that applies, behind first (its fix is the
   // cheapest); a repo can be in several states at once (CR-101).
-  const say = (p) => `${p.where} pins ${ENGINE_PACKAGE}@${p.version}`;
+  const say = (p) => `${p.where} pins ${p.package ?? ENGINE_PACKAGE}@${p.version}${p.oldLine ? " (the old line, before 0.9)" : ""}`;
   const lines = [];
   if (behind.length) lines.push(`ZDD engine skew: ${behind.map(say).join(", ")} — behind plugin ${plugin}. ${upgrade}`);
   if (ahead.length) lines.push(`ZDD engine skew: ${ahead.map(say).join(", ")} — ahead of plugin ${plugin}. Update the plugin.`);
   if (invalid.length) lines.push(`ZDD engine skew: ${invalid.map((p) => p.where).join(", ")} — not a well-formed version (plugin is ${plugin}). ${upgrade}`);
-  if (unpinned.length) lines.push(`ZDD engine skew: ${unpinned.map((p) => p.where).join(", ")} — ${ENGINE_PACKAGE} unpinned (floating): CI picks up whatever npm serves today (plugin is ${plugin}). ${upgrade}`);
+  if (unpinned.length) lines.push(`ZDD engine skew: ${unpinned.map((p) => p.where).join(", ")} — the engine unpinned (floating): CI picks up whatever npm serves today (plugin is ${plugin}). ${upgrade}`);
   if (lines.length) process.stdout.write(lines.join("\n") + "\n");
 }
 
