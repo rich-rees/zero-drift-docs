@@ -105,6 +105,10 @@ test("the read budget, and files the io refuses, are said, never silent (CR-107,
     const dl = detectRepo(linked, modules);
     assert.equal(dl.limits.refused, 1);
     assert.deepEqual(dl.limits.refusedFirst, ["api"]);
+    // A link git ignores is not source, and not counted (verify pass 2).
+    writeFileSync(join(linked, ".gitignore"), "api\n");
+    execFileSync("git", ["init", "-q"], { cwd: linked });
+    assert.equal(detectRepo(linked, modules).limits.refused, 0);
   } catch (e) {
     if (e.code !== "EPERM") throw e;
   }

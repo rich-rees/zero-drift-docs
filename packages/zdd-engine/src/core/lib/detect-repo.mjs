@@ -64,8 +64,10 @@ export function makeScan(io, skipDirs = new Set()) {
   const memos = new Map();
   let overBudget = false;
   // What the walk would not enter or list (a link, an unreadable folder, a
-  // name the io refuses) is unseen too, and counted with the refused reads.
-  const refused = new Set(walked.skipped.map((s) => s.path));
+  // name the io refuses) is unseen too, and counted with the refused reads —
+  // unless git ignores it: an ignored path is never source (the walk lists a
+  // link before it asks git).
+  const refused = new Set(walked.skipped.map((s) => s.path).filter((p) => !io.isIgnored(p)));
   const scan = {
     files,
     truncated: walked.truncated,
