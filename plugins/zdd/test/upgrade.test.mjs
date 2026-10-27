@@ -106,11 +106,12 @@ test("the notes say what is new since the repo's engine pin: from 2.0 no 1.x or 
 
 test("every upgrade re-runs detection: an opt-in extractor the evidence shows is offered with that evidence, never added — from 2.0.0, and from 2.2.1, which crosses no 2.1 note (2.4.1, from the first adopter)", () => {
   const later = adopted("detect-2-2", { fixture: "fixture-jobs", extractors: ["supabase"], engine: "2.2.1", settings: { extraKnownMarketplaces: LOCK("v2.2.1") } });
-  assert.match(runJson(later, ["upgrade", "--plan"]).notes.join("\n"), /^offers the opt-in extractor `jobs`.*`Procfile` runs a process/m);
+  assert.match(runJson(later, ["upgrade", "--plan"]).notes.join("\n"), /^offers the opt-in extractor `background-procfile`.*`Procfile` runs a process/m);
   const repo = adopted("detect-2-1", { fixture: "fixture-jobs", extractors: ["supabase"] });
   const json = runJson(repo, ["upgrade"]);
   const notes = json.notes.join("\n");
-  assert.match(notes, /^offers the opt-in extractor `jobs`.*`Procfile` runs a process/m, notes);
+  assert.match(notes, /^offers the opt-in extractor `background-procfile`.*`Procfile` runs a process/m, notes);
+  assert.match(notes, /^offers the opt-in extractor `background-vercel`.*`apps\/web\/vercel\.json` schedules a cron/m, notes);
   assert.deepEqual(JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8")).extractors, ["supabase"], "never added silently");
   assert.match(notes, /^2\.1 .*`\*` in a scanned url: it no longer matches a fixed route segment/m, notes);
 });

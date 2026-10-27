@@ -45,8 +45,8 @@ Run everything from the adopter's repo root.
 - The convention is not already a built-in: `supabase` (SQL migrations),
   `nextjs` (App Router), `fastapi` (decorators), `react-router` (a route tree
   in one file), `components` (React / React Native components),
-  `expo-router` (an Expo Router folder tree), `jobs` (workers and scheduled
-  jobs from run manifests), `external-services` (third-party systems by declared
+  `expo-router` (an Expo Router folder tree), the `background-*` readers
+  (workers, schedules and queues, one per platform file), `external-services` (third-party systems by declared
   marker). If it is, the answer is config, not code.
 
 Done when all three hold.
@@ -97,7 +97,7 @@ the sample. Wait for each answer.
    | Vue Router / Angular route arrays, a route table in one file | `react-router` | surface |
    | Blazor `@page`, SvelteKit, Nuxt, Remix — the file tree is the route tree | `nextjs` | surface, route |
    | Vue / Svelte single-file components, Angular `@Component` classes | `components` | component |
-   | A cron table, Celery beat, a systemd timer — a manifest that names a process | `jobs` | job |
+   | A cron table, Celery beat, a systemd timer — a manifest that names a process | `background-procfile` | background-task |
    | Anything else | `generic` (the minimal example) | — |
 
 6. **Options** — `roots` (folders to walk) and `extensions` (suffixes

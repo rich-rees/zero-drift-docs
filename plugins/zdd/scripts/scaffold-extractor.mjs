@@ -49,7 +49,7 @@ export const IO_SINCE = "1.3.0";
 // Mirror of the engine's catalogue (the adapter folders in
 // packages/zdd-engine/src/adapters/) — a local name may not shadow one. A test
 // holds the two together.
-export const BUILT_INS = ["supabase", "nextjs", "fastapi", "react-router", "components", "expo-router", "jobs", "external-services", "supabase-js", "supabase-py", "sqlalchemy", "generic"];
+export const BUILT_INS = ["supabase", "nextjs", "fastapi", "react-router", "components", "expo-router", "background-vercel", "background-railway", "background-cloudflare", "background-procfile", "background-compose", "background-pg-cron", "background-bullmq", "background-inngest", "background-trigger-dev", "background-sqs", "background-github-actions", "background-declared", "external-services", "supabase-js", "supabase-py", "sqlalchemy", "generic"];
 // Names a release retired but the engine still answers to (2.3: `services`
 // is `external-services`, 2.3.0, pick 3) — a local one may not take them.
 export const RETIRED_BUILT_INS = { services: "external-services" };

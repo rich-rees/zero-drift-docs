@@ -90,7 +90,7 @@ it in plain words:
   the docs as the code arrives.
 - **A young app** (months old) or **a mature codebase** (years old): on day
   one the **inventory** — the generated list of routes, tables, screens,
-  jobs, components, external services — is complete, with no questions. One
+  background tasks, components, external services — is complete, with no questions. One
   **mapping session** (step 5) proposes how the code groups into features
   and asks only where the evidence is thin. The **unclaimed list** (records
   no feature has claimed yet) is a to-do list, not a gate. Decisions are
@@ -134,10 +134,11 @@ step 3), and whether Matt Pocock's skills are installed (used in step 7):
      — early, built against a fixture — or stays map-only until that folder
      exists). Four more proposals carry their own evidence (ZDD 2.1):
      `components` (the `.tsx`/`.jsx` roots), `expo-router` (an `app/` folder
-     with a `_layout` file), `jobs` (background work: a Procfile, Railway, Compose,
-     Vercel or Cloudflare file that runs or schedules a process, pg_cron in a
-     migration, a queue in source — a package script counts only when one of
-     those runs it) and `external-services` (environment names
+     with a `_layout` file), one `background-*` reader per kind of background
+     work found (decision 0038: a Procfile, Railway, Compose, Vercel or
+     Cloudflare file that runs or schedules a process, pg_cron in a
+     migration, a BullMQ queue in source — a package script counts only when
+     one of those runs it) and `external-services` (environment names
      read in source — `RESEND_API_KEY` — grouped by prefix into one
      third-party system each, with any import whose package matches).
      **External services are guessed by name:** show each and ask the person

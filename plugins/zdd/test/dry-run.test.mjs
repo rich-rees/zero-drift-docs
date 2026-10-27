@@ -133,14 +133,16 @@ test("mature codebase: an Express API, a React Router web app, a Python archiver
   const repo = scenario("mature-codebase", { old: true });
   const d = bootstrapJson(repo, ["detect"]);
   assert.ok(d.proposals.some((p) => p.name === "react-router"), JSON.stringify(d.proposals.map((p) => p.name)));
-  assert.ok(d.proposals.some((p) => p.name === "jobs"), "Procfile, Compose and the queue propose background work");
+  for (const reader of ["background-procfile", "background-compose", "background-bullmq"]) assert.ok(d.proposals.some((p) => p.name === reader), `${reader}: Procfile, Compose and the queue propose background work`);
   assert.ok(d.proposals.some((p) => p.name === "external-services"), "Sentry");
   assert.equal(bootstrapJson(repo, ["estimate"]).scenario, "mature");
   // A pre-2.3 adopter: an old block in CLAUDE.md, the old extractor key, the old pin.
   bootstrapJson(repo, ["apply", `--answers=${answers("m", { name: "Fleet", extractors: ["react-router", "jobs", "services"], extractorOptions: { "react-router": { routesFile: "web/src/routes.tsx" }, jobs: { modes: { emails: "worker", archive: "worker" } }, services: { services: [{ name: "Sentry", imports: ["@sentry/node"], env: ["SENTRY_"] }] } } })}`]);
   const cfgPath = join(repo, "zdd", "config.json");
   const cfg = JSON.parse(readFileSync(cfgPath, "utf8"));
-  assert.deepEqual(cfg.extractors, ["react-router", "jobs", "external-services"], "a fresh apply writes the current name even when answered with the old one");
+  // A fresh apply writes the current names even when answered with the old ones: `services`
+  // is `external-services`, and `jobs` is the background readers detection finds (0.9).
+  assert.deepEqual(cfg.extractors, ["react-router", "background-bullmq", "background-compose", "background-procfile", "external-services"], "a fresh apply writes the current name even when answered with the old one");
   cfg.extractors = ["react-router", "jobs", "services"];
   cfg.extractorOptions.services = cfg.extractorOptions["external-services"];
   delete cfg.extractorOptions["external-services"];
@@ -166,7 +168,11 @@ test("mature codebase: an Express API, a React Router web app, a Python archiver
   const json = bootstrapJson(repo, ["upgrade"]);
   assert.match(readFileSync(join(repo, "CLAUDE.md"), "utf8"), /^@zdd\/instructions\.md$/m);
   assert.doesNotMatch(readFileSync(join(repo, "CLAUDE.md"), "utf8"), /zdd:begin/);
-  assert.deepEqual(JSON.parse(readFileSync(cfgPath, "utf8")).extractors, ["react-router", "jobs", "external-services"]);
+  assert.deepEqual(JSON.parse(readFileSync(cfgPath, "utf8")).extractors, ["react-router", "background-bullmq", "background-compose", "background-procfile", "external-services"]);
+  const moved = JSON.parse(readFileSync(cfgPath, "utf8")).extractorOptions;
+  assert.equal(moved.jobs, undefined);
+  assert.deepEqual(moved["background-procfile"], { modes: { emails: "worker", archive: "worker" } }, "modes go to the readers that read processes");
+  assert.deepEqual(moved["background-bullmq"], {}, "a queue reader takes only roots");
   assert.ok(json.notes.some((n) => /^2\.3 moves ZDD's rules out of the marked block/.test(n)), "the 2.3 note is said when crossing it");
   for (const cmd of ["derive", "render", "lint"]) {
     const r = engine(repo, [cmd]);
@@ -174,8 +180,8 @@ test("mature codebase: an Express API, a React Router web app, a Python archiver
   }
   const index = readFileSync(join(repo, "zdd", "agent-index.md"), "utf8");
   assert.match(index, /^## Background work$/m, index);
-  assert.match(index, /\[emails\]\(metadata\/job\/emails\.json\) — queue `emails`/, index);
-  assert.match(index, /\[archive\]\(metadata\/job\/archive\.json\) — worker/, index);
+  assert.match(index, /\[emails\]\(metadata\/background-task\/emails\.json\) — queue `emails`/, index);
+  assert.match(index, /\[archive\]\(metadata\/background-task\/archive\.json\) — worker/, index);
   assert.doesNotMatch(index, /nightly/, "the Actions schedule is off by default");
   assert.ok(existsSync(join(repo, "zdd", "metadata", "external-service", "sentry.json")));
   assert.deepEqual(grepArtifacts(repo, "planted"), []);

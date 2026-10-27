@@ -234,7 +234,7 @@ export function detect(root) {
   const tsxFiles = []; // components: every .tsx/.jsx file (bounded); roots are computed after the walk
   const MAX_TSX = 20_000;
   const expoAppDirs = new Set(); // expo-router: an `app/` folder holding a `_layout` file
-  const jobManifests = []; // jobs: { manifest, scripts } with a job-shaped command
+  const jobManifests = []; // background work: { manifest, scripts, what, reader } with a job-shaped command
   const envCandidates = new Map(); // services: env prefix -> { names, files, imports }
   const importSpecs = new Set(); // every package imported anywhere, for the services' import markers
   let probeBytes = 0;
@@ -273,19 +273,19 @@ export function detect(root) {
       const jobShaped = (cmd) => /(?:^|\s)python[0-9.]*\s+-m\s+[\w.]+/.test(cmd) || /(?:^|\s)(?:node|tsx|ts-node|bun|deno)\s+(?:-[^\s]+\s+)*[\w./-]+\.(?:m?[jt]s|cjs)\b/.test(cmd) || /(?:^|\s)(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?[\w:.-]+/.test(cmd);
       if (name === "Procfile") {
         const hits = text.split("\n").map((l) => /^\s*([A-Za-z_][\w-]*)\s*:\s*(.+)$/.exec(l)).filter((m) => m && m[1] !== "web" && jobShaped(m[2])).map((m) => m[1]);
-        if (hits.length) jobManifests.push({ manifest: rel, scripts: hits, what: "runs a process" });
+        if (hits.length) jobManifests.push({ manifest: rel, scripts: hits, what: "runs a process", reader: "background-procfile" });
       } else if (name === "vercel.json") {
         const paths = [...text.matchAll(/"path"\s*:\s*"([^"]+)"/g)].map((m) => m[1]);
-        if (/"crons"/.test(text) && paths.length) jobManifests.push({ manifest: rel, scripts: paths, what: "schedules a cron for" });
+        if (/"crons"/.test(text) && paths.length) jobManifests.push({ manifest: rel, scripts: paths, what: "schedules a cron for", reader: "background-vercel" });
       } else if (name === "wrangler.toml") {
-        if (/^\s*crons\s*=/m.test(text)) jobManifests.push({ manifest: rel, scripts: ["triggers.crons"], what: "schedules" });
+        if (/^\s*crons\s*=/m.test(text)) jobManifests.push({ manifest: rel, scripts: ["triggers.crons"], what: "schedules", reader: "background-cloudflare" });
       } else if (/^(docker-)?compose\.ya?ml$/.test(name)) {
         const svcs = [...text.matchAll(/^\s{2}([A-Za-z0-9_.-]+):\s*$/gm)].map((m) => m[1]).filter((n) => n !== "web");
-        if (/^\s+command:/m.test(text) && svcs.length) jobManifests.push({ manifest: rel, scripts: svcs, what: "runs a service" });
+        if (/^\s+command:/m.test(text) && svcs.length) jobManifests.push({ manifest: rel, scripts: svcs, what: "runs a service", reader: "background-compose" });
       } else if (name.endsWith(".sql")) {
         const crons = [...text.matchAll(/cron\.schedule\s*\(\s*'([^']+)'/gi)].map((m) => m[1]);
-        if (crons.length) jobManifests.push({ manifest: rel, scripts: crons, what: "schedules (pg_cron)" });
-      } else if (/startCommand/.test(text)) jobManifests.push({ manifest: rel, scripts: ["startCommand"], what: "runs a process" });
+        if (crons.length) jobManifests.push({ manifest: rel, scripts: crons, what: "schedules (pg_cron)", reader: "background-pg-cron" });
+      } else if (/startCommand/.test(text)) jobManifests.push({ manifest: rel, scripts: ["startCommand"], what: "runs a process", reader: "background-railway" });
     }
     if (/\.(ts|tsx|js|jsx|mjs|cjs)$/.test(name) && !/\.(test|spec|stories)\.[cm]?[jt]sx?$|\.d\.ts$/.test(name)) {
       let text = "";
@@ -295,7 +295,7 @@ export function detect(root) {
         return;
       }
       const queues = [...text.matchAll(/new\s+(?:Queue|Worker)\s*\(\s*['"`]([^'"`]+)['"`]/g)].map((m) => m[1]);
-      if (queues.length) jobManifests.push({ manifest: rel, scripts: [...new Set(queues)], what: "names a queue" });
+      if (queues.length) jobManifests.push({ manifest: rel, scripts: [...new Set(queues)], what: "names a BullMQ queue", reader: "background-bullmq" });
     }
     // external-services: environment variable NAMES read in source whose
     // suffix says "a credential or an address", grouped by prefix — a mirror
@@ -476,11 +476,13 @@ export function detect(root) {
       options: { appDir: expoDirs[0] },
     });
   }
-  if (jobManifests.length) {
-    jobManifests.sort((a, b) => (a.manifest < b.manifest ? -1 : 1));
+  // Background work (decision 0038): one reader per kind of file found, in
+  // name order; the core joins two readers' sight of one task.
+  jobManifests.sort((a, b) => (a.manifest < b.manifest ? -1 : 1));
+  for (const reader of [...new Set(jobManifests.map((m) => m.reader))].sort()) {
     proposals.push({
-      name: "jobs",
-      evidence: jobManifests.map((m) => `\`${m.manifest}\` ${m.what ?? "runs a process"}: ${m.scripts.map((s) => `\`${s}\``).join(", ")}`).concat(["the map will show this background work with its trigger and what it hits (a cron → a route, a queue → its worker); the mode (worker or scheduled) is never guessed: a schedule or a Railway file states it, else set extractorOptions.jobs.modes after bootstrap — lint names the ones left unknown; a package.json script counts only when a manifest runs it"]),
+      name: reader,
+      evidence: jobManifests.filter((m) => m.reader === reader).map((m) => `\`${m.manifest}\` ${m.what}: ${m.scripts.map((s) => `\`${s}\``).join(", ")}`).concat([`the map will show this background work with its trigger and what it hits (a cron → a route, a queue → its worker); the mode (worker or scheduled) is never guessed: a schedule or a Railway file states it, else set extractorOptions["${reader}"].modes after bootstrap — lint names the ones left unknown; a package.json script counts only when a manifest runs it`]),
       options: {},
     });
   }
@@ -692,8 +694,8 @@ function validateExtractorOptions(all) {
       calls(opts.subscribeCalls, "supabase-js.subscribeCalls");
     } else if (name === "external-services" || name === "services") {
       if (opts.roots !== undefined) list(opts.roots, `${name}.roots`);
-    } else if (name === "jobs") {
-      if (opts.roots !== undefined) list(opts.roots, "jobs.roots");
+    } else if (name.startsWith("background-")) {
+      if (opts.roots !== undefined) list(opts.roots, `${name}.roots`);
     } else if (name === "expo-router") {
       for (const k of ["appDir", "srcAliasRoot"]) if (opts[k] !== undefined) enginePath(opts[k], `expo-router.${k}`);
     } else if (name === "components") {
@@ -1412,6 +1414,7 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
     // that already exist): an answer or a stack spelt the old way is written
     // the current way, options key and all.
     migrateRenames(config, []);
+    migrateJobs(config, [], root);
     ledger.create("zdd/config.json", JSON.stringify(config, null, 2) + "\n");
   } else {
     // Repair: only an explicit answer changes the config. A pre-1.0 config's
@@ -1893,6 +1896,7 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
   }
   const renamed = [];
   migrateRenames(config, renamed);
+  migrateJobs(config, renamed, root);
   changes.push(...renamed);
   if (config.viewer && typeof config.viewer === "object" && Array.isArray(config.viewer.nonAreaTags)) {
     if (config.nonAreaTags === undefined) config.nonAreaTags = config.viewer.nonAreaTags;
@@ -1961,8 +1965,8 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
   {
     const mapDir = artifactPaths(config, { lenient: true }).mapDir;
     const links = migrateMapLinks(ledger, mapDir, artifactPaths(config, { lenient: true }).metadataDir);
-    for (const rel of links.touched) ledger.notes.push(`${rel}: links to metadata/service/ now point at metadata/external-service/ (2.3 rename) — the next derive moves the records there`);
-    for (const what of links.skipped) ledger.notes.push(`${mapDir}: ${what} was not read for old metadata/service/ links — check it by hand`);
+    for (const rel of links.touched) ledger.notes.push(`${rel}: links to a renamed kind's records now point at its new folder (metadata/service/ → metadata/external-service/, 2.3; metadata/job/ → metadata/background-task/, 0.9) — the next derive moves the records there`);
+    for (const what of links.skipped) ledger.notes.push(`${mapDir}: ${what} was not read for old metadata/service/ or metadata/job/ links — check it by hand`);
     if (renamed.length && existsSync(ledger.abs(`${mapDir}/services`))) ledger.notes.push(`${mapDir}/services/ is your hand-written folder for third-party systems — ZDD now calls them external services and a fresh install names the folder external-services/; rename it if you like (git mv), it is never renamed for you`);
   }
   // Blessings leave the map for the blessing store (2.5, decision 0032):
@@ -2200,7 +2204,9 @@ function moveBlessings(ledger, paths, { move, kindOf }) {
 // `upgrade` skill carries a matching "Upgrading to X.Y" section. Each note
 // opens with its release so the narration reads as a changelog.
 // ---------------------------------------------------------------------------
-const OPT_IN_EXTRACTORS = ["components", "expo-router", "jobs", "external-services"];
+// The background readers (decision 0038) are opt-ins one by one.
+const BACKGROUND_READERS = ["background-bullmq", "background-cloudflare", "background-compose", "background-pg-cron", "background-procfile", "background-railway", "background-vercel"];
+const OPT_IN_EXTRACTORS = ["components", "expo-router", ...BACKGROUND_READERS, "external-services"];
 const extractorsOn = (config) => new Set((Array.isArray(config.extractors) ? config.extractors : []).map((n) => (Object.hasOwn(RENAMED_EXTRACTORS, n) ? RENAMED_EXTRACTORS[n] : n)));
 // Every upgrade re-runs detection and offers each opt-in extractor that is
 // off but has evidence (2.4.1, from the first adopter: the offer lived in the 2.1
@@ -2230,7 +2236,52 @@ function offerOptIns(root, config) {
 // names for one release; upgrade rewrites them here, so the alias is never
 // what an upgraded repo relies on.
 const RENAMED_EXTRACTORS = { services: "external-services" };
-const RENAMED_KINDS = { service: "external-service" };
+// 0.9 (decision 0038): the record `job` is `background-task`.
+const RENAMED_KINDS = { service: "external-service", job: "background-task" };
+// 0.9 (decision 0038): the `jobs` extractor is one reader per platform file.
+// The readers are the ones detection finds evidence for, plus
+// background-declared when the config declares tasks by hand
+// (`jobs.entries`) and background-github-actions when it opted in
+// (`includeGithubActions`). `roots`, `exclude` and `modes` go to each reader
+// that reads processes; `entries` to background-declared. Written where
+// `jobs` sat, in name order.
+const PROCESS_READERS = new Set(["background-procfile", "background-compose", "background-railway"]);
+function migrateJobs(config, changes, root) {
+  const listed = Array.isArray(config.extractors) && config.extractors.includes("jobs");
+  const hasOpts = isPlainObject(config.extractorOptions) && Object.hasOwn(config.extractorOptions, "jobs");
+  if (!listed && !hasOpts) return;
+  const o = hasOpts && isPlainObject(config.extractorOptions.jobs) ? config.extractorOptions.jobs : {};
+  let found = [];
+  try {
+    found = (detect(root).proposals ?? []).map((p) => p.name).filter((n) => BACKGROUND_READERS.includes(n));
+  } catch {
+    /* detection unreadable here: only what the options say */
+  }
+  const readers = [...new Set([...found, ...(Array.isArray(o.entries) && o.entries.length ? ["background-declared"] : []), ...(o.includeGithubActions === true ? ["background-github-actions"] : [])])].sort();
+  if (listed) {
+    const at = config.extractors.indexOf("jobs");
+    const rest = config.extractors.filter((n) => n !== "jobs");
+    const add = readers.filter((n) => !rest.includes(n));
+    config.extractors = [...rest.slice(0, at), ...add, ...rest.slice(at)];
+  }
+  if (hasOpts) {
+    const shared = {};
+    for (const k of ["roots", "exclude", "modes"]) if (o[k] !== undefined) shared[k] = o[k];
+    const optionsFor = (n) => (n === "background-declared" ? { entries: o.entries } : n === "background-github-actions" ? (o.roots !== undefined ? { roots: o.roots } : {}) : PROCESS_READERS.has(n) ? shared : o.roots !== undefined ? { roots: o.roots } : {});
+    const next = {};
+    for (const [k, v] of Object.entries(config.extractorOptions)) {
+      if (k !== "jobs") next[k] = v;
+      else for (const n of readers) if (!Object.hasOwn(config.extractorOptions, n)) next[n] = optionsFor(n);
+    }
+    config.extractorOptions = next;
+  }
+  changes.push(
+    readers.length
+      ? `extractor "jobs" → ${readers.map((n) => `"${n}"`).join(", ")} (0.9, decision 0038: one reader per platform file, from what detection finds), its options moved to the readers that own them`
+      : `extractor "jobs" removed (0.9, decision 0038): detection finds no background work here — add the background-* reader for a platform file you commit`,
+  );
+}
+
 function migrateRenames(config, changes) {
   // Each step on its own (CR-305): a half-migrated config — the new extractor
   // name beside the old options key, or the old strict kind — is finished
@@ -3097,7 +3148,7 @@ export const ARTIFACT_EXPLANATIONS = [
   { match: /(^|\/)map\/apps\/[^/]+\.md$/, what: "one page per app you named (web, mobile, API) in the semantic map", why: "a home for what the whole app is and what belongs to it; a house rule for the app is a blessing that names it (applies-to)", who: "ZDD writes the stub at install; you fill it", handEdited: "yes — yours" },
   { match: /(^|\/)map\/(features|apps|external-services)\/\.gitkeep$|(^|\/)map\/?$/, what: "the semantic map: short pages grouping the code into features, apps and the third-party systems it depends on, and the links the code cannot show", why: "grouping is a thing the code cannot say about itself", who: "you and the AI, one mapping session at install and then as each piece of work touches a feature", handEdited: "yes — yours; the links inside it are kept in step with the code by the drift check" },
   { match: /(^|\/)blessings\/(\.gitkeep|[^/]+\.md)?$/, what: "the blessings: one short file per kind of work done more than once (\"Adding an upload?\"), naming the existing code to copy or extend (where:), the trap to refuse, and why", why: "the most common pattern in a codebase is often the deprecated one; a blessing is how the AI copies the right code, and reuses a helper instead of writing a second one", who: "you and the AI: \"choose patterns\" proposes one, \"update ZDD\" mints it once the code exists", handEdited: "yes — yours; lint fails one whose where: names no file" },
-  { match: /(^|\/)metadata\/?$/, what: "the inventory of the code (routes, tables, screens, jobs, components, external services), one small JSON file each", why: "a mechanical, always-correct map of what exists, so the AI finds its way without grepping", who: "the engine (derive) — regenerated by \"update ZDD\"", handEdited: "never — the drift check fails if it is" },
+  { match: /(^|\/)metadata\/?$/, what: "the inventory of the code (routes, tables, screens, background tasks, components, external services), one small JSON file each", why: "a mechanical, always-correct map of what exists, so the AI finds its way without grepping", who: "the engine (derive) — regenerated by \"update ZDD\"", handEdited: "never — the drift check fails if it is" },
   { match: /(^|\/)graph\.json$/, what: "the whole generated picture in one machine-readable file: every record and every link", why: "the human index is rendered from it, and other tools can read it", who: "the engine (render)", handEdited: "never" },
   { match: /(^|\/)agent-index\.md$/, what: "the short index the AI reads at the start of every session: each feature with pointers to its code", why: "orientation in one screen, so each session starts knowing where things are", who: "the engine (render)", handEdited: "never" },
   { match: /(^|\/)adr-index\.md$/, what: "one line per decision record, with what supersedes what", why: "the AI reads the whole list before work, then only the decisions its task cites", who: "the engine (render)", handEdited: "never" },

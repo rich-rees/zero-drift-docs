@@ -46,23 +46,24 @@ test("components fixture: components at the two .tsx roots and the mobile app, e
   assert.deepEqual(json.apps.map((a) => [a.name, a.extractor]), [["Mobile (Expo)", "expo-router (proposed above)"], ["Web (React)", "react-router (proposed above)"]]);
 });
 
-test("jobs fixture: jobs from the Procfile and the Railway file (a package script only where one of them runs it), with the mode caveat; supabase beside it", (t) => {
+test("background fixture: one reader per kind of file found (decision 0038), each with its evidence and the mode caveat naming its own option; a package script only where a manifest runs it; supabase beside them", (t) => {
   const json = detect(fresh(t, "fixture-jobs"));
-  assert.deepEqual(json.proposals.map((p) => p.name), ["supabase", "jobs"]);
-  const jobs = named(json, "jobs");
-  assert.deepEqual(jobs.options, {});
-  // `missing` is job-shaped too; the engine skips it with a diagnostic when its module resolves to nothing.
+  assert.deepEqual(json.proposals.map((p) => p.name), ["supabase", "background-bullmq", "background-cloudflare", "background-compose", "background-pg-cron", "background-procfile", "background-railway", "background-vercel"]);
+  const ev = (name) => named(json, name).evidence;
+  for (const p of json.proposals.filter((p) => p.name.startsWith("background-"))) {
+    assert.deepEqual(p.options, {});
+    assert.ok(p.evidence.some((e) => e.includes(`extractorOptions["${p.name}"].modes`) && /never guessed/.test(e)), p.evidence.join("|"));
+  }
   // 2.3: a package.json script on its own is a hand-run tool, never evidence; the manifests that run or schedule a process are.
-  assert.ok(!jobs.evidence.some((e) => /apps\/api\/package\.json/.test(e)), jobs.evidence.join("|"));
-  assert.ok(jobs.evidence.some((e) => e === "`Procfile` runs a process: `nightly`"), jobs.evidence.join("|"));
-  assert.ok(jobs.evidence.some((e) => e === "`apps/api/Procfile` runs a process: `worker`"), jobs.evidence.join("|"));
-  assert.ok(jobs.evidence.some((e) => e === "`apps/web/vercel.json` schedules a cron for: `/api/cron/sweep-stalled`"), jobs.evidence.join("|"));
-  assert.ok(jobs.evidence.some((e) => e === "`workers/edge/wrangler.toml` schedules: `triggers.crons`"), jobs.evidence.join("|"));
-  assert.ok(jobs.evidence.some((e) => e === "`docker-compose.yml` runs a service: `transcoder`"), jobs.evidence.join("|"));
-  assert.ok(jobs.evidence.some((e) => e === "`supabase/migrations/0002_cron.sql` schedules (pg_cron): `nightly-digest`"), jobs.evidence.join("|"));
-  assert.ok(jobs.evidence.some((e) => e === "`scripts/transcode.mjs` names a queue: `video-transcode`"), jobs.evidence.join("|"));
-  assert.ok(jobs.evidence.some((e) => /`apps\/api\/services\/housekeeping\/railway\.toml` runs a process: `startCommand`/.test(e)));
-  assert.ok(jobs.evidence.some((e) => /never guessed/.test(e)));
+  assert.ok(!json.proposals.some((p) => (p.evidence ?? []).some((e) => /apps\/api\/package\.json/.test(e))));
+  assert.ok(ev("background-procfile").includes("`Procfile` runs a process: `nightly`"), ev("background-procfile").join("|"));
+  assert.ok(ev("background-procfile").includes("`apps/api/Procfile` runs a process: `worker`"));
+  assert.ok(ev("background-vercel").includes("`apps/web/vercel.json` schedules a cron for: `/api/cron/sweep-stalled`"));
+  assert.ok(ev("background-cloudflare").includes("`workers/edge/wrangler.toml` schedules: `triggers.crons`"));
+  assert.ok(ev("background-compose").includes("`docker-compose.yml` runs a service: `transcoder`"));
+  assert.ok(ev("background-pg-cron").includes("`supabase/migrations/0002_cron.sql` schedules (pg_cron): `nightly-digest`"));
+  assert.ok(ev("background-bullmq").includes("`scripts/transcode.mjs` names a BullMQ queue: `video-transcode`"));
+  assert.ok(ev("background-railway").some((e) => /`apps\/api\/services\/housekeeping\/railway\.toml` runs a process: `startCommand`/.test(e)));
 });
 
 test("services fixture: one service per env prefix with its matching imports, names guessed and said so; the database, the platform and test files are never candidates", (t) => {

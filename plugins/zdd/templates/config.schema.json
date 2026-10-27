@@ -16,7 +16,7 @@
       "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
       "minItems": 1,
       "uniqueItems": true,
-      "description": "Extractors to run, composed: one per convention in the stack (built-in: supabase, nextjs, fastapi, react-router, components, expo-router, jobs, external-services, supabase-js, supabase-py, sqlalchemy, generic; `services` is the pre-2.3 name of external-services). Selected by NAME from the engine's registry or from localExtractorDir — never by path. Records from every extractor are merged and cross-extractor refs resolved after the merge.",
+      "description": "Extractors to run, composed: one per convention in the stack (built-in: supabase, nextjs, fastapi, react-router, components, expo-router, the background-* readers (vercel, railway, cloudflare, procfile, compose, pg-cron, bullmq, inngest, trigger-dev, sqs, github-actions, declared), external-services, supabase-js, supabase-py, sqlalchemy, generic; `services` is the pre-2.3 name of external-services). Selected by NAME from the engine's registry or from localExtractorDir — never by path. Records from every extractor are merged and cross-extractor refs resolved after the merge.",
       "examples": [["supabase", "supabase-js", "nextjs"], ["supabase", "supabase-py", "fastapi"], ["supabase", "fastapi", "sqlalchemy"], ["fastapi", "react-router"], ["generic"]],
       "not": { "allOf": [{ "contains": { "const": "services" } }, { "contains": { "const": "external-services" } }] }
     },
@@ -134,17 +134,77 @@
             "srcAliasRoot": { "type": "string", "description": "Where the tsconfig @/ alias points; default appDir's parent." }
           }
         },
-        "jobs": {
+        "background-vercel": {
           "type": "object",
           "additionalProperties": false,
-          "description": "Background work — what runs without a click (ZDD 2.1, opt-in; decisions 0020 and 0025): scheduled jobs, workers and queues from where the repo says they run — Procfile lines, Railway startCommand (+ cronSchedule = scheduled), Compose services with a command, Vercel crons, a Cloudflare worker's triggers, pg_cron in a migration, BullMQ/Inngest/Trigger.dev/SQS queues in source. A package.json script counts only when one of those runs it (`pnpm run worker` in a Procfile); on its own it is a hand-run tool. GitHub Actions schedules are an opt-in (`includeGithubActions`), shown apart. The mode is never guessed: scheduled from a schedule, worker from `modes`, else unknown with a lint warning.",
-          "properties": {
-            "roots": { "type": "array", "items": { "type": "string" }, "default": ["."], "description": "Where manifests are looked for; node_modules and .git are never entered." },
-            "exclude": { "type": "array", "items": { "type": "string" }, "description": "Script names that are not jobs. Default: dev, start, test, lint, build, typecheck, format, prepare, postinstall, and anything test:*, lint:*, build:*, check:*." },
-            "modes": { "type": "object", "additionalProperties": { "type": "string", "enum": ["worker", "scheduled"] }, "description": "The mode of a job the manifests do not state, by job name." },
-            "includeGithubActions": { "type": "boolean", "default": false, "description": "ZDD 2.3: list `.github/workflows` schedules as background work too, shown apart as repo housekeeping. Off by default: they are the repo's upkeep, not the app." },
-            "entries": { "type": "array", "description": "Processes no manifest names.", "items": { "type": "object", "required": ["name"], "additionalProperties": false, "properties": { "name": { "type": "string" }, "module": { "type": "string", "description": "A Python module, dotted (app.housekeeping)." }, "file": { "type": "string", "description": "A JS/TS entry file, relative to cwd." }, "cwd": { "type": "string", "description": "The folder the command runs in (default the repo root)." }, "mode": { "type": "string", "enum": ["worker", "scheduled"] }, "schedule": { "type": "string" }, "command": { "type": "string" }, "description": { "type": "string" } } } }
-          }
+          "description": "Background work (decision 0038): Vercel crons from vercel.json: one scheduled task per crons entry, calling its route. One background-task record per task; the core joins two readers' views of one task (the same code file, or the same command from the same folder).",
+          "properties": { "roots": { "type": "array", "items": { "type": "string" }, "default": ["."], "description": "Where its files are looked for; dependencies and build output are never entered." }, "exclude": { "type": "array", "items": { "type": "string" }, "description": "Process names that are not background work. Default: dev, start, test, lint, build, typecheck, format, prepare, postinstall, and anything test:*, lint:*, build:*, check:*." }, "modes": { "type": "object", "additionalProperties": { "type": "string", "enum": ["worker", "scheduled"] }, "description": "The mode of a task the files do not state, by task name — the option lint names for an unknown mode (CR-010)." } }
+        },
+        "background-railway": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Background work (decision 0038): Railway's railway.toml / railway.json: a service's startCommand (+ cronSchedule = scheduled). A deployment record: it joins the task another reader names for the same code or the same command from the same folder. One background-task record per task; the core joins two readers' views of one task (the same code file, or the same command from the same folder).",
+          "properties": { "roots": { "type": "array", "items": { "type": "string" }, "default": ["."], "description": "Where its files are looked for; dependencies and build output are never entered." }, "exclude": { "type": "array", "items": { "type": "string" }, "description": "Process names that are not background work. Default: dev, start, test, lint, build, typecheck, format, prepare, postinstall, and anything test:*, lint:*, build:*, check:*." }, "modes": { "type": "object", "additionalProperties": { "type": "string", "enum": ["worker", "scheduled"] }, "description": "The mode of a task the files do not state, by task name — the option lint names for an unknown mode (CR-010)." } }
+        },
+        "background-cloudflare": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Background work (decision 0038): A Cloudflare Worker's [triggers] crons in wrangler.toml, running its main module's scheduled(). One background-task record per task; the core joins two readers' views of one task (the same code file, or the same command from the same folder).",
+          "properties": { "roots": { "type": "array", "items": { "type": "string" }, "default": ["."], "description": "Where its files are looked for; dependencies and build output are never entered." }, "exclude": { "type": "array", "items": { "type": "string" }, "description": "Process names that are not background work. Default: dev, start, test, lint, build, typecheck, format, prepare, postinstall, and anything test:*, lint:*, build:*, check:*." }, "modes": { "type": "object", "additionalProperties": { "type": "string", "enum": ["worker", "scheduled"] }, "description": "The mode of a task the files do not state, by task name — the option lint names for an unknown mode (CR-010)." } }
+        },
+        "background-procfile": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Background work (decision 0038): Procfile lines (not web), resolved to the module or file they run; the mode is the modes option, else unknown. One background-task record per task; the core joins two readers' views of one task (the same code file, or the same command from the same folder).",
+          "properties": { "roots": { "type": "array", "items": { "type": "string" }, "default": ["."], "description": "Where its files are looked for; dependencies and build output are never entered." }, "exclude": { "type": "array", "items": { "type": "string" }, "description": "Process names that are not background work. Default: dev, start, test, lint, build, typecheck, format, prepare, postinstall, and anything test:*, lint:*, build:*, check:*." }, "modes": { "type": "object", "additionalProperties": { "type": "string", "enum": ["worker", "scheduled"] }, "description": "The mode of a task the files do not state, by task name — the option lint names for an unknown mode (CR-010)." } }
+        },
+        "background-compose": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Background work (decision 0038): Docker Compose services with a job-shaped command and no published ports: workers. One background-task record per task; the core joins two readers' views of one task (the same code file, or the same command from the same folder).",
+          "properties": { "roots": { "type": "array", "items": { "type": "string" }, "default": ["."], "description": "Where its files are looked for; dependencies and build output are never entered." }, "exclude": { "type": "array", "items": { "type": "string" }, "description": "Process names that are not background work. Default: dev, start, test, lint, build, typecheck, format, prepare, postinstall, and anything test:*, lint:*, build:*, check:*." }, "modes": { "type": "object", "additionalProperties": { "type": "string", "enum": ["worker", "scheduled"] }, "description": "The mode of a task the files do not state, by task name — the option lint names for an unknown mode (CR-010)." } }
+        },
+        "background-pg-cron": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Background work (decision 0038): pg_cron schedules (cron.schedule) in SQL migrations, calling the database function their body names. One background-task record per task; the core joins two readers' views of one task (the same code file, or the same command from the same folder).",
+          "properties": { "roots": { "type": "array", "items": { "type": "string" }, "default": ["."], "description": "Where its files are looked for; dependencies and build output are never entered." }, "exclude": { "type": "array", "items": { "type": "string" }, "description": "Process names that are not background work. Default: dev, start, test, lint, build, typecheck, format, prepare, postinstall, and anything test:*, lint:*, build:*, check:*." }, "modes": { "type": "object", "additionalProperties": { "type": "string", "enum": ["worker", "scheduled"] }, "description": "The mode of a task the files do not state, by task name — the option lint names for an unknown mode (CR-010)." } }
+        },
+        "background-bullmq": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Background work (decision 0038): BullMQ queues in source: new Queue produces, new Worker consumes. One background-task record per task; the core joins two readers' views of one task (the same code file, or the same command from the same folder).",
+          "properties": { "roots": { "type": "array", "items": { "type": "string" }, "default": ["."], "description": "Where its files are looked for; dependencies and build output are never entered." }, "exclude": { "type": "array", "items": { "type": "string" }, "description": "Process names that are not background work. Default: dev, start, test, lint, build, typecheck, format, prepare, postinstall, and anything test:*, lint:*, build:*, check:*." }, "modes": { "type": "object", "additionalProperties": { "type": "string", "enum": ["worker", "scheduled"] }, "description": "The mode of a task the files do not state, by task name — the option lint names for an unknown mode (CR-010)." } }
+        },
+        "background-inngest": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Background work (decision 0038): Inngest functions in source: createFunction({ id }, { event | cron }). One background-task record per task; the core joins two readers' views of one task (the same code file, or the same command from the same folder).",
+          "properties": { "roots": { "type": "array", "items": { "type": "string" }, "default": ["."], "description": "Where its files are looked for; dependencies and build output are never entered." }, "exclude": { "type": "array", "items": { "type": "string" }, "description": "Process names that are not background work. Default: dev, start, test, lint, build, typecheck, format, prepare, postinstall, and anything test:*, lint:*, build:*, check:*." }, "modes": { "type": "object", "additionalProperties": { "type": "string", "enum": ["worker", "scheduled"] }, "description": "The mode of a task the files do not state, by task name — the option lint names for an unknown mode (CR-010)." } }
+        },
+        "background-trigger-dev": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Background work (decision 0038): Trigger.dev tasks in source: task({ id }), schedules.task({ id, cron }). One background-task record per task; the core joins two readers' views of one task (the same code file, or the same command from the same folder).",
+          "properties": { "roots": { "type": "array", "items": { "type": "string" }, "default": ["."], "description": "Where its files are looked for; dependencies and build output are never entered." }, "exclude": { "type": "array", "items": { "type": "string" }, "description": "Process names that are not background work. Default: dev, start, test, lint, build, typecheck, format, prepare, postinstall, and anything test:*, lint:*, build:*, check:*." }, "modes": { "type": "object", "additionalProperties": { "type": "string", "enum": ["worker", "scheduled"] }, "description": "The mode of a task the files do not state, by task name — the option lint names for an unknown mode (CR-010)." } }
+        },
+        "background-sqs": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Background work (decision 0038): Amazon SQS queues in source: a QueueUrl with SendMessage / ReceiveMessage. One background-task record per task; the core joins two readers' views of one task (the same code file, or the same command from the same folder).",
+          "properties": { "roots": { "type": "array", "items": { "type": "string" }, "default": ["."], "description": "Where its files are looked for; dependencies and build output are never entered." }, "exclude": { "type": "array", "items": { "type": "string" }, "description": "Process names that are not background work. Default: dev, start, test, lint, build, typecheck, format, prepare, postinstall, and anything test:*, lint:*, build:*, check:*." }, "modes": { "type": "object", "additionalProperties": { "type": "string", "enum": ["worker", "scheduled"] }, "description": "The mode of a task the files do not state, by task name — the option lint names for an unknown mode (CR-010)." } }
+        },
+        "background-github-actions": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Background work (decision 0038): GitHub Actions schedules (on.schedule cron), shown apart as repo housekeeping. Listing this reader is the opt-in (jobs.includeGithubActions before 0.9). One background-task record per task; the core joins two readers' views of one task (the same code file, or the same command from the same folder).",
+          "properties": { "roots": { "type": "array", "items": { "type": "string" }, "default": ["."], "description": "Where its files are looked for; dependencies and build output are never entered." }, "exclude": { "type": "array", "items": { "type": "string" }, "description": "Process names that are not background work. Default: dev, start, test, lint, build, typecheck, format, prepare, postinstall, and anything test:*, lint:*, build:*, check:*." }, "modes": { "type": "object", "additionalProperties": { "type": "string", "enum": ["worker", "scheduled"] }, "description": "The mode of a task the files do not state, by task name — the option lint names for an unknown mode (CR-010)." } }
+        },
+        "background-declared": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Background tasks declared by hand (decision 0038; jobs.entries before 0.9). One that runs a reader's code, or the same command from the same folder, is joined with it.",
+          "properties": { "entries": { "type": "array", "description": "Background tasks declared by hand: the fallback for a platform no reader covers yet, or a process whose manifest runs build output (name its source file).", "items": { "type": "object", "required": ["name"], "additionalProperties": false, "properties": { "name": { "type": "string" }, "module": { "type": "string", "description": "A Python module, dotted (app.housekeeping)." }, "file": { "type": "string", "description": "A JS/TS entry file, relative to cwd." }, "cwd": { "type": "string", "description": "The folder the command runs in (default the repo root)." }, "mode": { "type": "string", "enum": ["worker", "scheduled"] }, "schedule": { "type": "string" }, "command": { "type": "string" }, "description": { "type": "string" } } } } }
         },
         "external-services": {
           "type": "object",
@@ -286,7 +346,7 @@
         },
         "strictKinds": {
           "type": "array",
-          "items": { "type": "string", "enum": ["component", "job", "external-service", "service"] },
+          "items": { "type": "string", "enum": ["component", "background-task", "external-service", "service"] },
           "uniqueItems": true,
           "default": [],
           "description": "The opt-in kinds (ZDD 2.1: component, job, external-service — spelt `service` until 2.3, still accepted while the config says `services`) that strict also governs. Unlisted, an unclaimed record of such a kind is a warning under strict, never a failure, so switching an extractor on never turns a green lint red by itself (decision 0017). A shared component is claimable; a page-private one is not."
