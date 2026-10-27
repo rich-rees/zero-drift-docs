@@ -26,8 +26,8 @@
     baseCounts[b] = (baseCounts[b] || 0) + 1;
   }
   // Endpoint labels are URL paths ("/api/journeys/[id]") — humanize them for
-  // the map, dropping whatever leading segments EVERY endpoint shares (a
-  // Next.js "/api", a FastAPI "/v1", nothing at all) rather than keying on any
+  // the map, dropping whatever leading segments EVERY endpoint shares (an
+  // "/api", a "/v1", nothing at all) rather than keying on any
   // one framework's convention; the exact path stays in the tooltip. The
   // shared prefix never eats a route whole: at least one segment of the
   // shortest route stays, so "/jobs" + "/jobs/{id}" caption as "Jobs" and
@@ -140,9 +140,11 @@
   // Tags that describe properties rather than areas are excluded; areas with
   // fewer than 4 concepts fold into "Other".
   // Exclusions come from zdd.config.json (viewer.nonAreaTags) — property and
-  // tech tags (react-flow, nextjs, …) must not surface as product areas.
+  // tech tags (a library's name used as a tag) must not surface as product
+  // areas. With none configured, nothing is excluded: the viewer carries no
+  // project's tags (decision 0036).
   const NON_AREA_TAGS = new Set(
-    (bundle.viewer && bundle.viewer.nonAreaTags) || ["rls-disabled", "media-project"],
+    (bundle.viewer && bundle.viewer.nonAreaTags) || [],
   );
   const rawArea = (d) => {
     for (const t of d.tags || []) if (!NON_AREA_TAGS.has(t)) return t;
@@ -571,7 +573,7 @@
   }
 
   // GitHub's /tree/ form is for directories; files need /blob/. And GitHub's
-  // web UI 404s raw [ ] in blob URLs (Next.js dynamic-route dirs like [id])
+  // web UI 404s raw [ ] in blob URLs (a file-tree router's dynamic dirs like [id])
   // while accepting the percent-encoded form — parens like (app) are fine
   // raw, so encode only the brackets (verified logged-in: raw → 404,
   // %5Bid%5D → renders). Extension on the last segment = file.

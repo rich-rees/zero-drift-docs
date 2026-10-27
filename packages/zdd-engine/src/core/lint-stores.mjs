@@ -432,7 +432,7 @@ if (unplaced.length) {
 
 // ---- 4c. Jobs whose mode is unknown (decision 0020) ----
 if (unknownJobs.length) {
-  console.error(`WARNING: ${unknownJobs.length} job${unknownJobs.length === 1 ? "" : "s"} with no stated mode — a worker or a scheduled job? The manifests do not say: commit a railway.toml/json with its startCommand (and cronSchedule for a scheduled one), or set extractorOptions.jobs.modes["<name>"] to "worker" or "scheduled":`);
+  console.error(`WARNING: ${unknownJobs.length} job${unknownJobs.length === 1 ? "" : "s"} with no stated mode — a worker or a scheduled job? The manifests do not say: commit the platform's manifest that states how it runs (and its schedule, for a scheduled one), or set the reading adapter's modes option (extractorOptions.<adapter>.modes["<name>"]) to "worker" or "scheduled":`);
   for (const j of unknownJobs) console.error(`  ${printable(j.id)}  (from ${printable(j.manifest)}; ${printable(j.file)})`);
 }
 

@@ -1,7 +1,7 @@
 // Post-merge ref resolution. Extractors are composed by config and cannot see
-// each other's records, so a Next.js route that calls `.from('things')` cannot
-// know the table's id (`table:db/things`) — that id is minted by the supabase
-// extractor. The contract: an extractor emits a resolved id when it minted
+// each other's records, so a route whose handler reads table `things` cannot
+// know the table's id (`table:db/things`) — that id is minted by the adapter
+// that reads the schema. The contract: an extractor emits a resolved id when it minted
 // the target itself, and an UNRESOLVED ref — a string starting with `?` —
 // when the target belongs to whichever extractor owns that convention. After
 // all extractors have run, this pass resolves the `?` refs against the merged
@@ -11,8 +11,8 @@
 // "module" record (a file that references something) keeps its old meaning;
 // refs pointing at a dropped record are stripped too (CR-009).
 //
-//   ?from:<name>      a table, else a bucket — the supabase-client `.from()`
-//                     / `.table()` receiver ambiguity, resolved by name-set
+//   ?from:<name>      a table, else a bucket — for a client call whose
+//                     receiver could be either, resolved by name-set
 //                     membership exactly as before
 //   ?table:<name>     a table by name
 //   ?bucket:<name>    a bucket by name
@@ -140,7 +140,7 @@ export function resolveRefs(records) {
     const full = afterKind(r.id);
     if (full !== short) add(map, full, r.id);
     // A table the migrations named in the default schema
-    // (`public.audit_events`) answers to its bare name too, as Postgres
+    // (`public.audit_events`) answers to its bare name too, as the database
     // resolves it: a client call names the table alone (2.1.1). Another
     // schema's table never does, and a function keeps its exact names (CR-007).
     if (r.kind === "table" && short.startsWith("public.")) add(map, short.slice("public.".length), r.id);

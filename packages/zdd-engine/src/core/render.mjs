@@ -398,8 +398,8 @@ function buildConcepts() {
     }
   }
   // Derived records inherit ONE tag from their claiming feature — the first
-  // tag that is a product area (viewer.nonAreaTags excludes tech/property
-  // tags like react-flow); inheriting an excluded tag would strand
+  // tag that is a product area (nonAreaTags excludes tech and property
+  // tags); inheriting an excluded tag would strand
   // the node in "Other".
   // Top-level config, resolved in run(): the tag lands in graph.json, so it
   // must not depend on which viewer is selected (CR-003).
@@ -407,8 +407,8 @@ function buildConcepts() {
   const inheritedTag = (feature) =>
     feature.tags.find((t) => !NON_AREA.has(t)) ?? feature.tags[0];
   // Unclaimed routes bucket by URL path — the first static segment after
-  // whatever leading segments EVERY route in the bundle shares (a Next.js
-  // `/api`, a FastAPI `/v1`, or nothing). Stack-neutral by construction: no
+  // whatever leading segments EVERY route in the bundle shares (an `/api`, a
+  // `/v1`, or nothing). Stack-neutral by construction: no
   // framework's prefix is named here (0.4.0; the old rule assumed
   // `/api/<area>`). Two guards keep the area an area (CR-004): the shared
   // prefix never eats the shortest route whole, so `/jobs` + `/jobs/{id}`

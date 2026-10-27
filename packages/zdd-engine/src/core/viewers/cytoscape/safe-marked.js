@@ -1,7 +1,7 @@
 // safeMarked — `marked` configured so source-derived markdown can never run
 // script in the hosted human index (CR-007, 0.4.0). Everything the detail
 // and docs panels render comes from the repo: leading `//` comments, SQL
-// comments, FastAPI docstrings, the glossary and ADR bodies — text anyone
+// comments, handler docstrings, the glossary and ADR bodies — text anyone
 // with commit access authored, and the viewer contract says the page must be
 // safe to host regardless. Three rules, applied at the renderer so the
 // parsed structure is untouched:

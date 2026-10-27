@@ -58,8 +58,8 @@ export function resolveViewer(config, defaultName) {
   return { name, options };
 }
 
-// Tags that are properties rather than product areas (tech tags like
-// `react-flow`). They shape the GRAPH — which area a record inherits from its
+// Tags that are properties rather than product areas (a library's name used
+// as a tag, a security property). They shape the GRAPH — which area a record inherits from its
 // claiming feature — so they are a top-level key, not a viewer option: the
 // artifact must not change when the viewer does (CR-003). The pre-0.4 home,
 // `viewer.nonAreaTags`, is still read as a fallback with a note.

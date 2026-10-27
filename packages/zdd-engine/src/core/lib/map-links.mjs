@@ -28,7 +28,8 @@ const normalise = (text) => text.replace(/\r\n?/g, "\n");
 // `<…>` (no line break, no unescaped `<` or `>`), or a run with no whitespace
 // whose parentheses balance, with `\(` / `\)` escaped. Reading only to the
 // first `)` cut `(app)--_layout.json` at `(app` and dropped the link silently;
-// Next.js keeps route groups in layout names, so that is a real filename.
+// a file-tree router may keep a route group in a layout's name, so that is a
+// real filename.
 const TARGET_RE = /^(.+\.(?:md|json))(?:#[A-Za-z0-9_-]*)?$/;
 
 // The destination after `](` at `start`, or null if none closes there.

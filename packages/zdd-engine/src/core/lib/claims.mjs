@@ -124,7 +124,8 @@ export function claimableRecords(metadataDir, bundleDir, skipped, unplaced, unkn
       unplaced.push({ id: String(record.id ?? nodeId), file, calls: record.facts.unplaced.map(String) });
     }
     // A job whose mode the manifests do not state (decision 0020): lint asks
-    // for a committed Railway file or a `modes` entry rather than guessing.
+    // for the platform's committed manifest or a `modes` entry rather than
+    // guessing.
     if (unknownJobs && record.kind === "job" && record.facts?.mode === "unknown") unknownJobs.push({ id: String(record.id ?? nodeId), file, manifest: String(record.facts.manifest ?? "") });
     if (!claimable(record)) continue;
     out.push({ kind: record.kind, id: String(record.id ?? nodeId), title: String(record.title ?? record.id ?? nodeId), nodeId, file, optIn: OPT_IN_CLAIMABLE_KINDS.includes(record.kind) });
