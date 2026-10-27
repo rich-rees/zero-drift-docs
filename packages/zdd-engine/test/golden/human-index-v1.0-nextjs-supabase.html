@@ -714,7 +714,7 @@ document.getElementById("bundle-name").textContent = window.BUNDLE_NAME;
   // Functions sit in their own band beneath Tables: sharing a lane
   // put a trigger function *next to* its tables, collapsing the join edges
   // into invisible sub-node-width stubs. Storage buckets stay with Tables.
-  // UI Components get a band of their own (they are many); Jobs share the
+  // UI Components get a band of their own (they are many); Background Tasks share the
   // API band (they are few and sit at the same depth); External Services
   // stay on the rail, since their edges come from several bands (ZDD 2.1).
   // Data Access (decision 0037) sits between the API and the tables it
@@ -1005,7 +1005,7 @@ document.getElementById("bundle-name").textContent = window.BUNDLE_NAME;
     .map((n) => ({ data: n.data, position: pos[n.data.id] }));
 
   // ---------- views ----------
-  const LANE_NAMES = ["UI Surfaces", "UI Components", "Features — curated slices", "API & Jobs", "Data Access", "Tables", "DB Functions"];
+  const LANE_NAMES = ["UI Surfaces", "UI Components", "Features — curated slices", "API & Background Tasks", "Data Access", "Tables", "DB Functions"];
 
   function viewLanes() {
     const lanes = LANE_NAMES.map(() => []);

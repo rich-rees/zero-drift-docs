@@ -177,6 +177,7 @@ test("CLI: derive and render are byte-stable; a cron's calls edge reaches its ro
   const graph = JSON.parse(readFileSync(join(repo, "zdd", "graph.json"), "utf8"));
   const node = graph.nodes.find((n) => n.title === "housekeeping");
   assert.equal(node.type, "Background Task");
+  assert.ok(readFileSync(join(repo, "zdd", "human-index.html"), "utf8").includes('"API & Background Tasks"'), "the viewer's lane heading names the kind (CR-090)");
   assert.ok(graph.edges.some((e) => e.source === "metadata/background-task/sweep-stalled" && e.target === "metadata/route/cron--sweep-stalled" && e.verb === "calls"), JSON.stringify(graph.edges.filter((e) => e.source.startsWith("metadata/background-task/"))));
   const index = readFileSync(join(repo, "zdd", "agent-index.md"), "utf8");
   assert.match(index, /^## Background work$/m);

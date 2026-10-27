@@ -14,6 +14,8 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { mergeBackgroundTasks } from "../src/core/lib/background-tasks.mjs";
 import { runReaders } from "./background-run.mjs";
+import { derive as procfile } from "../src/adapters/background-procfile/index.mjs";
+import { makeExtractorIo } from "../src/core/lib/extractor-io.mjs";
 
 const BIN = join(resolve(dirname(fileURLToPath(import.meta.url)), ".."), "bin", "zdd-engine.mjs");
 const task = (name, extra = {}) => ({
@@ -102,4 +104,76 @@ test("`jobs` is a retired name: a config that still lists it stops derive and na
   const r = spawnSync(process.execPath, [BIN, "derive"], { cwd: root, encoding: "utf8" });
   assert.notEqual(r.status, 0);
   assert.match(r.stderr, /Extractor 'jobs' was retired: background work is read by one adapter per platform file since 0\.9 \(decision 0038\).*background-procfile.*background-declared/);
+});
+
+// ---- slice 3 campaign (CR-077 to CR-091) ----
+
+test("CR-077: a package script's process keys are the pairs that run — a Railway file in the manifest's folder running a same-named file there is another task", (t) => {
+  const root = scratch(t, {
+    "apps/a/deploy/Procfile": "worker: npm run worker\n",
+    "apps/a/package.json": JSON.stringify({ scripts: { worker: "node src/worker.mjs" } }),
+    "apps/a/src/worker.mjs": "export {};\n",
+    "apps/a/deploy/src/worker.mjs": "export {};\n",
+    "apps/a/deploy/railway.toml": '[deploy]\nstartCommand = "node src/worker.mjs"\ncronSchedule = "0 * * * *"\n',
+  });
+  const out = runReaders(root);
+  const runsOf = (r) => r.resource[0];
+  assert.deepEqual(out.records.map(runsOf).sort(), ["apps/a/deploy/src/worker.mjs", "apps/a/src/worker.mjs"], "two tasks, two files");
+  assert.equal(out.records.find((r) => runsOf(r) === "apps/a/src/worker.mjs").facts.schedule, undefined, "the Procfile's worker takes no schedule it does not run under");
+});
+
+test("CR-078: a queue with two consumers joins the process that runs the second one", (t) => {
+  const root = scratch(t, {
+    Procfile: "emails: node b.mjs\n",
+    "a.mjs": 'new Worker("emails", fn);\n',
+    "b.mjs": 'new Worker("emails", fn);\n',
+    "p.mjs": 'new Queue("emails");\n',
+  });
+  const out = runReaders(root);
+  assert.deepEqual(out.records.map((r) => r.id), ["background-task:emails"]);
+  assert.equal(out.records[0].facts.queue, "emails");
+  assert.deepEqual(out.records[0].facts.consumers, ["a.mjs", "b.mjs"]);
+  assert.deepEqual(out.records[0].resource, ["b.mjs", "Procfile", "a.mjs"]);
+  assert.ok(!out.diagnostics.some((d) => /declared in .* and again/.test(d)), out.diagnostics.join("\n"));
+});
+
+test("CR-079/CR-091: the merge's settling rules, one by one", () => {
+  const m = (...records) => mergeBackgroundTasks(records).records;
+  // A lead with no mode at all takes the first member's stated mode.
+  const noMode = task("p", { runs: "w.mjs", processKeys: [".\u0000node w.mjs"] });
+  delete noMode.facts.mode;
+  assert.equal(m(noMode, task("q", { runs: "w.mjs", facts: { mode: "worker" } }))[0].facts.mode, "worker");
+  // The lead's own stated mode wins over a member's.
+  assert.equal(m(task("p", { runs: "w.mjs", processKeys: ["k"], facts: { mode: "worker" } }), task("q", { runs: "w.mjs", facts: { mode: "queue" } }))[0].facts.mode, "worker");
+  // No process: the first record that is not a deployment names it; all deployments: the first.
+  assert.equal(m(task("deploy", { processKeys: ["k"], deploys: true }), task("named", { processKeys: ["k"], deploys: true }))[0].title, "deploy");
+  const lone = task("z-declared", { processKeys: ["k2"] });
+  assert.equal(m(task("a-deploy", { processKeys: ["k2"], deploys: true }), lone)[0].title, "z-declared", "a process before a deployment, whatever order");
+  // A target and a description the lead lacks are taken; edges of one verb are united without repeats.
+  const merged = m(task("p", { runs: "w.mjs", processKeys: ["k3"], refs: ["?at:x.ts"], facts: { edges: { usedBy: ["?at:x.ts"] } } }), task("q", { runs: "w.mjs", description: "The digest.", refs: ["?at:x.ts", "?at:y.ts"], facts: { target: "/api/x", edges: { usedBy: ["?at:x.ts", "?at:y.ts"] } } }))[0];
+  assert.equal(merged.facts.target, "/api/x");
+  assert.equal(merged.description, "The digest.");
+  assert.deepEqual(merged.facts.edges.usedBy, ["?at:x.ts", "?at:y.ts"]);
+  assert.deepEqual(merged.refs, ["?at:x.ts", "?at:y.ts"]);
+  // Two declarations in one file that no process runs stay two tasks.
+  assert.deepEqual(m(task("daily", { runs: ["t.ts"] }), task("render", { runs: ["t.ts"] })).map((r) => r.title), ["daily", "render"]);
+});
+
+test("CR-080: a local extractor named jobs never runs — the retired name stops derive first", (t) => {
+  const root = scratch(t, {
+    "zdd/config.json": JSON.stringify({ extractors: ["jobs"], localExtractorDir: "zdd/extractors", render: { storeChanges: false } }),
+    "zdd/extractors/jobs.mjs": 'export function derive() { throw new Error("local jobs ran"); }\n',
+  });
+  const r = spawnSync(process.execPath, [BIN, "derive"], { cwd: root, encoding: "utf8" });
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /Extractor 'jobs' was retired/);
+  assert.doesNotMatch(r.stderr, /local jobs ran/);
+});
+
+test("CR-087: a reader's gitignored root is said, never an empty silence", (t) => {
+  const root = scratch(t, { "gen/Procfile": "worker: node w.mjs\n", "gen/w.mjs": "export {};\n" });
+  const io = makeExtractorIo(root, "t", { ignored: (rel) => rel === "gen" || rel.startsWith("gen/") });
+  const out = procfile({ repoRoot: root, options: { roots: ["gen"] }, io });
+  assert.deepEqual(out.records, []);
+  assert.match(out.diagnostics.join("\n"), /gen is gitignored — not source, not read/);
 });
