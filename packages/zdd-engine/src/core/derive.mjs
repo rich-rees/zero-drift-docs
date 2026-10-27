@@ -13,10 +13,11 @@
 //
 // Extractors are composed: config lists them by name, each one inventories one
 // convention, and this file merges their records and resolves cross-extractor
-// refs afterwards (src/lib/resolve-refs.mjs). Selection is by NAME only —
-// from the static registry below, or from the one repo-local directory config
-// may declare (`localExtractorDir`), the single sanctioned place config can
-// point at code. A path in the extractors list is refused.
+// refs afterwards (lib/resolve-refs.mjs). Selection is by NAME only — from
+// the catalogue of adapters beside the core (lib/catalogue.mjs, decision
+// 0036), or from the one repo-local directory config may declare
+// (`localExtractorDir`), the single sanctioned place config can point at
+// code. A path in the extractors list is refused. This file names no adapter.
 
 import { readFileSync, writeFileSync, readdirSync, statSync, lstatSync, realpathSync, mkdirSync, rmSync, existsSync } from "node:fs";
 import { join, dirname, resolve, sep } from "node:path";
@@ -26,23 +27,8 @@ import { resolveRefs } from "./lib/resolve-refs.mjs";
 import { insideRepo } from "./lib/paths.mjs";
 import { makeExtractorIo } from "./lib/extractor-io.mjs";
 import { gitIgnoredPredicate } from "./lib/ignored.mjs";
+import { catalogue } from "./lib/catalogue.mjs";
 
-const EXTRACTORS = {
-  supabase: "./extractors/supabase/index.mjs",
-  nextjs: "./extractors/nextjs/index.mjs",
-  fastapi: "./extractors/fastapi/index.mjs",
-  "react-router": "./extractors/react-router/index.mjs",
-  components: "./extractors/components/index.mjs",
-  "expo-router": "./extractors/expo-router/index.mjs",
-  jobs: "./extractors/jobs/index.mjs",
-  "external-services": "./extractors/external-services/index.mjs",
-  generic: "./extractors/generic/index.mjs",
-};
-// A name a release retired, still accepted for ONE release (the engine
-// prints the new name; "upgrade ZDD" rewrites the config). 2.3: `services`
-// became `external-services` (2.3.0, pick 3) — the records are third-party
-// systems, not a code service layer.
-export const EXTRACTOR_ALIASES = { services: "external-services" };
 const NAME_RE = /^[a-z][a-z0-9-]*$/;
 
 const RECORD_KEYS = ["kind", "id", "title", "description", "resource", "refs", "facts"];
@@ -155,9 +141,10 @@ function validateEdgeShapes(records) {
   }
 }
 
-// Which names are loadable: the registry plus whatever the local dir holds
+// Which names are loadable: the catalogue plus whatever the local dir holds
 // (`<dir>/<name>.mjs` or `<dir>/<name>/index.mjs`). Local names may not
-// shadow built-ins — a fork that wants a different `nextjs` is a fork.
+// shadow a catalogue adapter: a different take on one is a copy under a new
+// name (decision 0036 point 5).
 function localExtractors(repoRoot, dir) {
   const found = new Map();
   if (!dir) return found;
@@ -182,14 +169,16 @@ async function loadExtractor(name, repoRoot, config) {
     );
   }
   const local = localExtractors(repoRoot, localDir);
-  // hasOwn: a local extractor called `constructor` must not hit Object.prototype (CR-022).
-  if (Object.hasOwn(EXTRACTORS, name)) {
+  const { names, aliases } = catalogue();
+  // A Map, and hasOwn on the aliases: a local extractor called `constructor`
+  // must not hit Object.prototype (CR-022).
+  if (names.has(name)) {
     if (local.has(name)) fail(`Local extractor '${name}' shadows the built-in of the same name — rename it`);
-    return import(EXTRACTORS[name]);
+    return import(pathToFileURL(names.get(name)).href);
   }
-  if (Object.hasOwn(EXTRACTOR_ALIASES, name)) return import(EXTRACTORS[EXTRACTOR_ALIASES[name]]);
+  if (Object.hasOwn(aliases, name) && names.has(aliases[name])) return import(pathToFileURL(names.get(aliases[name])).href);
   if (local.has(name)) return import(pathToFileURL(local.get(name)).href);
-  const known = [...Object.keys(EXTRACTORS), ...Object.keys(EXTRACTOR_ALIASES)].sort().join(", ");
+  const known = [...names.keys(), ...Object.keys(aliases)].sort().join(", ");
   const localList = localDir ? `; local ${localDir}: ${[...local.keys()].join(", ") || "(none)"}` : "";
   fail(`Unknown extractor '${name}' (known: ${known}${localList})`);
 }

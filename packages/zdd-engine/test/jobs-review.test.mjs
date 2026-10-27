@@ -9,8 +9,8 @@ import assert from "node:assert/strict";
 import { writeFileSync, rmSync, mkdtempSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { derive, maskComments, scanPgCron, scanQueues, scanWorkflow } from "../src/extractors/jobs/index.mjs";
-import { makeExtractorIo } from "../src/lib/extractor-io.mjs";
+import { derive, maskComments, scanPgCron, scanQueues, scanWorkflow } from "../src/adapters/jobs/index.mjs";
+import { makeExtractorIo } from "../src/core/lib/extractor-io.mjs";
 
 const scratch = (t, files) => {
   const root = mkdtempSync(join(tmpdir(), "zdd-jobs-rv-"));

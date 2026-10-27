@@ -1,7 +1,7 @@
 // Moving blessings out of the semantic map into the blessing store, for
 // "upgrade ZDD" (ZDD-1, decision 0032). The plugin cannot import the engine
 // (it is installed apart, by npx), so the parser below mirrors the engine's
-// extractBlessings / structuralLines (packages/zdd-engine/src/lib/map-links.mjs)
+// extractBlessings / structuralLines (packages/zdd-engine/src/core/lib/map-links.mjs)
 // and a test holds the two equal on the same inputs. It also returns each
 // item's line range, which the move needs and the engine does not.
 //

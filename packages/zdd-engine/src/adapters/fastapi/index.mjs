@@ -25,9 +25,9 @@
 
 import { readFileSync, statSync, existsSync } from "node:fs";
 import { join, basename } from "node:path";
-import { slugify } from "../../lib/slug.mjs";
-import { repoRelative } from "../../lib/paths.mjs";
-import { walkDir } from "../../lib/walk.mjs";
+import { slugify } from "../../core/lib/slug.mjs";
+import { repoRelative } from "../../core/lib/paths.mjs";
+import { walkDir } from "../../core/lib/walk.mjs";
 
 const posixify = (p) => p.split(/[\\/]/).join("/");
 const HTTP_METHOD_ORDER = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "TRACE"];

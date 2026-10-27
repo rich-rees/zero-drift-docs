@@ -1,0 +1,14 @@
+{
+  "aliases": {
+    "services": "external-services"
+  },
+  "bundles": {
+    "nextjs-supabase": {
+      "extractors": ["supabase", "nextjs"],
+      "options": {
+        "supabase": { "migrationNamespaces": [], "externalBuckets": [] }
+      },
+      "rest": "nextjs"
+    }
+  }
+}

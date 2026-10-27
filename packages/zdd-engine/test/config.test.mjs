@@ -4,8 +4,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
-import { resolveExtractors, validateRepoBase, validatePathLayout, DEFAULT_PATHS } from "../src/lib/config.mjs";
-import { repoRelative, insideRepo, overlaps } from "../src/lib/paths.mjs";
+import { resolveExtractors, validateRepoBase, validatePathLayout, DEFAULT_PATHS } from "../src/core/lib/config.mjs";
+import { repoRelative, insideRepo, overlaps } from "../src/core/lib/paths.mjs";
 
 test("extractors list: names + per-name options; missing options default to {}", () => {
   const r = resolveExtractors({ extractors: ["supabase", "generic"], extractorOptions: { supabase: { a: 1 } } });

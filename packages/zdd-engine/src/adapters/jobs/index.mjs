@@ -44,7 +44,7 @@
 // Every file is read through `io` (decision 0010). Deterministic.
 
 import { posix } from "node:path";
-import { repoRelative } from "../../lib/paths.mjs";
+import { repoRelative } from "../../core/lib/paths.mjs";
 import { leadingComment } from "../nextjs/index.mjs";
 
 export const FACTS_KEY_ORDER = {

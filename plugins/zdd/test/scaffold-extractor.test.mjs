@@ -13,7 +13,7 @@ import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, re
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { BUILT_INS, IO_SINCE } from "../scripts/scaffold-extractor.mjs";
+import { BUILT_INS, RETIRED_BUILT_INS, IO_SINCE } from "../scripts/scaffold-extractor.mjs";
 
 const PLUGIN = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SCRIPT = join(PLUGIN, "scripts", "scaffold-extractor.mjs");
@@ -253,11 +253,14 @@ test("text bound for a generated comment is flattened to one line and every mask
   assert.equal(typeof loaded.derive, "function", "the flattened comment did not break the module");
 });
 
-test("the local-name guard mirrors the engine registry", () => {
-  const src = readFileSync(join(ENGINE, "src", "derive.mjs"), "utf8");
-  const block = /const EXTRACTORS = \{([\s\S]*?)\};/.exec(src)[1];
-  const names = [...block.matchAll(/^\s*"?([a-z][a-z0-9-]*)"?:/gm)].map((m) => m[1]);
+test("the local-name guard mirrors the engine's catalogue", () => {
+  // The catalogue is a folder of adapters beside the core (decision 0036):
+  // every <name>/index.mjs is a name, and catalogue.json carries the retired ones.
+  const dir = join(ENGINE, "src", "adapters");
+  const names = readdirSync(dir).filter((n) => existsSync(join(dir, n, "index.mjs")));
   assert.deepEqual([...BUILT_INS].sort(), names.sort());
+  const { aliases } = JSON.parse(readFileSync(join(dir, "catalogue.json"), "utf8"));
+  assert.deepEqual(RETIRED_BUILT_INS, aliases);
 });
 
 // The masks, lifted out of their templates and run on text that tries to

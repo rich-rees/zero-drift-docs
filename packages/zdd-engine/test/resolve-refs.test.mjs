@@ -4,7 +4,7 @@
 // Run: node --test "test/*.test.mjs"
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { resolveRefs } from "../src/lib/resolve-refs.mjs";
+import { resolveRefs } from "../src/core/lib/resolve-refs.mjs";
 
 const rec = (kind, id, refs = [], extra = {}) => ({ kind, id, title: id, description: "", resource: [`${kind}.x`], refs, facts: {}, filename: "x.json", ...extra });
 
@@ -148,7 +148,7 @@ test("1.3.0: a tie among PARAMETER routes still fans out with a diagnostic", () 
 });
 
 test("1.3.0 CR-033/034: a route-side `*` is one segment; a catch-all in the middle must still match the segments after it", async () => {
-  const { makeRouteMatcher } = await import("../src/lib/resolve-refs.mjs");
+  const { makeRouteMatcher } = await import("../src/core/lib/resolve-refs.mjs");
   assert.equal(makeRouteMatcher("/files/*")("/files/a"), true);
   assert.equal(makeRouteMatcher("/files/*")("/files/a/b"), false);
   const mid = makeRouteMatcher("/a/{p:path}/admin");
@@ -160,7 +160,7 @@ test("1.3.0 CR-033/034: a route-side `*` is one segment; a catch-all in the midd
 });
 
 test("1.3.0 CR-044: many catch-alls against a non-matching url stay polynomial", async () => {
-  const { makeRouteMatcher } = await import("../src/lib/resolve-refs.mjs");
+  const { makeRouteMatcher } = await import("../src/core/lib/resolve-refs.mjs");
   // Consecutive catch-alls then a literal that never matches: plain
   // backtracking tries every way to split the url among them.
   const pattern = "/" + Array.from({ length: 12 }, (_, i) => `[...p${i}]`).join("/") + "/z";

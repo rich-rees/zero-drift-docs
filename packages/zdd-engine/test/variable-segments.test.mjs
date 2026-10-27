@@ -10,12 +10,12 @@ import { readFileSync, writeFileSync, rmSync, mkdtempSync, mkdirSync } from "nod
 import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { expandTemplatePath, literalValues, parseLiteralUnion, MAX_EXPANSIONS } from "../src/lib/template-paths.mjs";
-import { scanApiCalls } from "../src/extractors/react-router/index.mjs";
-import { scanFileText } from "../src/extractors/nextjs/refs.mjs";
-import { derive as reactRouter } from "../src/extractors/react-router/index.mjs";
-import { derive as fastapi } from "../src/extractors/fastapi/index.mjs";
-import { resolveRefs } from "../src/lib/resolve-refs.mjs";
+import { expandTemplatePath, literalValues, parseLiteralUnion, MAX_EXPANSIONS } from "../src/core/lib/template-paths.mjs";
+import { scanApiCalls } from "../src/adapters/react-router/index.mjs";
+import { scanFileText } from "../src/adapters/nextjs/refs.mjs";
+import { derive as reactRouter } from "../src/adapters/react-router/index.mjs";
+import { derive as fastapi } from "../src/adapters/fastapi/index.mjs";
+import { resolveRefs } from "../src/core/lib/resolve-refs.mjs";
 
 const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const BIN = join(PKG, "bin", "zdd-engine.mjs");

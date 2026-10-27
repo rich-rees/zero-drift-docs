@@ -10,7 +10,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, cpSync, sy
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { makeExtractorIo, IO_MAX_READ_BYTES } from "../src/lib/extractor-io.mjs";
+import { makeExtractorIo, IO_MAX_READ_BYTES } from "../src/core/lib/extractor-io.mjs";
 
 const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const BIN = join(PKG, "bin", "zdd-engine.mjs");

@@ -13,7 +13,7 @@ import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { findMapBlessings, proposeMove, blessingSlug, rebaseLinks, removeMoved, blessingFileText, triggerQuestion } from "../scripts/lib/blessing-move.mjs";
-import { extractBlessings, blessingShape } from "../../../packages/zdd-engine/src/lib/map-links.mjs";
+import { extractBlessings, blessingShape } from "../../../packages/zdd-engine/src/core/lib/map-links.mjs";
 
 const PLUGIN = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SCRIPT = join(PLUGIN, "scripts", "bootstrap.mjs");

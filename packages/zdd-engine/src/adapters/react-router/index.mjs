@@ -52,10 +52,10 @@
 
 import { readFileSync, lstatSync, realpathSync } from "node:fs";
 import { join, posix } from "node:path";
-import { slugify } from "../../lib/slug.mjs";
-import { repoRelative } from "../../lib/paths.mjs";
-import { regularFileInside } from "../../lib/walk-markdown.mjs";
-import { expandTemplatePath } from "../../lib/template-paths.mjs";
+import { slugify } from "../../core/lib/slug.mjs";
+import { repoRelative } from "../../core/lib/paths.mjs";
+import { regularFileInside } from "../../core/lib/walk-markdown.mjs";
+import { expandTemplatePath } from "../../core/lib/template-paths.mjs";
 
 const RESOLVE_EXTS = [".tsx", ".ts", ".jsx", ".js", "/index.tsx", "/index.ts", "/index.jsx", "/index.js"];
 export const MAX_SOURCE_BYTES = 1024 * 1024;

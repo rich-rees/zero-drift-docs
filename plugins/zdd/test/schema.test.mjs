@@ -115,7 +115,7 @@ test("repoBase: the schema pattern refuses internal whitespace exactly as the en
 });
 
 test("the schema's documented refs defaults are the engine's defaults (CR-116)", async () => {
-  const refs = await import(pathToFileURL(resolve(PLUGIN, "..", "..", "packages", "zdd-engine", "src", "extractors", "nextjs", "refs.mjs")).href);
+  const refs = await import(pathToFileURL(resolve(PLUGIN, "..", "..", "packages", "zdd-engine", "src", "adapters", "nextjs", "refs.mjs")).href);
   const doc = SCHEMA.properties.extractorOptions.properties.nextjs.properties.refs.properties;
   assert.deepEqual(doc.extensions.default, refs.DEFAULT_REFS.extensions);
   assert.deepEqual(doc.excludeSuffixes.default, refs.DEFAULT_REFS.excludeSuffixes);

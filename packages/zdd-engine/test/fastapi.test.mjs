@@ -6,8 +6,8 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { parseFile, joinPath, derive } from "../src/extractors/fastapi/index.mjs";
-import { slugify } from "../src/lib/slug.mjs";
+import { parseFile, joinPath, derive } from "../src/adapters/fastapi/index.mjs";
+import { slugify } from "../src/core/lib/slug.mjs";
 
 test("parseFile: routers with prefix, api_route methods, stacked decorators, docstring, TRACE (CR-011)", () => {
   const { routers, handlers } = parseFile(`

@@ -9,8 +9,8 @@
 
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { walkDir } from "../../lib/walk.mjs";
-import { expandTemplatePath } from "../../lib/template-paths.mjs";
+import { walkDir } from "../../core/lib/walk.mjs";
+import { expandTemplatePath } from "../../core/lib/template-paths.mjs";
 import { scanSubscriptions } from "../react-router/index.mjs";
 
 const posixify = (p) => p.split(/[\\/]/).join("/");

@@ -13,8 +13,8 @@ import { writeFileSync, appendFileSync, rmSync, mkdtempSync, cpSync, mkdirSync }
 import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { tally, readStores, isoSince } from "../src/tally.mjs";
-import { recordsInLog } from "../src/lib/zdd-record.mjs";
+import { tally, readStores, isoSince } from "../src/core/tally.mjs";
+import { recordsInLog } from "../src/core/lib/zdd-record.mjs";
 
 const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const BIN = join(PKG, "bin", "zdd-engine.mjs");

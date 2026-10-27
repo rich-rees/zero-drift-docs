@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseRecord, SECTIONS, USE_VERBS, STORE_VERB, BLESSING_VERBS } from "../../../packages/zdd-engine/src/lib/zdd-record.mjs";
+import { parseRecord, SECTIONS, USE_VERBS, STORE_VERB, BLESSING_VERBS } from "../../../packages/zdd-engine/src/core/lib/zdd-record.mjs";
 import { INSTRUCTION_RULES, UPGRADE_NOTES } from "../scripts/bootstrap.mjs";
 
 const PLUGIN = resolve(dirname(fileURLToPath(import.meta.url)), "..");

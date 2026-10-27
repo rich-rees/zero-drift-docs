@@ -480,8 +480,9 @@ plugins/zdd/
   test/                             # seam 2: the runbook and hooks observed as files + processes
 packages/zdd-engine/                # deriver / renderer / checks + extractors + viewers
   bin/zdd-engine.mjs                # the CLI (derive / render / lint / freshness / tally)
-  src/extractors/{supabase,nextjs,fastapi,react-router,components,expo-router,jobs,external-services,generic}/   # input end: one per convention
-  src/viewers/{cytoscape,minimal}/  # output end: human-index viewers over graph.json
+  src/core/                         # the stack-free core: derive, render, lint, the stores, the viewers
+  src/core/viewers/{cytoscape,minimal}/  # output end: human-index viewers over graph.json
+  src/adapters/{supabase,nextjs,fastapi,react-router,components,expo-router,jobs,external-services,generic}/   # input end: one adapter per convention
   test/fixture*/                    # the miniature proving repos
 docs/patterns.md                    # blessings and "choose patterns", the whole system
 docs/decisions/                     # this repo's own decision record (ADR format)

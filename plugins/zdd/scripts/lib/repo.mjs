@@ -135,7 +135,7 @@ export function loadConfig(root) {
 }
 
 // A repo-relative path, in the engine's language
-// (packages/zdd-engine/src/lib/paths.mjs, CR-079): a non-empty string with no
+// (packages/zdd-engine/src/core/lib/paths.mjs, CR-079): a non-empty string with no
 // whitespace or control character anywhere, no leading `/`, no drive letter,
 // no URL scheme, no `..` segment. Returns the normal form — `.`-segments and
 // empty segments dropped, "." for the repo root itself (the engine's
@@ -180,7 +180,7 @@ export function repoRelative(value, label, { exact = false } = {}) {
 // plan (paths.patternsPlan, 2.0.0) is a session's working file, so it is
 // left alone like a curated path.
 // The two-level agent index's area folder, named as the engine names it
-// (packages/zdd-engine/src/lib/paths.mjs agentIndexAreaDir): the index path
+// (packages/zdd-engine/src/core/lib/paths.mjs agentIndexAreaDir): the index path
 // without its extension, or `<path>-areas` when it has none. One rule for the
 // instructions' wording and the fence (2.4.1 CR-005).
 export const agentIndexAreaDir = (agentIndexRel) => {

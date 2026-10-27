@@ -11,8 +11,8 @@ import { readFileSync, writeFileSync, rmSync, mkdtempSync, cpSync } from "node:f
 import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { buildBlessingIndex } from "../src/lib/blessing-index.mjs";
-import { readBlessing } from "../src/lib/blessings.mjs";
+import { buildBlessingIndex } from "../src/core/lib/blessing-index.mjs";
+import { readBlessing } from "../src/core/lib/blessings.mjs";
 
 const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const BIN = join(PKG, "bin", "zdd-engine.mjs");

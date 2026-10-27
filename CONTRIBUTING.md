@@ -89,10 +89,10 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
   `?route:<url>` (`*` = one segment the scan could not read; it matches a
   route parameter only, never a fixed word, and a template hole typed as a
   union of literals is expanded before emission — [decision 0019](docs/decisions/0019-a-variable-segment-matches-a-parameter-never-a-fixed-word.md),
-  `src/lib/template-paths.mjs`). The deriver resolves them after the
+  `src/core/lib/template-paths.mjs`). The deriver resolves them after the
   merge, drops misses with a diagnostic, and drops a record flagged
   `requireRefs: true` when nothing resolved (how a "module" record means "a file
-  that references something"). See `src/lib/resolve-refs.mjs`.
+  that references something"). See `src/core/lib/resolve-refs.mjs`.
 - **A ref may carry a verb** ([decision 0016](docs/decisions/0016-typed-edges-are-additive.md)):
   `facts.edges` maps a verb to the refs it covers, resolved and unresolved
   forms alike — `{ "subscribes": ["?table:audit_events"] }`. Every id there
@@ -119,7 +119,7 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
   check depends on this. Anything needing judgment is *not* metadata; it belongs in
   the semantic map, which links down to your records.
 - It's selected by **name** from config, never by path — from the engine's
-  registry (`src/derive.mjs`), or from the adopter's declared `localExtractorDir`
+  catalogue (`src/adapters/<name>/`), or from the adopter's declared `localExtractorDir`
   (`<name>.mjs` or `<name>/index.mjs`, the one place config may point at code;
   local names may not shadow built-ins). Try a convention there first, with the
   skill's scaffold; propose it for the registry once it has run against a real
@@ -183,16 +183,16 @@ viewer contract (the equivalent of "determinism" for extractors):
 - **License-compatible libraries.** The reference viewer vendors its libraries with a
   license notice; anything you bring (D3, a framework, …) must carry a compatible
   licence and its notice. The `cytoscape` viewer is Apache-2.0-derived and kept
-  in its own folder for that reason; the engine outside `src/viewers/cytoscape/`
+  in its own folder for that reason; the engine outside `src/core/viewers/cytoscape/`
   is MIT and stays that way.
 
 How a viewer becomes part of the product: like extractors, viewers are selected by
 config (`"viewer": "minimal"`, or `{ "name": "cytoscape", ...options }`), so a
 merged viewer ships as a **selectable option** in the registry —
-`packages/zdd-engine/src/viewers/index.mjs`, one line per viewer — a minor version
+`packages/zdd-engine/src/core/viewers/index.mjs`, one line per viewer — a minor version
 bump, live for each adopter when their repo moves its lock to that release. Model yours on
-`src/viewers/minimal/` (the smallest honest viewer: no libraries, nodes grouped by
-type, edges listed) and read `src/viewers/cytoscape/index.mjs` for how a viewer
+`src/core/viewers/minimal/` (the smallest honest viewer: no libraries, nodes grouped by
+type, edges listed) and read `src/core/viewers/cytoscape/index.mjs` for how a viewer
 builds its own private data shape from the graph.
 
 ## Other welcome contributions

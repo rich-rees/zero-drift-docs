@@ -26,8 +26,8 @@
 
 import { leadingComment } from "../nextjs/index.mjs";
 import { scanApiCalls, scanDataCalls, moduleConsts } from "../react-router/index.mjs";
-import { repoRelative } from "../../lib/paths.mjs";
-import { slugify } from "../../lib/slug.mjs";
+import { repoRelative } from "../../core/lib/paths.mjs";
+import { slugify } from "../../core/lib/slug.mjs";
 
 export const FACTS_KEY_ORDER = {
   surface: ["file", "routeGroups", "dynamicSegments", "layouts", "platforms", "edges"],

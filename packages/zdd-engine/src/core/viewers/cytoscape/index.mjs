@@ -3,7 +3,7 @@
 // corpus as read-only slide-outs. viz.html / viz.css / viz.js derive from an
 // Apache-2.0 proof-of-concept (LICENSE-NOTICE.md in this folder); the engine
 // outside this folder is MIT and never imports from it — the registry loads
-// it by name and hands it the graph (src/viewers/index.mjs).
+// it by name and hands it the graph (viewers/index.mjs).
 //
 // The embedded `window.BUNDLE` is this viewer's private data shape (node
 // data carries colour + size, bodies keyed by id, the embedded docs). It is

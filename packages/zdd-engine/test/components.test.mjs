@@ -11,11 +11,11 @@ import { readFileSync, writeFileSync, rmSync, mkdtempSync, cpSync } from "node:f
 import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { scanComponents, parseProps, importedNames, derive } from "../src/extractors/components/index.mjs";
-import { derive as reactRouter } from "../src/extractors/react-router/index.mjs";
-import { derive as fastapi } from "../src/extractors/fastapi/index.mjs";
-import { resolveRefs } from "../src/lib/resolve-refs.mjs";
-import { makeExtractorIo } from "../src/lib/extractor-io.mjs";
+import { scanComponents, parseProps, importedNames, derive } from "../src/adapters/components/index.mjs";
+import { derive as reactRouter } from "../src/adapters/react-router/index.mjs";
+import { derive as fastapi } from "../src/adapters/fastapi/index.mjs";
+import { resolveRefs } from "../src/core/lib/resolve-refs.mjs";
+import { makeExtractorIo } from "../src/core/lib/extractor-io.mjs";
 
 const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const BIN = join(PKG, "bin", "zdd-engine.mjs");

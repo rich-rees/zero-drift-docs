@@ -120,7 +120,7 @@ git history only. `test/determinism.test.mjs` is the guard; the blocking
 
 An extractor is one module implementing `derive({ repoRoot, options, io })` →
 `{ records, diagnostics, warnings? }` plus a `FACTS_KEY_ORDER` map, keyed to **one
-convention** (see `src/extractors/`). A record's `refs` may carry verbs
+convention** (see `src/adapters/`). A record's `refs` may carry verbs
 through `facts.edges` (`uses`, `usedBy`, `calls`, `subscribes`, `reads`,
 `writes`, `dependsOn`, `belongsTo` — decision 0016), which the graph keeps as
 `verb` on the edge. `io` (since 1.3.0) is the engine's safe
@@ -134,7 +134,7 @@ emits `?from:<name>` / `?function:<name>` / `?route:<url>` / `?surface:<file>` /
 into ids after the merge (a `*` in a url matches a route parameter only,
 never a fixed word — decision 0019). Missing
 source roots are "nothing to inventory", so a greenfield repo derives clean.
-Extractors are selected by name from a static registry in `src/derive.mjs` or
+Extractors are selected by name from the catalogue of adapter folders in `src/adapters/` or
 from the declared `localExtractorDir` — never by path. The plugin's `extractor`
 skill scaffolds a local one. To contribute one, see the
 repo's [CONTRIBUTING.md](https://github.com/rich-rees/zero-drift-docs/blob/main/CONTRIBUTING.md).
@@ -144,7 +144,7 @@ repo's [CONTRIBUTING.md](https://github.com/rich-rees/zero-drift-docs/blob/main/
 The human index is produced by a **viewer** — one module exporting
 `render({ graph, docs, changed, options, bundleName, repoBase })` and returning
 the page as a string — selected by name from the registry in
-`src/viewers/index.mjs`. `cytoscape` is the reference viewer (lanes / columns /
+`src/core/viewers/index.mjs`. `cytoscape` is the reference viewer (lanes / columns /
 explorer / force views, detail panel, glossary + ADR slide-outs; Apache-2.0-
 derived, isolated in its own folder under `LICENSE-NOTICE.md`); `minimal` is the
 no-library worked example. Viewers read `graph.json` and nothing else of the

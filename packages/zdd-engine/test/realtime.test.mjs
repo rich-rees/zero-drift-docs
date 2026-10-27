@@ -8,10 +8,10 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { scanSubscriptions, derive as reactRouter } from "../src/extractors/react-router/index.mjs";
-import { derive as nextjs } from "../src/extractors/nextjs/index.mjs";
-import { derive as supabase } from "../src/extractors/supabase/index.mjs";
-import { resolveRefs } from "../src/lib/resolve-refs.mjs";
+import { scanSubscriptions, derive as reactRouter } from "../src/adapters/react-router/index.mjs";
+import { derive as nextjs } from "../src/adapters/nextjs/index.mjs";
+import { derive as supabase } from "../src/adapters/supabase/index.mjs";
+import { resolveRefs } from "../src/core/lib/resolve-refs.mjs";
 
 const scratch = (files) => {
   const root = mkdtempSync(join(tmpdir(), "zdd-rt-"));

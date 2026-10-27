@@ -19,10 +19,10 @@ and its tests move from the pinned engine to the checkout.
 
 A PR is complete when it holds every item:
 
-- [ ] **The module** — `packages/zdd-engine/src/extractors/<name>/index.mjs`,
+- [ ] **The module** — `packages/zdd-engine/src/adapters/<name>/index.mjs`,
       options documented in its leading comment, reads through `io`.
-- [ ] **The registry line** — `EXTRACTORS` in `packages/zdd-engine/src/derive.mjs`,
-      and the same name in `BUILT_INS` in `plugins/zdd/scripts/scaffold-extractor.mjs`
+- [ ] **The catalogue name** — the folder name is the name the engine loads;
+      add the same name to `BUILT_INS` in `plugins/zdd/scripts/scaffold-extractor.mjs`
       (a test holds the two together, and a local extractor of that name now
       refuses to load — say so in the PR).
 - [ ] **A fixture repo** — `packages/zdd-engine/test/fixture-<name>/` with a

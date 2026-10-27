@@ -12,11 +12,11 @@
 //   zdd-engine tally [--since <ref|date>] [--json]  the ZDD record, counted over git history
 
 const COMMANDS = {
-  derive: () => import("../src/derive.mjs"),
-  render: () => import("../src/render.mjs"),
-  lint: () => import("../src/lint-stores.mjs"),
-  freshness: () => import("../src/check-freshness.mjs"),
-  tally: () => import("../src/tally.mjs"),
+  derive: () => import("../src/core/derive.mjs"),
+  render: () => import("../src/core/render.mjs"),
+  lint: () => import("../src/core/lint-stores.mjs"),
+  freshness: () => import("../src/core/check-freshness.mjs"),
+  tally: () => import("../src/core/tally.mjs"),
 };
 
 const [cmd, ...rest] = process.argv.slice(2);

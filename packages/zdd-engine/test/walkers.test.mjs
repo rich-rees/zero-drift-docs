@@ -2,9 +2,9 @@
 // Run: node --test "test/*.test.mjs"
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { slugify, extractMethods, leadingComment, derive as nextjs } from "../src/extractors/nextjs/index.mjs";
-import { scanFileText, normalizeFetchUrl } from "../src/extractors/nextjs/refs.mjs";
-import { makeRouteMatcher } from "../src/lib/resolve-refs.mjs";
+import { slugify, extractMethods, leadingComment, derive as nextjs } from "../src/adapters/nextjs/index.mjs";
+import { scanFileText, normalizeFetchUrl } from "../src/adapters/nextjs/refs.mjs";
+import { makeRouteMatcher } from "../src/core/lib/resolve-refs.mjs";
 
 test("slugify: dynamic + catch-all + groups + dots", () => {
   assert.equal(slugify("journeys/[id]/runs/[runId]"), "journeys--_id--runs--_runId");

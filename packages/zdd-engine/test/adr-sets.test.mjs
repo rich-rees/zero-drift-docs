@@ -12,7 +12,7 @@ import { readFileSync, writeFileSync, rmSync, mkdtempSync, cpSync, mkdirSync, re
 import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { readStores } from "../src/tally.mjs";
+import { readStores } from "../src/core/tally.mjs";
 
 const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const BIN = join(PKG, "bin", "zdd-engine.mjs");

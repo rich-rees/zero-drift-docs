@@ -11,7 +11,7 @@ import { readFileSync, writeFileSync, rmSync, mkdtempSync, cpSync, existsSync, r
 import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { agentIndexAreaDir } from "../src/render.mjs";
+import { agentIndexAreaDir } from "../src/core/render.mjs";
 
 const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const BIN = join(PKG, "bin", "zdd-engine.mjs");

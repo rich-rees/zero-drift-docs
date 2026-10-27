@@ -40,7 +40,7 @@
 
 import { posix } from "node:path";
 import { lex, model, localImports, scanApiCalls, scanDataCalls, moduleConsts } from "../react-router/index.mjs";
-import { repoRelative } from "../../lib/paths.mjs";
+import { repoRelative } from "../../core/lib/paths.mjs";
 
 export const FACTS_KEY_ORDER = {
   component: ["name", "export", "props", "propsType", "propsFrom", "shared", "sharedBy", "usedBy", "platforms", "edges"],

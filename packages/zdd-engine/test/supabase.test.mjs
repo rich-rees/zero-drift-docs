@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { derive } from "../src/extractors/supabase/index.mjs";
+import { derive } from "../src/adapters/supabase/index.mjs";
 
 const scratch = (files) => {
   const root = mkdtempSync(join(tmpdir(), "zdd-supa-"));

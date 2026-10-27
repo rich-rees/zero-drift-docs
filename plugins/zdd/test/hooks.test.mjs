@@ -130,7 +130,7 @@ test("fence: a generated path that overlaps a curated one or zdd/config.json is 
 });
 
 test("repoRelative speaks the engine's path language exactly — whitespace and backslashes rejected, '.' normalised (CR-079)", async () => {
-  const engine = await import(pathToFileURL(resolve(PLUGIN, "..", "..", "packages", "zdd-engine", "src", "lib", "paths.mjs")).href);
+  const engine = await import(pathToFileURL(resolve(PLUGIN, "..", "..", "packages", "zdd-engine", "src", "core", "lib", "paths.mjs")).href);
   const corpus = ["zdd/graph.json", "./docs/AGENT.md", "docs//x/./y.md", "zdd/", ".", "./", "docs/ZDD Index.md", " zdd/graph.json", "zdd/graph.json\n", "zdd\\graph.json", "\\zdd", "/etc/passwd", "C:/tmp/g.md", "c:\\tmp", "../x", "a/../b", "javascript:alert(1)", "http://x/y", "a:b/c", "", 42, null, "\x01x", "x\x7f"];
   for (const v of corpus) {
     let ours, theirs;

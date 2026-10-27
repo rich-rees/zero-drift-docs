@@ -17,6 +17,7 @@ const MAX_CONFIG_BYTES = 1024 * 1024; // the plugin's cap too (plugins/zdd/scrip
 import { dirname, join, resolve, relative } from "node:path";
 import { repoRelative, overlaps, agentIndexAreaDir } from "./paths.mjs";
 import { harnessPathsError } from "./adr-sets.mjs";
+import { catalogue, splitBundleOptions } from "./catalogue.mjs";
 
 export const DEFAULT_PATHS = {
   glossary: "zdd/glossary.md",
@@ -252,22 +253,11 @@ export function loadConfig(args, cwd = process.cwd()) {
 // works: it expands to the extractors it was a bundle of, with the old option
 // keys routed to the extractor that owns them, and prints a deprecation note.
 // The engine never rewrites the config; the plugin's `bootstrap --upgrade`
-// does (plugins/zdd/scripts/bootstrap.mjs mirrors LEGACY_ADAPTERS for that),
-// and the deprecation note says how to do it by hand.
+// does (plugins/zdd/scripts/bootstrap.mjs mirrors the bundles for that),
+// and the deprecation note says how to do it by hand. Retired names and the
+// pre-1.0 bundles are the catalogue's data (src/adapters/catalogue.json,
+// read by lib/catalogue.mjs): the core names no adapter (decision 0036).
 // ---------------------------------------------------------------------------
-// Mirror of derive's EXTRACTOR_ALIASES (config is resolved before the
-// registry is consulted): old extractor name -> current name.
-export const EXTRACTOR_NAME_ALIASES = { services: "external-services" };
-
-export const LEGACY_ADAPTERS = {
-  "nextjs-supabase": {
-    extractors: ["supabase", "nextjs"],
-    split(options = {}) {
-      const { migrationNamespaces = [], externalBuckets = [], ...nextjs } = options;
-      return { supabase: { migrationNamespaces, externalBuckets }, nextjs };
-    },
-  },
-};
 
 const isPlainObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 
@@ -299,7 +289,8 @@ export function resolveExtractors(config) {
     // A retired name (2.3: `services` → `external-services`, 2.3.0, pick 3)
     // still works for one release and is said once per derive; both names
     // at once is the same extractor twice.
-    for (const [old, now] of Object.entries(EXTRACTOR_NAME_ALIASES)) {
+    const aliases = catalogue().aliases;
+    for (const [old, now] of Object.entries(aliases)) {
       if (!list.includes(old)) continue;
       if (list.includes(now)) return { error: `extractors lists both '${old}' and '${now}' — they are one extractor; keep '${now}'` };
       diagnostics.push(`[config] extractor '${old}' is now '${now}' (ZDD 2.3) — "upgrade ZDD" renames it in zdd/config.json (extractors and extractorOptions); the old name works for this release only`);
@@ -314,11 +305,11 @@ export function resolveExtractors(config) {
     // The options key is the name as listed; a retired name's options may
     // also sit under the current name. Both at once is a conflict, and the
     // value validated is exactly the value handed over (CR-306).
-    const canonical = (name) => (Object.hasOwn(EXTRACTOR_NAME_ALIASES, name) ? EXTRACTOR_NAME_ALIASES[name] : name); // hasOwn: an extractor named `constructor` (CR-022)
+    const canonical = (name) => (Object.hasOwn(aliases, name) ? aliases[name] : name); // hasOwn: an extractor named `constructor` (CR-022)
     // The retired name's options key is read for the current name too (a
     // half-migrated config, verify CR-322), and the current name's for the
     // retired one: one extractor, one options object, never two.
-    const retiredOf = (now) => Object.entries(EXTRACTOR_NAME_ALIASES).filter(([, v]) => v === now).map(([k]) => k);
+    const retiredOf = (now) => Object.entries(aliases).filter(([, v]) => v === now).map(([k]) => k);
     const optionsFor = (name) => {
       const now = canonical(name);
       const keys = [...new Set([name, now, ...retiredOf(now)])].filter((k) => Object.hasOwn(options, k));
@@ -338,18 +329,21 @@ export function resolveExtractors(config) {
     return { extractors, diagnostics };
   }
   if (config.adapter !== undefined) {
-    const legacy = LEGACY_ADAPTERS[config.adapter];
+    const { bundles } = catalogue();
+    const legacy = typeof config.adapter === "string" && Object.hasOwn(bundles, config.adapter) ? bundles[config.adapter] : null;
     if (!legacy) {
-      return { error: `Unknown adapter '${config.adapter}' — 'adapter' is deprecated; use "extractors": [...] (known legacy adapters: ${Object.keys(LEGACY_ADAPTERS).join(", ")})` };
+      return { error: `Unknown adapter '${config.adapter}' — 'adapter' is deprecated; use "extractors": [...] (known legacy adapters: ${Object.keys(bundles).join(", ")})` };
     }
+    const owned = Object.entries(legacy.options ?? {}).map(([name, keys]) => `${Object.keys(keys).join(" + ")} under ${name}`);
+    if (legacy.rest) owned.push(`the rest under ${legacy.rest}`);
     diagnostics.push(
-      `[config] 'adapter' is deprecated — use "extractors": ${JSON.stringify(legacy.extractors)} with "extractorOptions" (split adapterOptions by key: migrationNamespaces + externalBuckets under supabase, the rest under nextjs)`,
+      `[config] 'adapter' is deprecated — use "extractors": ${JSON.stringify(legacy.extractors)} with "extractorOptions" (split adapterOptions by key: ${owned.join(", ")})`,
     );
     if (config.adapterOptions !== undefined && !isPlainObject(config.adapterOptions)) {
       return { error: `'adapterOptions' must be an object, got ${JSON.stringify(config.adapterOptions)}` };
     }
-    const split = legacy.split(config.adapterOptions);
+    const split = splitBundleOptions(legacy, config.adapterOptions);
     return { extractors: legacy.extractors.map((name) => ({ name, options: split[name] ?? {} })), diagnostics };
   }
-  return { error: `zdd/config.json names no extractors — add "extractors": ["supabase", "nextjs", ...] (or "generic" for a map-only bundle)` };
+  return { error: `zdd/config.json names no extractors — add "extractors": [...], one adapter per convention in your stack (or "generic" for a map-only bundle)` };
 }

@@ -29,7 +29,7 @@ const detect = (repo) => JSON.parse(execFileSync(process.execPath, [BOOTSTRAP, "
 const named = (json, name) => json.proposals.find((p) => p.name === name);
 
 test("the services mirror equals the engine's lists", async () => {
-  const engine = await import(new URL("file:///" + join(ENGINE, "src", "extractors", "external-services", "index.mjs").split("\\").join("/")));
+  const engine = await import(new URL("file:///" + join(ENGINE, "src", "adapters", "external-services", "index.mjs").split("\\").join("/")));
   assert.deepEqual(SERVICE_SUFFIXES, engine.CANDIDATE_SUFFIXES);
   assert.deepEqual(SERVICE_IGNORE, engine.BUILT_IN_IGNORE);
 });

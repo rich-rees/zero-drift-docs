@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { firstSentence, supersessionStamps, buildAdrIndex, rebaseAdrLinks } from "../src/lib/adr-index.mjs";
+import { firstSentence, supersessionStamps, buildAdrIndex, rebaseAdrLinks } from "../src/core/lib/adr-index.mjs";
 
 const PLAIN = [
   "# Region per deployment",

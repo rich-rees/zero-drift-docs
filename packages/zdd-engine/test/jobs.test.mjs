@@ -14,8 +14,8 @@ import { readFileSync, writeFileSync, rmSync, mkdtempSync, cpSync } from "node:f
 import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { parseCommand, scanTables, describe, derive, parseCompose, scanPgCron, scanQueues, scanWorkflow } from "../src/extractors/jobs/index.mjs";
-import { makeExtractorIo } from "../src/lib/extractor-io.mjs";
+import { parseCommand, scanTables, describe, derive, parseCompose, scanPgCron, scanQueues, scanWorkflow } from "../src/adapters/jobs/index.mjs";
+import { makeExtractorIo } from "../src/core/lib/extractor-io.mjs";
 
 const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const BIN = join(PKG, "bin", "zdd-engine.mjs");

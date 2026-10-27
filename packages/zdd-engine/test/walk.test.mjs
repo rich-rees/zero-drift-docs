@@ -9,10 +9,10 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { walkDir } from "../src/lib/walk.mjs";
-import { derive as supabase } from "../src/extractors/supabase/index.mjs";
-import { derive as fastapi } from "../src/extractors/fastapi/index.mjs";
-import { derive as nextjs } from "../src/extractors/nextjs/index.mjs";
+import { walkDir } from "../src/core/lib/walk.mjs";
+import { derive as supabase } from "../src/adapters/supabase/index.mjs";
+import { derive as fastapi } from "../src/adapters/fastapi/index.mjs";
+import { derive as nextjs } from "../src/adapters/nextjs/index.mjs";
 
 const scratch = (files) => {
   const root = mkdtempSync(join(tmpdir(), "zdd-walk-"));

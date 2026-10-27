@@ -14,15 +14,15 @@
 // Outbound refs (`.from('x')`, `.rpc('x')`, `fetch('/api/..')`) are emitted
 // UNRESOLVED (`?from:x`, `?function:x`, `?route:/api/..`) — the tables and
 // functions belong to the supabase extractor, and the deriver resolves them
-// after the merge (src/lib/resolve-refs.mjs). A missing appDir or middleware
+// after the merge (src/core/lib/resolve-refs.mjs). A missing appDir or middleware
 // file is "nothing to inventory" (greenfield), never an error.
 
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { walkSourceFiles, scanFiles, DEFAULT_REFS } from "./refs.mjs";
-import { slugify } from "../../lib/slug.mjs";
-import { repoRelative } from "../../lib/paths.mjs";
-import { walkDir } from "../../lib/walk.mjs";
+import { slugify } from "../../core/lib/slug.mjs";
+import { repoRelative } from "../../core/lib/paths.mjs";
+import { walkDir } from "../../core/lib/walk.mjs";
 
 export { slugify };
 

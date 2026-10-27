@@ -12,10 +12,10 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, cpSync, sy
 import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { derive, parseRouteTree, joinRoutePath, scanApiCalls, normalizeApiPath, importMap, lex, topLevel, narrowModule, MAX_SOURCE_BYTES } from "../src/extractors/react-router/index.mjs";
-import { derive as fastapi } from "../src/extractors/fastapi/index.mjs";
-import { resolveRefs } from "../src/lib/resolve-refs.mjs";
-import { unclaimedRecords, unclaimedInGraph } from "../src/lib/claims.mjs";
+import { derive, parseRouteTree, joinRoutePath, scanApiCalls, normalizeApiPath, importMap, lex, topLevel, narrowModule, MAX_SOURCE_BYTES } from "../src/adapters/react-router/index.mjs";
+import { derive as fastapi } from "../src/adapters/fastapi/index.mjs";
+import { resolveRefs } from "../src/core/lib/resolve-refs.mjs";
+import { unclaimedRecords, unclaimedInGraph } from "../src/core/lib/claims.mjs";
 
 const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const BIN = join(PKG, "bin", "zdd-engine.mjs");

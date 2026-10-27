@@ -9,7 +9,7 @@
 //                    schema zdd-graph/1): nodes = records + map concepts, edges
 //                    = refs + map links, every node carrying its resource
 //   - human index  — the graph rendered by a VIEWER picked from the registry
-//                    (src/viewers/index.mjs) by config `viewer`
+//                    (viewers/index.mjs) by config `viewer`
 //   - agent index  — llms.txt-shaped, feature-first, budget ~2k tokens
 //   - ADR index    — one orientation line per ADR
 //   - blessing index — one line per blessing in the blessing store, by
@@ -530,7 +530,7 @@ function buildConcepts() {
 // ---------------------------------------------------------------------------
 // Rendering 1: the graph artifact (graph.json, schema zdd-graph/1).
 // Viewer-neutral on purpose: no colours, sizes, layouts or embedded docs —
-// those are a viewer's business (src/viewers/). Node ids are bundle-relative
+// those are a viewer's business (viewers/). Node ids are bundle-relative
 // paths minus extension, so a node links back to the file it was built from;
 // `resource` links it to the source. Edges are deduped and self-refs dropped.
 // An edge carries `verb` when the record typed it (decision 0016); a graph

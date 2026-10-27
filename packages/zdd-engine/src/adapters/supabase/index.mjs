@@ -14,7 +14,7 @@
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { replayMigrations, sortMigrations, tableKey } from "./sql-replay.mjs";
-import { repoRelative } from "../../lib/paths.mjs";
+import { repoRelative } from "../../core/lib/paths.mjs";
 
 const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 

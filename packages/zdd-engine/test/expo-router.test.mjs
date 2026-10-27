@@ -9,11 +9,11 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { derive } from "../src/extractors/expo-router/index.mjs";
-import { derive as fastapi } from "../src/extractors/fastapi/index.mjs";
-import { derive as reactRouter } from "../src/extractors/react-router/index.mjs";
-import { resolveRefs } from "../src/lib/resolve-refs.mjs";
-import { makeExtractorIo } from "../src/lib/extractor-io.mjs";
+import { derive } from "../src/adapters/expo-router/index.mjs";
+import { derive as fastapi } from "../src/adapters/fastapi/index.mjs";
+import { derive as reactRouter } from "../src/adapters/react-router/index.mjs";
+import { resolveRefs } from "../src/core/lib/resolve-refs.mjs";
+import { makeExtractorIo } from "../src/core/lib/extractor-io.mjs";
 
 const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const FIXTURE = join(PKG, "test", "fixture-components");

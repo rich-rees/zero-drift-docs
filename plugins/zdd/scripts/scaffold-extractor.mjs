@@ -46,8 +46,9 @@ import { Ledger, printable } from "./bootstrap.mjs";
 const TEMPLATES = join(PLUGIN_ROOT, "templates", "extractor");
 // The engine version that first hands extractors `io` (decision 0010).
 export const IO_SINCE = "1.3.0";
-// Mirror of the engine's registry (packages/zdd-engine/src/derive.mjs
-// EXTRACTORS) — a local name may not shadow one. A test holds the two together.
+// Mirror of the engine's catalogue (the adapter folders in
+// packages/zdd-engine/src/adapters/) — a local name may not shadow one. A test
+// holds the two together.
 export const BUILT_INS = ["supabase", "nextjs", "fastapi", "react-router", "components", "expo-router", "jobs", "external-services", "generic"];
 // Names a release retired but the engine still answers to (2.3: `services`
 // is `external-services`, 2.3.0, pick 3) — a local one may not take them.
