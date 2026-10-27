@@ -55,6 +55,25 @@ class D:
   assert.match(found[1].body, /return 2[\s\S]*return 3/, "two defs named get are one entry, bodies joined");
 });
 
+test("defs: a signature over several lines, closing at the def's indent, still has its body and docstring", () => {
+  const [d] = defs(`async def _end(
+    engine,
+    job_id: str, *, status: str = "x(",
+) -> dict[str, object]:
+    """Ends a job."""
+    await jobs.end_job(conn)
+
+def after():
+    pass
+`);
+  assert.equal(d.name, "_end");
+  assert.equal(d.docstring, "Ends a job.");
+  assert.match(d.body, /jobs\.end_job/);
+  assert.ok(!d.body.includes("def after"));
+  const { handlers } = parseFile(`@router.get("/x")\nasync def h(\n    a: int,\n) -> dict:\n    """Doc."""\n    return 1\n`);
+  assert.equal(handlers[0].docstring, "Doc.", "FastAPI reads the same body: the description is found");
+});
+
 test("masked and strings: comments and string contents blanked, literals read with prefixes and triple quotes; a word before a quote is not a prefix", () => {
   const src = `x = f(rb'one', "two") # three\ny = """four\nfive"""\nverb'six'`;
   const m = masked(src);
@@ -143,7 +162,7 @@ test("FastAPI handlerRefs: the handler itself, module and member imports, same-f
   const files = ["app/routes/jobs.py", "app/repositories/jobs.py", "app/repositories/events.py", "app/a/util.py", "app/b/util.py"];
   const by = moduleFiles(files);
   const text = `from app.repositories import jobs as repo\nfrom app.repositories.events import record_event\nfrom . import jobs as same\nimport util\n\ndef helper():\n    pass\n`;
-  const file = { rel: "app/routes/jobs.py", imports: imports(text), defNames: new Set(defs(text).map((d) => d.name)) };
+  const file = { rel: "app/routes/jobs.py", imports: imports(text), bodies: new Map(defs(text).map((d) => [d.name, d.body])) };
   const body = `    repo.list_jobs(conn)\n    record_event(conn)\n    helper()\n    util.summarise()\n    print("repo.fake(x)")  # repo.nope()\n    same.thing()\n`;
   assert.deepEqual([...handlerRefs({ name: "h", body }, file, by)].sort(), [
     "?code:app/repositories/events.py#record_event",
@@ -151,6 +170,29 @@ test("FastAPI handlerRefs: the handler itself, module and member imports, same-f
     "?code:app/routes/jobs.py#h",
     "?code:app/routes/jobs.py#helper",
     "?code:app/routes/jobs.py#thing",
+  ]);
+});
+
+test("FastAPI handlerRefs: same-file helpers are followed as far as they go, cycles once; out of the file it is one hop", () => {
+  const by = moduleFiles(["app/routes/x.py", "app/repositories/jobs.py"]);
+  const text = `from app.repositories import jobs
+
+def _end(c):
+    return _audit(c)
+
+def _audit(c):
+    jobs.cancel(c)
+    return _end(c)
+
+def unused():
+    jobs.other()
+`;
+  const file = { rel: "app/routes/x.py", imports: imports(text), bodies: new Map(defs(text).map((d) => [d.name, d.body])) };
+  assert.deepEqual([...handlerRefs({ name: "h", body: "    return _end(c)\n" }, file, by)].sort(), [
+    "?code:app/repositories/jobs.py#cancel",
+    "?code:app/routes/x.py#_audit",
+    "?code:app/routes/x.py#_end",
+    "?code:app/routes/x.py#h",
   ]);
 });
 

@@ -60,12 +60,23 @@ export function defs(text) {
   return [...out.values()];
 }
 
-// The body of the def on line `i` (indent `indent`): the lines after it that
-// are blank or indented deeper.
+// The body of the def on line `i` (indent `indent`): the lines after its
+// signature that are blank or indented deeper. A signature may run over
+// several lines and close back at the def's own indent (`) -> dict:`), so the
+// header ends at the first line where the parentheses balance; before this,
+// such a def's body stopped at its closing `)` and read as empty.
 export function defBody(lines, i, indent) {
-  let end = i + 1;
+  let header = i;
+  let depth = 0;
+  for (let k = i; k < lines.length; k++) {
+    const code = masked(lines[k]);
+    depth += (code.match(/[([{]/g) ?? []).length - (code.match(/[)\]}]/g) ?? []).length;
+    header = k;
+    if (depth <= 0) break;
+  }
+  let end = header + 1;
   while (end < lines.length && (lines[end].trim() === "" || lines[end].search(/\S/) > indent)) end++;
-  return lines.slice(i + 1, end).join("\n");
+  return lines.slice(header + 1, end).join("\n");
 }
 
 // One scan over the text, telling code from strings and comments. `onString`

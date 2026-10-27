@@ -67,6 +67,15 @@ refs to a record another adapter minted.
 - **Python functions** are cut once, in `adapters/python/` (a helper folder,
   not an adapter), so `fastapi`, `supabase-py` and `sqlalchemy` agree on a
   function's text: a `def` at any indent and the lines indented deeper.
+- **Within a file, helpers are followed; across files, one hop.** A handler
+  that calls a private helper in its own file (`_end()`), which calls the
+  repository, reaches the repository: same-file helpers are followed as far
+  as they go, once each. A function in another file is one hop.
+- **A multi-line signature no longer empties a body.** A `def` whose
+  signature runs over several lines and closes at the def's own indent
+  (`) -> dict:`) used to read as an empty body, losing its calls and its
+  docstring. The body now starts after the signature (on one adopter: 9 more
+  routes gained their description).
 - **FastAPI follows the file's imports** for the functions a handler calls,
   and now for `include_router(<mod>.router)` too: `from app.routes import
   jobs` names `app/routes/jobs.py` even when a repository module shares the

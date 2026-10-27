@@ -18,8 +18,10 @@
 // route's refs name the code it runs, as `?code:<file>#<function>` — its own
 // handler, and each function the handler calls that resolves to one scanned
 // file: `<mod>.<fn>(` where `<mod>` is imported (`import a.b as mod`,
-// `from a import mod`, relative `from . import mod`), `<fn>(` imported with
-// `from a.mod import fn`, or `<fn>(` defined in the same file. One hop; a
+// `from a import mod`, relative `from . import mod`), or `<fn>(` imported
+// with `from a.mod import fn`. Helpers defined in the handler's own file are
+// followed as far as they go (a handler that calls `_end()`, which calls the
+// repository, reaches the repository); out of the file it is one hop. A
 // target that resolves to no file or to several is skipped, never guessed.
 // A data-access adapter (supabase-py, sqlalchemy, …) mints the records those
 // refs reach, and the core folds their tables into the route. Auth is not derived (FastAPI dependencies are not
@@ -136,28 +138,38 @@ export function parseFile(text) {
 }
 
 // The code a handler runs, as `?code:` refs (decision 0037): the handler
-// itself, and the functions it calls that resolve to exactly one scanned
-// file. `file` is { rel, imports, defNames }; `byModule` maps module basenames
-// to scanned files.
+// itself, every same-file helper it reaches, and the functions those call in
+// other files that resolve to exactly one scanned file. `file` is { rel,
+// imports, bodies } (bodies: same-file def name -> body); `byModule` maps
+// module basenames to scanned files.
 const CALL_ATTR = /(?<![\w.])([A-Za-z_]\w*)\.([A-Za-z_]\w*)\s*\(/g;
 const CALL_BARE = /(?<![\w.])([A-Za-z_]\w*)\s*\(/g;
 const joinModule = (module, member) => (module.endsWith(".") ? `${module}${member}` : `${module}.${member}`);
 export function handlerRefs(handler, file, byModule) {
-  const refs = new Set([`?code:${file.rel}#${handler.name}`]);
-  const body = masked(handler.body);
-  for (const m of body.matchAll(CALL_ATTR)) {
-    const imp = file.imports.get(m[1]);
-    if (!imp) continue;
-    const target = resolveModule(file.rel, imp.member ? joinModule(imp.module, imp.member) : imp.module, byModule);
-    if (target) refs.add(`?code:${target}#${m[2]}`);
-  }
-  for (const m of body.matchAll(CALL_BARE)) {
-    const name = m[1];
-    const imp = file.imports.get(name);
-    if (imp?.member) {
-      const target = resolveModule(file.rel, imp.module, byModule);
-      if (target) refs.add(`?code:${target}#${imp.member}`);
-    } else if (!imp && name !== handler.name && file.defNames.has(name)) refs.add(`?code:${file.rel}#${name}`);
+  const refs = new Set();
+  const seen = new Set([handler.name]);
+  const queue = [[handler.name, handler.body]];
+  while (queue.length) {
+    const [name, text] = queue.shift();
+    refs.add(`?code:${file.rel}#${name}`);
+    const body = masked(text);
+    for (const m of body.matchAll(CALL_ATTR)) {
+      const imp = file.imports.get(m[1]);
+      if (!imp) continue;
+      const target = resolveModule(file.rel, imp.member ? joinModule(imp.module, imp.member) : imp.module, byModule);
+      if (target) refs.add(`?code:${target}#${m[2]}`);
+    }
+    for (const m of body.matchAll(CALL_BARE)) {
+      const callee = m[1];
+      const imp = file.imports.get(callee);
+      if (imp?.member) {
+        const target = resolveModule(file.rel, imp.module, byModule);
+        if (target) refs.add(`?code:${target}#${imp.member}`);
+      } else if (!imp && file.bodies.has(callee) && !seen.has(callee)) {
+        seen.add(callee);
+        queue.push([callee, file.bodies.get(callee)]);
+      }
+    }
   }
   return refs;
 }
@@ -177,7 +189,7 @@ export function derive({ repoRoot, options, io }) {
   const files = walkPython(repoRoot, safeRoots, excludeDirs, diagnostics, isIgnored);
   const texts = new Map(files.map((rel) => [rel, readFileSync(join(repoRoot, rel), "utf8")]));
   const parsed = new Map(files.map((rel) => [rel, parseFile(texts.get(rel))]));
-  const callFiles = new Map(files.map((rel) => [rel, { rel, imports: imports(texts.get(rel)), defNames: new Set(defs(texts.get(rel)).map((d) => d.name)) }]));
+  const callFiles = new Map(files.map((rel) => [rel, { rel, imports: imports(texts.get(rel)), bodies: new Map(defs(texts.get(rel)).map((d) => [d.name, d.body])) }]));
   const callModules = moduleFiles(files);
 
   // Mount graph: each include is an edge parent -> child router carrying the
