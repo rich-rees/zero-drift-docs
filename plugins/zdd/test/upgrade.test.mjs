@@ -548,6 +548,10 @@ test("CR-150: a prerelease sorts before its release — an upgrade from 0.9.0-rc
   assert.ok(compareVersions("1.0.0-beta.2", "1.0.0-beta.11") < 0);
   assert.ok(compareVersions("1.0.0-alpha.beta", "1.0.0-beta") < 0);
   assert.equal(compareVersions("0.9.1+build.5", "v0.9.1"), 0);
+  // Verify pass 1: digits compare as digits, never as rounded JS numbers.
+  assert.ok(compareVersions("0.9.0-rc.9007199254740992", "0.9.0-rc.9007199254740993") < 0);
+  assert.ok(compareVersions("9007199254740993.0.0", "9007199254740992.0.0") > 0);
+  assert.ok(compareVersions("0.10.0", "0.9.0") > 0);
   const repo = adopted("from-rc", { release: "0.9.0-rc.1", extractors: ["supabase", "nextjs"], settings: { extraKnownMarketplaces: LOCK(`v${VERSION}`) } });
   mkdirSync(join(repo, "supabase", "migrations"), { recursive: true });
   writeFileSync(join(repo, "supabase", "migrations", "0001_init.sql"), "create table public.things (id int);\n");

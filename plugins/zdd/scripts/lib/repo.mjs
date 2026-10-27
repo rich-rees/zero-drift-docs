@@ -57,23 +57,31 @@ export const onNewLine = (config) => Boolean(config && Object.hasOwn(config, "re
 // Line first, then semver precedence: X.Y.Z, and a prerelease before its
 // release (CR-150: `0.9.0-rc.1` is before 0.9.0, so an upgrade from it still
 // crosses 0.9.0). A leading `v` (a tag's) is ignored, build metadata too; a
-// missing part counts as 0.
+// missing part counts as 0. Numbers compare as digit strings, never as JS
+// numbers, which round past 2^53 (verify pass 1).
 const parts = (s) => {
   const m = /^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:-([0-9A-Za-z.-]+))?(?:\+.*)?$/.exec(String(s).replace(OLD_LINE, ""));
-  return m ? { nums: [m[1], m[2], m[3]].map((n) => Number(n ?? 0)), pre: m[4] === undefined ? null : m[4].split(".") } : { nums: [0, 0, 0], pre: null };
+  return m ? { nums: [m[1], m[2], m[3]].map((n) => n ?? "0"), pre: m[4] === undefined ? null : m[4].split(".") } : { nums: ["0", "0", "0"], pre: null };
+};
+const cmpDigits = (x, y) => {
+  const [a, b] = [x.replace(/^0+(?=\d)/, ""), y.replace(/^0+(?=\d)/, "")];
+  return a.length !== b.length ? a.length - b.length : a < b ? -1 : a > b ? 1 : 0;
 };
 export function compareReleases(a, b) {
   const [la, lb] = [isOldLine(a) ? 0 : 1, isOldLine(b) ? 0 : 1];
   if (la !== lb) return la - lb;
   const [pa, pb] = [parts(a), parts(b)];
-  for (let i = 0; i < 3; i++) if (pa.nums[i] !== pb.nums[i]) return pa.nums[i] - pb.nums[i];
+  for (let i = 0; i < 3; i++) {
+    const d = cmpDigits(pa.nums[i], pb.nums[i]);
+    if (d) return d;
+  }
   if (!pa.pre || !pb.pre) return (pa.pre ? -1 : 0) + (pb.pre ? 1 : 0);
   for (let i = 0; i < Math.max(pa.pre.length, pb.pre.length); i++) {
     const [x, y] = [pa.pre[i], pb.pre[i]];
     if (x === undefined) return -1;
     if (y === undefined) return 1;
     const [nx, ny] = [/^\d+$/.test(x), /^\d+$/.test(y)];
-    if (nx && ny && Number(x) !== Number(y)) return Number(x) - Number(y);
+    if (nx && ny && cmpDigits(x, y)) return cmpDigits(x, y);
     if (nx !== ny) return nx ? -1 : 1;
     if (!nx && x !== y) return x < y ? -1 : 1;
   }
