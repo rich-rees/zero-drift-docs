@@ -29,34 +29,35 @@ const setClaims = (repo, claims) => {
 };
 const open = (repo) => unclaimedRecords({ metadataDir: join(repo, "zdd", "metadata"), mapDir: join(repo, "zdd", "map"), bundleDir: join(repo, "zdd") });
 
-test("jobs fixture: jobs are claimable; strict alone fails only the original kinds; strictKinds ['job'] fails the unclaimed jobs too; the claimed worker stays claimed", (t) => {
+test("background fixture: background tasks are claimable; strict alone fails only the original kinds; strictKinds ['background-task'] fails the unclaimed tasks too; the claimed worker stays claimed", (t) => {
   const repo = derived(t, "fixture-jobs");
   const u = open(repo);
-  // 2.3's fixture: eight jobs (one claimed), a cron route, a pg_cron function and four tables.
-  const JOBS = ["job:edge", "job:housekeeping", "job:nightly", "job:nightly-digest", "job:sweep-stalled", "job:transcoder", "job:video-transcode"];
+  // The fixture: seven background tasks (one claimed; the Compose worker and the queue it
+  // consumes are one task since 0.9), a cron route, a pg_cron function and four tables.
+  const JOBS = ["background-task:edge", "background-task:housekeeping", "background-task:nightly", "background-task:nightly-digest", "background-task:sweep-stalled", "background-task:transcoder"];
   const ORIGINAL = ["function:db/public.send_digest", "route:/api/cron/sweep-stalled", "table:db/audit_events", "table:db/jobs", "table:db/reports"];
-  assert.deepEqual(u.unclaimed.map((r) => r.id), ["function:db/public.send_digest", ...JOBS, "route:/api/cron/sweep-stalled", "table:db/audit_events", "table:db/jobs", "table:db/reports"]);
-  assert.equal(u.records.find((r) => r.id === "job:worker").optIn, true);
+  assert.deepEqual(u.unclaimed.map((r) => r.id), [...JOBS, "function:db/public.send_digest", "route:/api/cron/sweep-stalled", "table:db/audit_events", "table:db/jobs", "table:db/reports"]);
+  assert.equal(u.records.find((r) => r.id === "background-task:worker").optIn, true);
   // Default mode: one warning list, jobs and the rest alike.
   const plain = run(repo, ["lint"]);
   assert.equal(plain.status, 0, plain.stderr);
-  assert.match(plain.stderr, /WARNING: 12 of 14 records unclaimed/);
+  assert.match(plain.stderr, /WARNING: 11 of 13 records unclaimed/);
   // Strict with the original kinds allowed: the jobs are a warning, not a failure.
   setClaims(repo, { strict: true, allowUnclaimed: ORIGINAL });
   const soft = run(repo, ["lint"]);
   assert.equal(soft.status, 0, soft.stderr);
-  assert.match(soft.stderr, /WARNING: 7 records of an opt-in kind unclaimed — not a failure until claims\.strictKinds names the kind \(job\):/);
-  assert.match(soft.stderr, /job {7}housekeeping {2}\(zdd\/metadata\/job\/housekeeping\.json\)/);
+  assert.match(soft.stderr, /WARNING: 6 records of an opt-in kind unclaimed — not a failure until claims\.strictKinds names the kind \(background-task\):/);
+  assert.match(soft.stderr, /background-task housekeeping {2}\(zdd\/metadata\/background-task\/housekeeping\.json\)/);
   assert.doesNotMatch(soft.stderr, /is unclaimed — claims\.strict/);
   // Naming the kind makes it a failure, with the same line a route gets.
-  setClaims(repo, { strict: true, allowUnclaimed: ORIGINAL, strictKinds: ["job"] });
+  setClaims(repo, { strict: true, allowUnclaimed: ORIGINAL, strictKinds: ["background-task"] });
   const hard = run(repo, ["lint"]);
   assert.equal(hard.status, 1, hard.stderr);
-  assert.match(hard.stderr, /job:housekeeping is unclaimed — claims\.strict: link it from one feature slice, or add it to claims\.allowUnclaimed/);
-  assert.match(hard.stderr, /job:nightly is unclaimed/);
-  assert.doesNotMatch(hard.stderr, /job:worker is unclaimed/);
-  // Allow-listing a job works like any record.
-  setClaims(repo, { strict: true, allowUnclaimed: [...ORIGINAL, ...JOBS], strictKinds: ["job"] });
+  assert.match(hard.stderr, /background-task:housekeeping is unclaimed — claims\.strict: link it from one feature slice, or add it to claims\.allowUnclaimed/);
+  assert.match(hard.stderr, /background-task:nightly is unclaimed/);
+  assert.doesNotMatch(hard.stderr, /background-task:worker is unclaimed/);
+  // Allow-listing a background task works like any record.
+  setClaims(repo, { strict: true, allowUnclaimed: [...ORIGINAL, ...JOBS], strictKinds: ["background-task"] });
   assert.equal(run(repo, ["lint"]).status, 0);
 });
 
@@ -83,8 +84,8 @@ test("config: strictKinds must be an array of opt-in kinds — an original kind 
     assert.equal(r.status, 1, r.stderr);
     assert.match(r.stderr, re);
   };
-  expect({ strict: true, strictKinds: "job" }, /'claims\.strictKinds' must be an array of kinds \(component, job, external-service, service\)/);
+  expect({ strict: true, strictKinds: "background-task" }, /'claims\.strictKinds' must be an array of kinds \(component, background-task, external-service, service\)/);
   expect({ strict: true, strictKinds: ["route"] }, /'claims\.strictKinds' lists 'route', which 'claims\.strict' already governs — remove it/);
-  expect({ strict: true, strictKinds: ["jobz"] }, /'claims\.strictKinds' lists 'jobz', which is no opt-in claimable kind/);
-  expect({ strict: true, strictKind: ["job"] }, /'claims' has an unknown key 'strictKind'/);
+  expect({ strict: true, strictKinds: ["job"] }, /'claims\.strictKinds' lists 'job', which is no opt-in claimable kind/);
+  expect({ strict: true, strictKind: ["background-task"] }, /'claims' has an unknown key 'strictKind'/);
 });

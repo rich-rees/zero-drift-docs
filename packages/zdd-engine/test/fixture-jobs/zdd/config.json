@@ -7,7 +7,13 @@
     "supabase-py",
     "sqlalchemy",
     "nextjs",
-    "jobs"
+    "background-railway",
+    "background-procfile",
+    "background-vercel",
+    "background-cloudflare",
+    "background-pg-cron",
+    "background-compose",
+    "background-bullmq"
   ],
   "render": {
     "storeChanges": false
@@ -20,11 +26,6 @@
           "dir": "supabase/migrations"
         }
       ]
-    },
-    "jobs": {
-      "modes": {
-        "worker": "worker"
-      }
     },
     "nextjs": {
       "appDir": "apps/web/src/app",
@@ -43,6 +44,11 @@
       "roots": [
         "apps/api"
       ]
+    },
+    "background-procfile": {
+      "modes": {
+        "worker": "worker"
+      }
     }
   }
 }

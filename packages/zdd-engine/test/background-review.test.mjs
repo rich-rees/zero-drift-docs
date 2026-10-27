@@ -1,4 +1,5 @@
-// The jobs extractor after the slice 4–7 review (2.3.0 campaign 3):
+// The background readers, from the jobs extractor's slice 4–7 review (2.3.0
+// campaign 3; one reader per convention since decision 0038, merged by the core):
 // comments are not declarations (CR-506), a workflow's cron lives under
 // on.schedule only (CR-507), a target is a regular file (CR-508), a Railway
 // file joins the job in its own folder only (CR-509), two Vercel crons that
@@ -9,8 +10,8 @@ import assert from "node:assert/strict";
 import { writeFileSync, rmSync, mkdtempSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { derive, maskComments, scanPgCron, scanQueues, scanWorkflow } from "../src/adapters/jobs/index.mjs";
-import { makeExtractorIo } from "../src/core/lib/extractor-io.mjs";
+import { maskComments, scanPgCron, scanQueues, scanWorkflow } from "../src/adapters/background/shared.mjs";
+import { runReaders } from "./background-run.mjs";
 
 const scratch = (t, files) => {
   const root = mkdtempSync(join(tmpdir(), "zdd-jobs-rv-"));
@@ -21,7 +22,7 @@ const scratch = (t, files) => {
   }
   return root;
 };
-const jobs = (root, options = {}) => derive({ repoRoot: root, options, io: makeExtractorIo(root, "jobs") });
+const jobs = (root, options = {}) => runReaders(root, options);
 
 test("CR-506: maskComments blanks line and block comments and keeps strings, length and line count; the scanners read through it", () => {
   const src = 'const a = "// not a comment"; // new Worker("gone")\n/* new Queue("gone2") */ new Queue("kept"); const s = `x // y`;\n';
@@ -66,14 +67,14 @@ test("CR-507: only a cron under the top-level on.schedule is a schedule; a `- cr
   assert.deepEqual(scanWorkflow('name: Q\n"on":\n  schedule:\n    - cron: "5 5 * * *"\n'), { crons: ["5 5 * * *"], name: "Q" });
 });
 
-test("CR-508: a command whose target is a folder is not a job (skipped, and said — since 2.4.1 as a warning on every derive); a file is", (t) => {
+test("CR-508: a command whose target is a folder is not a task (skipped, and said — since 2.4.1 as a warning on every derive); a file is", (t) => {
   const root = scratch(t, { Procfile: "worker: node worker.mjs\nreal: node real.mjs\n", "worker.mjs/index.mjs": "export {};\n", "real.mjs": "export {};\n" });
   const out = jobs(root);
-  assert.deepEqual(out.records.map((r) => r.id), ["job:real"]);
-  assert.ok(out.warnings.some((w) => /^Procfile: 'worker' runs worker\.mjs, which is not a file in the repo/.test(w)), out.warnings.join("\n"));
+  assert.deepEqual(out.records.map((r) => r.id), ["background-task:real"]);
+  assert.ok(out.warnings.some((w) => /^WARNING \[background-procfile\]: Procfile: 'worker' runs worker\.mjs, which is not a file in the repo/.test(w)), out.warnings.join("\n"));
 });
 
-test("CR-509: a Railway file merges into the job that runs its command from the same folder, never into another app's job with the same command", (t) => {
+test("CR-509: a Railway file merges into the task that runs its command from the same folder, never into another app's task with the same command", (t) => {
   const root = scratch(t, {
     "apps/a/Procfile": "a-worker: node worker.mjs\n",
     "apps/a/worker.mjs": "export {};\n",
@@ -95,7 +96,7 @@ test("CR-510: two Vercel crons whose routes end alike are named by their whole r
     "vercel.json": JSON.stringify({ crons: [{ path: "/api/a/run", schedule: "1 * * * *" }, { path: "/api/b/run", schedule: "2 * * * *" }, { path: "/api/sweep", schedule: "3 * * * *" }] }),
   });
   const out = jobs(root);
-  assert.deepEqual(out.records.map((r) => r.id).sort(), ["job:api-a-run", "job:api-b-run", "job:sweep"]);
+  assert.deepEqual(out.records.map((r) => r.id).sort(), ["background-task:api-a-run", "background-task:api-b-run", "background-task:sweep"]);
   assert.ok(!out.diagnostics.some((d) => /declared in .* and again/.test(d)), out.diagnostics.join("\n"));
 });
 
@@ -105,7 +106,7 @@ test("CR-511: a scheduled task named like the process that consumes it joins tha
     "daily.mjs": 'import { schedules } from "@trigger.dev/sdk"; export const d = schedules.task({ id: "daily", cron: "0 1 * * *", run: async () => {} });\n',
   });
   const out = jobs(root);
-  assert.deepEqual(out.records.map((r) => r.id), ["job:daily"]);
+  assert.deepEqual(out.records.map((r) => r.id), ["background-task:daily"]);
   const d = out.records[0];
   assert.equal(d.facts.schedule, "0 1 * * *");
   assert.equal(d.facts.mode, "scheduled");
@@ -116,7 +117,7 @@ test("verify CR-506/CR-507: a Python source's `#` comment is not a declaration; 
   assert.deepEqual(scanQueues('# new Worker("retired")\nq = Queue("live")\n', { python: true }), []);
   assert.deepEqual(scanQueues('# new Worker("retired")\n', { python: false }), [{ queue: "retired", role: "consumer", lib: "bullmq" }], "in JS a # line is code");
   const root = scratch(t, { "w.py": '# new Worker("retired")\n', "w.ts": 'new Worker("live");\n' });
-  assert.deepEqual(jobs(root).records.map((r) => r.id), ["job:live"]);
+  assert.deepEqual(jobs(root).records.map((r) => r.id), ["background-task:live"]);
   const wf = ["name: X", "on:", "  workflow_dispatch:", "    inputs:", "      schedule:", "        - cron: '1 1 * * *'", "  schedule:", "    - cron: '2 2 * * *'", ""].join("\n");
   assert.deepEqual(scanWorkflow(wf), { crons: ["2 2 * * *"], name: "X" });
 });

@@ -227,9 +227,9 @@ test("CR-403: a repository whose ignored set git cannot list stops derive (fail 
   assert.ok(!existsSync(join(root, "zdd", "metadata")), "nothing was written");
 });
 
-test("CR-423: an ignored import target does not exist for the components extractor, nor an ignored command target for the jobs extractor", async (t) => {
+test("CR-423: an ignored import target does not exist for the components extractor, nor an ignored command target for a background reader", async (t) => {
   const { derive: components } = await import("../src/adapters/components/index.mjs");
-  const { derive: jobs } = await import("../src/adapters/jobs/index.mjs");
+  const { derive: procfile } = await import("../src/adapters/background-procfile/index.mjs");
   const root = scratch({
     "web/src/App.tsx": 'import { Gen } from "./gen/Gen";\nexport function App() { return <Gen /> }\n',
     "web/src/gen/Gen.tsx": "export function Gen() { return null }\n",
@@ -242,8 +242,12 @@ test("CR-423: an ignored import target does not exist for the components extract
   const c = components({ repoRoot: root, options: { roots: ["web/src"] }, io: makeExtractorIo(root, "components") });
   assert.ok(!c.records.some((r) => /gen/i.test(r.id)), "no record for the ignored component");
   assert.ok(!JSON.stringify(c.records).includes("web/src/gen/Gen.tsx"), "no edge into it either");
-  const j = jobs({ repoRoot: root, options: {}, io: makeExtractorIo(root, "jobs") });
-  assert.deepEqual(j.records, [], "a job whose file exists only as ignored build output resolves to no file");
+  const { mergeBackgroundTasks } = await import("../src/core/lib/background-tasks.mjs");
+  const read = procfile({ repoRoot: root, options: {}, io: makeExtractorIo(root, "background-procfile") });
+  assert.equal(read.records.length, 1);
+  assert.ok(read.records[0].unresolved && !read.records[0].runs, "a task whose file exists only as ignored build output resolves to no file");
+  const j = mergeBackgroundTasks(read.records);
+  assert.deepEqual(j.records, [], "the core drops it");
   // Since 2.4.1 said on every derive, as a warning naming the build output.
   assert.ok(j.warnings.some((w) => /'worker' runs dist\/worker\.mjs, which is not a file in the repo \(build output\?\)/.test(w)), j.warnings.join("\n"));
 });

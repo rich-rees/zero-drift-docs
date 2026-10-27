@@ -373,7 +373,7 @@ if (args.includes("--merge")) {
 // Read after the blocking lints so a failure above is not buried under the
 // list. Absent metadata (greenfield, or derive not yet run) is an empty
 // inventory: nothing to claim, no line printed.
-const { total, records, unclaimed, doubleClaimed, skipped, unplaced, unknownJobs } = unclaimedRecords({ metadataDir: METADATA_DIR, mapDir: MAP_DIR, bundleDir });
+const { total, records, unclaimed, doubleClaimed, skipped, unplaced, unknownTasks } = unclaimedRecords({ metadataDir: METADATA_DIR, mapDir: MAP_DIR, bundleDir });
 // Every adopter-controlled path is printable before it reaches the log — a
 // control character in a filename cannot forge a line (1.3.0 CR-032).
 const files = (list) => list.map(printable).join(", ");
@@ -430,10 +430,14 @@ if (unplaced.length) {
   for (const r of unplaced) for (const c of r.calls) console.error(`  ${printable(r.id)}  ${printable(c)}  (${printable(r.file)})`);
 }
 
-// ---- 4c. Jobs whose mode is unknown (decision 0020) ----
-if (unknownJobs.length) {
-  console.error(`WARNING: ${unknownJobs.length} job${unknownJobs.length === 1 ? "" : "s"} with no stated mode — a worker or a scheduled job? The manifests do not say: commit the platform's manifest that states how it runs (and its schedule, for a scheduled one), or set the reading adapter's modes option (extractorOptions.<adapter>.modes["<name>"]) to "worker" or "scheduled":`);
-  for (const j of unknownJobs) console.error(`  ${printable(j.id)}  (from ${printable(j.manifest)}; ${printable(j.file)})`);
+// ---- 4c. Background tasks whose mode is unknown (decision 0020) ----
+// Each names the option on the reader that read it (CR-010).
+if (unknownTasks.length) {
+  console.error(`WARNING: ${unknownTasks.length} background task${unknownTasks.length === 1 ? "" : "s"} with no stated mode — a worker or a scheduled task? The manifests do not say: commit the platform's manifest that states how it runs (and its schedule, for a scheduled one), or set the reader's modes option to "worker" or "scheduled":`);
+  for (const j of unknownTasks) {
+    const where = j.reader ? `extractorOptions[${JSON.stringify(j.reader)}].modes[${JSON.stringify(j.title)}]` : "the reading adapter's modes option";
+    console.error(`  ${printable(j.id)}  (from ${printable(j.manifest)}; ${printable(j.file)}) — set ${printable(where)}`);
+  }
 }
 
 // ---- 5. Stray root glossary (1.3.1) ----

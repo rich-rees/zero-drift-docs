@@ -86,7 +86,7 @@
   // reaches: route -> repository function -> table reads top to bottom. An
   // empty lane takes no space, so a map with none looks as it always did.
   const LANE_BY_TYPE = {
-    "UI Surface": 0, "UI Component": 1, "Feature": 2, "API Endpoint": 3, "Job": 3,
+    "UI Surface": 0, "UI Component": 1, "Feature": 2, "API Endpoint": 3, "Background Task": 3,
     "Data Access": 4, "Table": 5, "Storage Bucket": 5, "Database Function": 6,
   };
   const own = (table, key) => (Object.hasOwn(table, key) ? table[key] : undefined); // CR-010: static tables, source keys
@@ -443,7 +443,7 @@
     LANE_NAMES.forEach((nm, i) => { if (lanes[i].length) addLaneLabel(nm, 0, laneY[i] - 44, true); });
     addLaneLabel("Apps & Services", maxW + 190, -70);
     fitWithFloor(40, 0.65);
-    legendEl.innerHTML = "<b>Architecture view.</b> UI → components → features → API &amp; jobs → data access → tables → functions, top to bottom; apps &amp; external services on the rail. Dashed = subscribes; a component used by many shows the count and lights its edges on hover. Features (◆) are curated vertical slices, not an architectural tier — the Area coupling view shows the feature-first projection. Hover or tap a node to light its connections; high-traffic nodes show edges only then. <span class=\"authdot\"></span>&nbsp;= auth exception — ordinary session auth is stated per endpoint, not drawn.";
+    legendEl.innerHTML = "<b>Architecture view.</b> UI → components → features → API &amp; background tasks → data access → tables → functions, top to bottom; apps &amp; external services on the rail. Dashed = subscribes; a component used by many shows the count and lights its edges on hover. Features (◆) are curated vertical slices, not an architectural tier — the Area coupling view shows the feature-first projection. Hover or tap a node to light its connections; high-traffic nodes show edges only then. <span class=\"authdot\"></span>&nbsp;= auth exception — ordinary session auth is stated per endpoint, not drawn.";
     legendEl.hidden = false;
   }
 

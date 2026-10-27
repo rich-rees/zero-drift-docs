@@ -2,11 +2,21 @@
   "aliases": {
     "services": "external-services"
   },
+  "retired": {
+    "jobs": "background work is read by one adapter per platform file since 0.9 (decision 0038) \u2014 list the ones your repo uses: background-vercel, background-railway, background-cloudflare, background-procfile, background-compose, background-pg-cron, background-bullmq, background-inngest, background-trigger-dev, background-sqs, background-github-actions (its opt-in), and background-declared for tasks declared by hand (jobs.entries); \"upgrade ZDD\" rewrites this for you"
+  },
   "bundles": {
     "nextjs-supabase": {
-      "extractors": ["supabase", "supabase-js", "nextjs"],
+      "extractors": [
+        "supabase",
+        "supabase-js",
+        "nextjs"
+      ],
       "options": {
-        "supabase": { "migrationNamespaces": [], "externalBuckets": [] }
+        "supabase": {
+          "migrationNamespaces": [],
+          "externalBuckets": []
+        }
       },
       "rest": "nextjs"
     }

@@ -32,7 +32,7 @@ export const CLAIMABLE_KINDS = ["route", "table", "function", "surface"];
 // into its page.
 // `service` is the pre-2.3 kind of `external-service`, still emitted while a
 // config says `services` (2.3.0, pick 3, CR-302).
-export const OPT_IN_CLAIMABLE_KINDS = ["component", "job", "external-service", "service"];
+export const OPT_IN_CLAIMABLE_KINDS = ["component", "background-task", "external-service", "service"];
 const claimable = (record) => CLAIMABLE_KINDS.includes(record.kind) || (OPT_IN_CLAIMABLE_KINDS.includes(record.kind) && (record.kind !== "component" || record.facts?.shared === true));
 const MAX_DEPTH = 4; // metadataDir/<kind>/<file>.json — anything deeper is not derive's
 const MAX_ENTRIES = 20_000;
@@ -92,7 +92,7 @@ function walkJson(dir, out = [], state = { depth: 0, entries: 0 }) {
 
 // The claimable records under metadataDir, each with the node id a map link
 // resolves to (bundle-relative path minus extension), sorted by id.
-export function claimableRecords(metadataDir, bundleDir, skipped, unplaced, unknownJobs) {
+export function claimableRecords(metadataDir, bundleDir, skipped, unplaced, unknownTasks) {
   const out = [];
   const why = (p) => {
     try {
@@ -123,10 +123,10 @@ export function claimableRecords(metadataDir, bundleDir, skipped, unplaced, unkn
     if (unplaced && Array.isArray(record.facts?.unplaced) && record.facts.unplaced.length) {
       unplaced.push({ id: String(record.id ?? nodeId), file, calls: record.facts.unplaced.map(String) });
     }
-    // A job whose mode the manifests do not state (decision 0020): lint asks
-    // for the platform's committed manifest or a `modes` entry rather than
-    // guessing.
-    if (unknownJobs && record.kind === "job" && record.facts?.mode === "unknown") unknownJobs.push({ id: String(record.id ?? nodeId), file, manifest: String(record.facts.manifest ?? "") });
+    // A background task whose mode the manifests do not state (decision
+    // 0020): lint asks for the platform's committed manifest or a `modes`
+    // entry on the reader that read it (CR-010), rather than guessing.
+    if (unknownTasks && record.kind === "background-task" && record.facts?.mode === "unknown") unknownTasks.push({ id: String(record.id ?? nodeId), title: String(record.title ?? ""), file, manifest: String(record.facts.manifest ?? ""), reader: typeof record.facts.reader === "string" ? record.facts.reader : null });
     if (!claimable(record)) continue;
     out.push({ kind: record.kind, id: String(record.id ?? nodeId), title: String(record.title ?? record.id ?? nodeId), nodeId, file, optIn: OPT_IN_CLAIMABLE_KINDS.includes(record.kind) });
   }
@@ -173,10 +173,10 @@ export function unclaimedRecords({ metadataDir, mapDir, bundleDir }) {
   const raw = [];
   const claimed = featureClaims(mapDir, bundleDir, raw);
   const unplaced = [];
-  const unknownJobs = [];
-  const records = claimableRecords(metadataDir, bundleDir, raw, unplaced, unknownJobs);
+  const unknownTasks = [];
+  const records = claimableRecords(metadataDir, bundleDir, raw, unplaced, unknownTasks);
   unplaced.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-  unknownJobs.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  unknownTasks.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   const skipped = raw
     .map((s) => {
       const inMetadata = !relative(metadataDir, s.path).startsWith("..");
@@ -186,7 +186,7 @@ export function unclaimedRecords({ metadataDir, mapDir, bundleDir }) {
   return {
     skipped,
     unplaced,
-    unknownJobs,
+    unknownTasks,
     total: records.length,
     records,
     unclaimed: records.filter((r) => !claimed.has(r.nodeId)),

@@ -8,6 +8,8 @@
 //   aliases   a retired adapter name -> its current name, accepted for one
 //             release (the engine prints the new name; "upgrade ZDD"
 //             rewrites the config)
+//   retired   a removed adapter name -> what replaced it, printed when a
+//             config still selects it (one adapter split into several)
 //   bundles   a pre-1.0 `adapter` value -> the adapters it was a bundle of:
 //             `extractors`, `options` (adapter -> { optionKey: default }) for
 //             the old option keys an adapter owns, and `rest`, the adapter
@@ -74,6 +76,7 @@ export function readCatalogue(dir) {
   }
   const aliases = data.aliases ?? {};
   const bundles = data.bundles ?? {};
+  const retired = data.retired ?? {};
   const known = (n, where) => {
     if (typeof n !== "string" || !names.has(n)) broken(`${where} names '${n}', which is not an adapter in the catalogue`);
   };
@@ -88,7 +91,11 @@ export function readCatalogue(dir) {
     for (const n of Object.keys(b.options ?? {})) known(n, `bundle '${legacy}' options`);
     if (b.rest !== undefined) known(b.rest, `bundle '${legacy}' rest`);
   }
-  return { names, aliases, bundles };
+  for (const [old, why] of Object.entries(retired)) {
+    if (!NAME_RE.test(old) || names.has(old) || Object.hasOwn(aliases, old)) broken(`retired name '${old}' is not a free selectable name`);
+    if (typeof why !== "string" || !why.trim()) broken(`retired name '${old}' says nothing about what replaced it`);
+  }
+  return { names, aliases, bundles, retired };
 }
 
 // A bundle's old option object, split to the adapters that own its keys.

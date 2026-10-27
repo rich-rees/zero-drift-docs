@@ -24,6 +24,7 @@ import { join, dirname, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { loadConfig, resolveExtractors } from "./lib/config.mjs";
 import { resolveRefs } from "./lib/resolve-refs.mjs";
+import { mergeBackgroundTasks } from "./lib/background-tasks.mjs";
 import { insideRepo } from "./lib/paths.mjs";
 import { makeExtractorIo } from "./lib/extractor-io.mjs";
 import { gitIgnoredPredicate } from "./lib/ignored.mjs";
@@ -169,7 +170,7 @@ async function loadExtractor(name, repoRoot, config) {
     );
   }
   const local = localExtractors(repoRoot, localDir);
-  const { names, aliases } = catalogue();
+  const { names, aliases, retired } = catalogue();
   // A Map, and hasOwn on the aliases: a local extractor called `constructor`
   // must not hit Object.prototype (CR-022).
   if (names.has(name)) {
@@ -180,6 +181,7 @@ async function loadExtractor(name, repoRoot, config) {
   // a retired name never falls through to a local one (CR-002).
   if (Object.hasOwn(aliases, name)) return import(pathToFileURL(names.get(aliases[name])).href);
   if (local.has(name)) return import(pathToFileURL(local.get(name)).href);
+  if (Object.hasOwn(retired, name)) fail(`Extractor '${name}' was retired: ${retired[name]}`);
   const known = [...names.keys(), ...Object.keys(aliases)].sort().join(", ");
   const localList = localDir ? `; local ${localDir}: ${[...local.keys()].join(", ") || "(none)"}` : "";
   fail(`Unknown extractor '${name}' (known: ${known}${localList})`);
@@ -301,6 +303,11 @@ export async function deriveRecords({ repoRoot, config }) {
       factsOrder[kind] = [...new Set([...(factsOrder[kind] ?? []), ...order])];
     }
   }
+  // One task seen by two background readers is one record (decision 0038).
+  const bg = mergeBackgroundTasks(records);
+  records = bg.records;
+  diagnostics.push(...bg.diagnostics.map((d) => `[background] ${d}`));
+  warnings.push(...bg.warnings);
   validateEdgeShapes(records);
   const resolved = resolveRefs(records);
   records = resolved.records;

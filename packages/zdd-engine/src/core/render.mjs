@@ -57,7 +57,7 @@ const KIND_DISPLAY = {
   function: "Database Function",
   bucket: "Storage Bucket",
   module: "Module",
-  job: "Job",
+  "background-task": "Background Task", // `job` before 0.9 (decision 0038)
   component: "UI Component",
   "data-access": "Data Access",
   "external-service": "External Service",
@@ -693,7 +693,7 @@ function buildAgentIndex(concepts, features, adrs, { levels = 1, areaDir = "", r
   // clicking — each with its trigger and what it hits. Repo housekeeping
   // (GitHub Actions schedules, an opt-in) is listed apart: it is the repo's
   // upkeep, not the app.
-  const jobs = concepts.filter((c) => c.type === "Job").sort((a, b) => (a.title < b.title ? -1 : 1));
+  const jobs = concepts.filter((c) => c.type === "Background Task").sort((a, b) => (a.title < b.title ? -1 : 1));
   const jobRecords = new Map(jobs.map((c) => [c.id, (recordOf ? recordOf(c) : null) ?? {}]));
   const describeJob = (c) => {
     const f = jobRecords.get(c.id)?.facts ?? {};
