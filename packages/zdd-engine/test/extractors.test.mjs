@@ -282,15 +282,40 @@ test("localExtractorDir: a repo-local extractor is selected by name; a path stri
   rmSync(repo, { recursive: true, force: true });
 });
 
-test("unknown extractor name lists the known names: registry + local dir", () => {
+test("unknown extractor name lists the known names: every catalogue adapter and alias, plus the local dir (CR-011)", async () => {
+  const { catalogue } = await import("../src/core/lib/catalogue.mjs");
+  const { names, aliases } = catalogue();
   const repo = mkRepo(FIXTURE_GREENFIELD);
   mkdirSync(join(repo, "zdd", "extractors"), { recursive: true });
   writeFileSync(join(repo, "zdd", "extractors", "demo.mjs"), DEMO_EXTRACTOR);
   writeConfig(repo, { ...readConfig(repo), localExtractorDir: "zdd/extractors", extractors: ["rails"] });
   const err = runFail(repo, ["derive"]);
   assert.match(err, /Unknown extractor 'rails'/);
-  for (const name of ["supabase", "nextjs", "fastapi", "react-router", "generic", "demo"]) assert.ok(err.includes(name), `${name} listed: ${err}`);
+  const known = /\(known: ([^;)]*)/.exec(err)?.[1].split(", ") ?? [];
+  assert.deepEqual(known, [...names.keys(), ...Object.keys(aliases)].sort(), err);
+  assert.match(err, /local zdd\/extractors: demo/);
   rmSync(repo, { recursive: true, force: true });
+});
+
+test("CR-007: a local adapter may not reuse a catalogue name, in either form, and nothing is written", () => {
+  for (const form of ["file", "folder"]) {
+    const repo = mkRepo(FIXTURE_GREENFIELD);
+    const dir = join(repo, "zdd", "extractors");
+    if (form === "file") {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, "generic.mjs"), DEMO_EXTRACTOR);
+    } else {
+      mkdirSync(join(dir, "generic"), { recursive: true });
+      writeFileSync(join(dir, "generic", "index.mjs"), DEMO_EXTRACTOR);
+    }
+    writeConfig(repo, { ...readConfig(repo), localExtractorDir: "zdd/extractors", extractors: ["generic"] });
+    const before = existsSync(join(repo, "zdd", "metadata")) ? [...tree(join(repo, "zdd", "metadata")).keys()] : [];
+    const err = runFail(repo, ["derive"]);
+    assert.match(err, /Local extractor 'generic' shadows the built-in of the same name — rename it/, `${form}: ${err}`);
+    const after = existsSync(join(repo, "zdd", "metadata")) ? [...tree(join(repo, "zdd", "metadata")).keys()] : [];
+    assert.deepEqual(after, before, `${form}: no metadata written`);
+    rmSync(repo, { recursive: true, force: true });
+  }
 });
 
 test("determinism: derive + render on two fresh copies of every fixture, and twice on one copy, is byte-identical across zdd/", () => {
