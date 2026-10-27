@@ -460,7 +460,7 @@ test("pre-push hook with no engine CLI on PATH prints one line and exits 0", (t)
   assert.match(lines[0], /npx not found/);
 });
 
-test("pre-push hook runs derive --check, render --check, lint in order and stops at the first failure", (t) => {
+test("pre-push hook runs derive --check, render --check, lint, suite in order and stops at the first failure", (t) => {
   const sh = findSh();
   if (!sh) return t.skip("no sh available");
   const bin = join(scratch, "fakebin");
@@ -474,7 +474,7 @@ test("pre-push hook runs derive --check, render --check, lint in order and stops
   fake("never");
   rmSync(log, { force: true });
   assert.equal(run().status, 0);
-  assert.deepEqual(readFileSync(log, "utf8").trim().split("\n"), ["-y @rich-rees/zdd-engine@" + version() + " derive --check", "-y @rich-rees/zdd-engine@" + version() + " render --check", "-y @rich-rees/zdd-engine@" + version() + " lint"]);
+  assert.deepEqual(readFileSync(log, "utf8").trim().split("\n"), ["-y @rich-rees/zdd-engine@" + version() + " derive --check", "-y @rich-rees/zdd-engine@" + version() + " render --check", "-y @rich-rees/zdd-engine@" + version() + " lint", "-y @rich-rees/zdd-engine@" + version() + " suite"]); // the suite since 0.9 (CR-134)
   fake("render --check");
   rmSync(log);
   assert.notEqual(run().status, 0, "render failure propagates");

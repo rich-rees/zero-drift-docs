@@ -206,7 +206,8 @@ test("the suite's checks are numbered 1..n in order; commentMark matches a file 
   assert.deepEqual(SUITE_CHECKS.map((c) => c.n), SUITE_CHECKS.map((_, i) => i + 1));
   assert.equal(commentMark({ Procfile: "#", ".ts": "//", ".d.ts": "///" }, "a/Procfile"), "#");
   assert.equal(commentMark({ ".ts": "//", ".d.ts": "///" }, "a/x.d.ts"), "///");
-  assert.equal(commentMark({ ".ts": "//" }, "a/x.py"), null);
+  assert.equal(commentMark({ ".ts": "//" }, "a/x.py"), undefined); // not classified (CR-118); null means "no line comment"
+  assert.equal(commentMark({ ".json": null }, "a/x.json"), null);
   const m = maskJs('const a = "require(x)"; // import(y)\n/* process.env */ fetch(z);');
   assert.ok(!/require|import|process/.test(m));
   assert.match(m, /fetch\(z\)/);

@@ -187,14 +187,14 @@ test("mature codebase: an Express API, a React Router web app, a Python archiver
   assert.deepEqual(grepArtifacts(repo, "planted"), []);
 });
 
-test("hosted off GitHub: no workflow is written, the three commands are printed, the pre-push hook is the fallback; a merge conflict in a generated file: regenerate mid-merge, commit, render once more, the check passes", () => {
+test("hosted off GitHub: no workflow is written, the four commands are printed, the pre-push hook is the fallback; a merge conflict in a generated file: regenerate mid-merge, commit, render once more, the check passes", () => {
   const repo = scenario("young-app", { remote: "https://gitlab.com/example/app.git" });
   const json = bootstrapJson(repo, ["apply", `--answers=${answers("gl", {})}`]);
   assert.ok(!json.wrote.includes(".github/workflows/zdd.yml"));
   assert.ok(json.wrote.includes(".githooks/pre-push"));
   assert.equal(json.optIns.ci, false);
   const text = bootstrap(repo, ["apply", `--answers=${answers("gl2", {})}`]);
-  assert.match(text, /The merge gate for your own pipeline is three commands/);
+  assert.match(text, /The merge gate for your own pipeline is four commands/); // the suite since 0.9 (CR-140)
   assert.equal(engine(repo, ["derive"]).status, 0);
   assert.equal(engine(repo, ["render"]).status, 0);
   commit(repo, "adopt ZDD");
