@@ -18,6 +18,7 @@
 // inside a docstring is read as a call (accepted, and visible in the diff).
 
 import { repoRelative } from "../../core/lib/paths.mjs";
+import { MAX_CLOSED } from "../../core/lib/data-access.mjs";
 import { DEFAULT_EXCLUDE_DIRS, closeOver, dataAccessRecord, defs, pythonFiles } from "../python/source.mjs";
 
 export const FACTS_KEY_ORDER = {
@@ -33,14 +34,22 @@ export function scanCalls(body) {
 
 export function derive({ options, io }) {
   const diagnostics = [];
+  const warnings = [];
   const { roots = ["."], excludeDirs = DEFAULT_EXCLUDE_DIRS } = options;
   if (!Array.isArray(roots)) throw new Error(`supabase-py: 'roots' must be an array of repo-relative paths`);
   if (!Array.isArray(excludeDirs)) throw new Error(`supabase-py: 'excludeDirs' must be an array of directory names`);
-  const files = pythonFiles(io, roots.map((r) => repoRelative(r, "supabase-py.roots")), excludeDirs, diagnostics);
+  const files = pythonFiles(io, roots.map((r) => repoRelative(r, "supabase-py.roots")), excludeDirs, diagnostics, warnings);
   const records = [];
+  let overBudget = false;
   for (const rel of files) {
     const read = io.read(rel);
     if (!read.ok) {
+      if (read.code === "over-budget") {
+        // The total read budget ran out: the rest of the files are unread (CR-057).
+        if (!overBudget) warnings.push(`${rel}: the read budget ran out — this file and those after it were not read, so their data access is missing; narrow this adapter's roots`);
+        overBudget = true;
+        continue;
+      }
       if (read.code !== "missing" && read.code !== "ignored") diagnostics.push(`${rel}: ${read.reason} — skipped`);
       continue;
     }
@@ -48,12 +57,19 @@ export function derive({ options, io }) {
     // uses (a helper it calls, or passes as a callback): the same rule the
     // route side follows, so a handler's own record carries its helpers'.
     const fns = defs(read.text);
-    const closed = closeOver(fns, (fn) => scanCalls(fn.body));
+    // Past the closure's bound (a pathological file), each function keeps
+    // its own calls only, and derive says so on every run (CR-050).
+    const closedOrOwn = (closed, list, own) => {
+      if (closed) return closed;
+      warnings.push(`${rel}: too many same-file calls to follow (over ${MAX_CLOSED} function-to-table links) — each function's own data access is kept, its helpers' are not`);
+      return new Map(list.map((e) => [e.name, own(e)]));
+    };
+    const closed = closedOrOwn(closeOver(fns, (fn) => scanCalls(fn.body)), fns, (fn) => scanCalls(fn.body));
     for (const fn of fns) {
       const refs = closed.get(fn.name);
       if (!refs.size) continue;
       records.push(dataAccessRecord("supabase-py", rel, fn, refs));
     }
   }
-  return { records, diagnostics };
+  return { records, diagnostics, warnings };
 }

@@ -11,7 +11,13 @@ import { slugify } from "./slug.mjs";
 // once. Strongly connected functions (mutual recursion) share one result
 // (Tarjan's algorithm, iterative), so a long chain or a cycle stays linear in
 // the number of functions plus references.
-export function closeOver(entries, own) {
+//
+// Bounded (CR-050): the time is linear, but the sets are not — a chain of N
+// functions each with its own table holds N²/2 entries in all. Past
+// MAX_CLOSED entries across the file the closure stops and returns null; the
+// caller keeps each function's own refs and says so.
+export const MAX_CLOSED = 1 << 20;
+export function closeOver(entries, own, { max = MAX_CLOSED } = {}) {
   const byName = new Map(entries.map((e) => [e.name, e]));
   const succOf = (n) => [...byName.get(n).refers].filter((r) => byName.has(r));
   const index = new Map();
@@ -20,6 +26,7 @@ export function closeOver(entries, own) {
   const stack = [];
   const result = new Map();
   let next = 0;
+  let total = 0;
   const visit = (n) => {
     index.set(n, next);
     low.set(n, next++);
@@ -64,6 +71,8 @@ export function closeOver(entries, own) {
           for (const x of result.get(r)) set.add(x);
         }
       }
+      total += set.size;
+      if (total > max) return null;
       for (const m of members) result.set(m, set);
     }
   }
@@ -76,7 +85,9 @@ export function closeOver(entries, own) {
 // function mint two records; `?code:<file>#<fn>` reaches both (decision 0037).
 // A source path may hold characters a metadata filename may not (a space, a
 // `#`): each is written `~<hex>~`, so a valid path never aborts derive (CR-031).
-const FILENAME_SAFE = /[^A-Za-z0-9._~()[\]-]/g;
+// `~` itself is escaped too, so the encoding is one-to-one: `a b.ts` and
+// `a~20~b.ts` never share a filename (CR-058).
+const FILENAME_SAFE = /[^A-Za-z0-9._()[\]-]/g;
 // `fn` is { name, docstring }: the function's name as `?code:` names it, and
 // its description (a docstring, or the comment above it).
 export function dataAccessRecord(adapter, rel, fn, refs, edges) {

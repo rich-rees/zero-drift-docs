@@ -372,7 +372,7 @@ export function imports(text) {
 
 // ---- files and modules ----
 
-export function pythonFiles(io, roots, excludeDirs, diagnostics) {
+export function pythonFiles(io, roots, excludeDirs, diagnostics, warnings = diagnostics) {
   const out = new Set();
   for (const root of roots) {
     const r = io.read(root);
@@ -397,7 +397,9 @@ export function pythonFiles(io, roots, excludeDirs, diagnostics) {
     }, { enter: (_rel, name) => name !== ".git" && !excludeDirs.includes(name) });
     if (!walked.exists) diagnostics.push(`${root}: not a directory inside the repo — skipped`);
     for (const s of walked.skipped) diagnostics.push(`${s.path}: ${s.reason} — skipped`);
-    if (walked.truncated) diagnostics.push(`${root}: the walk's budget ran out — some files were not read`);
+    // A partial walk is a partial inventory: said on every derive, never a
+    // quiet diagnostic (CR-057).
+    if (walked.truncated) warnings.push(`${root}: the walk's budget ran out — some files were not read, so their data access is missing; narrow this adapter's roots`);
   }
   return [...out].sort();
 }

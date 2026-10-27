@@ -306,7 +306,7 @@ export function derive({ repoRoot, options, io }) {
     realRoot = realpathSync(repoRoot);
   } catch {
     diagnostics.push("repo root unreadable — nothing to inventory");
-    return { records: [], diagnostics };
+    return { records: [], diagnostics, warnings };
   }
 
   // A read is a regular file physically inside the repo (no symlink on any
@@ -383,7 +383,7 @@ export function derive({ repoRoot, options, io }) {
         st = lstatSync(cur);
       } catch {
         diagnostics.push(`${routesFile} not found — nothing to inventory`);
-        return { records: [], diagnostics };
+        return { records: [], diagnostics, warnings };
       }
       if (st.isSymbolicLink() || !st.isDirectory()) notRegular();
     }
@@ -396,7 +396,7 @@ export function derive({ repoRoot, options, io }) {
     if (atPath) notRegular();
     if (dir === ".") {
       diagnostics.push(`${routesFile} not found — nothing to inventory`); // the root always exists: greenfield-shaped (decision 0013)
-      return { records: [], diagnostics };
+      return { records: [], diagnostics, warnings };
     }
     throw new Error(`react-router: routesFile '${routesFile}' does not exist, but its folder '${dir}' does — a renamed or misspelt routes file would drop every surface record; fix extractorOptions.react-router.routesFile`);
   }

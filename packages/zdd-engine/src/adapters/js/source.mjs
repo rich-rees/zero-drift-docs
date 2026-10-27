@@ -380,8 +380,13 @@ export function localImports(text) {
 //     which only ever adds refs — the "might touch" side (decision 0011).
 // It runs to the next start. Template bodies are blanked on the mask, so a
 // line inside one never starts a statement. Each statement is classified:
-//   decl      a function / class / const / let / var / enum, by local name;
-//             `export default …` declares the local name "default"
+//   decl      a function / class / const / let / var / enum, by local name
+//             — every name a `const a = …, b = …` or a destructuring
+//             (`const { a, b: c } = …`) binds (CR-061); `export default …`
+//             declares the local name "default"
+//   type      an erased declaration that still binds a name an import may
+//             ask for: `declare …` (ambient) and `export default interface`
+//             (CR-046) — no code runs, so it mentions nothing and is no unit
 //   exports   `export { a as b }` — exported name → local name
 //   reexport  `export { a } from "…"` / `export * from "…"` — names (or *)
 //             another module declares
@@ -422,9 +427,11 @@ export function topLevel(text) {
   const exportsMap = new Map(); // exported name -> local name
   const reexported = new Set();
   let reexportAll = false;
+  const names = []; // statement index -> the names it declares, in order
   const declare = (name, k) => {
     if (!decls.has(name)) decls.set(name, []);
     decls.get(name).push(k);
+    (names[k] ??= []).push(name);
   };
   const exportList = (body, fn) => {
     for (const part of body.split(",")) {
@@ -434,14 +441,64 @@ export function topLevel(text) {
       fn(local, exported ?? local);
     }
   };
-  const DECL = new RegExp(`^(export\\s+)?(?:declare\\s+)?(?:(?:async\\s+)?function\\s*\\*?\\s*|class\\s+|(?:const\\s+)?enum\\s+|(?:const|let|var)\\s+)(${ID})`, "u");
-  const DEFAULT = new RegExp(`^export\\s+default\\s+(?:async\\s+)?(?:function\\s*\\*?|class)\\s*(${ID})?`, "u");
+  const DECL = new RegExp(`^(export\\s+)?(declare\\s+)?(?:(?:async\\s+)?function\\s*\\*?\\s*|(?:abstract\\s+)?class\\s+|(?:const\\s+)?enum\\s+|(?:const|let|var)\\s+)(${ID})?`, "u");
+  const DEFAULT = new RegExp(`^export\\s+default\\s+(?:async\\s+)?(?:function\\s*\\*?|(?:abstract\\s+)?class)\\s*(${ID})?`, "u");
+  const NAME = new RegExp(`^${ID}`, "u");
+  const IDS = new RegExp(`${ID}`, "gu");
+  // The names one `const` / `let` / `var` statement binds, on the mask: each
+  // declarator split at the commas outside brackets, a plain name (followed
+  // by `:`, `=`, `!` or the end — so `Map<string, number>`'s `number` is no
+  // declarator) or a destructuring pattern's bound names (a key before `:`
+  // and a default value after `=` bind nothing).
+  const bindings = (from, to) => {
+    const names = [];
+    let d = 0;
+    let piece = from;
+    const take = (a, b) => {
+      const t = mask.slice(a, b).trim();
+      const plain = NAME.exec(t);
+      if (plain && /^\s*(?:[:=!]|$)/.test(t.slice(plain[0].length))) names.push(plain[0]);
+      else if (t[0] === "{" || t[0] === "[") {
+        const close = matchBracket(t, 0);
+        // Blank each default value (`= f(x, y)`) to the next comma at the
+        // pattern's own depth, so a name inside it is never bound.
+        let inner = "";
+        let dd = 0;
+        let inDefault = false;
+        for (const c of t.slice(1, close - 1)) {
+          if (c === "(" || c === "[" || c === "{") dd++;
+          else if (c === ")" || c === "]" || c === "}") dd--;
+          if (dd === 0 && c === "=") inDefault = true;
+          else if (dd === 0 && c === ",") inDefault = false;
+          inner += inDefault ? " " : c;
+        }
+        for (const id of inner.matchAll(IDS)) if (!/^\s*:/.test(inner.slice(id.index + id[0].length))) names.push(id[0]);
+      }
+    };
+    for (let i = from; i < to; i++) {
+      const ch = mask[i];
+      if (ch === "(" || ch === "[" || ch === "{") d++;
+      else if (ch === ")" || ch === "]" || ch === "}") d--;
+      else if (d === 0 && ch === ";") break;
+      else if (d === 0 && ch === ",") {
+        take(piece, i);
+        piece = i + 1;
+      }
+    }
+    take(piece, to);
+    return names;
+  };
   starts.forEach((start, k) => {
     const end = k + 1 < starts.length ? starts[k + 1] : mask.length;
     const s = code.slice(start, end).trimStart();
     let kind = "code";
     let m;
     if (/^import\b/.test(s) || /^(?:export\s+)?(?:declare\s+)?(?:type|interface)\b/.test(s)) kind = "skip";
+    else if ((m = /^export\s+default\s+interface\b/.exec(s))) {
+      kind = "type";
+      declare("default", k);
+      exportsMap.set("default", "default");
+    }
     else if (/^export\s*\*/.test(s)) {
       kind = "skip";
       reexportAll = true;
@@ -456,18 +513,24 @@ export function topLevel(text) {
       declare("default", k);
       exportsMap.set("default", "default");
       if (m?.[1]) declare(m[1], k);
-    } else if ((m = DECL.exec(s))) {
-      kind = "decl";
-      declare(m[2], k);
-      if (m[1]) exportsMap.set(m[2], m[2]);
+    } else if ((m = DECL.exec(s)) && (m[3] || /^(?:export\s+)?(?:declare\s+)?(?:const|let|var)\s*[{[]/.test(s))) {
+      kind = m[2] ? "type" : "decl";
+      const lead = start + (code.slice(start, end).length - s.length);
+      const kw = /^(?:export\s+)?(?:declare\s+)?(const|let|var)\s+/.exec(s);
+      const names = kw && !/^(?:export\s+)?(?:declare\s+)?const\s+enum\b/.test(s) ? bindings(lead + kw[0].length, end) : [m[3]];
+      for (const name of names.length ? names : [m[3]].filter(Boolean)) {
+        declare(name, k);
+        if (m[1]) exportsMap.set(name, name);
+      }
     }
-    statements.push({ start, end, kind });
+    statements.push({ start, end, kind, names: names[k] ?? [] });
   });
   // The top-level names each statement mentions (on the mask: never in a
   // comment or a string, never as a property after a dot).
   const mentionRe = new RegExp(`(?<![.\\p{ID_Continue}$])${ID}`, "gu");
   for (const st of statements) {
     st.mentions = new Set();
+    if (st.kind === "type") continue; // erased: it runs nothing, so it reaches nothing
     for (const id of mask.slice(st.start, st.end).matchAll(mentionRe)) if (decls.has(id[0])) st.mentions.add(id[0]);
   }
   return { text, mask, statements, decls, exportsMap, reexported, reexportAll };
@@ -554,11 +617,9 @@ export function scanApiCalls(text, context = text) {
 // unit (null). `?code:<file>#*` names every unit in the file.
 export const MODULE_UNIT = "<module>";
 export function codeUnits(mod) {
-  const unitOf = mod.statements.map((s) => (s.kind === "code" ? MODULE_UNIT : null));
-  for (const [name, ks] of mod.decls) {
-    for (const k of ks) if (mod.statements[k].kind === "decl" && (unitOf[k] === null || unitOf[k] === "default")) unitOf[k] = name;
-  }
-  return unitOf;
+  // A declaration's unit is the first name it declares itself, "default"
+  // only when it declares no other (`export default function Foo` is Foo).
+  return mod.statements.map((s) => (s.kind === "code" ? MODULE_UNIT : s.kind === "decl" ? (s.names.find((n) => n !== "default") ?? s.names[0] ?? null) : null));
 }
 
 // ---------------------------------------------------------------------------
@@ -569,7 +630,7 @@ export const DEFAULT_EXCLUDE_DIRS = ["node_modules", ".git", ".next", "dist", "b
 // Tests reference tables wholesale for setup and assertions: those edges
 // describe the harness, not the app's data flow (the nextjs refs rule).
 export const DEFAULT_EXCLUDE_SUFFIXES = [".test.ts", ".test.tsx", ".test.js", ".test.jsx", ".spec.ts", ".spec.tsx", ".spec.js", ".spec.jsx", ".d.ts"];
-export function jsFiles(io, roots, { extensions = DEFAULT_EXTENSIONS, excludeDirs = DEFAULT_EXCLUDE_DIRS, excludeSuffixes = DEFAULT_EXCLUDE_SUFFIXES } = {}, diagnostics = []) {
+export function jsFiles(io, roots, { extensions = DEFAULT_EXTENSIONS, excludeDirs = DEFAULT_EXCLUDE_DIRS, excludeSuffixes = DEFAULT_EXCLUDE_SUFFIXES } = {}, diagnostics = [], warnings = diagnostics) {
   const out = new Set();
   const wanted = (name) => extensions.some((e) => name.endsWith(e)) && !excludeSuffixes.some((s) => name.endsWith(s));
   for (const root of roots) {
@@ -595,7 +656,9 @@ export function jsFiles(io, roots, { extensions = DEFAULT_EXTENSIONS, excludeDir
     }, { enter: (_rel, name) => name !== ".git" && !excludeDirs.includes(name) });
     if (!walked.exists) diagnostics.push(`${root}: not a directory inside the repo — skipped`);
     for (const s of walked.skipped) diagnostics.push(`${s.path}: ${s.reason} — skipped`);
-    if (walked.truncated) diagnostics.push(`${root}: the walk's budget ran out — some files were not read`);
+    // A partial walk is a partial inventory: said on every derive, never a
+    // quiet diagnostic (CR-057).
+    if (walked.truncated) warnings.push(`${root}: the walk's budget ran out — some files were not read, so their data access is missing; narrow this adapter's roots`);
   }
   return [...out].sort();
 }

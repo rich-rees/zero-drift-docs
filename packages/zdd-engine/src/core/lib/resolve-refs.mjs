@@ -50,7 +50,8 @@
 // referrer and the record itself goes, so inline data access reads exactly
 // as it did before data access was its own adapter. One that some referrer
 // reaches across files (a repository function) stays in the graph as its
-// own node, linked from each caller. One hop: a data-access record's own
+// own node, linked from each caller; one that no record reaches explains no
+// link and is dropped (D-1). One hop: a data-access record's own
 // `?code:` refs are not followed. Then requireRefs pruning runs as before.
 //
 // <name> is the id's text after its `kind:` prefix, or after the namespace
@@ -140,7 +141,7 @@ const compareFit = (a, b) => a[0] - b[0] || a[1] - b[1];
 export function resolveRefs(records) {
   const diagnostics = [];
   const warnings = [];
-  let codeRefs = 0;
+  const codeRefs = new Set(); // record id + ref: one ?code: ref counts once, in refs and an edge alike (CR-048)
   // name -> [ids], both the short name and the namespace-qualified text.
   const index = { table: new Map(), bucket: new Map(), function: new Map() };
   const add = (map, key, id) => {
@@ -234,7 +235,7 @@ export function resolveRefs(records) {
         return hits ? [...hits].sort() : drop(`surface at '${target}' matches no known surface`);
       }
       case "code":
-        codeRefs++;
+        codeRefs.add(`${record.id}\0${ref}`);
         return codeIndex.get(target) ?? null;
       case "at": {
         const hits = (recordsByFile.get(target) ?? []).filter((id) => id !== record.id);
@@ -282,8 +283,17 @@ export function resolveRefs(records) {
     }
     return resolved;
   };
+  // A data-access record's UNTYPED refs, resolved on their own (CR-056):
+  // `.from("jobs")` and a subscription to `jobs` resolve to one id, and the
+  // verb rule must still see the read. Its typed refs resolve with its edges.
+  const untypedOf = new Map();
   for (const r of records) {
-    const resolved = resolveList(r.refs, r);
+    let resolved;
+    if (r.kind === "data-access") {
+      const typed = new Set(Object.values(r.facts?.edges ?? {}).flat());
+      resolved = resolveList(r.refs.filter((x) => !typed.has(x)), r);
+      untypedOf.set(r.id, [...resolved]);
+    } else resolved = resolveList(r.refs, r);
     // Typed edges (decision 0016): `facts.edges` maps a verb to the refs it
     // covers, resolved the same way; every id it names is also a plain ref,
     // so every consumer of `refs` keeps working. Verbs and ids come out
@@ -305,8 +315,8 @@ export function resolveRefs(records) {
   // A schema, routes that name the code they run, and no adapter that reads
   // how code reaches the database: every route -> table edge is silently gone.
   // Say so on every derive (CR-013). An app with no tables is not warned.
-  if (codeRefs && !dataAccess.size && index.table.size) {
-    warnings.push(`${codeRefs} ref${codeRefs === 1 ? "" : "s"} name the code a route or screen runs (?code:) and the schema has tables, but no data-access adapter is configured, so no route links to a table — add the adapter for your database layer to "extractors" (see the catalogue in README, "What ZDD reads"), or your own`);
+  if (codeRefs.size && !dataAccess.size && index.table.size) {
+    warnings.push(`${codeRefs.size} ref${codeRefs.size === 1 ? " names" : "s name"} the code a route or screen runs (?code:) and the schema has tables, but no data-access adapter is configured, so no route links to a table — add the adapter for your database layer to "extractors" (see the catalogue in README, "What ZDD reads"), or your own`);
   }
   // Fold and absorb data access (decision 0037; see the head of this file).
   // The data-access records' own refs are final here: every record was
@@ -326,8 +336,7 @@ export function resolveRefs(records) {
         // The verbs the referrer itself gives the link (`reads`, …), and the
         // refs the data-access record leaves untyped: those take the verbs.
         const verbs = Object.keys(r.facts?.edges ?? {}).filter((v) => r.facts.edges[v].includes(id));
-        const typed = new Set(Object.values(dEdges).flat());
-        const untyped = d.refs.filter((t) => !typed.has(t));
+        const untyped = untypedOf.get(id) ?? [];
         const carried = Object.entries(dEdges).concat(verbs.map((v) => [v, untyped]));
         const edges = { ...(r.facts.edges ?? {}) };
         const added = new Set();
@@ -344,7 +353,10 @@ export function resolveRefs(records) {
       }
       r.refs = [...refs].sort();
     }
-    const absorbed = new Set();
+    // Absorbed: every referrer holds the record's file. Unreached: no record
+    // reaches it at all — a data-access record exists to explain a link, so
+    // one that explains none is dropped (D-1, slice 2b dry runs).
+    const absorbed = new Set([...dataAccess.keys()].filter((id) => !referrers.has(id)));
     for (const [id, from] of referrers) {
       const file = dataAccess.get(id).resource[0];
       if (from.every((r) => r.resource.includes(file))) absorbed.add(id);
