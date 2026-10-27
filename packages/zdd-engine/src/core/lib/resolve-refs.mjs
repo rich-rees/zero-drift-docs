@@ -31,6 +31,23 @@
 //                     a component names the screens that import it (2.1.0);
 //                     a file that is the element of several routes is all
 //                     of them, silently
+//   ?code:<file>#<fn> every data-access record for function <fn> in <file>
+//                     (decision 0037): how a route or screen names the code
+//                     it runs — its own handler, and the functions it calls —
+//                     without knowing how that code reaches the database. A
+//                     miss is silent: most functions touch no database
+//
+// Data access, after resolution (decision 0037). A `data-access` record is
+// one function that touches the database, minted by a data-access adapter
+// with refs to the tables, buckets and functions it reaches. A record that
+// reaches one through `?code:` takes its refs and typed edges as its own
+// (the route → table edge). A data-access record whose every referrer holds
+// its file — a handler's own body — is ABSORBED: its refs live on the
+// referrer and the record itself goes, so inline data access reads exactly
+// as it did before data access was its own adapter. One that some referrer
+// reaches across files (a repository function) stays in the graph as its
+// own node, linked from each caller. One hop: a data-access record's own
+// `?code:` refs are not followed. Then requireRefs pruning runs as before.
 //
 // <name> is the id's text after its `kind:` prefix, or after the namespace
 // slash when the id is namespaced (`table:db/things` -> `things`); a
@@ -160,6 +177,13 @@ export function resolveRefs(records) {
       surfacesByFile.get(f).push(r.id);
     }
   }
+  const dataAccess = new Map(records.filter((r) => r.kind === "data-access").map((r) => [r.id, r]));
+  // file#function -> the data-access ids for it: one per adapter that read it.
+  const codeIndex = new Map();
+  for (const d of dataAccess.values()) {
+    const key = `${d.resource[0]}#${d.facts?.function}`;
+    codeIndex.set(key, [...(codeIndex.get(key) ?? []), d.id].sort());
+  }
   const routes = records
     .filter((r) => r.kind === "route")
     .map((r) => ({ id: r.id, path: afterKind(r.id), match: makeRouteMatcher(afterKind(r.id)) }))
@@ -197,6 +221,8 @@ export function resolveRefs(records) {
         const hits = surfacesByFile.get(target);
         return hits ? [...hits].sort() : drop(`surface at '${target}' matches no known surface`);
       }
+      case "code":
+        return codeIndex.get(target) ?? null;
       case "at": {
         const hits = (recordsByFile.get(target) ?? []).filter((id) => id !== record.id);
         return hits.length ? [...hits].sort() : drop(`'${target}' is no record's resource`);
@@ -262,6 +288,50 @@ export function resolveRefs(records) {
     }
     r.refs = [...resolved].sort();
     if (r.facts.unplaced) r.facts.unplaced.sort();
+  }
+  // Fold and absorb data access (decision 0037; see the head of this file).
+  // The data-access records' own refs are final here: every record was
+  // resolved above, and a data-access record is never folded into another.
+  if (dataAccess.size) {
+    const referrers = new Map(); // data-access id -> records that reach it
+    for (const r of records) {
+      if (r.kind === "data-access") continue;
+      const reached = r.refs.filter((id) => dataAccess.has(id));
+      if (!reached.length) continue;
+      const refs = new Set(r.refs);
+      for (const id of reached) {
+        (referrers.get(id) ?? referrers.set(id, []).get(id)).push(r);
+        const d = dataAccess.get(id);
+        for (const t of d.refs) if (t !== r.id && !dataAccess.has(t)) refs.add(t);
+        const dEdges = d.facts?.edges;
+        if (!dEdges) continue;
+        const edges = (r.facts.edges ??= {});
+        for (const [verb, ids] of Object.entries(dEdges)) {
+          const keep = ids.filter((t) => t !== r.id && !dataAccess.has(t));
+          if (keep.length) edges[verb] = [...new Set([...(edges[verb] ?? []), ...keep])].sort();
+        }
+        if (Object.keys(edges).length) r.facts.edges = Object.fromEntries(Object.keys(edges).sort().map((v) => [v, edges[v]]));
+        else delete r.facts.edges;
+      }
+      r.refs = [...refs].sort();
+    }
+    const absorbed = new Set();
+    for (const [id, from] of referrers) {
+      const file = dataAccess.get(id).resource[0];
+      if (from.every((r) => r.resource.includes(file))) absorbed.add(id);
+    }
+    if (absorbed.size) {
+      for (const r of records) {
+        r.refs = r.refs.filter((id) => !absorbed.has(id));
+        if (!r.facts?.edges) continue;
+        for (const verb of Object.keys(r.facts.edges)) {
+          r.facts.edges[verb] = r.facts.edges[verb].filter((id) => !absorbed.has(id));
+          if (!r.facts.edges[verb].length) delete r.facts.edges[verb];
+        }
+        if (!Object.keys(r.facts.edges).length) delete r.facts.edges;
+      }
+      for (let i = records.length - 1; i >= 0; i--) if (absorbed.has(records[i].id)) records.splice(i, 1);
+    }
   }
   // Prune to a fixed point: dropping a record strips the refs that pointed
   // at it, which can empty another `requireRefs` record, which must then be

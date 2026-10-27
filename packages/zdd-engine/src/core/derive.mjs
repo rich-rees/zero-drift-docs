@@ -396,7 +396,8 @@ export async function run(args) {
     }
     const byKind = {};
     for (const r of records) byKind[r.kind] = (byKind[r.kind] ?? 0) + 1;
-    const summary = Object.entries(byKind).map(([k, n]) => `${n} ${k}s`).join(", ") || "nothing to inventory";
+    const plural = (k) => (k.endsWith("s") ? `${k}es` : `${k}s`); // a data-access -> data-accesses
+    const summary = Object.entries(byKind).map(([k, n]) => `${n} ${plural(k)}`).join(", ") || "nothing to inventory";
     console.log(`Wrote ${records.length} records (${summary}) -> ${metadataRel}`);
   }
 }

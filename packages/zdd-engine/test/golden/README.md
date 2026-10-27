@@ -32,7 +32,9 @@ them). The full-page human-index golden was regenerated again under ZDD-3
 (the stack-free core, decision 0036): the inlined viewer script lost its
 stack names from comments, and its fallback non-area tags (one project's
 `rls-disabled` / `media-project`) became none. No graph byte moved: the
-BUNDLE literal and every metadata golden are unchanged.
+BUNDLE literal and every metadata golden are unchanged. Slice 2 regenerated it once more for the viewer's new Data Access lane
+(decision 0037), again with no graph byte moved; the FastAPI goldens did not
+move at all, with `supabase-py` added to that fixture's config.
 
 ## Regenerating
 

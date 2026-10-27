@@ -59,6 +59,7 @@ const KIND_DISPLAY = {
   module: "Module",
   job: "Job",
   component: "UI Component",
+  "data-access": "Data Access",
   "external-service": "External Service",
   service: "External Service", // the pre-2.3 kind, while a config still says `services`
 };

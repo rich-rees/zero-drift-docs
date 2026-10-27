@@ -82,9 +82,12 @@
   // UI Components get a band of their own (they are many); Jobs share the
   // API band (they are few and sit at the same depth); External Services
   // stay on the rail, since their edges come from several bands (ZDD 2.1).
+  // Data Access (decision 0037) sits between the API and the tables it
+  // reaches: route -> repository function -> table reads top to bottom. An
+  // empty lane takes no space, so a map with none looks as it always did.
   const LANE_BY_TYPE = {
     "UI Surface": 0, "UI Component": 1, "Feature": 2, "API Endpoint": 3, "Job": 3,
-    "Table": 4, "Storage Bucket": 4, "Database Function": 5,
+    "Data Access": 4, "Table": 5, "Storage Bucket": 5, "Database Function": 6,
   };
   const own = (table, key) => (Object.hasOwn(table, key) ? table[key] : undefined); // CR-010: static tables, source keys
   const layerOf = (id) => own(LANE_BY_TYPE, nodeIndex[id]?.type) ?? "rail";
@@ -367,10 +370,10 @@
     .map((n) => ({ data: n.data, position: pos[n.data.id] }));
 
   // ---------- views ----------
-  const LANE_NAMES = ["UI Surfaces", "UI Components", "Features — curated slices", "API & Jobs", "Tables", "DB Functions"];
+  const LANE_NAMES = ["UI Surfaces", "UI Components", "Features — curated slices", "API & Jobs", "Data Access", "Tables", "DB Functions"];
 
   function viewLanes() {
-    const lanes = [[], [], [], [], [], []];
+    const lanes = LANE_NAMES.map(() => []);
     const rail = [];
     for (const n of bundle.nodes) {
       // Modules (lib/component files) would swamp the orientation view — the
@@ -453,8 +456,8 @@
     AREAS.forEach((area, ci) => {
       const ids = cols[area];
       ids.sort((a, b) => {
-        const la = layerOf(a) === "rail" ? 6 : layerOf(a);
-        const lb = layerOf(b) === "rail" ? 6 : layerOf(b);
+        const la = layerOf(a) === "rail" ? LANE_NAMES.length : layerOf(a);
+        const lb = layerOf(b) === "rail" ? LANE_NAMES.length : layerOf(b);
         return la - lb || a.localeCompare(b);
       });
       ids.forEach((id, i) => {
