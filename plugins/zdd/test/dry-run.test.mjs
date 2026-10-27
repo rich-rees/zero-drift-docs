@@ -97,7 +97,7 @@ test("greenfield: the install writes an empty zdd/ and the instructions, derive 
 test("young app (the video repo's shape): detection proposes Supabase, Next.js, components and external services with evidence; estimate says young with a backfill offer; the install, derive, render and lint pass; nothing from .claude/worktrees/ reaches a record", () => {
   const repo = scenario("young-app");
   const d = bootstrapJson(repo, ["detect"]);
-  assert.deepEqual(d.proposals.map((p) => p.name).sort(), ["components", "external-services", "nextjs", "supabase"], JSON.stringify(d.proposals.map((p) => p.name)));
+  assert.deepEqual(d.proposals.map((p) => p.name).sort(), ["components", "external-services", "nextjs", "supabase", "supabase-js"], JSON.stringify(d.proposals.map((p) => p.name)));
   assert.equal(d.host.kind, "github");
   const svc = d.proposals.find((p) => p.name === "external-services");
   assert.ok(svc.options.services.some((s) => s.name === "Resend"), JSON.stringify(svc.options));

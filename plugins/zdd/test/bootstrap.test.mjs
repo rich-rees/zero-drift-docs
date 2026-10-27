@@ -108,11 +108,11 @@ test("detect: Next.js App Router + middleware + migrations (the engine's Next.js
   const repo = fresh("detect-next", join(ENGINE_FIXTURES, "fixture"));
   rmSync(join(repo, "zdd"), { recursive: true });
   const json = JSON.parse(bootstrap(repo, ["detect", "--json"]));
-  assert.deepEqual(json.proposals.map((p) => p.name), ["supabase", "nextjs", "components"], "ZDD 2.1: the .tsx files under src propose the components extractor too");
-  assert.deepEqual(json.proposals[2].options, { roots: ["src"] });
+  assert.deepEqual(json.proposals.map((p) => p.name), ["supabase", "supabase-js", "nextjs", "components"], "ZDD 2.1: the .tsx files under src propose the components extractor too; 0.9: supabase-js reads their client calls");
+  assert.deepEqual(json.proposals.find((p) => p.name === "components").options, { roots: ["src"] });
   assert.deepEqual(json.proposals[0].options.migrationNamespaces, [{ name: "db", dir: "migrations" }]);
-  assert.deepEqual(json.proposals[1].options, { appDir: "src/app", apiPrefix: "/api", middlewarePath: "src/middleware.ts" });
-  assert.ok(json.proposals[1].evidence.some((e) => e.includes("App Router tree at `src/app`")));
+  assert.deepEqual(json.proposals.find((p) => p.name === "nextjs").options, { appDir: "src/app", apiPrefix: "/api", middlewarePath: "src/middleware.ts" });
+  assert.ok(json.proposals.find((p) => p.name === "nextjs").evidence.some((e) => e.includes("App Router tree at `src/app`")));
   // dependency-only Next.js: no tree yet, `next` in package.json
   const bare = fresh("detect-next-dep");
   writeFileSync(join(bare, "package.json"), JSON.stringify({ dependencies: { next: "15", expo: "52", "react-router-dom": "7" } }));
@@ -670,7 +670,7 @@ test("upgrade a v0.3.1 repo: adapter → extractors, every owned file rewritten 
   assert.ok(crossing.notes.some((n) => n.includes(`@rich-rees/zdd-engine@${PLUGIN_VERSION} lint`) && /blessing/.test(n)), "the lint note names the pinned command");
 
   const config = JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8"));
-  assert.deepEqual(config.extractors, ["supabase", "nextjs"]);
+  assert.deepEqual(config.extractors, ["supabase", "supabase-js", "nextjs"]);
   assert.equal(config.adapter, undefined);
   assert.equal(config.adapterOptions, undefined);
   assert.deepEqual(config.extractorOptions.supabase.migrationNamespaces, [{ name: "db", dir: "migrations" }]);

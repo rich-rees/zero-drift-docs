@@ -139,7 +139,7 @@ const MAX_PROBE_BYTES = 64 * 1024 * 1024;
 // this is the migration that makes the expansion unnecessary.
 const LEGACY_ADAPTERS = {
   "nextjs-supabase": {
-    extractors: ["supabase", "nextjs"],
+    extractors: ["supabase", "supabase-js", "nextjs"],
     split(options = {}) {
       const { migrationNamespaces = [], externalBuckets = [], ...nextjs } = options;
       return { supabase: { migrationNamespaces, externalBuckets }, nextjs };
@@ -508,23 +508,36 @@ export function detect(root) {
   if (mode === "existing" && !proposals.length) {
     proposals.push({ name: "generic", evidence: ["source present but no known convention found — map-only ZDD; scaffold an extractor for it with the `extractor` skill once bootstrap is done"], options: {} });
   }
+  // Supabase beside JS code that reaches it (decision 0037): the route and
+  // screen adapters name the code they run, and supabase-js reads how that
+  // code reaches the database — without it, no page links to a table.
+  const JS_READERS = ["nextjs", "react-router", "components", "expo-router"];
+  const jsReaders = JS_READERS.filter((n) => proposals.some((p) => p.name === n));
+  const at = proposals.findIndex((p) => p.name === "supabase");
+  if (at !== -1 && jsReaders.length) {
+    proposals.splice(at + 1, 0, {
+      name: "supabase-js",
+      evidence: [`Supabase beside JS code (${jsReaders.join(", ")}): the client's \`.from()\` / \`.rpc()\` / Realtime calls are read here and joined to the pages and screens that run them`],
+      options: {},
+    });
+  }
   // Questions the evidence raises but cannot answer (2.2.0). Supabase beside
   // a web app: Realtime subscriptions become `subscribes` edges, the client's
   // own call is seen, a wrapper of the app's own is not until it is named.
-  // One question per web extractor (CR-009): a repo with both a Next.js and a
-  // React Router app may wrap Realtime differently in each.
+  // One question, naming every web app: since 0.9 the call names live in one
+  // place, supabase-js's options, whichever app makes the call.
   const questions = [];
   const names = proposals.map((p) => p.name);
-  if (names.includes("supabase")) {
-    for (const web of ["react-router", "nextjs"].filter((n) => names.includes(n))) {
-      questions.push({
-        topic: "realtime",
-        ask:
-          `Does the ${web === "nextjs" ? "Next.js" : "React Router"} app subscribe to Supabase Realtime through a wrapper of its own (e.g. \`live.onInsert("table", …)\`)? ` +
-          'The client\'s own `.on("postgres_changes", { table })` needs nothing; a wrapper is invisible until its call names are listed in subscribeCalls',
-        records: SUBSCRIBE_CALLS[web],
-      });
-    }
+  const webs = ["react-router", "nextjs"].filter((n) => names.includes(n));
+  if (names.includes("supabase-js") && webs.length) {
+    const apps = webs.map((w) => (w === "nextjs" ? "Next.js" : "React Router")).join(" or the ");
+    questions.push({
+      topic: "realtime",
+      ask:
+        `Does the ${apps} app subscribe to Supabase Realtime through a wrapper of its own (e.g. \`live.onInsert("table", …)\`)? ` +
+        'The client\'s own `.on("postgres_changes", { table })` needs nothing; a wrapper is invisible until its call names are listed in subscribeCalls',
+      records: SUBSCRIBE_CALLS["supabase-js"],
+    });
   }
   return { mode, proposals, apps, sourceFiles, questions, host };
 }
@@ -638,8 +651,9 @@ function enginePath(value, label) {
 }
 // The path-bearing option keys of the built-in extractors, by extractor name.
 // A local extractor's options are its own; only these are inspected.
-// Where each web extractor names its Realtime wrapper calls (ZDD 2.1).
-const SUBSCRIBE_CALLS = { nextjs: "extractorOptions.nextjs.refs.subscribeCalls", "react-router": "extractorOptions.react-router.subscribeCalls" };
+// Where Realtime wrapper calls are named: each web extractor's options in
+// ZDD 2.1–2.5, supabase-js's since 0.9 (decision 0037).
+const SUBSCRIBE_CALLS = { nextjs: "extractorOptions.nextjs.refs.subscribeCalls", "react-router": "extractorOptions.react-router.subscribeCalls", "supabase-js": "extractorOptions.supabase-js.subscribeCalls" };
 const isCallList = (v) => Array.isArray(v) && v.every((s) => typeof s === "string" && s.length > 0 && s.length <= MAX_NAME);
 
 function validateExtractorOptions(all) {
@@ -663,6 +677,9 @@ function validateExtractorOptions(all) {
     } else if (name === "react-router") {
       for (const k of ["routesFile", "srcAliasRoot"]) if (opts[k] !== undefined) enginePath(opts[k], `react-router.${k}`);
       calls(opts.subscribeCalls, "react-router.subscribeCalls");
+    } else if (name === "supabase-js") {
+      if (opts.roots !== undefined) list(opts.roots, "supabase-js.roots");
+      calls(opts.subscribeCalls, "supabase-js.subscribeCalls");
     } else if (name === "external-services" || name === "services") {
       if (opts.roots !== undefined) list(opts.roots, `${name}.roots`);
     } else if (name === "jobs") {
