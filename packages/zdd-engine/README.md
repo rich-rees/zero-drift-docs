@@ -102,7 +102,8 @@ npx @rich-rees/zdd-engine contract [--json]
   outside the repo. Five checks, numbered in the order they were added: the
   same bytes on another machine and on a second run; a gitignored path never
   read; a missing root nothing to inventory; commented-out code (every line
-  of the fixture, by the adapter's `COMMENT` marks) and a `fixture-trap/`
+  of the fixture, by the adapter's `COMMENT` marks, which must classify
+  every file the adapter reads) and a `fixture-trap/`
   folder never a record; every read through `io`. A failing check numbered
   at or below `suiteChecks` fails the run, a newer one warns. Catalogue
   adapters pass the same suite in this package's tests.
@@ -128,7 +129,7 @@ version:
 | `agentIndex.levels` | `1` | `2` lists the areas first and writes one file per area under `zdd/agent-index/`, each feature one hop away — for a repo whose feature list alone does not fit (2.3) |
 | `claims.strictKinds` | `[]` | The opt-in kinds (`component`, `background-task`, `external-service`) that `claims.strict` also fails on; unlisted they warn (decision 0017) |
 | `localExtractorDir` | — | Repo-relative folder of repo-local extractors (`<name>.mjs` or `<name>/index.mjs`) — the one place config may point at code |
-| `suiteChecks` | absent (every check warns) | How many of the standard suite's checks block for the repo's own adapters (decision 0040); written by bootstrap and raised by "upgrade ZDD" |
+| `suiteChecks` | absent (every check warns) | How many of the standard suite's checks block for the repo's own adapters, 0 to 5 (decision 0040). Bootstrap writes 5 at a fresh install; "upgrade ZDD" raises it at once only where the repo has no adapter of its own, and otherwise `bootstrap.mjs adapters --raise` does, once they pass |
 | `adapter` / `adapterOptions` | *(deprecated)* | The pre-1.0 single adapter; `nextjs-supabase` still expands to `[supabase, supabase-js, nextjs]` with a deprecation note |
 | `name` | `"Codebase"` | Display name for the indexes |
 | `repoBase` | `""` | GitHub `/tree/<branch>/` URL prefix for source links in the human index — http(s) only, refused otherwise |
@@ -190,7 +191,7 @@ own adapters are behind on.
 | `derive` | 1 | yes | `derive({ repoRoot, options, io })` returns `{ records, diagnostics }`; the same source bytes give byte-identical records |
 | `io` | 1 | yes | every read and listing through the `io` the engine hands in, never `node:fs`, the environment or the network; a gitignored path is never read |
 | missing source | 1 | yes | a configured root that does not exist is nothing to inventory: no records and a diagnostic, never an error |
-| `COMMENT` | 1 | yes | `{ ".ext": "<line comment mark>" }` for each kind of file read (`{}` when none takes one), so the suite can comment out the fixture |
+| `COMMENT` | 1 | yes | `{ ".ext": "<line comment mark>" }` for every kind of file the adapter reads (`null` for one that takes no line comment, such as JSON), so the suite can comment out the fixture |
 | `SUITE` | 1 | yes (an adopter's own) | a `fixture/` folder beside the adapter and `export const SUITE = { options, companions? }`; a catalogue adapter's fixture lives in ZDD's tests |
 | `FACTS_KEY_ORDER` | 1 | no | facts in a stable order, per kind |
 | unresolved refs | 1 | no | `?table:<name>`, `?route:<url>`, … for another adapter's records; the core resolves them |

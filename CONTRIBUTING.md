@@ -141,12 +141,16 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
   suite** ([decision 0040](docs/decisions/0040-adapters-declare-a-contract-number-and-pass-one-standard-suite.md)).
   `export const CONTRACT = 1`, a number of its own that moves only when the
   table below does, and `export const COMMENT`, the line-comment mark for
-  each kind of file it reads. The suite (`zdd-engine suite`, run on a copy
+  each kind of file it reads (`null` for one that takes none, like JSON; the
+  suite fails a file the adapter read that COMMENT does not classify). The suite (`zdd-engine suite`, run on a copy
   of the adapter's fixture outside any repo) holds every adapter to five
   checks: byte-identical records on another machine and on a second run, a
   gitignored path never read, a missing root nothing to inventory,
   commented-out code (every line of the fixture, by `COMMENT`) never a
-  record, and every read through `io`. A catalogue adapter is listed, with
+  record, and every read through `io` (a text scan for the honest mistake —
+  `node:fs`, a process or network module, `require`, `process.env` — not a
+  sandbox: a local adapter is the repo's own code, trusted like its tests,
+  decision 0010). A catalogue adapter is listed, with
   its fixture and options, in `packages/zdd-engine/test/standard-suite.test.mjs`
   — a new one cannot ship without passing; a local one keeps its `fixture/`
   beside it and `export const SUITE = { options }`. A check added in a
@@ -159,7 +163,7 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
   | `derive` | 1 | yes | `derive({ repoRoot, options, io })` returns `{ records, diagnostics }`; the same source bytes give byte-identical records |
   | `io` | 1 | yes | every read and listing through the `io` the engine hands in, never `node:fs`, the environment or the network; a gitignored path is never read |
   | missing source | 1 | yes | a configured root that does not exist is nothing to inventory: no records and a diagnostic, never an error |
-  | `COMMENT` | 1 | yes | `{ ".ext": "<line comment mark>" }` for each kind of file read (`{}` when none takes one), so the suite can comment out the fixture |
+  | `COMMENT` | 1 | yes | `{ ".ext": "<line comment mark>" }` for every kind of file the adapter reads (`null` for one that takes no line comment, such as JSON), so the suite can comment out the fixture |
   | `SUITE` | 1 | yes (an adopter's own) | a `fixture/` folder beside the adapter and `export const SUITE = { options, companions? }`; a catalogue adapter's fixture lives in ZDD's tests |
   | `FACTS_KEY_ORDER` | 1 | no | facts in a stable order, per kind |
   | unresolved refs | 1 | no | `?table:<name>`, `?route:<url>`, … for another adapter's records; the core resolves them |

@@ -143,7 +143,9 @@ like the roots. It must hold:
   on one route, two statements on one table);
 - a declaration **commented out**, and one **inside a string** — neither may
   become a record (ZDD's standard suite also comments out every line of the
-  fixture itself, by the module's `COMMENT` marks, and expects nothing new;
+  fixture itself, by the module's `COMMENT` marks, and expects nothing new
+  — COMMENT must name every kind of file the module reads, `null` for one
+  that takes no line comment;
   a declaration inside a string goes in `fixture-trap/`, laid out like
   `fixture/`, which must give nothing either);
 - the convention's awkward corner from Step 1 (a prefix, nesting, an

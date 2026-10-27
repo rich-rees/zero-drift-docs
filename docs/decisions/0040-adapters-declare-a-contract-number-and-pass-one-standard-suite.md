@@ -90,6 +90,28 @@ adapter that could repeat it.
   comment is where a description is read from, by design). A
   `fixture-trap/` folder, laid out like the fixture, adds what must never be
   a record (declarations inside strings) and must change nothing.
+- **After the slice 5 campaign (CR-118 to CR-148).** COMMENT must classify
+  every file the adapter actually reads — derive keeps a read trace for the
+  suite (`ZDD_IO_TRACE`) — with `null` for a kind that takes no line comment;
+  an unclassified one fails check 4, so the check can no longer pass on
+  nothing. Check 5 reads imports from comment-free text and calls from text
+  with strings blanked but `${…}` kept, bans `node:module`, `vm`, `os`,
+  `process` and packages too, and is said to be what it is: a check for the
+  honest mistake, not a sandbox (a local adapter is trusted like the repo's
+  tests, decision 0010). Check 1's second machine also has another HOME,
+  temp folder, user and CI flag; check 2 puts an ignored copy beside each
+  file as well as under a folder; check 3 leaves out a companion's records;
+  CRLF stays whole. An unknown or retired adapter fails the suite, and
+  `--raise` refuses while one is configured. Only `fixture/`, `fixture-deep/`
+  and `fixture-trap/` are test data. On the io side: `io.kind` says
+  `unreadable` (never `missing`) when a path cannot be examined, and
+  `linked` for a folder under a link; a route, page or migration io cannot
+  read now stops derive, as `readFileSync` did, rather than writing an empty
+  or partial record; nextjs reads each file once and its middleware matcher
+  from live code only; supabase never lists an ignored folder. The managed
+  pre-push hook runs the suite, the CI step goes after the whole lint step
+  when a workflow has no freshness step, and the schema's `suiteChecks` stops
+  at 5.
 - **What blocks** (Rich's call, question 3): `suiteChecks` in
   `zdd/config.json`, one number for the repo. A failing check numbered at or
   below it fails `suite`; a newer one warns; absent, every check warns. A
