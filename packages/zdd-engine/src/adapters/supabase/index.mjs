@@ -65,6 +65,10 @@ export function derive({ repoRoot, options, io }) {
     // an incomplete schema and prune real tables: derive stops (CR-130). A
     // symlinked migration stays a skip, never followed (decision 0040).
     if (walked.truncated) throw new Error(`supabase: ${ns}: ${dir} holds more entries than io lists — derive stops rather than replay part of the history`);
+    // A symlink is a skip; any other entry the listing could not examine may
+    // be a migration, so derive stops on it too (CR-130, verify 1).
+    const lost = walked.skipped.find((k) => !/symlink — not followed/.test(k.reason));
+    if (lost) throw new Error(`supabase: ${ns}: ${lost.path}: ${lost.reason} — derive stops rather than replay a history that may be missing it`);
     for (const k of walked.skipped) diagnostics.push(`${ns}: ${k.path}: ${k.reason} — skipped`);
     const files = [];
     for (const f of sortMigrations(names)) {
