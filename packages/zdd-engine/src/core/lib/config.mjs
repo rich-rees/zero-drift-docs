@@ -255,8 +255,8 @@ export function loadConfig(args, cwd = process.cwd()) {
 // The engine never rewrites the config; the plugin's `bootstrap --upgrade`
 // does (plugins/zdd/scripts/bootstrap.mjs mirrors the bundles for that),
 // and the deprecation note says how to do it by hand. Retired names and the
-// pre-1.0 bundles are the catalogue's data (src/adapters/catalogue.json,
-// read by lib/catalogue.mjs): the core names no adapter (decision 0036).
+// pre-1.0 bundles are the catalogue's data (its catalogue.json, read and
+// checked by lib/catalogue.mjs): the core names no adapter (decision 0036).
 // ---------------------------------------------------------------------------
 
 const isPlainObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);

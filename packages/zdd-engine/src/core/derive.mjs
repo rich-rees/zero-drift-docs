@@ -176,7 +176,9 @@ async function loadExtractor(name, repoRoot, config) {
     if (local.has(name)) fail(`Local extractor '${name}' shadows the built-in of the same name — rename it`);
     return import(pathToFileURL(names.get(name)).href);
   }
-  if (Object.hasOwn(aliases, name) && names.has(aliases[name])) return import(pathToFileURL(names.get(aliases[name])).href);
+  // catalogue() refused an alias whose target is not a catalogue adapter, so
+  // a retired name never falls through to a local one (CR-002).
+  if (Object.hasOwn(aliases, name)) return import(pathToFileURL(names.get(aliases[name])).href);
   if (local.has(name)) return import(pathToFileURL(local.get(name)).href);
   const known = [...names.keys(), ...Object.keys(aliases)].sort().join(", ");
   const localList = localDir ? `; local ${localDir}: ${[...local.keys()].join(", ") || "(none)"}` : "";
