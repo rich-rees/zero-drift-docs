@@ -40,7 +40,7 @@
 import { readFileSync, lstatSync, fstatSync, openSync, readSync, writeSync, closeSync, rmSync, mkdirSync, renameSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { join, dirname } from "node:path";
-import { PLUGIN_ROOT, parseArgs, adopterRoot, readConfig, artifactPaths, repoRelative, resolveInside, pathsOverlap, CONFIG_REL, posixify, onNewLine } from "./lib/repo.mjs";
+import { PLUGIN_ROOT, parseArgs, adopterRoot, readConfig, artifactPaths, repoRelative, resolveInside, pathsOverlap, CONFIG_REL, posixify, onNewLine, configRelease } from "./lib/repo.mjs";
 import { Ledger, printable } from "./bootstrap.mjs";
 
 const TEMPLATES = join(PLUGIN_ROOT, "templates", "extractor");
@@ -202,6 +202,11 @@ export function scaffold(root, rawAnswers) {
   const cfg = readConfig(root);
   if (cfg.state === "absent") throw new Error("no zdd/config.json — adopt ZDD first (the zdd:bootstrap runbook), then scaffold an extractor");
   if (cfg.state === "invalid") throw new Error(`${cfg.error} — fix it first; the scaffold never replaces a config it cannot read`);
+  // The pin, judged before any write (CR-152): a `release` that is not a
+  // version is refused as the upgrade refuses it, and both keys — a stale
+  // `engine` a pre-0.9 plugin wrote — is the upgrade's to clear first.
+  configRelease(cfg.config);
+  if (Object.hasOwn(cfg.config, "engine") && Object.hasOwn(cfg.config, "release")) throw new Error(`zdd/config.json pins both 'release' and the old line's 'engine' — say "upgrade ZDD" first (it drops the stale 'engine', decision 0042), then scaffold; nothing was written`);
   const config = cfg.config;
   const paths = artifactPaths(config); // throws on a bad configured path
 
@@ -417,9 +422,9 @@ export function scaffold(root, rawAnswers) {
   if (next.extractors.includes("generic") && next.extractors.length > 1) {
     ledger.notes.push("'generic' is still listed in extractors — it emits nothing; remove it now that a real extractor runs");
   }
-  if (onNewLine(next)) {
-    if (olderThan(next.release, "0.0.0") === null) ledger.notes.push(`zdd/config.json's release pin (${printable(String(next.release))}) is not a version — "upgrade ZDD" rewrites it`);
-  } else {
+  // Every new-line release hands extractors io; a `release` that is not a
+  // version was refused in the preflight (CR-152).
+  if (!onNewLine(next)) {
     const older = olderThan(next.engine, IO_SINCE);
     if (older === true) ledger.notes.push(`zdd/config.json pins engine ${next.engine}; this extractor needs ${IO_SINCE} or later and will stop derive until then — say "upgrade ZDD"`);
     else if (older === null) ledger.notes.push(`zdd/config.json's engine pin (${printable(String(next.engine))}) is not a version this can compare — this extractor needs ${IO_SINCE} or later`);

@@ -272,7 +272,7 @@
       "type": "string",
       "deprecated": true,
       "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(\\.(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*))?(\\+([0-9a-zA-Z-]+(\\.[0-9a-zA-Z-]+)*))?$",
-      "description": "DEPRECATED (before 0.9): the old line's pin, a version of @rich-rees/zdd-engine (0.2.0 to 2.5.0). \"upgrade ZDD\" replaces it with `release`; a config holding both is refused (decision 0042).",
+      "description": "DEPRECATED (before 0.9): the old line's pin, a version of @rich-rees/zdd-engine (0.2.0 to 2.5.0). \"upgrade ZDD\" replaces it with `release`. Beside a `release` it is stale (a plugin from before 0.9 wrote it) and the upgrade drops it; no release writes both (decision 0042).",
       "examples": ["2.5.0"]
     },
     "hooks": {

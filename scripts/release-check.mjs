@@ -3,7 +3,7 @@
 // Run by .github/workflows/release.yml before anything is published, and by
 // scripts/pre-tag.mjs on the machine that tags:
 //
-//   node scripts/release-check.mjs vX.Y.Z
+//   node scripts/release-check.mjs vX.Y.Z [--root=<checkout>]   (--root: a test's fixture)
 //
 // Exit 1 with the first pin that disagrees. The pins: the engine's
 // package.json (and its name: the new line's package, decision 0042), both plugin manifests, the marketplace entry, the CI and
@@ -12,7 +12,8 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const rootArg = process.argv.slice(3).find((a) => a.startsWith("--root="));
+const ROOT = rootArg ? resolve(rootArg.slice("--root=".length)) : resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const tag = process.argv[2];
 if (!/^v\d+\.\d+\.\d+$/.test(tag ?? "")) {
   console.error("usage: release-check.mjs vX.Y.Z");
@@ -39,7 +40,9 @@ for (const rel of ["plugins/zdd/templates/zdd.yml", "plugins/zdd/templates/pre-p
 }
 for (const skill of readdirSync(join(ROOT, "plugins/zdd/skills"), { withFileTypes: true }).filter((d) => d.isDirectory())) {
   const text = read(`plugins/zdd/skills/${skill.name}/SKILL.md`);
-  for (const m of text.matchAll(/@rich-rees\/zdd(?:-engine)?@(\S+?)\s/g)) expect(`plugins/zdd/skills/${skill.name}/SKILL.md npx pin`, m[1]);
+  for (const m of text.matchAll(/@rich-rees\/zdd@(\S+?)\s/g)) expect(`plugins/zdd/skills/${skill.name}/SKILL.md npx pin`, m[1]);
+  // The old line's package is never what a skill runs (decision 0042, CR-164).
+  for (const m of text.matchAll(/@rich-rees\/zdd-engine@(\S+)/g)) problems.push(`plugins/zdd/skills/${skill.name}/SKILL.md: pins the old line's package (${m[0]}) — the engine is @rich-rees/zdd`);
 }
 const readme = read("README.md");
 const status = /\*\*Status: (\d+\.\d+\.\d+)\.\*\*/.exec(readme);

@@ -28,6 +28,19 @@ import { parseArgs, adopterRoot, readConfig, pluginVersion, ENGINE_PACKAGE, OLD_
 // The semver.org grammar: no leading zeros, well-formed prerelease identifiers.
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
 
+// A line up to its comment: a `#` that opens the line or follows whitespace,
+// outside quotes — YAML's rule and the shell's, the two files read here.
+function stripComment(line) {
+  let quote = null;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (quote) {
+      if (ch === quote) quote = null;
+    } else if (ch === "'" || ch === '"') quote = ch;
+    else if (ch === "#" && (i === 0 || /\s/.test(line[i - 1]))) return line.slice(0, i);
+  }
+  return line;
+}
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
 export function findPins(root) {
   const pins = [];
@@ -35,7 +48,7 @@ export function findPins(root) {
   if (state === "valid" && config.release !== undefined) pins.push({ where: "zdd/config.json (release)", raw: config.release, pkg: ENGINE_PACKAGE });
   if (state === "valid" && config.engine !== undefined) pins.push({ where: "zdd/config.json (engine)", raw: config.engine, pkg: OLD_ENGINE_PACKAGE, old: true });
   // Either package: `@rich-rees/zdd@` is never inside the old name's pin.
-  const re = new RegExp(`(${esc(OLD_ENGINE_PACKAGE)}|${esc(ENGINE_PACKAGE)})@([^"'\\s]*)`);
+  const re = new RegExp(`(${esc(OLD_ENGINE_PACKAGE)}|${esc(ENGINE_PACKAGE)})@([^"'\\s]*)`, "g");
   // The package name with no `@<version>` after it — the v0.3.1 workflow's
   // `npx -y @rich-rees/zdd-engine derive` — floats to whatever npm serves
   // today (CR-081). A longer package name or a path into the package is not
@@ -51,9 +64,17 @@ export function findPins(root) {
     } catch {
       continue;
     }
-    const m = re.exec(text);
-    if (m) pins.push({ where: rel, raw: m[2], pkg: m[1], old: m[1] === OLD_ENGINE_PACKAGE });
-    else if (floating.test(text)) pins.push({ where: rel, raw: undefined, unpinned: true });
+    // Every pin outside a comment, each distinct one once (CR-154): a pin in
+    // a comment is not what runs, and a first match could hide the one that
+    // does — any pin that differs is skew.
+    const live = text.split(/\r?\n/).map(stripComment).join("\n");
+    const seen = new Set();
+    for (const m of live.matchAll(re)) {
+      if (seen.has(m[0])) continue;
+      seen.add(m[0]);
+      pins.push({ where: rel, raw: m[2], pkg: m[1], old: m[1] === OLD_ENGINE_PACKAGE });
+    }
+    if (floating.test(live)) pins.push({ where: rel, raw: undefined, unpinned: true });
   }
   return pins.map((p) => ({ where: p.where, version: typeof p.raw === "string" && SEMVER.test(p.raw) ? p.raw : null, ...(p.pkg ? { package: p.pkg } : {}), ...(p.old ? { oldLine: true } : {}), ...(p.unpinned ? { unpinned: true } : {}) }));
 }

@@ -39,8 +39,9 @@ Run everything from the adopter's repo root.
 ## Step 0 — preconditions
 
 - `zdd/config.json` exists. If not, stop: adopt first with `zdd:bootstrap`.
-- `engine` in that config is **1.3.0 or later** — the version that hands
-  extractors `io`. Older: say "upgrade ZDD" first. A local extractor may not take a built-in's name, nor a retired one the engine still reserves (`services`, the pre-2.3 name of `external-services`; `jobs`, split into the `background-*` readers in 0.9). A scaffolded
+- The config's pin hands extractors `io`: any `release` (the line from 0.9,
+  decision 0042) does; an old-line `engine` pin must be **1.3.0 or later**.
+  Older, or both keys: say "upgrade ZDD" first. A local extractor may not take a built-in's name, nor a retired one the engine still reserves (`services`, the pre-2.3 name of `external-services`; `jobs`, split into the `background-*` readers in 0.9). A scaffolded
   extractor stops `derive` on an older engine by design.
 - The convention is not already a built-in: `supabase` (SQL migrations),
   `nextjs` (App Router), `fastapi` (decorators), `react-router` (a route tree

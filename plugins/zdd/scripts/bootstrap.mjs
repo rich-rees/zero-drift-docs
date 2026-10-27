@@ -87,6 +87,7 @@ import {
   oldLine,
   configRelease,
   compareReleases,
+  SEMVER,
   pluginVersion,
   parseArgs,
   adopterRoot,
@@ -1589,12 +1590,12 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
   // the release this machine runs. The machine moves first.
   // On either line (decision 0042): an old-line pin or lock is behind every
   // new-line release, whatever its number.
-  const fromRelease = configRelease(cfg.config); // throws on both keys, before any write
+  const fromRelease = configRelease(cfg.config); // throws on a release that is not a version, before any write
   const locked = ourLockRef(new Ledger(root));
   if (locked && RELEASE_TAG.test(locked) && compareReleases(lockRelease(locked), version) > 0) {
     throw new Error(`this repo locks ${locked}, newer than this plugin (${version}) — update this machine first (the session-start line names the commands), restart, then say "upgrade ZDD" again`);
   }
-  if (fromRelease && /^(?:zdd-engine@)?\d+\.\d+\.\d+$/.test(fromRelease) && compareReleases(fromRelease, version) > 0) {
+  if (fromRelease && compareReleases(fromRelease, version) > 0) {
     throw new Error(`zdd/config.json's release pin ${fromRelease} is newer than this plugin (${version}) — update this machine's plugin first; upgrade never moves a repo backwards`);
   }
   const dropIds = parseDrop(drop);
@@ -1659,6 +1660,13 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
   }
   // The pin (decision 0042): the old line's `engine` becomes the new line's
   // `release`, where `engine` sat; a config with neither gains it at the end.
+  // Beside a `release`, an `engine` pin is stale — a pre-0.9 plugin's upgrade
+  // run on a repo already moved writes one (CR-151) — and is dropped, named.
+  if (Object.hasOwn(config, "engine") && Object.hasOwn(config, "release")) {
+    const stale = config.engine;
+    delete config.engine;
+    changes.push(`engine pin ${typeof stale === "string" && SEMVER.test(stale) ? stale : "(not a version)"} dropped: a plugin from before 0.9 wrote it beside "release" (decision 0042) — keep every teammate's plugin on this release`);
+  }
   if (Object.hasOwn(config, "engine")) {
     const next = {};
     for (const [k, v] of Object.entries(config)) next[k === "engine" ? "release" : k] = k === "engine" ? version : v;
@@ -2128,6 +2136,10 @@ function migrateDataAccess(config, changes, root, from) {
 // `supabase-js` is listed when it is not — the names are its calls. A value
 // that is not a list of names stays where it is, named (CR-011: a malformed
 // option never stops an upgrade); the engine ignores it there with a warning.
+// A name is the adapter's call name — dotted JS identifiers — never only a
+// short string (CR-155: a control character would move and later print raw).
+const SUBSCRIBE_CALL = /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/;
+const isCallNames = (v) => isCallList(v) && v.every((n) => SUBSCRIBE_CALL.test(n));
 function moveSubscribeCalls(config, changes) {
   const notes = [];
   const opts = config.extractorOptions;
@@ -2137,8 +2149,8 @@ function moveSubscribeCalls(config, changes) {
   const from = [rr && Object.hasOwn(rr, "subscribeCalls") ? ["react-router", rr] : null, nx && Object.hasOwn(nx, "subscribeCalls") ? ["nextjs.refs", nx] : null].filter(Boolean);
   if (!from.length) return notes;
   const into = 'extractorOptions["supabase-js"].subscribeCalls';
-  const sjOk = opts["supabase-js"] === undefined || (isPlainObject(opts["supabase-js"]) && (opts["supabase-js"].subscribeCalls === undefined || isCallList(opts["supabase-js"].subscribeCalls)));
-  const good = sjOk ? from.filter(([, o]) => isCallList(o.subscribeCalls)) : [];
+  const sjOk = opts["supabase-js"] === undefined || (isPlainObject(opts["supabase-js"]) && (opts["supabase-js"].subscribeCalls === undefined || isCallNames(opts["supabase-js"].subscribeCalls)));
+  const good = sjOk ? from.filter(([, o]) => isCallNames(o.subscribeCalls)) : [];
   for (const [where] of from.filter((f) => !good.includes(f))) {
     notes.push(`zdd/config.json: extractorOptions.${where}.subscribeCalls was not moved — ${sjOk ? "it is not a list of call names" : `${into} is not a list of call names to add to`}; since 0.9 the engine reads only ${into} (decision 0037), so fix it there by hand`);
   }
@@ -2765,7 +2777,9 @@ function sweepList(ledger, metadataRel) {
 // upgrade asks for rewrites them, so a retired name there is never the
 // team's to fix (found by the slice 6 dry run: `metadata/job/` in graph.json
 // and the agent index). The metadata folder is skipped by sweepList.
-const generatedArtifacts = (paths) => [...GENERATED_KEYS.filter((k) => k !== "metadataDir").map((k) => paths[k]), agentIndexAreaDir(paths.agentIndex)].filter((p) => typeof p === "string" && p);
+// Files match exactly; only the area folder is a folder (CR-161: a generated
+// path naming a folder must not hide that folder from the sweep).
+const generatedArtifacts = (paths) => ({ files: GENERATED_KEYS.filter((k) => k !== "metadataDir").map((k) => paths[k]).filter((p) => typeof p === "string" && p), dirs: [agentIndexAreaDir(paths.agentIndex)].filter((p) => typeof p === "string" && p) });
 export function findRetiredNames(ledger, { oldEngine = null, oldLock = null, metadataRel = "zdd/metadata", generated = generatedArtifacts(artifactPaths({})) } = {}) {
   const rules = [...RETIRED_NAMES];
   if (oldLock && /^v\d+\.\d+\.\d+$/.test(oldLock) && oldLock !== `v${oldEngine}`) {
@@ -2780,7 +2794,7 @@ export function findRetiredNames(ledger, { oldEngine = null, oldLock = null, met
   for (const rel of list.files) {
     if (hits.length > MAX_RETIRED_NOTES) break;
     if (written.has(rel) || rel.endsWith(`/${INSTRUCTIONS_NAME}`) || rel === INSTRUCTIONS_NAME) continue;
-    if (generated.some((g) => rel === g || rel.startsWith(`${g}/`))) continue;
+    if (generated.files.includes(rel) || generated.dirs.some((g) => rel.startsWith(`${g}/`))) continue;
     let st;
     try {
       st = lstatSync(ledger.abs(rel));
@@ -3281,7 +3295,7 @@ export function explain(rel) {
 // Preflight (2.3.0, C7): every piece of tech ZDD needs, checked before a
 // question is asked and again before an upgrade's engine run. Today the
 // plugin carries no engine: every skill that does real work runs `npx -y
-// @rich-rees/zdd-engine@<pin>`, so the engine is downloaded from the public
+// @rich-rees/zdd@<pin>`, so the engine is downloaded from the public
 // npm registry on a machine's first run; the plugin and Matt Pocock's skills
 // come from public GitHub repositories. No account is needed anywhere.
 // ---------------------------------------------------------------------------
@@ -3294,7 +3308,7 @@ const USES = {
   git: "ZDD reads the repo's history for freshness and locks a release by a git tag",
   repo: "ZDD reads the repo's history for freshness and locks a release by a git tag; run `git init` in the folder first",
   github: "ZDD and Matt Pocock's skills are installed from public GitHub repositories, and the release check reads the list of releases there",
-  registry: "ZDD's engine, @rich-rees/zdd-engine, is downloaded from the public npm registry by npx; no npm account is needed, the package is public",
+  registry: "ZDD's engine, @rich-rees/zdd, is downloaded from the public npm registry by npx; no npm account is needed, the package is public",
   engine: "the exact engine version this ZDD release pins must be there to download",
 };
 function head(url, timeoutMs = 5000) {
