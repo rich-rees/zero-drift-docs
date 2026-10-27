@@ -104,8 +104,11 @@ and the reader that turns candidates into records.
   reader per kind of file it finds; "upgrade ZDD" replaces `jobs` with the
   readers detection finds (plus `background-declared` and
   `background-github-actions` when the old options asked for them), moves
-  `roots` / `exclude` / `modes` to the process readers and `entries` to
-  `background-declared`, renames `job` in `claims.strictKinds` and the
+  `roots` to every reader (each walks it), `exclude` / `modes` to the
+  process readers, and `entries` / `modes` to `background-declared`; a
+  reader whose options already exist must agree, else the upgrade stops,
+  and so it does when no reader can be named (detection failed or found
+  nothing) rather than leave `jobs` with no reader in its place. It renames `job` in `claims.strictKinds` and the
   allow-list, and repairs the map's `metadata/job/` links. The 0.9
   upgrade notes are slice 6's.
 
