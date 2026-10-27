@@ -222,6 +222,8 @@ test("CR-054: a parameter or a local that shadows a top-level declaration is not
       "export function destructured(props) { const { db, other: x = db } = props; return db(); }",
       "export function keyOnly(props) { const { db: client } = props; return db(); }",
       "export function computed(props) { const { [db.name]: client } = props; return db(); }",
+      "export function nested(props) { const { [db[index]]: client, x = { db } } = props; return db(); }",
+      "export function typedArray(values) { const [db]: [Client] = values; return db(); }",
       "",
     ].join("\n"),
   });
@@ -232,6 +234,9 @@ test("CR-054: a parameter or a local that shadows a top-level declaration is not
   // A computed key binds nothing either (CR-075).
   assert.ok(fns.includes("computed"), fns.join(", "));
   fns.splice(fns.indexOf("computed"), 1);
+  // Nested computed keys and a default's object bind nothing; an annotated array pattern binds `db` (CR-075/076).
+  assert.ok(fns.includes("nested") && !fns.includes("typedArray"), fns.join(", "));
+  fns.splice(fns.indexOf("nested"), 1);
   assert.deepEqual(fns, ["db", "real"]);
 });
 

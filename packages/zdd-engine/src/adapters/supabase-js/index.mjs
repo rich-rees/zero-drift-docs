@@ -184,21 +184,39 @@ function boundInside(mask, own) {
   // nothing (verify pass 1 on CR-054).
   for (const h of mask.matchAll(/\b(?:const|let|var)\s*([{[])/g)) {
     const open = h.index + h[0].length - 1;
-    let d = 0;
-    let inDefault = false;
+    // One pass over the pattern's brackets: a computed key — a `[` where an
+    // object pattern expects a key, after its `{` or a `,` — is an
+    // expression, blanked with everything inside it however deep (CR-075);
+    // so is a default, from its `=` to the next comma at that depth. The
+    // scan ends at the pattern's own closer, before any type annotation.
+    const stack = [];
+    let blankTo = -1; // stack depth at which the blanked span ends
+    const inDefault = [];
+    let prev = "";
     let pattern = "";
     for (let j = open; j < mask.length; j++) {
       const c = mask[j];
-      if (c === "(" || c === "[" || c === "{") d++;
-      else if (c === ")" || c === "]" || c === "}") d--;
-      if (d === 0) break;
-      if (d === 1 && c === "=") inDefault = true;
-      else if (d === 1 && c === ",") inDefault = false;
-      pattern += inDefault || j === open ? " " : c;
+      const opener = c === "(" || c === "[" || c === "{";
+      const closer = c === ")" || c === "]" || c === "}";
+      if (opener) {
+        if (blankTo === -1 && c === "[" && stack[stack.length - 1] === "{" && (prev === "{" || prev === ",")) blankTo = stack.length;
+        stack.push(c);
+        inDefault.push(false);
+      } else if (closer) {
+        stack.pop();
+        inDefault.pop();
+        if (!stack.length) break;
+        if (blankTo === stack.length) {
+          blankTo = -1;
+          pattern += " ";
+          prev = c;
+          continue;
+        }
+      } else if (blankTo === -1 && c === "=") inDefault[inDefault.length - 1] = true;
+      else if (blankTo === -1 && c === ",") inDefault[inDefault.length - 1] = false;
+      pattern += j === open || blankTo !== -1 || inDefault.some(Boolean) ? " " : c;
+      if (!/\s/.test(c)) prev = c;
     }
-    // A computed key (`{ [db.name]: client }`) is an expression, never a
-    // binding: blanked with its brackets (CR-075).
-    pattern = pattern.replace(/\[[^\]]*\](?=\s*:)/g, (k) => " ".repeat(k.length));
     for (const id of pattern.matchAll(ID_RE)) if (!/^\s*:/.test(pattern.slice(id.index + id[0].length))) out.add(id[0]);
   }
   for (const h of mask.matchAll(/(?<![\w$.])([A-Za-z_$][\w$]*)\s*=>/g)) out.add(h[1]);
