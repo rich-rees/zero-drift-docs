@@ -157,7 +157,7 @@ comments:
   said during "choose patterns" and the plan's *Reuse* line for the same
   code are one `reused` line here, never two. A slice added or extended is
   `stored`; the generated metadata gets no lines of its own.
-- **`zdd-engine tally`** reads these out of git history and reports, per
+- **The engine's `tally`** reads these out of git history and reports, per
   section, the counts and the ADRs, terms and blessings no record has ever
   named. CI's `lint --merge` warns (never fails) on a record it cannot fully
   read: a missing or empty section, an unknown verb, a `turned` or

@@ -69,13 +69,13 @@ his 1.3) + `docs/adr/`, and ZDD's homes are different. Bootstrap writes
 
 - The glossary is **`zdd/glossary.md`** — never a root `GLOSSARY.md` or
   `CONTEXT.md`. If either appears, its content belongs in `zdd/glossary.md`
-  (`zdd-engine lint` warns while one sits beside the real glossary).
+  (the engine's `lint` warns while one sits beside the real glossary).
 - ADRs live in **`zdd/adr/`** — never `docs/adr/` — or, when the repo has a
   harness ADR set (`paths.harnessAdrDir` in `zdd/config.json`), a decision
   about how the team builds (review, tests, CI, the tracker, ZDD itself) goes
   there instead. Number them `NNNN-*.md`, continuing the sequence across both
   folders.
-- Supersession is linted (`zdd-engine lint`): a new ADR that supersedes another
+- Supersession is linted (the engine's `lint`): a new ADR that supersedes another
   must stamp the old one `Superseded [in part] by ADR-NNNN`, both directions.
 
 The authoring discipline — when a decision is ADR-worthy, and the glossary/ADR

@@ -377,7 +377,7 @@ category: https://github.com/rich-rees/zero-drift-docs/discussions (decision 004
   record:` it replaces is still read, as the blessings section. A squash
   merge loses the record unless the merger keeps the message; a merge
   commit keeps it.
-- **The tally.** `zdd-engine tally [--since <ref|date>] [--json]` counts,
+- **The tally.** `npx -y @rich-rees/zdd@0.11.0 tally [--since <ref|date>] [--json]` counts,
   per section, how often an artifact turned, confirmed, was reused or
   stored, then names the ADRs, glossary terms and blessings in the stores
   that no record ever named.

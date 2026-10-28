@@ -20,7 +20,7 @@
       "type": "integer",
       "minimum": 0,
       "maximum": 5,
-      "description": "How many of the standard suite's checks block for this repo's own adapters (decision 0040): `zdd-engine suite` fails on a failing check numbered at or below it and warns on a newer one. Written by bootstrap at a fresh install (every check), raised by \"upgrade ZDD\" where the repo has no adapter of its own, and by `bootstrap.mjs adapters --raise` once its own adapters pass. Absent: every check warns."
+      "description": "How many of the standard suite's checks block for this repo's own adapters (decision 0040): the engine's `suite` fails on a failing check numbered at or below it and warns on a newer one. Written by bootstrap at a fresh install (every check), raised by \"upgrade ZDD\" where the repo has no adapter of its own, and by `bootstrap.mjs adapters --raise` once its own adapters pass. Absent: every check warns."
     },
     "extractors": {
       "type": "array",

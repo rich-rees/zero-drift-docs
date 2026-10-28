@@ -35,7 +35,7 @@ ZDD blessing for file uploads, so I'll read its exemplar", "I'm recording this a
 ADR"), so the reader can tell it came from ZDD, not your own judgement. "update ZDD"
 writes these as the **ZDD record** (sections `glossary`, `adrs`, `blessings`, `map`,
 `comments`; `turned` / `confirmed` / `reused` (map only) / `stored` lines in plain
-sentences, or `- none`) into the update commit's message; `zdd-engine tally` counts them.
+sentences, or `- none`) into the update commit's message; the engine's `tally` counts them.
 
 **A release or engine-skew line** from ZDD's session-start checks (or `load`) is the
 **first line of your reply**, verbatim, and is fixed before the task. The fix depends on it:

@@ -398,7 +398,7 @@ The config holds `suiteChecks`: how many checks of ZDD's standard suite
 block in CI for the repo's own adapters (decision 0040). A fresh install
 writes all of them. When an uncovered part is built through the extractor
 skill, its last test runs the suite; the CI workflow runs it again on every
-pull request (`zdd-engine suite`). With no adapter of the repo's own, the
+pull request (the engine's `suite`). With no adapter of the repo's own, the
 step says so and passes.
 
 ## Step 6 — the backfill, offered once (never default)

@@ -399,7 +399,7 @@ function main() {
       `To lift the fence for this repo set "hooks": { "fence": false } in zdd/config.json.`
     : `ZDD fence: ${target} is a generated artifact — never hand-edit it. ` +
       `Run the ZDD update ritual ("update ZDD" / the \`update\` skill) to regenerate it ` +
-      `(zdd-engine derive + render). ` +
+      `(the engine's derive + render). ` +
       // Taking a side of a conflicted generated file (2.4.1): the
       // instructions' route never checks one out, so say it here too.
       (SHELL_TOOLS.has(tool) && SIDE_CHECKOUT.test(str(args.command))
