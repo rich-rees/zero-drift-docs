@@ -55,8 +55,10 @@ Run this as the definition of done for every unit of work — the spoken form is
    ```
    npx -y @rich-rees/zdd@0.13.0 render
    ```
-5. **Lint the stores.** Supersession symmetry, blessing citations and every
-   blessing's trigger question (blocking); a blessing with no reason or over
+5. **Lint the stores.** Supersession symmetry, blessing citations, every
+   blessing's trigger question, and every blessing and map-page header (a
+   key written twice, or a quote that does not close the same way)
+   (blocking); a blessing with no reason or over
    the length budget (warnings — shorten it, the detail belongs in the ADR);
    and the **claims**: every route, table, function and surface no feature
    slice links, and any record two slices claim. Read the list against the

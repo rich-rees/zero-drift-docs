@@ -351,8 +351,9 @@ is written into the host's settings.
    (`zdd/graph.json`, the agent, ADR and blessing indexes, the human index);
    never edit them.
 3. **Lint** — `npx -y @rich-rees/zdd@0.13.0 lint`. The same blocking
-   check CI runs: ADR numbering, supersession symmetry, and every blessing's
-   citation and trigger question. A failure here is fixed now, not discovered
+   check CI runs: ADR numbering, supersession symmetry, every blessing's
+   citation and trigger question, and every blessing and map-page header
+   (a key written twice, or a quote that does not close the same way, fails). A failure here is fixed now, not discovered
    on the first PR. It also prints the **unclaimed records** — on day one
    that is the whole inventory, and it is the mapping session's worklist.
 4. **Check it together** (an existing codebase; on a greenfield repo it

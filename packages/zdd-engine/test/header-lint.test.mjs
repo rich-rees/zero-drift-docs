@@ -22,9 +22,9 @@ const FIXTURE = join(PKG, "test", "fixture");
 test("headerProblems: a repeated key and a value whose quotes do not match, by line; an apostrophe inside a value, matched quotes and CRLF are fine", () => {
   const text = ["---", "where: src/a.ts", "kind: copy", "importance: \"high'", "kind: extend", "title: Bob's page", 'note: "quoted"', "other: 'single'", "open: \"no end", "close: no start'", "tags: [a, b]", "---", "", "Body: with: colons", ""].join("\r\n");
   assert.deepEqual(headerProblems(text), [
-    { line: 4, key: "importance", problem: "quotes" },
+    { line: 4, key: "importance", problem: "quotes", read: "high" },
     { line: 5, key: "kind", problem: "repeated", first: 3 },
-    { line: 9, key: "open", problem: "quotes" },
+    { line: 9, key: "open", problem: "quotes", read: '"no end' },
   ]);
   assert.deepEqual(headerProblems("---\nkind: copy\n---\n"), []);
   assert.deepEqual(headerProblems("no header at all\n"), []);
@@ -50,4 +50,27 @@ test("lint: a blessing or a map page with a repeated key or mismatched quotes fa
   assert.match(r.stderr, /zdd\/blessings\/doubled\.md:5: 'importance' opens with one quote and does not close with the same one — ZDD would read it as 'high'; close it with the same quote, or drop both/, r.stderr);
   assert.match(r.stderr, /zdd\/map\/apps\/twice\.md:3: 'title' opens with one quote and does not close with the same one/, r.stderr);
   assert.match(r.stderr, /zdd\/map\/apps\/twice\.md:4: 'type' is written twice \(first on line 2\)/, r.stderr);
+});
+
+test("campaign CR-221, 222, 224: a quote fault reports its own line's reading even when the key repeats below; a long key or value is cut short in the message; many faults stay linear", (t) => {
+  const own = headerProblems("---\ntitle: \"Broken'\ntitle: Good\n---\n");
+  assert.deepEqual(own, [
+    { line: 2, key: "title", problem: "quotes", read: "Broken" },
+    { line: 3, key: "title", problem: "repeated", first: 2 },
+  ]);
+  const repo = mkdtempSync(join(tmpdir(), "zdd-header-"));
+  t.after(() => rmSync(repo, { recursive: true, force: true }));
+  cpSync(FIXTURE, repo, { recursive: true });
+  assert.equal(spawnSync(process.execPath, [BIN, "derive"], { cwd: repo, encoding: "utf8" }).status, 0);
+  const long = "k".repeat(5000);
+  const many = Array.from({ length: 30000 }, (_, i) => `x${i}: "v'`).join("\n");
+  writeFileSync(join(repo, "zdd", "blessings", "hostile.md"), `---\nwhere: src/app/page.tsx\nkind: copy\n${long}: "${"v".repeat(5000)}'\n${many}\n---\n\nAdding a hostile thing? Copy the page, because it is thin.\n`);
+  writeFileSync(join(repo, "zdd", "blessings", "a-own.md"), "---\nwhere: src/app/page.tsx\nkind: copy\ntitle: \"Broken'\ntitle: Good\n---\n\nAdding an own thing? Copy the page, because it is thin.\n");
+  const started = Date.now();
+  const r = spawnSync(process.execPath, [BIN, "lint"], { cwd: repo, encoding: "utf8" });
+  assert.ok(Date.now() - started < 20_000, `lint took ${Date.now() - started} ms`);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /a-own\.md:4: 'title' opens with one quote and does not close with the same one — ZDD would read it as 'Broken'/, r.stderr);
+  const line = r.stderr.split("\n").find((l) => l.includes("hostile.md:4:")) ?? "";
+  assert.ok(line.length > 0 && line.length < 400, `the long key's line is cut short (${line.length} chars)`);
 });

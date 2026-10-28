@@ -505,10 +505,11 @@ category: https://github.com/rich-rees/zero-drift-docs/discussions (decision 004
   regenerate's lint names each line and what ZDD read. Show each one to
   the developer and fix it on their word (which reading they meant is
   theirs); never pick for them.
-- Nothing to answer; no config-schema or metadata-contract change. The
-  pins move to 0.13.0.
-- **What moves on the bump**: only the pins. `derive --check` and
-  `render --check` keep their bytes.
+- No migration question; no config-schema or metadata-contract change.
+  The pins move to 0.13.0.
+- **What moves on the bump**: the pins, and any header line lint names,
+  fixed on the developer's word. `derive --check` and `render --check`
+  keep their bytes.
 
 ## Upgrading to 0.12 (the first adopter's 0.11 findings)
 

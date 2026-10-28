@@ -33,9 +33,9 @@
 //    store pins nothing.
 //    Store headers (0.13.0, decision 0047): a blessing or a semantic-map
 //    page whose header writes a key twice, or opens a value with a quote
-//    and does not close it with the same one, FAILS, naming the line — the
-//    parser would keep the last key, or strip the odd pair, and read
-//    something the author did not write.
+//    and does not close it with the same one (or not at all), FAILS, naming
+//    the line — the parser would keep the last key, or strip the odd pair,
+//    and read something the author did not write.
 // 3. TEMPSTATE lint (--tempstate, PRs only — tautological on the base
 //    branch): the branch working file must be deleted before merge.
 //    Enforced by construction, not ritual.
@@ -232,16 +232,18 @@ const stampsOf = (num) => {
   if (!stampsByNum.has(num)) stampsByNum.set(num, forwardStamps(readFileSync(byNum.get(num).abs, "utf8")));
   return stampsByNum.get(num);
 };
-// A header that says one thing twice, or quotes a value one way and closes
-// it another (decision 0047): the parser reads it silently, so lint fails it.
-const headerLint = (rel, text) => {
-  for (const h of headerProblems(text)) {
-    const what = printable(h.key);
-    if (h.problem === "repeated") problems.push(`${printable(rel)}:${h.line}: '${what}' is written twice (first on line ${h.first}) — ZDD reads only the last one; keep one line`);
-    else {
-      const read = parseFrontmatter(text).frontmatter[h.key];
-      problems.push(`${printable(rel)}:${h.line}: '${what}' opens with one quote and does not close with the same one — ZDD would read it as '${printable(String(read ?? ""))}'; close it with the same quote, or drop both`);
-    }
+// A header that says one thing twice, or opens a value with a quote and
+// does not close it with the same one (decision 0047): the parser reads it
+// silently, so lint fails it. A key or value is cut short in the message,
+// so a hostile header cannot flood the log.
+const brief = (t, n = 60) => {
+  const p = printable(String(t));
+  return p.length > n ? `${p.slice(0, n - 1)}…` : p;
+};
+const headerLint = (rel, found) => {
+  for (const h of found) {
+    if (h.problem === "repeated") problems.push(`${printable(rel)}:${h.line}: '${brief(h.key)}' is written twice (first on line ${h.first}) — ZDD reads only the last one; keep one line`);
+    else problems.push(`${printable(rel)}:${h.line}: '${brief(h.key)}' opens with one quote and does not close with the same one — ZDD would read it as '${brief(h.read)}'; close it with the same quote, or drop both`);
   }
 };
 const BLESSINGS_DIR = resolve(REPO, paths.blessingsDir);
@@ -254,7 +256,7 @@ for (const path of walkMarkdown(MAP_DIR)) {
     problems.push(`${rel}: over ${MAX_STORE_FILE_BYTES / 1024} KiB — a semantic-map concept is a short document; split it or move the bulk out of the map`);
     continue;
   }
-  headerLint(rel, text);
+  headerLint(rel, headerProblems(text));
   const parsed = parseFrontmatter(text);
   mapPages.set(relative(MAP_DIR, path).split(/[\\/]/).join("/").replace(/\.md$/, ""), parsed ? String(parsed.frontmatter.type ?? "") : "");
   const left = extractBlessings(parsed ? parsed.body : text);
@@ -280,10 +282,7 @@ const REPO_REAL = (() => {
   }
 })();
 for (const b of store.blessings) {
-  {
-    const raw = readBounded(resolve(REPO, b.file), MAX_STORE_FILE_BYTES);
-    if (raw !== null) headerLint(b.file, raw);
-  }
+  headerLint(b.file, b.headerProblems ?? []);
   const excerpt = printable(b.text.length > 60 ? b.text.slice(0, 59) + "…" : b.text);
   const where = `${printable(b.file)} (blessing: "${excerpt}")`;
   const shape = b.shape;

@@ -124,8 +124,7 @@ blessing*, and "update ZDD"'s minting step:
    is stored?") belongs in its **ADR and a code comment at the site**, not
    the blessings. `lint` **fails** a blessing whose `where:` is missing or
    names no file, and any header (a blessing's or a map page's) that
-   writes a key twice or closes a quoted value with a different quote
-   (decision 0047).
+   writes a key twice, or opens a value with a quote and does not close it with the same one (decision 0047).
 2. **One trap, with its reason.** One instruction is allowed, as the thing
    the blessing refuses ("never through a Vercel function"), with the ADR or
    a "because".
