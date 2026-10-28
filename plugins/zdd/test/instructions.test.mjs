@@ -99,6 +99,12 @@ test("the instructions carry the rules the findings asked for (13, C11, C12, C13
   assert.match(body, /Two ADRs with one number[\s\S]*next\s+free number[\s\S]*every citation/, "2.4.1, finding 6: the renumber route");
   assert.match(body, /check for existing code to reuse/, "C13: reuse first");
   assert.match(body, /mint the blessings that survived, record the rest in the commit\s+message, delete the plan/, "C13: reconcile, spelled out");
+  assert.match(body, /one marked \*\*high\*\* is not to be reinvented: follow it, or say in the plan\s+why not/, "decision 0045: what the high marker asks, in every session");
+  // The rules of importance live where the work happens (decision 0045 point 9).
+  const skill = (p) => readFileSync(join(PLUGIN, "skills", p), "utf8");
+  assert.match(skill("authoring.md"), /`importance: high`[\s\S]*often needed and costly to reinvent[\s\S]*proposes[\s\S]*confirms[\s\S]*a fifth of the store/, "decision 0045: the header key, its test, who sets it, scarcity");
+  assert.match(skill("patterns/SKILL.md"), /Propose \*\*`importance: high`\*\* only when[\s\S]*suggest\*\* marking that blessing high/, "decision 0045: patterns proposes and suggests");
+  assert.match(skill("update/SKILL.md"), /`importance: high` \*\*only\*\* when the plan proposed\s+it and the developer confirms it now/, "decision 0045: update writes only on a yes");
   assert.match(body, /built on Matt\s+Pocock's skills/, "C14: why");
   assert.match(body, /https:\/\/github\.com\/rich-rees\/zero-drift-docs#readme/, "C14: the README's URL");
   // The findings home moved to Discussions (decision 0041): the developer

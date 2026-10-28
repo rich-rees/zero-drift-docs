@@ -185,8 +185,10 @@ kill a pattern, change it, or create one the plan never saw.
      with `where:` (**the existing, reusable code**: a shared helper or base
      layer before a pattern to imitate), `kind:` (`copy` or `extend`),
      `applies-to:` when it is a house rule for a whole app,
-     `first-built-in:` (the slice this work built it for) and `adr:` when an
-     ADR blessed it; then the text, trigger question first, naming a *kind*
+     `first-built-in:` (the slice this work built it for), `adr:` when an
+     ADR blessed it, and `importance: high` **only** when the plan proposed
+     it and the developer confirms it now (often needed and costly to
+     reinvent; [authoring.md](../authoring.md)) — never by default; then the text, trigger question first, naming a *kind*
      of work, the one trap it refuses, and the reason (an ADR, or
      "because …"). A candidate whose substance is a
      rule with no code to point at becomes an ADR and a code comment at the

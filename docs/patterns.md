@@ -99,6 +99,15 @@ work touches. Every other blessing is opened when its question matches.
 never decides where the blessing applies — a file-upload pattern does not
 "belong" to the feature that happened to need it first.
 
+**High importance** (0.11, decision 0045): `importance: high` marks a
+blessing that is often needed **and** costly to reinvent — the side peek
+every details page uses, so nobody builds a modal of their own. Its index
+line comes first in its section and opens with a bold **high**; the human
+index pins it to the top of the Blessings peek with a chip. It is emphasis
+with one duty, not "always read": a session still opens it when its
+question matches, and a plan that departs from it says why. A session
+proposes it and the developer confirms it; `high` stays scarce.
+
 **Who uses an `extend` blessing's code** is worked out on every render from
 the metadata: every record that references the exemplar's record, or that
 it says uses it. "Users unknown to ZDD" means no record has that file (an
@@ -212,6 +221,8 @@ Apps touched: api, web (house rules read in full)
 | A blessing with no `kind:`, or one that is neither `copy` nor `extend` | `lint` | **fails** (2.5) |
 | An `applies-to:` that names no app or package page | `lint` | **fails** (2.5) |
 | A Blessings section left on a semantic-map page | `lint` | **fails** (2.5: "upgrade ZDD" moves them) |
+| An `importance:` other than `high` (case-exact) | `lint` | **fails** (0.11) |
+| More `importance: high` blessings than a fifth of the store (at least one allowed) | `lint` | warning (0.11) |
 | A `first-built-in:` that names no map page, or a header line ZDD does not read | `lint` | warning |
 | A blessing with no reason (no ADR, no "because …") | `lint` | warning |
 | A blessing over 300 visible characters | `lint` | warning |

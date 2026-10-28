@@ -56,7 +56,10 @@ are the ones `load` used.
 3. **Read the blessing index whole.** It is one line per blessing: the
    trigger question linked to its file, then **where** (`copy:` or
    `extend:` and the code) and **why** (the ADR or the reason). House rules
-   come first, under "Applies to" their app.
+   come first, under "Applies to" their app. A line that opens with
+   **high** is a blessing marked `importance: high` — often needed and
+   costly to reinvent — and comes first in its section: when its question
+   is anywhere near the work, open it.
    - For **every app the work touches**, open each of its house rules in
      full — they apply to all work in that app.
    - For **each piece**, open in full (its file in the blessing store) every
@@ -92,7 +95,9 @@ are the ones `load` used.
    - **follow** `<blessing>` ("<trigger question>") — because …
    - **depart from** `<blessing>` ("<trigger question>") — because … (a
      departure with a reason is legitimate; a silent one is the failure this
-     step exists to prevent)
+     step exists to prevent). Departing from a **high** blessing is
+     building your own version of what it names: say why its code cannot
+     serve, not only that this piece differs.
    - **no blessing applies** — say what you checked
    - **new pattern, candidate blessing** — the question it would answer (a
      *kind* of work that recurs, not this feature's instance), the existing
@@ -101,6 +106,14 @@ are the ones `load` used.
      `copy` or `extend`, the one trap it refuses, and the reason. It must pass the test in
      [authoring.md](../authoring.md): pointer to reusable code first; a rule
      with no code to point at is an ADR and a code comment, not a blessing.
+     Propose **`importance: high`** only when it is both **often needed**
+     and **costly to reinvent**, and say so with the reason; the developer
+     confirms it at "update ZDD". Keep it scarce — lint warns past a fifth
+     of the store.
+   - Seeing a piece about to **reinvent** what an existing normal blessing
+     names (a modal of its own where a side-peek blessing applies) is the
+     moment to **suggest** marking that blessing high: say so, with the
+     reason, and change its header only on the developer's yes.
 7. **Write the plan file** in the shape below, **say the plan aloud** (one
    line per piece), and commit it on the branch. It is a working file: it
    crosses sessions and machines because it is committed.
@@ -123,7 +136,7 @@ Apps touched: <app>, <app> (house rules read in full)
 - **<piece>** — follow `<blessing>` ("<trigger question>") — because …
 - **<piece>** — depart from `<blessing>` ("<trigger question>") — because …
 - **<piece>** — no blessing applies — checked <questions>
-- **<piece>** — new pattern, candidate blessing (<copy | extend>): "<Question?>
+- **<piece>** — new pattern, candidate blessing (<copy | extend>[, proposed high]): "<Question?>
   Copy <exemplar> — never <refused pattern>." — because …
 
 ## Retest
