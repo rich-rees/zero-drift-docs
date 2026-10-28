@@ -889,8 +889,9 @@
 
   // ---------- blessings (decision 0043) ----------
   // A blessing names the code to start from for a kind of work, asked as a
-  // trigger question. The list is the store in the index's order (by
-  // question); kind and app are chips, never headings.
+  // trigger question. The list is the store in the engine's order (high
+  // first, then by question, then id — decision 0045); importance, kind and
+  // app are chips, never headings.
   function chip(text, cls, title) {
     const s = document.createElement("span");
     s.className = `tag ${cls}`;

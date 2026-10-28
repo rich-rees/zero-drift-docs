@@ -70,7 +70,9 @@ blessings as a hint; only the ticket's own step binds.
 `render` writes `zdd/blessing-index.md` (`paths.blessingIndex`): one line per
 blessing, its trigger question linked to its file, then **where** and
 **why**. House rules come first, under the app they apply to; every other
-blessing follows in one list, by question.
+blessing follows in one list. Within each section a blessing marked
+`importance: high` comes first, its line opening with a bold **high**; then
+the rest, by question.
 
 ```markdown
 ## Applies to [API](map/apps/api.md)

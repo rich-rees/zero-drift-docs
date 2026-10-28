@@ -69,8 +69,8 @@ before(() => {
   urls = {
     fixture: renderFixture(),
     hostile: renderFixture((repo) => writeFileSync(join(repo, "zdd", "blessings", "hostile.md"), HOSTILE)),
-    // A second high blessing whose question sorts before the fixture's high
-    // one and after none of the normal ones' — so only the pin puts it first.
+    // A second high blessing whose question sorts after the fixture's high
+    // one and after every normal one's — so only the pin puts it on top.
     twoHigh: renderFixture((repo) => writeFileSync(join(repo, "zdd", "blessings", "showing-a-thing.md"),
       "---\nwhere: src/app/page.tsx\nkind: copy\nimportance: high\n---\n\nShowing a thing? Copy the page because x.\n")),
     empty: renderFixture((repo) => {

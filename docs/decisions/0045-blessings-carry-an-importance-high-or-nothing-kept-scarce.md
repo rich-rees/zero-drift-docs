@@ -1,6 +1,6 @@
 # 0045 — Blessings carry an importance: `high` or nothing, kept scarce
 
-**Date:** 2026-10-28 · **Status:** accepted · **Origin:** ZDD-7, the design session on 2026-10-28 (Rich's calls, questions 1–9). Widens the blessing store's header (0031) and the viewer's `docs.blessings` entry (0043). **Supersedes, in part:** [0043](0043-viewers-get-the-blessing-store-ready-read.md) point 1's order (the rest of 0043 stands).
+**Date:** 2026-10-28 · **Status:** accepted · **Origin:** ZDD-7, the design session on 2026-10-28 (Rich's calls, questions 1–9). Widens the blessing store's header (0031) and the viewer's `docs.blessings` entry (0043). **Supersedes, in part:** [0043](0043-viewers-get-the-blessing-store-ready-read.md) point 1's order and point 3's "by trigger question", and [0031](0031-blessings-live-in-a-store-of-their-own-one-file-each-with-a-where-and-a-kind.md) point 4's index order (the rest of both stands).
 
 ## Context
 

@@ -103,7 +103,9 @@ test("the instructions carry the rules the findings asked for (13, C11, C12, C13
   // The rules of importance live where the work happens (decision 0045 point 9).
   const skill = (p) => readFileSync(join(PLUGIN, "skills", p), "utf8");
   assert.match(skill("authoring.md"), /`importance: high`[\s\S]*often needed and costly to reinvent[\s\S]*proposes[\s\S]*confirms[\s\S]*a fifth of the store/, "decision 0045: the header key, its test, who sets it, scarcity");
-  assert.match(skill("patterns/SKILL.md"), /Propose \*\*`importance: high`\*\* only when[\s\S]*suggest\*\* marking that blessing high/, "decision 0045: patterns proposes and suggests");
+  assert.match(skill("patterns/SKILL.md"), /Propose \*\*`importance: high`\*\* only when[\s\S]*suggest\*\* marking that blessing high[\s\S]*Never edit the\s+blessing file here/, "decision 0045: patterns proposes and suggests, and never writes (CR-193)");
+  assert.match(skill("patterns/SKILL.md"), /## Proposed high\n/, "CR-193: the plan carries an existing blessing's proposal");
+  assert.match(skill("update/SKILL.md"), /\*\*Proposed high\*\*[\s\S]*on their yes add the line[\s\S]*Never on silence/, "CR-193: update writes an existing blessing's proposal only on a yes");
   assert.match(skill("update/SKILL.md"), /`importance: high` \*\*only\*\* when the plan proposed\s+it and the developer confirms it now/, "decision 0045: update writes only on a yes");
   assert.match(body, /built on Matt\s+Pocock's skills/, "C14: why");
   assert.match(body, /https:\/\/github\.com\/rich-rees\/zero-drift-docs#readme/, "C14: the README's URL");

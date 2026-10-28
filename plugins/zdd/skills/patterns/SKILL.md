@@ -113,7 +113,9 @@ are the ones `load` used.
    - Seeing a piece about to **reinvent** what an existing normal blessing
      names (a modal of its own where a side-peek blessing applies) is the
      moment to **suggest** marking that blessing high: say so, with the
-     reason, and change its header only on the developer's yes.
+     reason, and put it on the plan's *Proposed high* line. Never edit the
+     blessing file here: "update ZDD" confirms it against the final diff
+     and writes it on the developer's yes.
 7. **Write the plan file** in the shape below, **say the plan aloud** (one
    line per piece), and commit it on the branch. It is a working file: it
    crosses sessions and machines because it is committed.
@@ -138,6 +140,10 @@ Apps touched: <app>, <app> (house rules read in full)
 - **<piece>** — no blessing applies — checked <questions>
 - **<piece>** — new pattern, candidate blessing (<copy | extend>[, proposed high]): "<Question?>
   Copy <exemplar> — never <refused pattern>." — because …
+
+## Proposed high
+
+- `<blessing>` ("<trigger question>") — often needed and costly to reinvent: …
 
 ## Retest
 

@@ -1,6 +1,7 @@
 // The blessing index (2.0.0; where and why since ZDD-1, decision 0031):
 // one line per blessing in the store, house rules under their app first,
-// then every other blessing by question. The builder on its own, then the
+// then every other blessing; each section high first, then by question
+// (decision 0045). The builder on its own, then the
 // fixture's index against its golden, render --check catching a stale or
 // missing index, and the agent index's reading path naming it.
 // Run: node --test "test/*.test.mjs"

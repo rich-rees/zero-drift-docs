@@ -195,6 +195,11 @@ kill a pattern, change it, or create one the plan never saw.
      site instead. Otherwise **drop it**, and record why.
    - **no blessing applies** — nothing to do, unless the build ended up
      copying something; then treat that as precedent.
+   - **Proposed high** — for each existing blessing the plan proposed
+     marking `importance: high`: confirm the reason still holds against the
+     final diff and ask the developer; on their yes add the line to that
+     blessing's header, otherwise record the proposal as dropped, with why.
+     Never on silence (decision 0045).
    - **Retest** — for every piece that extended an `extend` blessing's code,
      confirm each user on its *Retest* line was retested (its tests ran, or
      it was checked by hand), or that the plan says why not. A user left

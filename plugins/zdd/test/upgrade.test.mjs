@@ -336,7 +336,7 @@ test("2.4.1 CR-020: the opt-in offer is quiet for an extractor already on", () =
 
 test("2.4.1, finding 3: each rule's `since` is a release no later than this plugin, and moves with what the rule says — change `says`, then bump `since` and this table together", () => {
   const PINNED = {
-    load: oldLine("2.4.0"), patterns: oldLine("2.3.0"), update: oldLine("2.4.0"), upgrade: oldLine("2.3.0"), skew: oldLine("2.3.0"), generated: oldLine("2.4.1"),
+    load: oldLine("2.4.0"), patterns: "0.11.0", update: oldLine("2.4.0"), upgrade: oldLine("2.3.0"), skew: oldLine("2.3.0"), generated: oldLine("2.4.1"),
     merge: oldLine("2.4.1"), renumber: oldLine("2.4.1"), install: oldLine("2.3.0"), grill: oldLine("2.3.0"), findings: "0.9.0", record: oldLine("2.4.1"), blessings: oldLine("2.5.0"),
   };
   const VERSION = JSON.parse(readFileSync(join(PLUGIN, ".claude-plugin", "plugin.json"), "utf8")).version;
@@ -349,10 +349,30 @@ test("2.4.1, finding 3: each rule's `since` is a release no later than this plug
   }
   assert.deepEqual(Object.keys(SAYS_SHA).sort(), Object.keys(PINNED).sort());
   const SAYS_PINNED = {
-    load: "f5ab5c09cab0", patterns: "ce86483b2454", update: "0143764c1f10", upgrade: "1f328adcb3f1", skew: "c0a3cd59c82f", generated: "d342fc5876db",
+    load: "f5ab5c09cab0", patterns: "5a1de9697705", update: "0143764c1f10", upgrade: "1f328adcb3f1", skew: "c0a3cd59c82f", generated: "d342fc5876db",
     merge: "98d4b51c843c", renumber: "d1f96292c08e", install: "df690ac41ed2", grill: "474fe1670736", findings: "c6a5958dbb61", record: "3767c173ae7e", blessings: "5d7a511af2c2",
   };
   assert.deepEqual(SAYS_SHA, SAYS_PINNED, "a rule's `says` changed — bump its `since` to this release, then copy the new hashes here");
+});
+
+test("CR-192 (decision 0045 point 8): the 0.11 upgrade explains importance and never asks for it or writes it", () => {
+  const note = UPGRADE_NOTES["0.11.0"]({ paths: { bundleDir: "zdd" }, config: {} }).join("\n");
+  const skill = readFileSync(join(PLUGIN, "skills", "upgrade", "SKILL.md"), "utf8");
+  const section = skill.slice(skill.indexOf("## Upgrading to 0.11"));
+  for (const [name, text] of [["UPGRADE_NOTES 0.11.0", note], ["Upgrading to 0.11", section]]) {
+    assert.match(text, /importance: high/, `${name} names the field`);
+    assert.match(text, /never set by the upgrade|never sets it/, `${name} says the upgrade never sets it`);
+    assert.doesNotMatch(text, /\bask (?:the person|them|whether)\b|\badd (?:the|that) line\b|on their yes/i, `${name} solicits or writes importance`);
+  }
+  assert.match(section, /touch no blessing file/);
+  assert.match(section, /Nothing to answer/);
+});
+
+test("CR-194: the patterns rule changed in 0.11, so an upgrade from 0.10 shows an adopter's own choose-patterns paragraph, and its `says` carries the high clause", () => {
+  const rule = INSTRUCTION_RULES.find((r) => r.id === "patterns");
+  assert.equal(ruleChangedSince(rule, "0.10.0"), true);
+  assert.equal(ruleChangedSince(rule, "0.11.0"), false);
+  assert.match(rule.says, /one marked high is not to be reinvented: follow it, or say in the plan why not/);
 });
 
 test("newestTag: the highest release tag by semver, ignoring pre-releases and junk", () => {

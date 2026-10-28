@@ -7,7 +7,8 @@
 //
 // House rules first: a blessing with `applies-to` is listed under its app or
 // package, and every one is read in full for an app the work touches. Then
-// every other blessing in one list, by question. Each line carries two
+// every other blessing in one list; each section high first, then by
+// question (decision 0045). Each line carries two
 // pointers, where (the exemplar, and for an `extend` blessing who uses it)
 // and why (the ADRs it cites, else its "because …" clause). A blessing with
 // no question is still listed, flagged, so nothing in the store is invisible

@@ -193,7 +193,7 @@ test("decision 0031: an unknown first-built-in and an unknown header key are WAR
   const r = lint(repo);
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stderr, /^WARNING: zdd\/blessings\/lost\.md .*'first-built-in: features\/nowhere' names no semantic-map page/m);
-  assert.match(r.stderr, /^WARNING: zdd\/blessings\/lost\.md .*has header line ZDD does not read \(apply-to\) — the header is where, kind, applies-to, first-built-in, adr/m);
+  assert.match(r.stderr, /^WARNING: zdd\/blessings\/lost\.md .*has header line ZDD does not read \(apply-to\) — the header is where, kind, applies-to, first-built-in, adr, importance$/m);
   rmSync(repo, { recursive: true, force: true });
 });
 

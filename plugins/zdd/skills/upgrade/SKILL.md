@@ -505,13 +505,15 @@ category: https://github.com/rich-rees/zero-drift-docs/discussions (decision 004
   its section with a bold **high**; the reference human index pins it to
   the top of the Blessings peek with a chip; a plan that departs from it
   says why.
-- **The upgrade never sets it.** In step 5, with the blessing index open,
-  ask the person whether any blessing earns it, naming the test; add the
-  line only on their yes, one blessing at a time. Keep it scarce: lint
-  warns when more than a fifth of the store (at least one) is high, and
-  fails any value but `high`, case-exact.
-- Nothing else to answer; no config-schema or metadata-contract change.
-  The pins move to 0.11.0.
+- **The upgrade never sets it, and asks nothing about it** (decision 0045
+  point 8): marking a blessing high is a judgement made in the course of
+  work — a session proposes it at "choose patterns", and "update ZDD"
+  writes it on the developer's yes. In step 5, say in one line that the
+  field exists and what it is for; touch no blessing file. Lint fails any
+  value but `high` (case-exact) and warns when more than a fifth of the
+  store (at least one) is high.
+- Nothing to answer; no config-schema or metadata-contract change. The
+  pins move to 0.11.0.
 - **What moves on the bump**: with the reference viewer, `render --check`
   moves `human-index.html` (each blessing entry gains `importance`); the
   rewritten `zdd/instructions.md` and Codex's `AGENTS.md` block gain one

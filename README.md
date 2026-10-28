@@ -584,8 +584,8 @@ still change; 1.0.0 freezes it.
   `lint` fails any value but `high` and warns when more than a fifth of
   the store is high. The viewer contract's blessing entry gains
   `importance`, high entries first (decision 0045). **What moves on the
-  bump**: every pin ZDD owns names `@rich-rees/zdd@0.11.0`; `render --check`
-  moves `human-index.html`; "upgrade ZDD" rewrites `zdd/instructions.md`
+  bump**: every pin ZDD owns names `@rich-rees/zdd@0.11.0`; with the
+  reference viewer `render --check` moves `human-index.html`; "upgrade ZDD" rewrites `zdd/instructions.md`
   and the `AGENTS.md` block (one clause); `blessing-index.md` moves only
   once a blessing is marked high; no graph or metadata byte changes.
   Nothing to answer — the upgrade never marks a blessing high.
