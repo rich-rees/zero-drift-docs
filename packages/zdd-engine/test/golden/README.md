@@ -45,7 +45,7 @@ the viewer's new button, filter box, back buttons and peek script. No graph,
 metadata, agent-index or blessing-index byte moved. The ZDD-2 campaign's
 fixes (CR-167 to CR-179) regenerated the full-page golden once more: every
 changed line is a changed line of viz.js or viz.html; the BUNDLE literal did
-not move.
+not move. Verify pass 1 (CR-180) moved it again, by viz.js lines only.
 
 ## Regenerating
 
