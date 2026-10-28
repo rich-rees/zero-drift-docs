@@ -10,8 +10,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseRecord, SECTIONS, USE_VERBS, STORE_VERB, BLESSING_VERBS } from "../../../packages/zdd-engine/src/lib/zdd-record.mjs";
+import { parseRecord, SECTIONS, USE_VERBS, STORE_VERB, BLESSING_VERBS } from "../../../packages/zdd-engine/src/core/lib/zdd-record.mjs";
 import { INSTRUCTION_RULES, UPGRADE_NOTES } from "../scripts/bootstrap.mjs";
+import { oldLine } from "../scripts/lib/repo.mjs";
 
 const PLUGIN = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (...p) => readFileSync(join(PLUGIN, ...p), "utf8");
@@ -77,7 +78,7 @@ test("load declares with the ZDD: prefix and claims no benefit; patterns says th
 });
 
 test("the 2.4 upgrade note names the record, the tally and the lint warning; the Upgrading section exists", () => {
-  const notes = UPGRADE_NOTES["2.4.0"]({ paths: { bundleDir: "zdd" }, config: {} }).join("\n");
+  const notes = UPGRADE_NOTES[oldLine("2.4.0")]({ paths: { bundleDir: "zdd" }, config: {} }).join("\n");
   assert.match(notes, /zdd\/instructions\.md/);
   assert.match(notes, /ZDD record:/);
   assert.match(notes, /zdd-engine tally/);

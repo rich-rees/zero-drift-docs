@@ -130,7 +130,7 @@ test("fence: a generated path that overlaps a curated one or zdd/config.json is 
 });
 
 test("repoRelative speaks the engine's path language exactly — whitespace and backslashes rejected, '.' normalised (CR-079)", async () => {
-  const engine = await import(pathToFileURL(resolve(PLUGIN, "..", "..", "packages", "zdd-engine", "src", "lib", "paths.mjs")).href);
+  const engine = await import(pathToFileURL(resolve(PLUGIN, "..", "..", "packages", "zdd-engine", "src", "core", "lib", "paths.mjs")).href);
   const corpus = ["zdd/graph.json", "./docs/AGENT.md", "docs//x/./y.md", "zdd/", ".", "./", "docs/ZDD Index.md", " zdd/graph.json", "zdd/graph.json\n", "zdd\\graph.json", "\\zdd", "/etc/passwd", "C:/tmp/g.md", "c:\\tmp", "../x", "a/../b", "javascript:alert(1)", "http://x/y", "a:b/c", "", 42, null, "\x01x", "x\x7f"];
   for (const v of corpus) {
     let ours, theirs;
@@ -460,7 +460,7 @@ test("pre-push hook with no engine CLI on PATH prints one line and exits 0", (t)
   assert.match(lines[0], /npx not found/);
 });
 
-test("pre-push hook runs derive --check, render --check, lint in order and stops at the first failure", (t) => {
+test("pre-push hook runs derive --check, render --check, lint, suite in order and stops at the first failure", (t) => {
   const sh = findSh();
   if (!sh) return t.skip("no sh available");
   const bin = join(scratch, "fakebin");
@@ -474,7 +474,7 @@ test("pre-push hook runs derive --check, render --check, lint in order and stops
   fake("never");
   rmSync(log, { force: true });
   assert.equal(run().status, 0);
-  assert.deepEqual(readFileSync(log, "utf8").trim().split("\n"), ["-y @rich-rees/zdd-engine@" + version() + " derive --check", "-y @rich-rees/zdd-engine@" + version() + " render --check", "-y @rich-rees/zdd-engine@" + version() + " lint"]);
+  assert.deepEqual(readFileSync(log, "utf8").trim().split("\n"), ["-y @rich-rees/zdd@" + version() + " derive --check", "-y @rich-rees/zdd@" + version() + " render --check", "-y @rich-rees/zdd@" + version() + " lint", "-y @rich-rees/zdd@" + version() + " suite"]); // the suite since 0.9 (CR-134)
   fake("render --check");
   rmSync(log);
   assert.notEqual(run().status, 0, "render failure propagates");
@@ -537,7 +537,12 @@ test("every engine pin in the plugin (skills, templates) equals the plugin versi
     for (const n of readdirSync(d)) {
       const p = join(d, n);
       if (statSync(p).isDirectory()) rec(p);
-      else for (const m of readFileSync(p, "utf8").matchAll(/@rich-rees\/zdd-engine@([0-9][^"'\s`]*)/g)) pins.push({ file: p, version: m[1] });
+      else {
+        const text = readFileSync(p, "utf8");
+        for (const m of text.matchAll(/@rich-rees\/zdd@([0-9][^"'\s`]*)/g)) pins.push({ file: p, version: m[1] });
+        // The old line's package is never pinned by the plugin (decision 0042).
+        for (const m of text.matchAll(/@rich-rees\/zdd-engine@([0-9][^"'\s`]*)/g)) pins.push({ file: p, version: `old line: ${m[0]}` });
+      }
     }
   };
   rec(join(PLUGIN, "skills"));

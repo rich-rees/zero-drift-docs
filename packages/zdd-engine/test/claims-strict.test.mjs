@@ -13,7 +13,7 @@ import { mkdtempSync, writeFileSync, readFileSync, rmSync, cpSync, symlinkSync, 
 import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { unclaimedRecords } from "../src/lib/claims.mjs";
+import { unclaimedRecords } from "../src/core/lib/claims.mjs";
 
 const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const BIN = join(PKG, "bin", "zdd-engine.mjs");

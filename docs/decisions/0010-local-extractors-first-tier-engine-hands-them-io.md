@@ -1,6 +1,6 @@
 # Local extractors are the first tier; the engine hands them `io`
 
-**Date:** 2026-09-28 · **Status:** accepted · **Origin:** 1.3.0 — the "add your own stack" story for the public plugin. Designing the `extractor` skill showed that a local extractor could not honour the hardening checklist it was about to teach: the engine's safe-read helpers were unreachable from the adopter's repo. **Supersedes, in part:** [0003](0003-kernel-and-opt-ins.md) point 5 ("the script is the only writer") — a second script now writes adopter-owned files, by the same rule.
+**Date:** 2026-09-28 · **Status:** accepted; the "registry" tier superseded by [0036](0036-the-core-knows-no-stack-adapters-live-beside-it.md) (the registry becomes the catalogue of adapters beside the core) · **Origin:** 1.3.0 — the "add your own stack" story for the public plugin. Designing the `extractor` skill showed that a local extractor could not honour the hardening checklist it was about to teach: the engine's safe-read helpers were unreachable from the adopter's repo. **Supersedes, in part:** [0003](0003-kernel-and-opt-ins.md) point 5 ("the script is the only writer") — a second script now writes adopter-owned files, by the same rule.
 
 An extractor is called `derive({ repoRoot, options, io })`. `io` is a
 frozen object the engine builds fresh for each extractor on each run

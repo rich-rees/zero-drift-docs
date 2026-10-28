@@ -30,6 +30,17 @@ import { fileURLToPath } from "node:url";
 
 export const FACTS_KEY_ORDER = __FACTS_KEY_ORDER__;
 
+// What ZDD's standard suite needs (`zdd-engine suite`, decision 0040): the
+// adapter contract this module was written for, how a line of each kind of
+// file it reads is commented out (null for one that takes none, such as JSON;
+// the suite comments out every line of the
+// fixture and expects nothing new), and the options its fixture/ is read
+// with. Put a fixture-trap/ folder beside fixture/ (laid out the same way)
+// for declarations written inside strings: they must give nothing either.
+export const CONTRACT = 1;
+export const COMMENT = __COMMENT__;
+export const SUITE = { options: __FIXTURE_OPTIONS__ };
+
 const DEFAULT_ROOTS = __ROOTS__;
 const DEFAULT_EXTENSIONS = __EXTENSIONS__;
 // Folders never walked: dependencies, build output, the zdd bundle.
@@ -39,7 +50,7 @@ export function derive({ repoRoot, options = {}, io }) {
   if (!io) {
     // Fail loudly (decision 0010): empty records here would be committed by
     // `derive` and then accepted by `derive --check` as the new truth.
-    throw new Error("__NAME__ needs @rich-rees/zdd-engine __IO_SINCE__ or later (io was not passed) — say \"upgrade ZDD\", then derive again");
+    throw new Error("__NAME__ needs an engine that passes io — any @rich-rees/zdd, or @rich-rees/zdd-engine __IO_SINCE__ or later (io was not passed) — say \"upgrade ZDD\", then derive again");
   }
   const roots = options.roots ?? DEFAULT_ROOTS;
   const extensions = options.extensions ?? DEFAULT_EXTENSIONS;
@@ -117,7 +128,7 @@ function merge(records) {
   return [...byId.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
 
-// The engine's filename scheme (src/lib/slug.mjs), copied because a local
+// The engine's filename scheme (src/core/lib/slug.mjs), copied because a local
 // extractor cannot import the engine: `/` → `--`, `{p}` → `_p`, `.` → `-`.
 // Two ids that slug alike fail derive loudly — never a silent overwrite.
 function slugify(key) {

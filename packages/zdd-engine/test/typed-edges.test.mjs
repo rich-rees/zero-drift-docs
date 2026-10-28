@@ -10,7 +10,7 @@ import { readFileSync, writeFileSync, rmSync, mkdtempSync, cpSync, mkdirSync } f
 import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { resolveRefs } from "../src/lib/resolve-refs.mjs";
+import { resolveRefs } from "../src/core/lib/resolve-refs.mjs";
 
 const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const BIN = join(PKG, "bin", "zdd-engine.mjs");

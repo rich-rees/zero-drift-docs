@@ -202,10 +202,10 @@ test("pick 3: upgrade renames the extractor and its options key in place, strict
   assert.deepEqual(cfg.extractors, ["fastapi", "external-services"]);
   assert.deepEqual(Object.keys(cfg.extractorOptions), ["fastapi", "external-services"], "the new key where the old one sat");
   assert.deepEqual(cfg.extractorOptions["external-services"], { services: [{ name: "Sentry", env: ["SENTRY_"] }], roots: ["api"] });
-  assert.deepEqual(cfg.claims.strictKinds, ["external-service", "job"]);
+  assert.deepEqual(cfg.claims.strictKinds, ["external-service", "background-task"], "0.9 renames job too (decision 0038)");
   assert.equal(readFileSync(join(repo, "zdd", "map", "services", "sentry.md"), "utf8"), sentryPage.replace("metadata/service/", "metadata/external-service/"));
   assert.ok(json.notes.some((n) => /zdd\/config\.json: extractor "services" → "external-services"/.test(n)), json.notes.join("\n"));
-  assert.ok(json.notes.some((n) => /zdd\/map\/services\/sentry\.md: links to metadata\/service\/ now point at metadata\/external-service\//.test(n)), json.notes.join("\n"));
+  assert.ok(json.notes.some((n) => /zdd\/map\/services\/sentry\.md: links to a renamed kind's records now point at its new folder \(metadata\/service\/ → metadata\/external-service\//.test(n)), json.notes.join("\n"));
   assert.ok(json.notes.some((n) => /zdd\/map\/services\/ is your hand-written folder .* never renamed for you/.test(n)), json.notes.join("\n"));
   assert.ok(existsSync(join(repo, "zdd", "map", "services", "sentry.md")), "the folder keeps its name");
   const again = runJson(repo, ["upgrade"]);
@@ -230,11 +230,11 @@ test("CR-304/305/311/317: allowUnclaimed ids move with the kind; a half-migrated
   const cfg = JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8"));
   assert.deepEqual(cfg.extractors, ["external-services", "fastapi"], "every old occurrence goes; the new name is already there");
   assert.deepEqual(Object.keys(cfg.extractorOptions), ["external-services", "fastapi"]);
-  assert.deepEqual(cfg.claims.strictKinds, ["external-service", "job"], "in place");
+  assert.deepEqual(cfg.claims.strictKinds, ["external-service", "background-task"], "in place; 0.9 renames job too");
   assert.deepEqual(cfg.claims.allowUnclaimed, ["route:/health", "external-service:resend"]);
   assert.equal(readFileSync(join(repo, "zdd", "map", "features", "a.md"), "utf8"), page.replaceAll("metadata/service/", "metadata/external-service/"));
   assert.ok(json.notes.some((n) => /claims\.allowUnclaimed "service:…" ids → "external-service:…"/.test(n)), json.notes.join("\n"));
-  assert.ok(json.notes.some((n) => /zdd\/map: zdd\/map\/d0\/.*\(deeper than 16 folders\) was not read for old metadata\/service\/ links — check it by hand/.test(n)), json.notes.join("\n"));
+  assert.ok(json.notes.some((n) => /zdd\/map: zdd\/map\/d0\/.*\(deeper than 16 folders\) was not read for old metadata\/service\/ or metadata\/job\/ links — check it by hand/.test(n)), json.notes.join("\n"));
 
   // Nothing left in the config, one old link left in the map: still rewritten.
   const linksOnly = adopted("rename-links-only", { engine: "2.2.1" });

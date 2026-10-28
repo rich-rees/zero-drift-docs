@@ -35,7 +35,12 @@ function repoRoot() {
     if (dirname(dir) === dir) throw new Error("no zdd/config.json above this test — run it inside the adopting repo");
   }
 }
-const PIN = JSON.parse(readFileSync(join(repoRoot(), "zdd", "config.json"), "utf8")).engine;
+// The release pin (`release`, from 0.9: @rich-rees/zdd) or, before 0.9, the
+// old line's `engine` pin (@rich-rees/zdd-engine) — decision 0042.
+const CONFIG = JSON.parse(readFileSync(join(repoRoot(), "zdd", "config.json"), "utf8"));
+const PIN_KEY = Object.hasOwn(CONFIG, "release") ? "release" : "engine";
+const PIN = CONFIG[PIN_KEY];
+const PACKAGE = PIN_KEY === "release" ? "@rich-rees/zdd" : "@rich-rees/zdd-engine";
 const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
 // npm's own npx script, run by this node — no shell, so no quoting to get
@@ -51,8 +56,8 @@ function npxCli() {
 // the test, never hangs it (1.3.0 CR-045).
 function engine(repo, args, env = process.env, timeout = 300_000) {
   const local = process.env.ZDD_ENGINE_BIN;
-  if (!local && !SEMVER.test(String(PIN))) throw new Error(`zdd/config.json 'engine' must be a version like 1.3.0, got ${JSON.stringify(PIN)}`);
-  const argv = local ? [local, ...args, `--root=${repo}`] : [npxCli(), "-y", `@rich-rees/zdd-engine@${PIN}`, ...args, `--root=${repo}`];
+  if (!local && !SEMVER.test(String(PIN))) throw new Error(`zdd/config.json '${PIN_KEY}' must be a version like 0.9.0, got ${JSON.stringify(PIN)}`);
+  const argv = local ? [local, ...args, `--root=${repo}`] : [npxCli(), "-y", `${PACKAGE}@${PIN}`, ...args, `--root=${repo}`];
   const r = spawnSync(process.execPath, argv, { encoding: "utf8", env, timeout, killSignal: "SIGKILL" });
   const timedOut = r.error?.code === "ETIMEDOUT" ? `\n(killed after ${timeout / 1000} s — derive did not terminate)` : "";
   return { status: r.status, out: `${r.stdout ?? ""}${r.stderr ?? ""}${timedOut}` };
@@ -113,7 +118,7 @@ function scratchRepo(t, { withFixture = true, options = FIXTURE_OPTIONS, from = 
   const target = join(repo, "zdd", "extractors", NAME);
   walkFiles(HERE, (p) => {
     const rel = relative(HERE, p);
-    if (/^fixture(?:-deep)?(?:[\\/]|$)/.test(rel) || rel.endsWith(".test.mjs")) return;
+    if (/^fixture(?:-deep|-trap)?(?:[\\/]|$)/.test(rel) || rel.endsWith(".test.mjs")) return;
     mkdirSync(dirname(join(target, rel)), { recursive: true });
     writeFileSync(join(target, rel), readCapped(p, budget));
   });
@@ -193,7 +198,7 @@ test("the extractor reads through io only: no fs, process, network or environmen
   const budget = { bytes: 0 }; // one total across the scan (CR-008)
   walkFiles(HERE, (p) => {
     const rel = relative(HERE, p);
-    if (!/\.m?js$/.test(p) || /^fixture(?:-deep)?(?:[\\/]|$)/.test(rel) || rel.endsWith(".test.mjs")) return;
+    if (!/\.m?js$/.test(p) || /^fixture(?:-deep|-trap)?(?:[\\/]|$)/.test(rel) || rel.endsWith(".test.mjs")) return;
     const text = readCapped(p, budget).toString("utf8");
     for (const [re, what] of banned) if (re.test(text)) problems.push(`${rel} ${what}`);
   });
@@ -264,4 +269,25 @@ test("recursion ceiling: a convention that recurses stops on a cycle or a deep c
   const out = engineOk(repo, ["derive", "--verbose"], process.env, 60_000); // killed, and red, after a minute
   assert.ok(Date.now() - started < 60_000, "derive took over a minute on the deep fixture");
   assert.match(out, /cycle|deeper than|depth|ceiling/i, "derive finished but did not say where it stopped");
+});
+
+// ---------------------------------------------------------------------------
+// ZDD's standard suite (decision 0040): the checks every adapter passes, run
+// by the engine on a copy of fixture/ outside this repo — the same command
+// CI runs. Every check must pass here, whatever zdd/config.json's
+// suiteChecks says CI holds the repo to.
+// ---------------------------------------------------------------------------
+test("the standard suite: every check passes", () => {
+  const r = engine(repoRoot(), ["suite", "--json", `--extractors=${NAME}`]);
+  let report;
+  try {
+    report = JSON.parse(r.out.slice(r.out.indexOf("{")));
+  } catch {
+    assert.fail(`zdd-engine suite gave no report (does the pinned engine have \`suite\`? it came in 0.9):\n${r.out}`);
+  }
+  const mine = report.adapters.find((a) => a.name === NAME);
+  assert.ok(mine, `the suite did not find ${NAME} in localExtractorDir`);
+  assert.equal(mine.contractFail ?? null, null, mine.contractFail);
+  const failed = mine.checks.filter((c) => !c.ok).map((c) => `${c.n} ${report.checks[c.n - 1].title}: ${c.detail}\n   fix: ${report.checks[c.n - 1].fix}`);
+  assert.deepEqual(failed, []);
 });

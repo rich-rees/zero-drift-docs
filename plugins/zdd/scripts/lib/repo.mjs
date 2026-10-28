@@ -19,11 +19,78 @@ import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 
 export const PLUGIN_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
-export const ENGINE_PACKAGE = "@rich-rees/zdd-engine";
+export const ENGINE_PACKAGE = "@rich-rees/zdd";
+
+// Two release lines (decision 0042). Up to 2.5.0 the engine was
+// `@rich-rees/zdd-engine` and a repo's config pinned it as `engine`; from
+// 0.9.0 it is `@rich-rees/zdd`, pinned as `release`. The numbers restart, so
+// a number alone never says which line it is on (1.0.0 is on both): the
+// config's key says it, and in the strings this plugin compares an old-line
+// release carries the old package's name (`zdd-engine@2.5.0`). Every
+// old-line release comes before every new-line one.
+export const OLD_ENGINE_PACKAGE = "@rich-rees/zdd-engine";
+const OLD_LINE = "zdd-engine@";
+export const oldLine = (v) => `${OLD_LINE}${v}`;
+export const isOldLine = (r) => typeof r === "string" && r.startsWith(OLD_LINE);
+// A version as semver.org writes it — no leading `v`, no leading zeros —
+// the schema's pattern for `release` and `engine`.
+export const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
+// The release a config pins, as compareReleases reads it: `release` → its
+// version; `engine` → the old line's; neither → null (a config from before
+// pins, on the old line too). A `release` that is not a version is refused
+// (CR-149): it may be a newer release spelt oddly, and the upgrade never
+// overwrites what it cannot place. An `engine` that is not one counts as
+// unknown — the old line is behind whatever it says. Both keys: a pre-0.9
+// plugin run on a repo already moved writes `engine` beside `release`
+// (CR-151); `release` is the repo's statement, and `engine` is stale.
+export function configRelease(config) {
+  const has = (k) => config && Object.hasOwn(config, k);
+  if (has("release")) {
+    if (typeof config.release !== "string" || !SEMVER.test(config.release)) throw new Error("zdd/config.json's release pin is not a version (X.Y.Z, as semver.org writes it) — correct it by hand to the release this repo is on, then run the upgrade again; nothing was written (decision 0042)");
+    return config.release;
+  }
+  if (has("engine")) return typeof config.engine === "string" && SEMVER.test(config.engine) ? oldLine(config.engine) : null;
+  return null;
+}
+// A config is on the new line exactly when it pins `release`.
+export const onNewLine = (config) => Boolean(config && Object.hasOwn(config, "release"));
+// Line first, then semver precedence: X.Y.Z, and a prerelease before its
+// release (CR-150: `0.9.0-rc.1` is before 0.9.0, so an upgrade from it still
+// crosses 0.9.0). A leading `v` (a tag's) is ignored, build metadata too; a
+// missing part counts as 0. Numbers compare as digit strings, never as JS
+// numbers, which round past 2^53 (verify pass 1).
+const parts = (s) => {
+  const m = /^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:-([0-9A-Za-z.-]+))?(?:\+.*)?$/.exec(String(s).replace(OLD_LINE, ""));
+  return m ? { nums: [m[1], m[2], m[3]].map((n) => n ?? "0"), pre: m[4] === undefined ? null : m[4].split(".") } : { nums: ["0", "0", "0"], pre: null };
+};
+const cmpDigits = (x, y) => {
+  const [a, b] = [x.replace(/^0+(?=\d)/, ""), y.replace(/^0+(?=\d)/, "")];
+  return a.length !== b.length ? a.length - b.length : a < b ? -1 : a > b ? 1 : 0;
+};
+export function compareReleases(a, b) {
+  const [la, lb] = [isOldLine(a) ? 0 : 1, isOldLine(b) ? 0 : 1];
+  if (la !== lb) return la - lb;
+  const [pa, pb] = [parts(a), parts(b)];
+  for (let i = 0; i < 3; i++) {
+    const d = cmpDigits(pa.nums[i], pb.nums[i]);
+    if (d) return d;
+  }
+  if (!pa.pre || !pb.pre) return (pa.pre ? -1 : 0) + (pb.pre ? 1 : 0);
+  for (let i = 0; i < Math.max(pa.pre.length, pb.pre.length); i++) {
+    const [x, y] = [pa.pre[i], pb.pre[i]];
+    if (x === undefined) return -1;
+    if (y === undefined) return 1;
+    const [nx, ny] = [/^\d+$/.test(x), /^\d+$/.test(y)];
+    if (nx && ny && cmpDigits(x, y)) return cmpDigits(x, y);
+    if (nx !== ny) return nx ? -1 : 1;
+    if (!nx && x !== y) return x < y ? -1 : 1;
+  }
+  return 0;
+}
 export const MAX_CONFIG_BYTES = 1024 * 1024; // a config bigger than this is not a config
 export const MAX_INDEX_BYTES = 64 * 1024; // the SessionStart injection is cut here (~16k tokens, 8× render's budget) — CR-086
 
-// Mirror of the engine's DEFAULT_PATHS (src/lib/config.mjs). The engine is
+// Mirror of the engine's DEFAULT_PATHS (src/core/lib/config.mjs). The engine is
 // installed outside the plugin (npx), so the plugin cannot import it — this
 // copy is the contract both sides honour, and config.schema.json documents it.
 export const DEFAULT_PATHS = {
@@ -135,7 +202,7 @@ export function loadConfig(root) {
 }
 
 // A repo-relative path, in the engine's language
-// (packages/zdd-engine/src/lib/paths.mjs, CR-079): a non-empty string with no
+// (packages/zdd-engine/src/core/lib/paths.mjs, CR-079): a non-empty string with no
 // whitespace or control character anywhere, no leading `/`, no drive letter,
 // no URL scheme, no `..` segment. Returns the normal form — `.`-segments and
 // empty segments dropped, "." for the repo root itself (the engine's
@@ -180,7 +247,7 @@ export function repoRelative(value, label, { exact = false } = {}) {
 // plan (paths.patternsPlan, 2.0.0) is a session's working file, so it is
 // left alone like a curated path.
 // The two-level agent index's area folder, named as the engine names it
-// (packages/zdd-engine/src/lib/paths.mjs agentIndexAreaDir): the index path
+// (packages/zdd-engine/src/core/lib/paths.mjs agentIndexAreaDir): the index path
 // without its extension, or `<path>-areas` when it has none. One rule for the
 // instructions' wording and the fence (2.4.1 CR-005).
 export const agentIndexAreaDir = (agentIndexRel) => {

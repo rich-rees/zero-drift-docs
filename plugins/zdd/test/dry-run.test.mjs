@@ -97,7 +97,7 @@ test("greenfield: the install writes an empty zdd/ and the instructions, derive 
 test("young app (the video repo's shape): detection proposes Supabase, Next.js, components and external services with evidence; estimate says young with a backfill offer; the install, derive, render and lint pass; nothing from .claude/worktrees/ reaches a record", () => {
   const repo = scenario("young-app");
   const d = bootstrapJson(repo, ["detect"]);
-  assert.deepEqual(d.proposals.map((p) => p.name).sort(), ["components", "external-services", "nextjs", "supabase"], JSON.stringify(d.proposals.map((p) => p.name)));
+  assert.deepEqual(d.proposals.map((p) => p.name).sort(), ["components", "external-services", "nextjs", "supabase", "supabase-js"], JSON.stringify(d.proposals.map((p) => p.name)));
   assert.equal(d.host.kind, "github");
   const svc = d.proposals.find((p) => p.name === "external-services");
   assert.ok(svc.options.services.some((s) => s.name === "Resend"), JSON.stringify(svc.options));
@@ -133,17 +133,20 @@ test("mature codebase: an Express API, a React Router web app, a Python archiver
   const repo = scenario("mature-codebase", { old: true });
   const d = bootstrapJson(repo, ["detect"]);
   assert.ok(d.proposals.some((p) => p.name === "react-router"), JSON.stringify(d.proposals.map((p) => p.name)));
-  assert.ok(d.proposals.some((p) => p.name === "jobs"), "Procfile, Compose and the queue propose background work");
+  for (const reader of ["background-procfile", "background-compose", "background-bullmq"]) assert.ok(d.proposals.some((p) => p.name === reader), `${reader}: Procfile, Compose and the queue propose background work`);
   assert.ok(d.proposals.some((p) => p.name === "external-services"), "Sentry");
   assert.equal(bootstrapJson(repo, ["estimate"]).scenario, "mature");
   // A pre-2.3 adopter: an old block in CLAUDE.md, the old extractor key, the old pin.
   bootstrapJson(repo, ["apply", `--answers=${answers("m", { name: "Fleet", extractors: ["react-router", "jobs", "services"], extractorOptions: { "react-router": { routesFile: "web/src/routes.tsx" }, jobs: { modes: { emails: "worker", archive: "worker" } }, services: { services: [{ name: "Sentry", imports: ["@sentry/node"], env: ["SENTRY_"] }] } } })}`]);
   const cfgPath = join(repo, "zdd", "config.json");
   const cfg = JSON.parse(readFileSync(cfgPath, "utf8"));
-  assert.deepEqual(cfg.extractors, ["react-router", "jobs", "external-services"], "a fresh apply writes the current name even when answered with the old one");
+  // A fresh apply writes the current names even when answered with the old ones: `services`
+  // is `external-services`, and `jobs` is the background readers detection finds (0.9).
+  assert.deepEqual(cfg.extractors, ["react-router", "background-bullmq", "background-compose", "background-procfile", "external-services"], "a fresh apply writes the current name even when answered with the old one");
   cfg.extractors = ["react-router", "jobs", "services"];
   cfg.extractorOptions.services = cfg.extractorOptions["external-services"];
   delete cfg.extractorOptions["external-services"];
+  delete cfg.release; // the old line's pin (decision 0042)
   cfg.engine = "2.2.1";
   writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + "\n");
   // The repo's lock sat at v2.1.0 (its own lock test still says so, in docs/setup.md).
@@ -166,7 +169,11 @@ test("mature codebase: an Express API, a React Router web app, a Python archiver
   const json = bootstrapJson(repo, ["upgrade"]);
   assert.match(readFileSync(join(repo, "CLAUDE.md"), "utf8"), /^@zdd\/instructions\.md$/m);
   assert.doesNotMatch(readFileSync(join(repo, "CLAUDE.md"), "utf8"), /zdd:begin/);
-  assert.deepEqual(JSON.parse(readFileSync(cfgPath, "utf8")).extractors, ["react-router", "jobs", "external-services"]);
+  assert.deepEqual(JSON.parse(readFileSync(cfgPath, "utf8")).extractors, ["react-router", "background-bullmq", "background-compose", "background-procfile", "external-services"]);
+  const moved = JSON.parse(readFileSync(cfgPath, "utf8")).extractorOptions;
+  assert.equal(moved.jobs, undefined);
+  assert.deepEqual(moved["background-procfile"], { modes: { emails: "worker", archive: "worker" } }, "modes go to the readers that read processes");
+  assert.deepEqual(moved["background-bullmq"], {}, "a queue reader takes only roots");
   assert.ok(json.notes.some((n) => /^2\.3 moves ZDD's rules out of the marked block/.test(n)), "the 2.3 note is said when crossing it");
   for (const cmd of ["derive", "render", "lint"]) {
     const r = engine(repo, [cmd]);
@@ -174,21 +181,21 @@ test("mature codebase: an Express API, a React Router web app, a Python archiver
   }
   const index = readFileSync(join(repo, "zdd", "agent-index.md"), "utf8");
   assert.match(index, /^## Background work$/m, index);
-  assert.match(index, /\[emails\]\(metadata\/job\/emails\.json\) — queue `emails`/, index);
-  assert.match(index, /\[archive\]\(metadata\/job\/archive\.json\) — worker/, index);
+  assert.match(index, /\[emails\]\(metadata\/background-task\/emails\.json\) — queue `emails`/, index);
+  assert.match(index, /\[archive\]\(metadata\/background-task\/archive\.json\) — worker/, index);
   assert.doesNotMatch(index, /nightly/, "the Actions schedule is off by default");
   assert.ok(existsSync(join(repo, "zdd", "metadata", "external-service", "sentry.json")));
   assert.deepEqual(grepArtifacts(repo, "planted"), []);
 });
 
-test("hosted off GitHub: no workflow is written, the three commands are printed, the pre-push hook is the fallback; a merge conflict in a generated file: regenerate mid-merge, commit, render once more, the check passes", () => {
+test("hosted off GitHub: no workflow is written, the four commands are printed, the pre-push hook is the fallback; a merge conflict in a generated file: regenerate mid-merge, commit, render once more, the check passes", () => {
   const repo = scenario("young-app", { remote: "https://gitlab.com/example/app.git" });
   const json = bootstrapJson(repo, ["apply", `--answers=${answers("gl", {})}`]);
   assert.ok(!json.wrote.includes(".github/workflows/zdd.yml"));
   assert.ok(json.wrote.includes(".githooks/pre-push"));
   assert.equal(json.optIns.ci, false);
   const text = bootstrap(repo, ["apply", `--answers=${answers("gl2", {})}`]);
-  assert.match(text, /The merge gate for your own pipeline is three commands/);
+  assert.match(text, /The merge gate for your own pipeline is four commands/); // the suite since 0.9 (CR-140)
   assert.equal(engine(repo, ["derive"]).status, 0);
   assert.equal(engine(repo, ["render"]).status, 0);
   commit(repo, "adopt ZDD");
@@ -233,7 +240,7 @@ test("hosted off GitHub: no workflow is written, the three commands are printed,
 
 test("the preflight's messages: a dead registry, a dead GitHub, no repository — each named in plain words; all present passes", async () => {
   const ok = await new Promise((r) => {
-    const s = createServer((req, res) => res.writeHead(req.url === `/@rich-rees%2fzdd-engine/${VERSION}` ? 200 : req.url === "/" ? 200 : 404).end("{}"));
+    const s = createServer((req, res) => res.writeHead(req.url === `/@rich-rees%2fzdd/${VERSION}` ? 200 : req.url === "/" ? 200 : 404).end("{}"));
     s.listen(0, "127.0.0.1", () => r({ url: `http://127.0.0.1:${s.address().port}`, close: () => s.close() }));
   });
   try {

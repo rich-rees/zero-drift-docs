@@ -11,7 +11,7 @@ import { writeFileSync, rmSync, mkdtempSync, cpSync, readFileSync, appendFileSyn
 import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { watchedPaths } from "../src/check-freshness.mjs";
+import { watchedPaths } from "../src/core/check-freshness.mjs";
 
 const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const BIN = join(PKG, "bin", "zdd-engine.mjs");

@@ -10,12 +10,13 @@ import { readFileSync, writeFileSync, rmSync, mkdtempSync, mkdirSync } from "nod
 import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { expandTemplatePath, literalValues, parseLiteralUnion, MAX_EXPANSIONS } from "../src/lib/template-paths.mjs";
-import { scanApiCalls } from "../src/extractors/react-router/index.mjs";
-import { scanFileText } from "../src/extractors/nextjs/refs.mjs";
-import { derive as reactRouter } from "../src/extractors/react-router/index.mjs";
-import { derive as fastapi } from "../src/extractors/fastapi/index.mjs";
-import { resolveRefs } from "../src/lib/resolve-refs.mjs";
+import { makeExtractorIo } from "../src/core/lib/extractor-io.mjs";
+import { expandTemplatePath, literalValues, parseLiteralUnion, MAX_EXPANSIONS } from "../src/core/lib/template-paths.mjs";
+import { scanApiCalls } from "../src/adapters/js/source.mjs";
+import { scanFileText } from "../src/adapters/nextjs/refs.mjs";
+import { derive as reactRouter } from "../src/adapters/react-router/index.mjs";
+import { derive as fastapi } from "../src/adapters/fastapi/index.mjs";
+import { resolveRefs } from "../src/core/lib/resolve-refs.mjs";
 
 const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const BIN = join(PKG, "bin", "zdd-engine.mjs");
@@ -137,7 +138,7 @@ test("end to end (the second adopter's shape): a union-typed segment expands to 
     writeFileSync(join(root, rel), text);
   }
   const api = fastapi({ repoRoot: root, options: { roots: ["api"] } });
-  const web = reactRouter({ repoRoot: root, options: { routesFile: "web/src/routes.tsx" } });
+  const web = reactRouter({ repoRoot: root, io: makeExtractorIo(root, "reactRouter"), options: { routesFile: "web/src/routes.tsx" } });
   const { records } = resolveRefs([...api.records, ...web.records]);
   const by = (id) => records.find((r) => r.id === id);
   assert.deepEqual(by("surface:/admin/publishers").refs, ["route:/authors", "route:/authors/{id}", "route:/publishers", "route:/publishers/{id}"], "never /health, never /jobs/{job_id}/cancel");

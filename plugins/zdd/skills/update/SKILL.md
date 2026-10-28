@@ -47,13 +47,13 @@ Run this as the definition of done for every unit of work — the spoken form is
    for a new pattern or a copied precedent worth a blessing.
 3. **Run the deriver.** Regenerates the codebase metadata from source:
    ```
-   npx -y @rich-rees/zdd-engine@2.5.0 derive
+   npx -y @rich-rees/zdd@0.9.0 derive
    ```
 4. **Run the renderer.** Rebuilds the graph artifact (`zdd/graph.json`), the
    agent index, the ADR index (and the harness ADR index, when the repo has
    one), the blessing index, and the human index:
    ```
-   npx -y @rich-rees/zdd-engine@2.5.0 render
+   npx -y @rich-rees/zdd@0.9.0 render
    ```
 5. **Lint the stores.** Supersession symmetry, blessing citations and every
    blessing's trigger question (blocking); a blessing with no reason or over
@@ -64,15 +64,15 @@ Run this as the definition of done for every unit of work — the spoken form is
    slice now. Four more lines can appear (ZDD 2.1 and 2.4.1), all warnings: **API
    calls lint could not place** (a `${variable}` segment matches only a
    route parameter — type the variable as a union of literals, or the edge
-   stays missing); **jobs with no stated mode** (set
-   `extractorOptions.jobs.modes`, or `mode` on a `jobs.entries` line; a
-   Railway file states only a schedule — its `cronSchedule` makes a job
-   scheduled — and Railway applies that file over its dashboard, so never
+   stays missing); **background tasks with no stated mode** (set the
+   `modes` option lint names, on the reader that read the task, or `mode` on a
+   `background-declared` entry; a Railway file states only a schedule — its
+   `cronSchedule` makes a task scheduled — and Railway applies that file over its dashboard, so never
    commit one just to state a mode); and, from `derive`, **an environment name no declared
    service covers** (add the service to
    `extractorOptions["external-services"].services`, or its prefix to
-   `ignore`) and **a job whose start command names no file in the repo**
-   (build output: name its source file in `extractorOptions.jobs.entries`,
+   `ignore`) and **a background task whose start command names no file in the repo**
+   (build output: name its source file in `extractorOptions["background-declared"].entries`,
    as the warning shows). Each names the file; fix it in this unit of work
    where the diff caused it.
    - **A duplicate ADR number** fails lint after a merge from main: a
@@ -92,12 +92,12 @@ Run this as the definition of done for every unit of work — the spoken form is
      along with a stale `allowUnclaimed` entry and any claim file lint could
      not read. The unit of work is not finished until lint is green: link the
      record from one slice, move a double claim to one owner, or allow-list
-     genuine plumbing. A component, job or external service (kind
-     `external-service`) is a failure only when `claims.strictKinds` names
+     genuine plumbing. A component, background task (kind `background-task`)
+     or external service (kind `external-service`) is a failure only when `claims.strictKinds` names
      its kind; otherwise it is a warning, so that
      switching an extractor on never turns a green lint red by itself.
    ```
-   npx -y @rich-rees/zdd-engine@2.5.0 lint
+   npx -y @rich-rees/zdd@0.9.0 lint
    ```
 6. **Write the ZDD record and commit all of it in the PR.** Code and docs
    merge atomically; the doc delta is reviewed alongside the code delta.

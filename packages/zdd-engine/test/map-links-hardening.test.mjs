@@ -12,8 +12,8 @@ import { writeFileSync, rmSync, mkdtempSync, cpSync, mkdirSync, symlinkSync } fr
 import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { extractBlessings, forwardStamps, extractLinks, structuralLines } from "../src/lib/map-links.mjs";
-import { walkMarkdown, readBounded, regularFileInside } from "../src/lib/walk-markdown.mjs";
+import { extractBlessings, forwardStamps, extractLinks, structuralLines } from "../src/core/lib/map-links.mjs";
+import { walkMarkdown, readBounded, regularFileInside } from "../src/core/lib/walk-markdown.mjs";
 
 const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const BIN = join(PKG, "bin", "zdd-engine.mjs");

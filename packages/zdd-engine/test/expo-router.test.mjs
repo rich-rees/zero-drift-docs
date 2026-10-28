@@ -9,11 +9,12 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { derive } from "../src/extractors/expo-router/index.mjs";
-import { derive as fastapi } from "../src/extractors/fastapi/index.mjs";
-import { derive as reactRouter } from "../src/extractors/react-router/index.mjs";
-import { resolveRefs } from "../src/lib/resolve-refs.mjs";
-import { makeExtractorIo } from "../src/lib/extractor-io.mjs";
+import { derive } from "../src/adapters/expo-router/index.mjs";
+import { derive as fastapi } from "../src/adapters/fastapi/index.mjs";
+import { derive as reactRouter } from "../src/adapters/react-router/index.mjs";
+import { resolveRefs } from "../src/core/lib/resolve-refs.mjs";
+import { withoutCode } from "./code-reach.mjs";
+import { makeExtractorIo } from "../src/core/lib/extractor-io.mjs";
 
 const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const FIXTURE = join(PKG, "test", "fixture-components");
@@ -29,15 +30,17 @@ test("fixture: one surface per screen and per layout, namespaced and titled '(na
   assert.equal(jobs.title, "/jobs (native)");
   assert.equal(jobs.description, "The job list, the same endpoint the web page reads.");
   assert.deepEqual(jobs.resource, ["apps/mobile/app/(tabs)/jobs/index.tsx"]);
-  assert.deepEqual(jobs.refs, ["?route:/jobs"]);
-  assert.deepEqual(jobs.facts, { file: "screen", routeGroups: ["(tabs)"], dynamicSegments: [], layouts: ["apps/mobile/app/_layout.tsx", "apps/mobile/app/(tabs)/_layout.tsx"], edges: { calls: ["?route:/jobs"] } });
+  const CODE = "?code:apps/mobile/app/(tabs)/jobs/index.tsx#*"; // the screen's code, for a data-access adapter (decision 0037)
+  assert.deepEqual(jobs.refs, [CODE, "?route:/jobs"]);
+  assert.deepEqual(jobs.facts, { file: "screen", routeGroups: ["(tabs)"], dynamicSegments: [], layouts: ["apps/mobile/app/_layout.tsx", "apps/mobile/app/(tabs)/_layout.tsx"], edges: { calls: ["?route:/jobs"], reads: [CODE] } });
   assert.equal(jobs.filename, "native--jobs.json");
   const job = by("surface:native:/jobs/[id]");
   assert.deepEqual(job.facts.dynamicSegments, ["id"]);
-  assert.deepEqual(job.refs, ["?route:/jobs/*/route"], "the template hole is a parameter, expanded by decision 0019's rule");
+  assert.deepEqual(withoutCode(job.refs), ["?route:/jobs/*/route"], "the template hole is a parameter, expanded by decision 0019's rule");
   const settings = by("surface:native:/settings");
   assert.deepEqual(settings.resource, ["apps/mobile/app/settings.android.tsx", "apps/mobile/app/settings.ios.tsx"]);
   assert.deepEqual(settings.facts.platforms, ["android", "ios"]);
+  assert.deepEqual(settings.facts.edges.reads, ["?code:apps/mobile/app/settings.android.tsx#*", "?code:apps/mobile/app/settings.ios.tsx#*"], "each file of the pair names its code (CR-072)");
   assert.deepEqual(settings.facts.layouts, ["apps/mobile/app/_layout.tsx"]);
   const root = by("surface:native:/_layout");
   assert.equal(root.facts.file, "layout");
@@ -48,7 +51,7 @@ test("fixture: one surface per screen and per layout, namespaced and titled '(na
 
 test("after the merge: the native /jobs and the web /jobs both call route:/jobs, as two surfaces", () => {
   const api = fastapi({ repoRoot: FIXTURE, options: { roots: ["apps/api"] } });
-  const web = reactRouter({ repoRoot: FIXTURE, options: { routesFile: "apps/web/src/routes.tsx" } });
+  const web = reactRouter({ repoRoot: FIXTURE, io: makeExtractorIo(FIXTURE, "reactRouter"), options: { routesFile: "apps/web/src/routes.tsx" } });
   const native = derive({ repoRoot: FIXTURE, options: { appDir: "apps/mobile/app" }, io: makeExtractorIo(FIXTURE, "expo-router") });
   const { records } = resolveRefs([...api.records, ...web.records, ...native.records]);
   const callers = records.filter((r) => r.kind === "surface" && r.refs.includes("route:/jobs")).map((r) => r.id).sort();

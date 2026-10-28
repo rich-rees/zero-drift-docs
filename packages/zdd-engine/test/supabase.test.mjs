@@ -5,7 +5,8 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { derive } from "../src/extractors/supabase/index.mjs";
+import { derive } from "../src/adapters/supabase/index.mjs";
+import { makeExtractorIo } from "../src/core/lib/extractor-io.mjs";
 
 const scratch = (files) => {
   const root = mkdtempSync(join(tmpdir(), "zdd-supa-"));
@@ -22,13 +23,13 @@ test("CR-064: two migrationNamespaces with one name is an error naming both dirs
     "db-b/0001.sql": "create table offers (id uuid primary key);\n",
   });
   const options = { migrationNamespaces: [{ name: "db", dir: "db-a" }, { name: "db", dir: "db-b" }] };
-  assert.throws(() => derive({ repoRoot: root, options }), /migrationNamespaces: name 'db' is used twice \(db-a and db-b\)/);
+  assert.throws(() => derive({ repoRoot: root, io: makeExtractorIo(root, "supabase"), options }), /migrationNamespaces: name 'db' is used twice \(db-a and db-b\)/);
   // The same name is still refused when the first dir does not exist yet
   // (greenfield tolerance must not hide the duplicate).
   const missing = { migrationNamespaces: [{ name: "db", dir: "nope" }, { name: "db", dir: "db-b" }] };
-  assert.throws(() => derive({ repoRoot: root, options: missing }), /name 'db' is used twice \(nope and db-b\)/);
+  assert.throws(() => derive({ repoRoot: root, io: makeExtractorIo(root, "supabase"), options: missing }), /name 'db' is used twice \(nope and db-b\)/);
   // Distinct names: both replay.
-  const ok = derive({ repoRoot: root, options: { migrationNamespaces: [{ name: "a", dir: "db-a" }, { name: "b", dir: "db-b" }] } });
+  const ok = derive({ repoRoot: root, io: makeExtractorIo(root, "supabase"), options: { migrationNamespaces: [{ name: "a", dir: "db-a" }, { name: "b", dir: "db-b" }] } });
   assert.deepEqual(ok.records.map((r) => r.id).sort(), ["table:a/jobs", "table:b/offers"]);
   rmSync(root, { recursive: true, force: true });
 });
@@ -39,7 +40,7 @@ test("a table created as `public.things` keeps that id when later migrations say
     "migrations/0002.sql": "alter table things add column name text;\n",
   });
   try {
-    const { records } = derive({ repoRoot: root, options: { migrationNamespaces: [{ name: "db", dir: "migrations" }] } });
+    const { records } = derive({ repoRoot: root, io: makeExtractorIo(root, "supabase"), options: { migrationNamespaces: [{ name: "db", dir: "migrations" }] } });
     const things = records.find((r) => r.id === "table:db/public.things");
     assert.ok(things, records.map((r) => r.id).join(", "));
     assert.equal(things.filename, "db--public.things.json");
@@ -57,7 +58,7 @@ test("a function body that names only `archive.things` links that table, never `
     "migrations/0001.sql": "create table public.things (id uuid);\ncreate table archive.things (id uuid);\ncreate or replace function archived() returns int language sql as $$ select count(*) from archive.things $$;\ncreate or replace function bare() returns int language sql as $$ select count(*) from things $$;\ncreate or replace function qualified() returns int language sql as $$ select count(*) from public.things $$;\n",
   });
   try {
-    const { records } = derive({ repoRoot: root, options: { migrationNamespaces: [{ name: "db", dir: "migrations" }] } });
+    const { records } = derive({ repoRoot: root, io: makeExtractorIo(root, "supabase"), options: { migrationNamespaces: [{ name: "db", dir: "migrations" }] } });
     const refs = (id) => records.find((r) => r.id === id).refs;
     assert.deepEqual(refs("function:db/archived"), ["table:db/archive.things"]);
     assert.deepEqual(refs("function:db/bare"), ["table:db/public.things"]);
@@ -73,8 +74,8 @@ test("collision checks see through the spelling: `public.things` in one namespac
     "b/0001.sql": "create table things (id uuid);\n",
   });
   try {
-    assert.throws(() => derive({ repoRoot: root, options: { migrationNamespaces: [{ name: "a", dir: "a" }, { name: "b", dir: "b" }] } }), /Table 'things' exists in namespaces 'a' and 'b'/);
-    assert.throws(() => derive({ repoRoot: root, options: { migrationNamespaces: [{ name: "a", dir: "a" }], externalBuckets: [{ name: "things", namespace: "a" }] } }), /'things' is both a table and a bucket/);
+    assert.throws(() => derive({ repoRoot: root, io: makeExtractorIo(root, "supabase"), options: { migrationNamespaces: [{ name: "a", dir: "a" }, { name: "b", dir: "b" }] } }), /Table 'things' exists in namespaces 'a' and 'b'/);
+    assert.throws(() => derive({ repoRoot: root, io: makeExtractorIo(root, "supabase"), options: { migrationNamespaces: [{ name: "a", dir: "a" }], externalBuckets: [{ name: "things", namespace: "a" }] } }), /'things' is both a table and a bucket/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

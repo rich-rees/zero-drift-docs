@@ -31,6 +31,14 @@
 //       app, a mature codebase) and the opt-in backfill: source files,
 //       commits, age, and an honest estimate of the user's review time.
 //
+//   bootstrap.mjs adapters [--raise] [--root=<dir>] [--json]
+//       The adapters this repo wrote itself, through the engine's standard
+//       suite (decision 0040): each one's contract, the steps of the
+//       contract it is behind on with the question to ask about each, and
+//       every check it fails with what to fix. The upgrade skill's interview
+//       reads this. `--raise` writes `suiteChecks` up to the engine's count
+//       once every check passes — from then on the newer checks block in CI.
+//
 //   bootstrap.mjs upgrade [--plan] [--lock] [--drop=<ids>]
 //                         [--move-blessings=<token> [--kinds=<name>:<copy|extend>,…]]
 //                         [--to=vX.Y.Z] [--root=<dir>] [--json]
@@ -55,19 +63,19 @@
 // Answer set (every key optional):
 //   {
 //     "name": "My App", "repoBase": "https://github.com/o/r/tree/main/", "baseBranch": "main",
-//     "extractors": ["supabase", "fastapi"],          // else derived from `stack`, else the detection
+//     "extractors": ["<adapter>", "<adapter>"],      // else derived from `stack`, else the detection
 //     "extractorOptions": { ... },                     // else defaults per extractor
-//     "stack": ["FastAPI", "Supabase", "React web", "Expo"],   // greenfield answers; strings or {name, path}
+//     "stack": ["<a framework>", "<a database>", "<an app>"],   // greenfield answers; strings or {name, path}, matched by the adapters' rules
 //     "apps": ["Web", "Mobile"],                       // map skeleton (Application concepts); else from `stack` / detection
 //     "optIns": { "autoLoad": true, "fence": true, "stop": true, "ci": true, "prePush": true },   // defaults: all on (repair: current state)
 //     "codex": false,                                  // also write AGENTS.md
 //     "seedAdr": true                                  // ADR-0001 "Adopt Zero-Drift Docs"
 //   }
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, lstatSync, chmodSync, openSync, writeSync, closeSync, rmSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, lstatSync, chmodSync, openSync, writeSync, closeSync, rmSync, opendirSync } from "node:fs";
 import { findMapBlessings, proposeMove, blessingSlug, blessingFileText, removeMoved } from "./lib/blessing-move.mjs";
 import { scopeTag, repointLinks, linksToMoved } from "./lib/adr-split.mjs";
-import { join, dirname, basename, relative, posix } from "node:path";
+import { join, dirname, basename, relative, resolve, posix } from "node:path";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { request as httpRequest } from "node:http";
@@ -75,6 +83,11 @@ import { request as httpsRequest } from "node:https";
 import {
   PLUGIN_ROOT,
   ENGINE_PACKAGE,
+  OLD_ENGINE_PACKAGE,
+  oldLine,
+  configRelease,
+  compareReleases,
+  SEMVER,
   pluginVersion,
   parseArgs,
   adopterRoot,
@@ -93,6 +106,7 @@ import {
   isOurDeclaration,
   pluginsDir,
   agentIndexAreaDir,
+  GENERATED_KEYS,
 } from "./lib/repo.mjs";
 
 const TEMPLATES = join(PLUGIN_ROOT, "templates");
@@ -120,91 +134,130 @@ const LEGACY_SNIPPET_HEADING = "## Documentation — Zero-Drift Docs (ZDD)";
 const LEGACY_FINGERPRINT = ["/zdd:orient", "/zdd:update"];
 // Ownership line carried by every file the plugin writes besides config.
 export const OWNER_MARK = "Managed by Zero-Drift Docs (zdd)";
-// Mirrors of the engine's external-services extractor (src/extractors/
-// external-services/index.mjs: CANDIDATE_SUFFIXES, BUILT_IN_IGNORE) — the plugin cannot import
-// the engine under npx; a test keeps the two pairs equal.
-export const SERVICE_SUFFIXES = ["_API_KEY", "_DSN", "_SECRET", "_TOKEN", "_URL", "_KEY"];
-export const SERVICE_IGNORE = ["DATABASE", "SUPABASE", "PG", "POSTGRES", "NODE", "NEXT", "VITE", "EXPO", "PUBLIC", "CI", "GITHUB", "RAILWAY", "VERCEL", "PORT", "HOST", "BASE", "API", "APP", "WEB", "SERVER", "CLIENT", "AUTH", "JWT", "SESSION", "COOKIE", "TEST", "DEV", "LOG"];
-
-const SKIP_DIRS = new Set(["node_modules", ".git", ".next", "dist", "build", "coverage", ".venv", "venv", "__pycache__", ".expo", "zdd"]);
 const MAX_NAME = 120;
-const MAX_SCAN_BYTES = 1024 * 1024; // detection never reads a file larger than this (CR-091)
-// The react-router probe reads JS/TS source to find a route tree; this is the
-// most it reads in total (1.2.0 review CR-008). Past it, detection stops
-// reading and says so — a proposal, not an inventory.
-const MAX_PROBE_BYTES = 64 * 1024 * 1024;
+const MAX_SCAN_BYTES = 1024 * 1024; // the plugin never reads a repo file larger than this (CR-091)
 
-// Mirror of the engine's LEGACY_ADAPTERS (src/lib/config.mjs): the one legacy
+// border: names a stack (the pre-1.0 bundle an upgrade migrates)
+// Mirror of the engine catalogue's bundles (src/adapters/catalogue.json): the one legacy
 // adapter and how its options split. The engine expands it at derive time;
 // this is the migration that makes the expansion unnecessary.
 const LEGACY_ADAPTERS = {
   "nextjs-supabase": {
-    extractors: ["supabase", "nextjs"],
+    extractors: ["supabase", "supabase-js", "nextjs"],
     split(options = {}) {
       const { migrationNamespaces = [], externalBuckets = [], ...nextjs } = options;
       return { supabase: { migrationNamespaces, externalBuckets }, nextjs };
     },
   },
 };
+// border: end
 
 // ---------------------------------------------------------------------------
-// Detection — one probe per extractor convention, each returning the evidence
-// it found and the options that evidence implies. Purely file-shaped and
-// sorted, so the proposal is the same for the same tree. Symlinks are never
-// followed (CR-004): a link is skipped, whatever it points at.
+// Detection — asked of the adapters (decision 0039). Each catalogue adapter
+// carries its own: the evidence that it fits, the options it would use and
+// the parts of the app it covers. The plugin carries no engine, so it runs
+// the engine of its own release and reads the answer; it names no stack.
+//
+// Which engine: ZDD_ENGINE_BIN, when set, names an engine checkout's bin (a
+// test, a dry run against another build) — accepted only when it is an
+// engine's own `bin/zdd-engine.mjs`, a regular file in a package named for
+// the engine (CR-097: whoever sets the environment already chooses PATH, so
+// this is no new boundary, but a stray value is refused, not run); else the
+// engine beside this plugin when one ships with it at the same version (this
+// repository's own checkout); else the pinned package under npx, as every
+// skill runs it. On Windows npx is a .cmd file, and cmd.exe neither keeps a
+// quote inside an argument nor leaves `%NAME%` alone, so npm's own
+// `npx-cli.js` beside node runs instead, with no shell (CR-096); only when it
+// is missing does cmd.exe run npx, and then an argument cmd.exe would change
+// is refused before anything runs.
 // ---------------------------------------------------------------------------
-function walk(root, onFile, maxDepth = 6) {
-  const rec = (dir, depth) => {
-    if (depth > maxDepth) return;
-    let names;
+const SIBLING_ENGINE = join(PLUGIN_ROOT, "..", "..", "packages", "zdd-engine");
+export function engineCommand({ env = process.env, platform = process.platform, execPath = process.execPath, sibling: siblingDir = SIBLING_ENGINE } = {}) {
+  if (env.ZDD_ENGINE_BIN) {
+    const given = resolve(env.ZDD_ENGINE_BIN);
+    let pkg = null;
     try {
-      names = readdirSync(dir).sort();
+      const st = lstatSync(given);
+      if (basename(given) === "zdd-engine.mjs" && basename(dirname(given)) === "bin" && st.isFile()) pkg = readJson(join(dirname(dirname(given)), "package.json"));
     } catch {
-      return;
+      pkg = null;
     }
-    for (const name of names) {
-      const p = join(dir, name);
-      let st;
-      try {
-        st = lstatSync(p);
-      } catch {
-        continue;
-      }
-      if (st.isSymbolicLink()) continue;
-      if (st.isDirectory()) {
-        if (!SKIP_DIRS.has(name) && !name.startsWith(".")) rec(p, depth + 1);
-      } else if (st.isFile()) {
-        // A file over the cap is not a convention to inventory (a generated
-        // blob, a vendored bundle) and is never read (CR-091).
-        if (st.size > MAX_SCAN_BYTES) continue;
-        onFile(p, name, posixify(relative(root, p)));
-      }
-    }
-  };
-  rec(root, 0);
+    if (pkg?.name !== ENGINE_PACKAGE) throw new Error(`ZDD_ENGINE_BIN (${given}) is not an engine's bin/zdd-engine.mjs in a ${ENGINE_PACKAGE} package — unset it, or point it at one`);
+    return { cmd: execPath, pre: [given], shell: false };
+  }
+  const bin = join(siblingDir, "bin", "zdd-engine.mjs");
+  let sibling = null;
+  try {
+    sibling = existsSync(bin) ? readJson(join(siblingDir, "package.json")) : null;
+  } catch {
+    sibling = null;
+  }
+  if (sibling?.name === ENGINE_PACKAGE && sibling.version === pluginVersion()) return { cmd: execPath, pre: [bin], shell: false };
+  const pkg = `${ENGINE_PACKAGE}@${pluginVersion()}`;
+  if (platform !== "win32") return { cmd: "npx", pre: ["-y", pkg], shell: false };
+  const cli = join(dirname(execPath), "node_modules", "npm", "bin", "npx-cli.js");
+  if (existsSync(cli)) return { cmd: execPath, pre: [cli, "-y", pkg], shell: false };
+  return { cmd: "npx.cmd", pre: ["-y", pkg], shell: true };
+}
+// What cmd.exe would change or act on inside a quoted argument.
+const CMD_UNSAFE = /["%^!&|<>\r\n]/;
+// The command line `runEngine` would run: through cmd.exe each argument is
+// quoted, and one cmd.exe would read differently is refused (CR-096).
+export function engineArgv(command, args) {
+  const all = [...command.pre, ...args].map(String);
+  if (!command.shell) return all;
+  const bad = all.find((a) => CMD_UNSAFE.test(a));
+  if (bad !== undefined) throw new Error(`cannot run the engine through cmd.exe with ${JSON.stringify(bad)}: it holds a character cmd.exe would read (a quote, %, ^, !, &, |, <, >) — move the repo to a path without one, or install npm's npx-cli.js beside node`);
+  return all.map((a) => `"${a}"`);
+}
+export function runEngine(args) {
+  const command = engineCommand();
+  return execFileSync(command.cmd, engineArgv(command, args), { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 * 1024 * 1024, timeout: 300_000, shell: command.shell });
 }
 
-function readPackageJson(root) {
-  const p = join(root, "package.json");
+export function detect(root) {
+  let d;
   try {
-    const st = lstatSync(p);
-    if (!st.isFile() || st.size > MAX_SCAN_BYTES) return null; // CR-091: same bound as the walk
-    return readJson(p);
+    d = JSON.parse(runEngine(["detect", `--root=${root}`]));
+  } catch (e) {
+    throw new Error(`detection could not run — the engine said: ${String(e.stderr || e.message).trim().split(/\r?\n/).slice(-3).join(" ")}`);
+  }
+  return { ...d, host: repoHost(root) };
+}
+
+// Where the repo is hosted (2.3.0, C6): the shipped CI workflow runs only on
+// GitHub Actions, so the CI offer depends on this. From the origin remote;
+// a repo with no remote yet (greenfield) is "none" and keeps the GitHub
+// default, which the skill then asks about.
+export function hostOf(remote) {
+  if (typeof remote !== "string" || !remote.trim()) return { kind: "none", remote: null };
+  const r = remote.trim();
+  // border: names a stack (git hosts, for the CI offer — not the app's stack)
+  const kind = /(^|[@/.])github\.com([:/]|$)/i.test(r) ? "github"
+    : /(^|[@/.])gitlab\.com([:/]|$)/i.test(r) ? "gitlab"
+    : /dev\.azure\.com|visualstudio\.com/i.test(r) ? "azure"
+    : /(^|[@/.])bitbucket\.org([:/]|$)/i.test(r) ? "bitbucket"
+    : "other";
+  // border: end
+  return { kind, remote: r };
+}
+function repoHost(root) {
+  if (!hasGit(root)) return hostOf(null);
+  try {
+    return hostOf(execFileSync("git", ["remote", "get-url", "origin"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 10_000 }));
   } catch {
-    return null;
+    return hostOf(null);
   }
 }
 
-// Namespace names for several migration dirs: the path above `migrations`,
-// minus the conventional `supabase` segment, made unique (CR-012).
-function namespaceNames(dirs) {
-  if (dirs.length === 1) return ["db"];
-  const names = dirs.map((d) => {
-    const segs = d.split("/").filter((s) => s && s !== "migrations" && s !== "supabase");
-    return segs.length ? segs.join("-") : "db";
-  });
-  return dedupe(names);
-}
+// ---------------------------------------------------------------------------
+// Greenfield: the answers name a stack; each entry selects an adapter at its
+// future path, or names an Application concept for the map when no adapter
+// fits. The rules are the adapters' own (DETECTION.stack, read through the
+// engine's detection), tried in rank order; a companion adapter joins when
+// the stack holds what it needs (a data-access adapter beside its schema
+// adapter and an app that runs the calls, CR-045). The neutral list of stacks with adapters is the same data.
+// ---------------------------------------------------------------------------
 // Unique names, checked against the whole set: a raw `foo-2` sitting next to
 // two `foo`s cannot be collided into (review CR-047).
 function dedupe(names) {
@@ -222,391 +275,53 @@ function dedupe(names) {
   });
 }
 
-export function detect(root) {
-  const sqlDirs = new Map(); // dir -> count
-  const pyRouters = new Map(); // dir -> { routers, apps }
-  const pyRoots = new Set();
-  let appDir = null;
-  let middlewarePath = null;
-  const routesFiles = []; // react-router: files declaring a route tree in code
-  const packageJsons = []; // nested package.json files (workspaces)
-  // ZDD 2.1 (2.1.0): the four opt-in extractors' signals.
-  const tsxFiles = []; // components: every .tsx/.jsx file (bounded); roots are computed after the walk
-  const MAX_TSX = 20_000;
-  const expoAppDirs = new Set(); // expo-router: an `app/` folder holding a `_layout` file
-  const jobManifests = []; // jobs: { manifest, scripts } with a job-shaped command
-  const envCandidates = new Map(); // services: env prefix -> { names, files, imports }
-  const importSpecs = new Set(); // every package imported anywhere, for the services' import markers
-  let probeBytes = 0;
-  let probeTruncated = false;
-  const skippedRoutesFiles = []; // route trees at paths the engine would refuse
-  let sourceFiles = 0;
-
-  walk(root, (abs, name, rel) => {
-    if (/\.(ts|tsx|js|jsx|py|sql|go|rb|rs|java|cs)$/.test(name)) sourceFiles++;
-    if (name === "package.json" && rel !== "package.json") packageJsons.push(rel);
-    if (name.endsWith(".sql") && /(^|\/)migrations\//.test(rel + "/")) {
-      const dir = posixify(dirname(rel));
-      sqlDirs.set(dir, (sqlDirs.get(dir) ?? 0) + 1);
-    }
-    // components: every .tsx/.jsx file, counted under its nearest `src/`
-    // (or, without one, its top-level folder) — the roots to propose.
-    if (/\.(tsx|jsx)$/.test(name) && !/\.(test|spec|stories|story)\.[tj]sx$/.test(name) && tsxFiles.length < MAX_TSX) tsxFiles.push(rel);
-    // expo-router: a `_layout` file under an `app/` folder (Next.js's is `layout`).
-    if (/^_layout\.(tsx|jsx|ts|js)$/.test(name)) {
-      const segs = posixify(dirname(rel)).split("/");
-      const app = segs.lastIndexOf("app");
-      if (app !== -1) expoAppDirs.add(segs.slice(0, app + 1).join("/"));
-    }
-    // jobs — background work (2.3): a manifest that RUNS a process (a
-    // Procfile line, a Railway file, a Compose service), a schedule (Vercel
-    // crons, a Cloudflare `[triggers]`, a pg_cron line in a migration), or a
-    // queue in source. A package.json script on its own is a hand-run tool,
-    // not background work, and is no longer evidence (2.3.0, pick 6).
-    if (name === "Procfile" || name === "railway.toml" || name === "railway.json" || name === "vercel.json" || name === "wrangler.toml" || /^(docker-)?compose\.ya?ml$/.test(name) || (name.endsWith(".sql") && /(^|\/)migrations\//.test(rel))) {
-      let text = "";
-      try {
-        text = readFileSync(abs, "utf8");
-      } catch {
-        return;
-      }
-      const jobShaped = (cmd) => /(?:^|\s)python[0-9.]*\s+-m\s+[\w.]+/.test(cmd) || /(?:^|\s)(?:node|tsx|ts-node|bun|deno)\s+(?:-[^\s]+\s+)*[\w./-]+\.(?:m?[jt]s|cjs)\b/.test(cmd) || /(?:^|\s)(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?[\w:.-]+/.test(cmd);
-      if (name === "Procfile") {
-        const hits = text.split("\n").map((l) => /^\s*([A-Za-z_][\w-]*)\s*:\s*(.+)$/.exec(l)).filter((m) => m && m[1] !== "web" && jobShaped(m[2])).map((m) => m[1]);
-        if (hits.length) jobManifests.push({ manifest: rel, scripts: hits, what: "runs a process" });
-      } else if (name === "vercel.json") {
-        const paths = [...text.matchAll(/"path"\s*:\s*"([^"]+)"/g)].map((m) => m[1]);
-        if (/"crons"/.test(text) && paths.length) jobManifests.push({ manifest: rel, scripts: paths, what: "schedules a cron for" });
-      } else if (name === "wrangler.toml") {
-        if (/^\s*crons\s*=/m.test(text)) jobManifests.push({ manifest: rel, scripts: ["triggers.crons"], what: "schedules" });
-      } else if (/^(docker-)?compose\.ya?ml$/.test(name)) {
-        const svcs = [...text.matchAll(/^\s{2}([A-Za-z0-9_.-]+):\s*$/gm)].map((m) => m[1]).filter((n) => n !== "web");
-        if (/^\s+command:/m.test(text) && svcs.length) jobManifests.push({ manifest: rel, scripts: svcs, what: "runs a service" });
-      } else if (name.endsWith(".sql")) {
-        const crons = [...text.matchAll(/cron\.schedule\s*\(\s*'([^']+)'/gi)].map((m) => m[1]);
-        if (crons.length) jobManifests.push({ manifest: rel, scripts: crons, what: "schedules (pg_cron)" });
-      } else if (/startCommand/.test(text)) jobManifests.push({ manifest: rel, scripts: ["startCommand"], what: "runs a process" });
-    }
-    if (/\.(ts|tsx|js|jsx|mjs|cjs)$/.test(name) && !/\.(test|spec|stories)\.[cm]?[jt]sx?$|\.d\.ts$/.test(name)) {
-      let text = "";
-      try {
-        text = readFileSync(abs, "utf8");
-      } catch {
-        return;
-      }
-      const queues = [...text.matchAll(/new\s+(?:Queue|Worker)\s*\(\s*['"`]([^'"`]+)['"`]/g)].map((m) => m[1]);
-      if (queues.length) jobManifests.push({ manifest: rel, scripts: [...new Set(queues)], what: "names a queue" });
-    }
-    // external-services: environment variable NAMES read in source whose
-    // suffix says "a credential or an address", grouped by prefix — a mirror
-    // of the engine's extractor (a test pins the two lists together), so
-    // the proposal and the warning agree. Names only, never a value.
-    if (/\.(py|ts|tsx|js|jsx|mjs|cjs)$/.test(name) && !/\.(test|spec|stories)\.[cm]?[jt]sx?$|\.d\.ts$/.test(name) && !/(^|\/)(test_[^/]*\.py|[^/]*_test\.py|conftest\.py)$/.test(rel)) {
-      let text = "";
-      try {
-        text = readFileSync(abs, "utf8");
-      } catch {
-        return;
-      }
-      for (const m of text.matchAll(/^\s*import\s+([\w.]+)\s*(?:#.*)?$/gm)) importSpecs.add(m[1]);
-      for (const m of text.matchAll(/^\s*from\s+([\w.]+)\s+import\b/gm)) importSpecs.add(m[1]);
-      for (const m of text.matchAll(/\bimport\s*(?:[^'"`;]*?\bfrom\s*)?(['"])([^'"]+)\1|\brequire\s*\(\s*(['"])([^'"]+)\3\s*\)/g)) importSpecs.add(m[2] ?? m[4]);
-      const NAME = "([A-Z][A-Z0-9_]{2,})";
-      const reads = [
-        new RegExp(`\\bos\\.environ(?:\\.get)?\\s*[\\[(]\\s*['"]${NAME}['"]`, "g"),
-        new RegExp(`\\bos\\.getenv\\s*\\(\\s*['"]${NAME}['"]`, "g"),
-        new RegExp(`\\.get\\s*\\(\\s*['"]${NAME}['"]`, "g"),
-        new RegExp(`\\bprocess\\.env(?:\\.${NAME}|\\s*\\[\\s*['"]${NAME}['"])`, "g"),
-        new RegExp(`\\bimport\\.meta\\.env(?:\\.${NAME}|\\s*\\[\\s*['"]${NAME}['"])`, "g"),
-        new RegExp(`\\bDeno\\.env\\.get\\s*\\(\\s*['"]${NAME}['"]`, "g"),
-      ];
-      for (const re of reads) {
-        for (const m of text.matchAll(re)) {
-          const envName = m[1] ?? m[2];
-          if (!SERVICE_SUFFIXES.some((suf) => envName.endsWith(suf))) continue;
-          const prefix = envName.replace(/^(NEXT_PUBLIC_|VITE_|EXPO_PUBLIC_|REACT_APP_|PUBLIC_)/, "").split("_")[0];
-          if (!prefix || SERVICE_IGNORE.includes(prefix)) continue;
-          const c = envCandidates.get(prefix) ?? { names: new Set(), files: new Set() };
-          c.names.add(envName);
-          c.files.add(rel);
-          envCandidates.set(prefix, c);
-        }
-      }
-    }
-    if (name.endsWith(".py")) {
-      let text = "";
-      try {
-        text = readFileSync(abs, "utf8");
-      } catch {
-        return;
-      }
-      const routers = /\bAPIRouter\s*\(/.test(text);
-      const app = /\bFastAPI\s*\(/.test(text);
-      if (routers || app) {
-        const dir = posixify(dirname(rel));
-        const cur = pyRouters.get(dir) ?? { routers: 0, apps: 0 };
-        if (routers) cur.routers++;
-        if (app) cur.apps++;
-        pyRouters.set(dir, cur);
-        // The scan root is the top-level file or the first path segment.
-        pyRoots.add(dir === "." ? rel : rel.split("/")[0]);
-      }
-    }
-    if (/^(page|route|layout)\.(tsx|ts|jsx|js)$/.test(name)) {
-      const m = /^(.*?(?:^|\/)app)(\/|$)/.exec(posixify(dirname(rel)) + "/");
-      if (m && (!appDir || m[1].length < appDir.length)) appDir = m[1];
-    }
-    if (/^middleware\.(ts|js)$/.test(name) && rel.split("/").length <= 2) middlewarePath = rel;
-    // A React Router route tree declared in code: the array form or the JSX
-    // form, in a .tsx/.jsx/.ts/.js file that imports react-router.
-    if (/\.(tsx|jsx|ts|js)$/.test(name) && !/\.(test|spec|stories|story)\.[tj]sx?$/.test(name) && !/\.d\.ts$/.test(name)) {
-      let st;
-      try {
-        st = lstatSync(abs);
-      } catch {
-        return;
-      }
-      if (probeBytes + st.size > MAX_PROBE_BYTES) {
-        probeTruncated = true;
-        return;
-      }
-      probeBytes += st.size;
-      let text = "";
-      try {
-        text = readFileSync(abs, "utf8");
-      } catch {
-        return;
-      }
-      // A detected path must be one the engine will accept (CR-009): the
-      // engine's path rule refuses whitespace and control characters.
-      if (/from\s*['"]react-router(-dom)?['"]/.test(text) && /\bcreate(?:Browser|Hash|Memory)Router\s*\(|:\s*RouteObject\[\]\s*=|<Route\b/.test(text)) {
-        try {
-          enginePath(rel, "routesFile");
-          routesFiles.push(rel);
-        } catch {
-          skippedRoutesFiles.push(rel);
-        }
-      }
-    }
-  });
-  routesFiles.sort();
-
-  const pkg = readPackageJson(root);
-  const deps = { ...(pkg?.dependencies ?? {}), ...(pkg?.devDependencies ?? {}) };
-  // Workspace packages' dependencies too (`apps/web/package.json`) — a
-  // monorepo's web app declares react-router in its own manifest.
-  const nestedDeps = new Map(); // dep name -> first workspace dir declaring it (sorted)
-  for (const rel of packageJsons.sort()) {
-    const sub = readPackageJson(join(root, dirname(rel)));
-    for (const d of Object.keys({ ...(sub?.dependencies ?? {}), ...(sub?.devDependencies ?? {}) })) if (!nestedDeps.has(d)) nestedDeps.set(d, posixify(dirname(rel)));
-  }
-  const proposals = [];
-
-  if (sqlDirs.size) {
-    const dirs = [...sqlDirs.keys()].sort();
-    const names = namespaceNames(dirs);
-    proposals.push({
-      name: "supabase",
-      evidence: dirs.map((d) => `SQL migrations under \`${d}\` (${sqlDirs.get(d)} file${sqlDirs.get(d) === 1 ? "" : "s"})`),
-      options: { migrationNamespaces: dirs.map((d, i) => ({ name: names[i], dir: d })) },
-    });
-  }
-  if (appDir || deps.next) {
-    const ev = [];
-    if (appDir) ev.push(`App Router tree at \`${appDir}\` (page/route/layout files)`);
-    if (deps.next) ev.push(`\`next\` in package.json dependencies`);
-    if (middlewarePath) ev.push(`\`${middlewarePath}\` present`);
-    const options = { appDir: appDir ?? "src/app", apiPrefix: "/api" };
-    if (middlewarePath) options.middlewarePath = middlewarePath;
-    proposals.push({ name: "nextjs", evidence: ev, options });
-  }
-  if (pyRouters.size) {
-    const ev = [];
-    for (const [dir, c] of [...pyRouters.entries()].sort()) {
-      if (c.apps) ev.push(dir === "." ? "`FastAPI()` app at the repo root" : `\`FastAPI()\` app under \`${dir}\``);
-      if (c.routers) ev.push(`\`APIRouter\` under \`${dir}\``);
-    }
-    proposals.push({ name: "fastapi", evidence: ev, options: { roots: [...pyRoots].sort() } });
-  }
-
-  // react-router: the routes file is the evidence; a bare dependency with no
-  // tree yet is proposed at the convention's default path (like `next`).
-  const rrDeps = ["react-router", "react-router-dom"];
-  const reactRouterDep = rrDeps.some((d) => deps[d] || nestedDeps.has(d));
-  // A dependency-only proposal sits at the convention's default path INSIDE
-  // the workspace package that declares it (CR-021), else the root.
-  const rrDir = rrDeps.some((d) => deps[d]) ? "" : (rrDeps.map((d) => nestedDeps.get(d)).find(Boolean) ?? "");
-  if (routesFiles.length || reactRouterDep || skippedRoutesFiles.length) {
-    const ev = [];
-    if (routesFiles.length) ev.push(`route tree declared in \`${routesFiles[0]}\`${routesFiles.length > 1 ? ` (also: ${routesFiles.slice(1).map((f) => `\`${f}\``).join(", ")} — one routesFile per extractor; confirm which)` : ""}`);
-    if (reactRouterDep) ev.push(`\`react-router\` in ${rrDir ? `\`${rrDir}/package.json\`` : "package.json"} dependencies`);
-    if (skippedRoutesFiles.length) ev.push(`route tree at ${skippedRoutesFiles.map((f) => `\`${f}\``).join(", ")} skipped — the path has whitespace or control characters the engine refuses; rename it`);
-    if (probeTruncated) ev.push(`detection stopped reading source after ${MAX_PROBE_BYTES / (1024 * 1024)} MiB — confirm the routes file by hand`);
-    proposals.push({ name: "react-router", evidence: ev, options: { routesFile: routesFiles[0] ?? posixify(join(rrDir, "src/routes.tsx")) } });
-  }
-
-  // ZDD 2.1's opt-ins (2.1.0). Each is proposed on its own evidence; an
-  // adopter who says no to one sees nothing change.
-  // A component root is the file's nearest `src/`; without one, the nearest
-  // folder holding a package.json (a workspace app); without that, the
-  // top-level folder (or the repo root for a root-level file).
-  const packageDirs = packageJsons.map((rel) => posixify(dirname(rel))).sort((a, b) => b.length - a.length);
-  const tsxDirs = new Map();
-  for (const rel of tsxFiles) {
-    const segs = rel.split("/");
-    const src = segs.lastIndexOf("src");
-    let root;
-    if (src !== -1) root = segs.slice(0, src + 1).join("/");
-    else root = packageDirs.find((d) => rel.startsWith(`${d}/`)) ?? (segs.length > 1 ? segs[0] : ".");
-    tsxDirs.set(root, (tsxDirs.get(root) ?? 0) + 1);
-  }
-  if (tsxDirs.size) {
-    const dirs = [...tsxDirs.keys()].sort();
-    proposals.push({
-      name: "components",
-      evidence: dirs.map((d) => `${tsxDirs.get(d)} .tsx/.jsx file${tsxDirs.get(d) === 1 ? "" : "s"} under \`${d}\``),
-      options: { roots: dirs },
-    });
-  }
-  const expoDirs = [...expoAppDirs].sort();
-  if (expoDirs.length) {
-    proposals.push({
-      name: "expo-router",
-      evidence: [`Expo Router tree at \`${expoDirs[0]}\` (a \`_layout\` file)${expoDirs.length > 1 ? ` — also ${expoDirs.slice(1).map((d) => `\`${d}\``).join(", ")}; one appDir per extractor, confirm which` : ""}`],
-      options: { appDir: expoDirs[0] },
-    });
-  }
-  if (jobManifests.length) {
-    jobManifests.sort((a, b) => (a.manifest < b.manifest ? -1 : 1));
-    proposals.push({
-      name: "jobs",
-      evidence: jobManifests.map((m) => `\`${m.manifest}\` ${m.what ?? "runs a process"}: ${m.scripts.map((s) => `\`${s}\``).join(", ")}`).concat(["the map will show this background work with its trigger and what it hits (a cron → a route, a queue → its worker); the mode (worker or scheduled) is never guessed: a schedule or a Railway file states it, else set extractorOptions.jobs.modes after bootstrap — lint names the ones left unknown; a package.json script counts only when a manifest runs it"]),
-      options: {},
-    });
-  }
-  if (envCandidates.size) {
-    const services = [];
-    const evidence = [];
-    for (const [prefix, c] of [...envCandidates].sort(([a], [b]) => (a < b ? -1 : 1))) {
-      const imports = [...importSpecs].filter((spec) => spec.toLowerCase().replace(/^@/, "").split(/[/.]/)[0].replace(/[-_]/g, "").includes(prefix.toLowerCase().replace(/[-_]/g, ""))).sort();
-      const entry = { name: prefix.charAt(0) + prefix.slice(1).toLowerCase(), env: [`${prefix}_`] };
-      if (imports.length) entry.imports = imports;
-      services.push(entry);
-      evidence.push(`\`${[...c.names].sort().join("`, `")}\` read in ${[...c.files].sort().map((f) => `\`${f}\``).join(", ")}${imports.length ? `; imports ${imports.map((i) => `\`${i}\``).join(", ")}` : ""} → service "${entry.name}"`);
-    }
-    evidence.push("usedBy lists the files carrying a service's marker (its env name or a matching import), never the files that reach the provider through a settings object or a wrapper — say so when proposing");
-    evidence.push("names are guessed from the env prefix — confirm or rename each; a prefix that is not a service goes in `ignore`");
-    proposals.push({ name: "external-services", evidence, options: { services } });
-  }
-
-  const apps = [];
-  if (deps.expo || deps["expo-router"] || nestedDeps.has("expo") || nestedDeps.has("expo-router") || expoDirs.length) apps.push({ name: "Mobile (Expo)", evidence: expoDirs.length ? `Expo Router tree at \`${expoDirs[0]}\`` : "`expo` in package.json", extractor: expoDirs.length ? "expo-router (proposed above)" : "expo-router — switched on by an `app/` folder with a `_layout` file (ZDD 2.1, early); map-only until then" });
-  if (routesFiles.length || reactRouterDep || skippedRoutesFiles.length) apps.push({ name: "Web (React)", evidence: routesFiles.length ? `route tree in \`${routesFiles[0]}\`` : reactRouterDep ? "`react-router` in package.json" : `route tree at a refused path (\`${skippedRoutesFiles[0]}\`)`, extractor: "react-router (proposed above)" });
-
-  const host = repoHost(root);
-  const mode = sourceFiles === 0 && !pkg ? "greenfield" : "existing";
-  if (mode === "existing" && !proposals.length) {
-    proposals.push({ name: "generic", evidence: ["source present but no known convention found — map-only ZDD; scaffold an extractor for it with the `extractor` skill once bootstrap is done"], options: {} });
-  }
-  // Questions the evidence raises but cannot answer (2.2.0). Supabase beside
-  // a web app: Realtime subscriptions become `subscribes` edges, the client's
-  // own call is seen, a wrapper of the app's own is not until it is named.
-  // One question per web extractor (CR-009): a repo with both a Next.js and a
-  // React Router app may wrap Realtime differently in each.
-  const questions = [];
-  const names = proposals.map((p) => p.name);
-  if (names.includes("supabase")) {
-    for (const web of ["react-router", "nextjs"].filter((n) => names.includes(n))) {
-      questions.push({
-        topic: "realtime",
-        ask:
-          `Does the ${web === "nextjs" ? "Next.js" : "React Router"} app subscribe to Supabase Realtime through a wrapper of its own (e.g. \`live.onInsert("table", …)\`)? ` +
-          'The client\'s own `.on("postgres_changes", { table })` needs nothing; a wrapper is invisible until its call names are listed in subscribeCalls',
-        records: SUBSCRIBE_CALLS[web],
-      });
-    }
-  }
-  return { mode, proposals, apps, sourceFiles, questions, host };
+// Put `value` at `path` (keys and array indexes) inside `obj`.
+function setAt(obj, path, value) {
+  let cur = obj;
+  for (let i = 0; i < path.length - 1; i++) cur = cur[path[i]];
+  cur[path.at(-1)] = value;
 }
 
-// Where the repo is hosted (2.3.0, C6): the shipped CI workflow runs only on
-// GitHub Actions, so the CI offer depends on this. From the origin remote;
-// a repo with no remote yet (greenfield) is "none" and keeps the GitHub
-// default, which the skill then asks about.
-export function hostOf(remote) {
-  if (typeof remote !== "string" || !remote.trim()) return { kind: "none", remote: null };
-  const r = remote.trim();
-  const kind = /(^|[@/.])github\.com([:/]|$)/i.test(r) ? "github"
-    : /(^|[@/.])gitlab\.com([:/]|$)/i.test(r) ? "gitlab"
-    : /dev\.azure\.com|visualstudio\.com/i.test(r) ? "azure"
-    : /(^|[@/.])bitbucket\.org([:/]|$)/i.test(r) ? "bitbucket"
-    : "other";
-  return { kind, remote: r };
-}
-function repoHost(root) {
-  if (!hasGit(root)) return hostOf(null);
-  try {
-    return hostOf(execFileSync("git", ["remote", "get-url", "origin"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 10_000 }));
-  } catch {
-    return hostOf(null);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Greenfield: the answers name a stack; map each part to an extractor with
-// its future paths, or to an Application concept for the map when no
-// extractor exists yet.
-// ---------------------------------------------------------------------------
-const STACK_RULES = [
-  { match: /fastapi/i, extractor: "fastapi", options: (path) => ({ roots: [path || "api"] }) },
-  { match: /supabase|postgres/i, extractor: "supabase", options: (path) => ({ migrationNamespaces: [{ name: "db", dir: path || "supabase/migrations" }] }) },
-  { match: /next(\.js)?/i, extractor: "nextjs", options: (path) => ({ appDir: path || "src/app", apiPrefix: "/api" }) },
-  // An EXPLICIT Expo Router entry selects the extractor (at its future app
-  // folder); a bare "Expo" is the Application alone.
-  { match: /expo.?router/i, extractor: "expo-router", options: (path) => ({ appDir: path || "app" }), app: "Mobile (Expo)" },
-  { match: /expo|react.?native/i, app: "Mobile (Expo)" },
-  // Only an EXPLICIT React Router entry selects the extractor (at its future
-  // routes file) — "React web", "Vite", "web" could be Vue, Svelte or another
-  // router (CR-014); those stay an Application concept until the router is
-  // named. Both get the Application.
-  { match: /react.?router/i, extractor: "react-router", options: (path) => ({ routesFile: path || "src/routes.tsx" }), app: "Web (React)" },
-  { match: /react|web|vite/i, app: "Web (React)" },
-];
-
-function fromStack(stack = []) {
+function fromStack(stack = [], { stacks = [], companions = [] } = {}) {
   const extractors = [];
   const extractorOptions = {};
   const apps = [];
   for (const entry of stack) {
     const name = typeof entry === "string" ? entry : entry.name;
     const path = typeof entry === "string" || entry.path === undefined ? undefined : repoRelative(entry.path, `stack entry ${name} path`);
-    const rule = STACK_RULES.find((r) => r.match.test(name));
+    const rule = stacks.find((r) => new RegExp(r.match, "i").test(name));
     if (!rule) {
       apps.push(name);
       continue;
     }
     if (rule.app && !apps.includes(rule.app)) apps.push(rule.app);
-    if (rule.extractor) {
-      const opts = rule.options(path);
-      if (!extractors.includes(rule.extractor)) {
-        extractors.push(rule.extractor);
-        extractorOptions[rule.extractor] = opts;
-      } else {
-        // A second entry for the same extractor adds its path (CR-042).
-        const cur = extractorOptions[rule.extractor];
-        for (const [k, v] of Object.entries(opts)) {
-          if (Array.isArray(v) && Array.isArray(cur[k])) {
-            for (const item of v) if (!cur[k].some((x) => JSON.stringify(x) === JSON.stringify(item))) cur[k].push(item);
-          } else if (JSON.stringify(cur[k]) !== JSON.stringify(v)) {
-            fail(`two stack entries give different ${rule.extractor}.${k} (${JSON.stringify(cur[k])} vs ${JSON.stringify(v)}) — an extractor has one ${k}; choose one`);
-          }
+    if (!rule.adapter || !rule.options) continue;
+    const opts = structuredClone(rule.options);
+    if (path !== undefined && rule.path) setAt(opts, rule.path, path);
+    if (!extractors.includes(rule.adapter)) {
+      extractors.push(rule.adapter);
+      extractorOptions[rule.adapter] = opts;
+      continue;
+    }
+    // A second entry for the same adapter adds its path (CR-042).
+    const cur = extractorOptions[rule.adapter];
+    for (const [k, v] of Object.entries(opts)) {
+      if (Array.isArray(v) && Array.isArray(cur[k])) {
+        for (const item of v) if (!cur[k].some((x) => JSON.stringify(x) === JSON.stringify(item))) cur[k].push(item);
+        // Items that carry a name keep the names unique (several migration folders).
+        if (cur[k].every((x) => x && typeof x === "object" && typeof x.name === "string")) {
+          const names = dedupe(cur[k].map((x) => x.name));
+          cur[k].forEach((x, i) => (x.name = names[i]));
         }
-        if (Array.isArray(cur.migrationNamespaces)) {
-          const names = dedupe(cur.migrationNamespaces.map((m) => m.name));
-          cur.migrationNamespaces.forEach((m, i) => (m.name = names[i]));
-        }
+      } else if (JSON.stringify(cur[k]) !== JSON.stringify(v)) {
+        fail(`two stack entries give different ${rule.adapter}.${k} (${JSON.stringify(cur[k])} vs ${JSON.stringify(v)}) — an extractor has one ${k}; choose one`);
       }
     }
+  }
+  for (const c of companions) {
+    if (extractors.includes(c.adapter) || !c.all.every((n) => extractors.includes(n)) || !c.any.some((n) => extractors.includes(n))) continue;
+    extractors.splice(extractors.indexOf(c.all[0]) + 1, 0, c.adapter);
+    extractorOptions[c.adapter] = {};
   }
   return { extractors, extractorOptions, apps };
 }
@@ -619,12 +334,12 @@ const fail = (msg) => {
   throw new Error(`answers: ${msg}`);
 };
 
-// Mirrors of the ENGINE's rules (src/lib/config.mjs validateRepoBase and
-// src/lib/paths.mjs repoRelative), applied to the answers so a config the
+// Mirrors of the ENGINE's rules (src/core/lib/config.mjs validateRepoBase and
+// src/core/lib/paths.mjs repoRelative), applied to the answers so a config the
 // engine's first derive would refuse is never written (CR-078). The engine's
 // path rule is stricter than the plugin's repoRelative in lib/repo.mjs (no
-// whitespace, no backslash) and looser in one spot (`.` is a valid root — the
-// fastapi default), and the option values land in config.json verbatim, so
+// whitespace, no backslash) and looser in one spot (`.` is a valid root — an
+// adapter's default), and the option values land in config.json verbatim, so
 // the engine's rule is the one that applies here.
 const ENGINE_REPO_BASE = /^https?:\/\/\S+$/i;
 function enginePath(value, label) {
@@ -636,55 +351,70 @@ function enginePath(value, label) {
   if (value.split("/").some((s) => s === "..")) bad();
   return value;
 }
-// The path-bearing option keys of the built-in extractors, by extractor name.
-// A local extractor's options are its own; only these are inspected.
-// Where each web extractor names its Realtime wrapper calls (ZDD 2.1).
-const SUBSCRIBE_CALLS = { nextjs: "extractorOptions.nextjs.refs.subscribeCalls", "react-router": "extractorOptions.react-router.subscribeCalls" };
+// The path-bearing option keys of each catalogue adapter come from its own
+// option shape (DETECTION.optionShape, read through the engine's detection).
+// A local extractor's options are its own; only catalogue ones are inspected.
 const isCallList = (v) => Array.isArray(v) && v.every((s) => typeof s === "string" && s.length > 0 && s.length <= MAX_NAME);
 
-function validateExtractorOptions(all) {
+function validateExtractorOptions(all, adapters = {}) {
   const obj = (v) => v && typeof v === "object" && !Array.isArray(v);
   const list = (v, label) => {
     if (!Array.isArray(v)) fail(`${label} must be an array of repo-relative paths`);
     v.forEach((p, i) => enginePath(p, `${label}[${i}]`));
   };
-  const calls = (v, label) => {
+  const calls = (v, label, grammar) => {
     if (v !== undefined && !isCallList(v)) fail(`${label} must be an array of call names (strings), e.g. ["live.onInsert"]`); // CR-011
+    // The adapter's own grammar for a call name (CR-102): a name outside it is ignored by the engine.
+    const re = grammar ? new RegExp(grammar) : null;
+    const bad = v === undefined || !re ? undefined : v.find((s) => !re.test(s));
+    if (bad !== undefined) fail(`${label}: ${JSON.stringify(bad)} is not a call name the adapter reads (dotted identifiers, e.g. "live.onInsert")`);
   };
   for (const [name, opts] of Object.entries(all)) {
     if (!obj(opts)) fail(`extractorOptions.${name} must be an object`);
-    if (name === "nextjs") {
-      for (const k of ["appDir", "middlewarePath", "srcAliasRoot"]) if (opts[k] !== undefined) enginePath(opts[k], `nextjs.${k}`);
-      if (opts.refs !== undefined) {
-        if (!obj(opts.refs)) fail("nextjs.refs must be an object");
-        if (opts.refs.roots !== undefined) list(opts.refs.roots, "nextjs.refs.roots");
-        calls(opts.refs.subscribeCalls, "nextjs.refs.subscribeCalls");
+    const shape = adapters[Object.hasOwn(RENAMED_EXTRACTORS, name) ? RENAMED_EXTRACTORS[name] : name]?.optionShape;
+    if (!shape) continue;
+    // A dotted key's value, after checking every parent on the way is an object.
+    const at = (key) => {
+      let cur = opts;
+      const segs = key.split(".");
+      for (let i = 0; i < segs.length - 1; i++) {
+        cur = cur[segs[i]];
+        if (cur === undefined) return undefined;
+        if (!obj(cur)) fail(`${name}.${segs.slice(0, i + 1).join(".")} must be an object`);
       }
-    } else if (name === "react-router") {
-      for (const k of ["routesFile", "srcAliasRoot"]) if (opts[k] !== undefined) enginePath(opts[k], `react-router.${k}`);
-      calls(opts.subscribeCalls, "react-router.subscribeCalls");
-    } else if (name === "external-services" || name === "services") {
-      if (opts.roots !== undefined) list(opts.roots, `${name}.roots`);
-    } else if (name === "jobs") {
-      if (opts.roots !== undefined) list(opts.roots, "jobs.roots");
-    } else if (name === "expo-router") {
-      for (const k of ["appDir", "srcAliasRoot"]) if (opts[k] !== undefined) enginePath(opts[k], `expo-router.${k}`);
-    } else if (name === "components") {
-      if (opts.roots !== undefined) list(opts.roots, "components.roots");
-      if (opts.srcAliasRoot !== undefined) enginePath(opts.srcAliasRoot, "components.srcAliasRoot");
-    } else if (name === "fastapi") {
-      if (opts.roots !== undefined) list(opts.roots, "fastapi.roots");
-    } else if (name === "supabase" && opts.migrationNamespaces !== undefined) {
-      if (!Array.isArray(opts.migrationNamespaces)) fail("supabase.migrationNamespaces must be an array");
-      opts.migrationNamespaces.forEach((ns, i) => {
-        if (!obj(ns)) fail(`supabase.migrationNamespaces[${i}] must be an object`);
-        enginePath(ns.dir, `supabase.migrationNamespaces[${i}].dir`);
+      return cur[segs.at(-1)];
+    };
+    for (const k of shape.paths ?? []) if (at(k) !== undefined) enginePath(at(k), `${name}.${k}`);
+    for (const k of shape.pathLists ?? []) if (at(k) !== undefined) list(at(k), `${name}.${k}`);
+    for (const k of shape.callLists ?? []) calls(at(k), `${name}.${k}`, shape.callName);
+    // A list of objects: each `required` key is a repo-relative path, each
+    // `optional` one is when present (CR-101).
+    for (const [k, keys] of Object.entries(shape.objectLists ?? {})) {
+      const v = at(k);
+      if (v === undefined) continue;
+      if (!Array.isArray(v)) fail(`${name}.${k} must be an array`);
+      v.forEach((item, i) => {
+        if (!obj(item)) fail(`${name}.${k}[${i}] must be an object`);
+        for (const pk of keys.required ?? []) enginePath(item[pk], `${name}.${k}[${i}].${pk}`);
+        for (const pk of keys.optional ?? []) if (item[pk] !== undefined) enginePath(item[pk], `${name}.${k}[${i}].${pk}`);
       });
     }
   }
 }
 
-export function validateAnswers(a) {
+// The options about to be written, whatever their source — an answer, the
+// detection, a stated stack — checked as an answer is (CR-100): a detected
+// path the engine would refuse (a folder name with a space) stops the run
+// before the first write, never after.
+function finalOptions(options, adapters) {
+  try {
+    validateExtractorOptions(options, adapters);
+  } catch (e) {
+    throw new Error(`${e.message.replace(/^answers: /, "the extractor options to write: ")} — the engine would refuse this config; nothing was written. Correct it in the answers' extractorOptions`);
+  }
+}
+
+export function validateAnswers(a, adapters = {}) {
   if (!a || typeof a !== "object" || Array.isArray(a)) fail("must be a JSON object");
   for (const k of ["name", "repoBase", "baseBranch"]) if (a[k] !== undefined && !isName(a[k])) fail(`${k} must be a single-line string (≤${MAX_NAME} chars)`);
   if (a.repoBase !== undefined && a.repoBase !== "" && !ENGINE_REPO_BASE.test(a.repoBase)) fail("repoBase must be an http(s) URL with no whitespace, or empty (the engine's rule)");
@@ -694,7 +424,7 @@ export function validateAnswers(a) {
   }
   if (a.extractorOptions !== undefined) {
     if (!a.extractorOptions || typeof a.extractorOptions !== "object" || Array.isArray(a.extractorOptions)) fail("extractorOptions must be an object");
-    validateExtractorOptions(a.extractorOptions);
+    validateExtractorOptions(a.extractorOptions, adapters);
   }
   if (a.stack !== undefined) {
     if (!Array.isArray(a.stack)) fail("stack must be an array");
@@ -1180,8 +910,12 @@ function writePluginSettings(ledger, version, { mode = "apply", lock = false } =
   );
 }
 
+// Either line's package, pinned (decision 0042): the old name becomes the new
+// one with the new version. `@rich-rees/zdd@` is never a prefix of the old
+// name's pin, and the old name is tried first.
 function pinEngine(text, version) {
-  const re = new RegExp(ENGINE_PACKAGE.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&") + "@[^\"'\\s]*", "g");
+  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+  const re = new RegExp(`(?:${esc(OLD_ENGINE_PACKAGE)}|${esc(ENGINE_PACKAGE)})@[^"'\\s]*`, "g");
   return text.replace(re, `${ENGINE_PACKAGE}@${version}`);
 }
 // 2.0 (2.0.0): the workflow's lint step gates the merge, so it runs
@@ -1227,6 +961,46 @@ export function mergeGate(text) {
 const OLD_WORKFLOW_HEADER = /^# Managed by Zero-Drift Docs \(zdd\): written by `zdd:bootstrap`; `zdd:bootstrap(\r?)\n# --upgrade` rewrites the engine pin below\. Remove this header line to take(\r?)\n# ownership of the file\.(\r?)$/m;
 export function refreshHeader(text) {
   return text.replace(OLD_WORKFLOW_HEADER, (_m, a, b, c) => `# Managed by Zero-Drift Docs (zdd): written by \`zdd:bootstrap\`; "upgrade ZDD"${a}\n# rewrites the engine pin below. Remove this header line to take ownership${b}\n# of the file.${c}`);
+}
+// The standard suite's step (0.9, decision 0040): an owned workflow from an
+// earlier release gains it, in the template's own words, before the
+// freshness step — or, where the team removed that one, after the lint
+// step. A workflow that already runs `suite` outside a comment keeps its
+// shape; one with neither step to anchor on is named for a hand edit.
+const SUITE_STEP_NAME = "- name: Your own adapters pass the standard suite";
+function suiteStepBlock() {
+  const lines = readFileSync(join(TEMPLATES, "zdd.yml"), "utf8").split(/\r?\n/);
+  const at = lines.findIndex((l) => l.trim() === SUITE_STEP_NAME);
+  let from = at;
+  while (from > 0 && lines[from - 1].trim().startsWith("#")) from--;
+  const indent = lines[at].match(/^\s*/)[0];
+  return lines.slice(from, at + 2).map((l) => l.slice(indent.length));
+}
+export function addSuiteStep(text) {
+  if (text.split(/\r?\n/).some((l) => /"\$ZDD_ENGINE"\s+suite\b/.test(stripYamlComment(l)))) return { text, how: "present" };
+  const eol = text.includes("\r\n") ? "\r\n" : "\n";
+  const lines = text.split(/\r?\n/);
+  const block = suiteStepBlock();
+  const fresh = lines.findIndex((l) => /^\s*-\s+name:\s*Semantic-map freshness/.test(l));
+  if (fresh !== -1) {
+    const indent = lines[fresh].match(/^\s*/)[0];
+    lines.splice(fresh, 0, ...block.map((l) => indent + l), "");
+    return { text: lines.join(eol), how: "added" };
+  }
+  const lint = lines.findIndex((l) => /^\s*(?:-\s+)?run:\s*npx -y "\$ZDD_ENGINE" lint\b/.test(stripYamlComment(l)));
+  if (lint === -1) return { text, how: "absent" };
+  let head = lint;
+  while (head > 0 && !/^\s*-\s/.test(lines[head])) head--;
+  const indent = lines[head].match(/^\s*/)[0];
+  // After the whole lint step (CR-120): its own keys — env, timeout, the rest
+  // of a multi-line run — are every later line indented deeper than its
+  // `- `; the step ends at the first one that is not, blank lines aside.
+  let end = lint + 1;
+  while (end < lines.length && (lines[end].trim() === "" || lines[end].match(/^\s*/)[0].length > indent.length)) end++;
+  while (end > lint + 1 && lines[end - 1].trim() === "") end--;
+  const after = end < lines.length && lines[end].trim() !== "";
+  lines.splice(end, 0, "", ...block.map((l) => indent + l), ...(after ? [""] : []));
+  return { text: lines.join(eol), how: "added" };
 }
 const workflowText = (version) => pinEngine(readFileSync(join(TEMPLATES, "zdd.yml"), "utf8"), version);
 const prePushText = (version) => pinEngine(readFileSync(join(TEMPLATES, "pre-push"), "utf8"), version);
@@ -1319,14 +1093,16 @@ function mergeOptions(base, next) {
 }
 
 export function apply(root, rawAnswers, { date = today(), home } = {}) {
-  const answers = validateAnswers(rawAnswers);
+  // Detection first: it writes nothing, and the answers are checked against
+  // the adapters' own option shapes (decision 0039).
+  const detection = detect(root);
+  const answers = validateAnswers(rawAnswers, detection.adapters);
   const ledger = new Ledger(root);
   const version = pluginVersion();
   const cfg = readConfig(root);
   if (cfg.state === "invalid") throw new Error(`${cfg.error} — fix or remove it; bootstrap never replaces a config it cannot read`);
   const existingConfig = cfg.config;
   const paths = artifactPaths(existingConfig); // throws on a bad configured path — before any write
-  const detection = detect(root);
   const mode = existingConfig ? "repair" : detection.mode;
 
   // Opt-ins: fresh adoption defaults all on; repair defaults to the current
@@ -1346,7 +1122,7 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
   const optIns = { ...current, ...(answers.optIns ?? {}) };
   // The shipped workflow is GitHub Actions (C6): on another host it would
   // never run and the user would believe they had a merge gate. The opt-in
-  // is recorded as off, the three commands are printed for their own
+  // is recorded as off, the four commands are printed for their own
   // pipeline, and the pre-push hook is offered as the fallback.
   const host = detection.host ?? hostOf(null);
   const ciOffHost = optIns.ci && !["github", "none"].includes(host.kind);
@@ -1354,7 +1130,7 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
 
   // --- config.json -------------------------------------------------------
   let config = existingConfig;
-  const stack = fromStack(answers.stack);
+  const stack = fromStack(answers.stack, detection);
   if (!config) {
     let extractors = answers.extractors;
     let extractorOptions = answers.extractorOptions;
@@ -1375,16 +1151,25 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
       name: answers.name || basename(root),
       repoBase: answers.repoBase || "",
       baseBranch: answers.baseBranch || "main",
-      engine: version,
+      release: version,
       extractors,
       extractorOptions: Object.fromEntries(extractors.map((n) => [n, extractorOptions[n] ?? {}])),
       hooks: { autoLoad: optIns.autoLoad, fence: optIns.fence, stop: optIns.stop },
+      // The first map check, done with the developer (decision 0039 points 3
+      // and 4): owed until `bootstrap.mjs check --done` clears it. On a
+      // greenfield repo it waits for the first derive that finds records.
+      mapCheck: "owed",
+      // Every check of the standard suite blocks from day one (decision
+      // 0040): a fresh install has no adapter of its own that predates one.
+      suiteChecks: SUITE_CHECK_COUNT,
     };
     if (!hasGit(root)) config.render = { storeChanges: false };
     // A fresh install never writes a retired name (the alias is for configs
     // that already exist): an answer or a stack spelt the old way is written
     // the current way, options key and all.
     migrateRenames(config, []);
+    migrateJobs(config, [], root);
+    finalOptions(config.extractorOptions, detection.adapters);
     ledger.create("zdd/config.json", JSON.stringify(config, null, 2) + "\n");
   } else {
     // Repair: only an explicit answer changes the config. A pre-1.0 config's
@@ -1430,6 +1215,7 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
         }
       }
       if (moved.length) {
+        finalOptions(Object.fromEntries(moved.map((n) => [n, opts[n]])), detection.adapters);
         existingConfig.extractorOptions = opts;
         repairNotes.push(`zdd/config.json: extractorOptions updated for ${moved.join(", ")}`);
       }
@@ -1475,7 +1261,7 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
   if (!existingConfig) {
     const featuresDir = ledger.abs(`${paths.mapDir}/features`);
     const hasSlice = readdirSync(featuresDir).some((f) => /\.md$/i.test(f));
-    if (!hasSlice) ledger.create(`${paths.mapDir}/features/example-feature.md`, exampleFeature(config, paths));
+    if (!hasSlice) ledger.create(`${paths.mapDir}/features/example-feature.md`, exampleFeature(config, paths, detection.adapters));
     else ledger.kept.push(`${paths.mapDir}/features/ (a slice is present — example skipped)`);
   }
   const adrDir = ledger.abs(paths.adrDir);
@@ -1491,7 +1277,7 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
   ledger.notes.push(`hooks: autoLoad ${optIns.autoLoad ? "on" : "off"}, fence ${optIns.fence ? "on" : "off"}, stop ${optIns.stop ? "on" : "off"} (recorded in zdd/config.json; the plugin's hooks.json reads it)`);
 
   if (ciOffHost) {
-    ledger.notes.push(`CI workflow not written: this repo's origin is ${host.kind} (${host.remote}), and the workflow ZDD ships runs only on GitHub Actions — a file there would never run. The merge gate for your own pipeline is the three commands the summary prints; the pre-push hook is the local fallback`);
+    ledger.notes.push(`CI workflow not written: this repo's origin is ${host.kind} (${host.remote}), and the workflow ZDD ships runs only on GitHub Actions — a file there would never run. The merge gate for your own pipeline is the four commands the summary prints; the pre-push hook is the local fallback`);
   }
   if (optIns.ci) {
     ensureOwned(ledger, ".github/workflows/zdd.yml", workflowText(version));
@@ -1523,25 +1309,20 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
   const pocock = findPocock(root, home);
   return { mode, version, date, config, optIns, pocock, detection, host, ciCommands: ciCommands(version), ...ledgerOut(ledger) };
 }
-// The merge gate as three commands, for a pipeline ZDD ships no workflow for.
-export const ciCommands = (version) => [`npx -y ${ENGINE_PACKAGE}@${version} derive --check`, `npx -y ${ENGINE_PACKAGE}@${version} render --check`, `npx -y ${ENGINE_PACKAGE}@${version} lint --merge`];
+// The merge gate as four commands, for a pipeline ZDD ships no workflow for.
+export const ciCommands = (version) => [`npx -y ${ENGINE_PACKAGE}@${version} derive --check`, `npx -y ${ENGINE_PACKAGE}@${version} render --check`, `npx -y ${ENGINE_PACKAGE}@${version} lint --merge`, `npx -y ${ENGINE_PACKAGE}@${version} suite`];
 
-// The example feature slice's text, from the configured extractors. The
+// The example feature slice's text, from the configured extractors and the
+// records each adapter says an example can link (DETECTION.exampleClaims). The
 // example TARGETS are shown as bare paths, never in the `[x](y.json)` shape:
 // the render's link scanner reads that shape wherever it appears (inline
 // code included), and a link it cannot resolve blocks the render — and at
 // bootstrap no metadata exists yet.
-const EXAMPLE_TARGETS = {
-  supabase: ["a table: `../../metadata/table/db--things.json`"],
-  nextjs: ["an API route: `../../metadata/route/things.json`", "a page: `../../metadata/surface/things--_id.json`"],
-  fastapi: ["an API route: `../../metadata/route/things--_id.json`"],
-  "react-router": ["a screen: `../../metadata/surface/things--_id.json`"],
-};
-export function exampleFeature(config, paths) {
+export function exampleFeature(config, paths, adapters = {}) {
   // Relative to the slice's own folder, whatever the configured layout (CR-022).
   const toMeta = posixify(relative(join(paths.mapDir, "features"), paths.metadataDir)) || ".";
   const targets = [];
-  for (const name of config.extractors ?? []) for (const t of EXAMPLE_TARGETS[name] ?? []) if (!targets.includes(t)) targets.push(t.replaceAll("../../metadata", toMeta));
+  for (const name of config.extractors ?? []) for (const t of adapters[name]?.exampleClaims ?? []) if (!targets.includes(t)) targets.push(t.replaceAll("../../metadata", toMeta));
   if (!targets.length) targets.push(`a record: \`${toMeta}/<kind>/<file>.json\``);
   const roots = [];
   for (const name of config.extractors ?? []) {
@@ -1807,12 +1588,15 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
   if (cfg.state === "invalid") throw new Error(`${cfg.error} — fix it by hand; upgrade never rewrites a config it cannot read`);
   // Never backwards (CR-005): a teammate may already have moved the repo past
   // the release this machine runs. The machine moves first.
+  // On either line (decision 0042): an old-line pin or lock is behind every
+  // new-line release, whatever its number.
+  const fromRelease = configRelease(cfg.config); // throws on a release that is not a version, before any write
   const locked = ourLockRef(new Ledger(root));
-  if (locked && RELEASE_TAG.test(locked) && compareVersions(locked, version) > 0) {
+  if (locked && RELEASE_TAG.test(locked) && compareReleases(lockRelease(locked), version) > 0) {
     throw new Error(`this repo locks ${locked}, newer than this plugin (${version}) — update this machine first (the session-start line names the commands), restart, then say "upgrade ZDD" again`);
   }
-  if (typeof cfg.config.engine === "string" && /^\d+\.\d+\.\d+$/.test(cfg.config.engine) && compareVersions(cfg.config.engine, version) > 0) {
-    throw new Error(`zdd/config.json's engine pin ${cfg.config.engine} is newer than this plugin (${version}) — update this machine's plugin first; upgrade never moves a repo backwards`);
+  if (fromRelease && compareReleases(fromRelease, version) > 0) {
+    throw new Error(`zdd/config.json's release pin ${fromRelease} is newer than this plugin (${version}) — update this machine's plugin first; upgrade never moves a repo backwards`);
   }
   const dropIds = parseDrop(drop);
   const kindOf = parseKinds(kinds);
@@ -1840,7 +1624,7 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
   }
   const ledger = new Ledger(root, { dryRun: plan });
   const config = cfg.config;
-  const fromEngine = typeof config.engine === "string" ? config.engine : null;
+  const fromEngine = fromRelease;
   const hasLegacy = config.adapter !== undefined || config.adapterOptions !== undefined;
   const hasNew = config.extractors !== undefined || config.extractorOptions !== undefined;
   if (hasLegacy && hasNew) throw new Error("zdd/config.json has both 'adapter' and 'extractors' — keep one by hand before upgrading (the engine refuses this shape too)"); // CR-008
@@ -1866,6 +1650,7 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
   }
   const renamed = [];
   migrateRenames(config, renamed);
+  migrateJobs(config, renamed, root);
   changes.push(...renamed);
   if (config.viewer && typeof config.viewer === "object" && Array.isArray(config.viewer.nonAreaTags)) {
     if (config.nonAreaTags === undefined) config.nonAreaTags = config.viewer.nonAreaTags;
@@ -1873,9 +1658,34 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
     if (!Object.keys(config.viewer).length) delete config.viewer;
     changes.push("viewer.nonAreaTags → top-level nonAreaTags (it shapes graph.json, not just the viewer)");
   }
-  if (config.engine !== version) {
-    changes.push(`engine pin ${typeof config.engine === "string" ? config.engine : "(none)"} → ${version}`);
-    config.engine = version;
+  // The pin (decision 0042): the old line's `engine` becomes the new line's
+  // `release`, where `engine` sat; a config with neither gains it at the end.
+  // Beside a `release`, an `engine` pin is stale — a pre-0.9 plugin's upgrade
+  // run on a repo already moved writes one (CR-151) — and is dropped, named.
+  if (Object.hasOwn(config, "engine") && Object.hasOwn(config, "release")) {
+    const stale = config.engine;
+    delete config.engine;
+    changes.push(`engine pin ${typeof stale === "string" && SEMVER.test(stale) ? stale : "(not a version)"} dropped: a plugin from before 0.9 wrote it beside "release" (decision 0042) — keep every teammate's plugin on this release`);
+  }
+  if (Object.hasOwn(config, "engine")) {
+    const next = {};
+    for (const [k, v] of Object.entries(config)) next[k === "engine" ? "release" : k] = k === "engine" ? version : v;
+    for (const k of Object.keys(config)) delete config[k];
+    Object.assign(config, next);
+    changes.push(`engine pin ${typeof fromEngine === "string" ? fromEngine.replace("zdd-engine@", "") : "(not a version)"} → release ${version} (the engine is ${ENGINE_PACKAGE} from 0.9, a new line numbered from 0.9.0 — decision 0042)`);
+  } else if (config.release !== version) {
+    changes.push(`release pin ${typeof config.release === "string" ? config.release : "(none)"} → ${version}`);
+    config.release = version;
+  }
+  ledger.notes.push(...migrateDataAccess(config, changes, root, fromEngine));
+  // The standard suite (decision 0040): with no adapter of the repo's own,
+  // every check blocks at once — there is nothing a new check could turn
+  // red. With some, the number stays where it is (absent: every check
+  // warns) until `bootstrap.mjs adapters --raise`, after the interview.
+  const own = ownAdapters(root, config);
+  if (!own.length && config.suiteChecks !== SUITE_CHECK_COUNT) {
+    changes.push(`suiteChecks ${config.suiteChecks ?? "(none)"} → ${SUITE_CHECK_COUNT}: no adapter of this repo's own, so every check of the standard suite blocks (decision 0040)`);
+    config.suiteChecks = SUITE_CHECK_COUNT;
   }
   // The Stop hook (plugin 1.1, decision 0008) is a new opt-in; upgrade names
   // it but never answers it — the skill asks, and a repair `apply` records it.
@@ -1905,8 +1715,10 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
       continue;
     }
     let next = rel.endsWith("pre-push") ? fresh() : pinEngine(cur, version);
+    const pinMoved = next !== cur; // before the gate, header and suite step change it too
     let gate = null;
     let headerNote = null;
+    let suite = null;
     if (rel.endsWith("zdd.yml")) {
       gate = mergeGate(next);
       next = gate.text;
@@ -1921,12 +1733,17 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
         next = head;
         headerNote = `${rel}: its header comment now names "upgrade ZDD" (it named the retired \`zdd:bootstrap --upgrade\`)`;
       }
+      suite = addSuiteStep(next);
+      next = suite.text;
+      if (suite.how === "absent") ledger.notes.push(`${rel}: no lint or freshness step to place it beside — add a step that runs \`npx -y "$ZDD_ENGINE" suite\` by hand (the standard suite on this repo's own adapters, decision 0040)`);
     }
     if (next !== cur) {
       ledger.overwrite(rel, next);
-      ledger.notes.push(`${rel}: ${rel.endsWith("pre-push") ? "rewritten from the template" : "engine pin updated"} (${version})`);
+      if (rel.endsWith("pre-push")) ledger.notes.push(`${rel}: rewritten from the template (${version})`);
+      else if (pinMoved) ledger.notes.push(`${rel}: engine pin updated (${version})`);
       if (gate?.how === "added") ledger.notes.push(`${rel}: the lint step now runs \`lint --merge\` (2.0) — the merge gate fails while the branch's pattern plan exists`);
       if (headerNote) ledger.notes.push(headerNote);
+      if (suite?.how === "added") ledger.notes.push(`${rel}: a step now runs the standard suite on this repo's own adapters (0.9, decision 0040)`);
     } else ledger.kept.push(rel);
   }
   // Links in the map move whenever any still point at a renamed kind's folder
@@ -1934,8 +1751,8 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
   {
     const mapDir = artifactPaths(config, { lenient: true }).mapDir;
     const links = migrateMapLinks(ledger, mapDir, artifactPaths(config, { lenient: true }).metadataDir);
-    for (const rel of links.touched) ledger.notes.push(`${rel}: links to metadata/service/ now point at metadata/external-service/ (2.3 rename) — the next derive moves the records there`);
-    for (const what of links.skipped) ledger.notes.push(`${mapDir}: ${what} was not read for old metadata/service/ links — check it by hand`);
+    for (const rel of links.touched) ledger.notes.push(`${rel}: links to a renamed kind's records now point at its new folder (metadata/service/ → metadata/external-service/, 2.3; metadata/job/ → metadata/background-task/, 0.9) — the next derive moves the records there`);
+    for (const what of links.skipped) ledger.notes.push(`${mapDir}: ${what} was not read for old metadata/service/ or metadata/job/ links — check it by hand`);
     if (renamed.length && existsSync(ledger.abs(`${mapDir}/services`))) ledger.notes.push(`${mapDir}/services/ is your hand-written folder for third-party systems — ZDD now calls them external services and a fresh install names the folder external-services/; rename it if you like (git mv), it is never renamed for you`);
   }
   // Blessings leave the map for the blessing store (2.5, decision 0032):
@@ -1980,15 +1797,16 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
   // old engine pin and the lock's old tag included (the first adopter keeps the tag in a
   // lock test of its own).
   const retired = findRetiredNames(ledger, {
-    oldEngine: fromEngine && fromEngine !== version ? fromEngine : null,
+    oldEngine: fromEngine && fromEngine !== version ? fromEngine.replace("zdd-engine@", "") : null,
     oldLock: lockBefore && lockBefore !== `v${version}` ? lockBefore : null,
     metadataRel: artifactPaths(config, { lenient: true }).metadataDir,
+    generated: generatedArtifacts(artifactPaths(config, { lenient: true })),
   });
   for (const r of retired) ledger.notes.push(r);
   if (stopUnset) ledger.notes.push('hooks.stop is not set (new in 1.1: the Stop hook prompts for the curated half once per session) — it stays OFF until answered: run bootstrap apply with {"optIns":{"stop":true}} (repair mode, keeps every other choice), or add "stop": true inside the existing "hooks" object by hand');
   const ctx = { root, config, version, paths: artifactPaths(config, { lenient: true }) };
   for (const [release, notes] of Object.entries(UPGRADE_NOTES)) {
-    if (fromEngine && compareVersions(release, fromEngine) <= 0) continue;
+    if (fromEngine && compareReleases(release, fromEngine) <= 0) continue;
     // A note never stops an upgrade mid-write (CR-011): a config shape it
     // did not expect is named, and the run goes on.
     try {
@@ -1998,6 +1816,7 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
     }
   }
   ledger.notes.push(...offerOptIns(root, config));
+  if (own.length) ledger.notes.push(`this repo's own adapters (${own.join(", ")}): run \`bootstrap.mjs adapters\` — the standard suite on each one's fixture, and the steps of the adapter contract each is behind on (decision 0040); fix what it names through the extractor skill, then \`bootstrap.mjs adapters --raise\` (suiteChecks stays at ${config.suiteChecks ?? "0, every check warning,"} until then)`);
   ledger.notes.push("curated artifacts (glossary, ADRs, map pages, metadata) untouched — upgrade never writes them, save two mechanical moves named above: a map link to a record whose kind a release renamed, and blessings moved out of the map on --move-blessings");
   ledger.notes.push("if the engine pin moved: run `derive` and `render`, then `lint`, and commit the regenerated artifacts in the same PR");
   return { version, plan, ...ledgerOut(ledger), duplicates, blessingMoves };
@@ -2173,24 +1992,24 @@ function moveBlessings(ledger, paths, { move, kindOf }) {
 // `upgrade` skill carries a matching "Upgrading to X.Y" section. Each note
 // opens with its release so the narration reads as a changelog.
 // ---------------------------------------------------------------------------
-const OPT_IN_EXTRACTORS = ["components", "expo-router", "jobs", "external-services"];
 const extractorsOn = (config) => new Set((Array.isArray(config.extractors) ? config.extractors : []).map((n) => (Object.hasOwn(RENAMED_EXTRACTORS, n) ? RENAMED_EXTRACTORS[n] : n)));
 // Every upgrade re-runs detection and offers each opt-in extractor that is
 // off but has evidence (2.4.1, from the first adopter: the offer lived in the 2.1
 // note, so the first adopter's 2.2.1 → 2.4.0 never saw `jobs`, though 2.3 had widened it
-// to the first adopter's Vercel cron and Railway worker). Never added by upgrade, and a
+// to the first adopter's cron and worker). Never added by upgrade, and a
 // "no" is not remembered: the line comes back while the evidence does.
+// Which adapters are opt-ins is each adapter's word (DETECTION.optIn, 0039).
 function offerOptIns(root, config) {
   const notes = [];
   const have = extractorsOn(config);
-  let proposals = [];
+  let d;
   try {
-    proposals = detect(root).proposals ?? [];
+    d = detect(root);
   } catch {
-    return [`could not re-run detection here — run \`bootstrap.mjs detect\` to see whether the opt-in extractors (${OPT_IN_EXTRACTORS.join(", ")}) apply`];
+    return ["could not re-run detection here — run `bootstrap.mjs detect` to see whether an opt-in extractor applies"];
   }
-  for (const p of proposals) {
-    if (!OPT_IN_EXTRACTORS.includes(p.name) || have.has(p.name)) continue;
+  for (const p of d.proposals ?? []) {
+    if (!d.adapters?.[p.name]?.optIn || have.has(p.name)) continue;
     notes.push(
       `offers the opt-in extractor \`${p.name}\` — evidence: ${(p.evidence ?? []).join("; ")}. ` +
         `Never added by upgrade: on the user's word, a repair apply with it in "extractors" (and its options: ${JSON.stringify(p.options ?? {})})`,
@@ -2203,7 +2022,149 @@ function offerOptIns(root, config) {
 // names for one release; upgrade rewrites them here, so the alias is never
 // what an upgraded repo relies on.
 const RENAMED_EXTRACTORS = { services: "external-services" };
-const RENAMED_KINDS = { service: "external-service" };
+// 0.9 (decision 0038): the record `job` is `background-task`.
+const RENAMED_KINDS = { service: "external-service", job: "background-task" };
+// border: names a stack (the 0.9 migration of `jobs` names the readers that replace it)
+// 0.9 (decision 0038): the `jobs` extractor is one reader per platform file.
+// The readers are the ones detection finds evidence for, plus
+// background-declared when the config declares tasks by hand
+// (`jobs.entries`) and background-github-actions when it opted in
+// (`includeGithubActions`). `roots` goes to every reader (each walks it);
+// `exclude` and `modes` to the readers that read processes; `entries` and
+// `modes` to background-declared (an entry's mode may live in `modes`,
+// CR-081). Written where `jobs` sat, in name order. A reader's options that
+// already exist are kept when they hold the same values, else the upgrade
+// stops before writing (CR-085). When `jobs` is listed and no reader can be
+// named — detection failed or found nothing — the upgrade stops rather than
+// write a config with no reader in its place (CR-084).
+const PROCESS_READERS = new Set(["background-procfile", "background-compose", "background-railway"]);
+function migrateJobs(config, changes, root) {
+  const listed = Array.isArray(config.extractors) && config.extractors.includes("jobs");
+  const hasOpts = isPlainObject(config.extractorOptions) && Object.hasOwn(config.extractorOptions, "jobs");
+  if (!listed && !hasOpts) return;
+  const o = hasOpts && isPlainObject(config.extractorOptions.jobs) ? config.extractorOptions.jobs : {};
+  let found = [];
+  let detectError = null;
+  try {
+    found = (detect(root).proposals ?? []).filter((p) => (p.parts ?? []).includes("background tasks")).map((p) => p.name);
+  } catch (e) {
+    detectError = e;
+  }
+  const readers = [...new Set([...found, ...(Array.isArray(o.entries) && o.entries.length ? ["background-declared"] : []), ...(o.includeGithubActions === true ? ["background-github-actions"] : [])])].sort();
+  if (listed && !readers.length) {
+    throw new Error(
+      `zdd/config.json lists "jobs", which 0.9 splits into one background-* reader per platform file (decision 0038), but ${detectError ? `detection could not run here (${detectError.message})` : "detection finds no background work under the repo (it reads six folders deep)"} — nothing was written. ` +
+        `Replace "jobs" in "extractors" by hand with the readers for the files you commit (background-procfile, background-railway, background-vercel, background-cloudflare, background-compose, background-pg-cron, background-bullmq, background-inngest, background-trigger-dev, background-sqs, background-github-actions, background-declared), move extractorOptions.jobs to them, and run the upgrade again`,
+    );
+  }
+  if (listed) {
+    const at = config.extractors.indexOf("jobs");
+    const rest = config.extractors.filter((n) => n !== "jobs");
+    const add = readers.filter((n) => !rest.includes(n));
+    config.extractors = [...rest.slice(0, at), ...add, ...rest.slice(at)];
+  }
+  if (hasOpts) {
+    const pick = (keys) => Object.fromEntries(keys.filter((k) => o[k] !== undefined).map((k) => [k, o[k]]));
+    const optionsFor = (n) => (n === "background-declared" ? pick(["roots", "entries", "modes"]) : PROCESS_READERS.has(n) ? pick(["roots", "exclude", "modes"]) : pick(["roots"]));
+    // A reader whose options already exist (a half-migrated config): kept
+    // when every moved value is already there unchanged, else stop (CR-085).
+    for (const n of readers) {
+      if (!Object.hasOwn(config.extractorOptions, n)) continue;
+      const have = isPlainObject(config.extractorOptions[n]) ? config.extractorOptions[n] : {};
+      const moved = optionsFor(n);
+      const differs = Object.keys(moved).filter((k) => JSON.stringify(have[k]) !== JSON.stringify(moved[k]));
+      if (differs.length) throw new Error(`zdd/config.json has both extractorOptions.jobs and extractorOptions["${n}"], and they disagree on ${differs.join(", ")} — merge them by hand into "${n}", delete extractorOptions.jobs, then run the upgrade again; nothing was written`);
+    }
+    const next = {};
+    for (const [k, v] of Object.entries(config.extractorOptions)) {
+      if (k !== "jobs") next[k] = v;
+      else for (const n of readers) if (!Object.hasOwn(config.extractorOptions, n)) next[n] = optionsFor(n);
+    }
+    config.extractorOptions = next;
+  }
+  changes.push(
+    readers.length
+      ? `extractor "jobs" → ${readers.map((n) => `"${n}"`).join(", ")} (0.9, decision 0038: one reader per platform file, from what detection finds), its options moved to the readers that own them`
+      : `extractor "jobs" removed (0.9, decision 0038): detection finds no background work here — add the background-* reader for a platform file you commit`,
+  );
+}
+// border: end
+
+// 0.9 (decisions 0037 and 0039): the route and screen adapters no longer
+// read a database client — the data-access adapters do, and without one no
+// route links to a table. An upgrade from a release before an adapter's
+// `upgradeAdds` adds it where detection proposes it, with detection's
+// evidence in the plan (Rich's call, ZDD-3 slice 6: as the `jobs` split,
+// never a question). Appended to "extractors": records are merged and refs
+// resolved after every adapter has run, so the place changes no byte.
+// Detection that cannot run is named, never a stop: the engine's
+// `[data-access]` warning says the same on every derive until it is fixed.
+function migrateDataAccess(config, changes, root, from) {
+  const notes = [];
+  if (!Array.isArray(config.extractors)) return notes;
+  notes.push(...moveSubscribeCalls(config, changes));
+  let d;
+  try {
+    d = detect(root);
+  } catch (e) {
+    notes.push(`could not re-run detection here (${e.message}) — the data-access adapters 0.9 reads tables through (decision 0037) were not added; run \`bootstrap.mjs detect\` and add the ones it proposes to "extractors" by hand`);
+    return notes;
+  }
+  const have = extractorsOn(config);
+  // An adapter that joins others' records (its `companion`) is added only
+  // where the config already runs them: detection may propose the schema
+  // a team chose to leave out, and a reader of client calls with no table
+  // records to join links nothing.
+  const joins = (name) => {
+    const c = (d.companions ?? []).find((x) => x?.adapter === name);
+    return !c || ((c.all ?? []).every((n) => have.has(n)) && (!(c.any ?? []).length || c.any.some((n) => have.has(n))));
+  };
+  for (const p of d.proposals ?? []) {
+    const since = d.adapters?.[p.name]?.upgradeAdds;
+    if (typeof since !== "string" || have.has(p.name) || !joins(p.name)) continue;
+    if (from && compareReleases(from, since) >= 0) continue;
+    config.extractors = [...config.extractors, p.name];
+    if (isPlainObject(config.extractorOptions) && !Object.hasOwn(config.extractorOptions, p.name)) config.extractorOptions[p.name] = p.options ?? {};
+    changes.push(`extractor "${p.name}" added (${since}, decision 0037: the ${(p.parts ?? []).join(", ")} the route and screen adapters stopped reading) — detection: ${(p.evidence ?? []).join("; ")}`);
+  }
+  return notes;
+}
+// border: names a stack (the 0.9 move of subscribeCalls to supabase-js)
+// `subscribeCalls` lived on `react-router` and in `nextjs.refs`; since 0.9
+// `supabase-js` reads it (decision 0037), and set in the old place it is a
+// warning on every derive. Moved, every name kept once in first-seen order;
+// `supabase-js` is listed when it is not — the names are its calls. A value
+// that is not a list of names stays where it is, named (CR-011: a malformed
+// option never stops an upgrade); the engine ignores it there with a warning.
+// A name is the adapter's call name — dotted JS identifiers — never only a
+// short string (CR-155: a control character would move and later print raw).
+const SUBSCRIBE_CALL = /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/;
+const isCallNames = (v) => isCallList(v) && v.every((n) => SUBSCRIBE_CALL.test(n));
+function moveSubscribeCalls(config, changes) {
+  const notes = [];
+  const opts = config.extractorOptions;
+  if (!isPlainObject(opts)) return notes;
+  const rr = isPlainObject(opts["react-router"]) ? opts["react-router"] : null;
+  const nx = isPlainObject(opts.nextjs) && isPlainObject(opts.nextjs.refs) ? opts.nextjs.refs : null;
+  const from = [rr && Object.hasOwn(rr, "subscribeCalls") ? ["react-router", rr] : null, nx && Object.hasOwn(nx, "subscribeCalls") ? ["nextjs.refs", nx] : null].filter(Boolean);
+  if (!from.length) return notes;
+  const into = 'extractorOptions["supabase-js"].subscribeCalls';
+  const sjOk = opts["supabase-js"] === undefined || (isPlainObject(opts["supabase-js"]) && (opts["supabase-js"].subscribeCalls === undefined || isCallNames(opts["supabase-js"].subscribeCalls)));
+  const good = sjOk ? from.filter(([, o]) => isCallNames(o.subscribeCalls)) : [];
+  for (const [where] of from.filter((f) => !good.includes(f))) {
+    notes.push(`zdd/config.json: extractorOptions.${where}.subscribeCalls was not moved — ${sjOk ? "it is not a list of call names" : `${into} is not a list of call names to add to`}; since 0.9 the engine reads only ${into} (decision 0037), so fix it there by hand`);
+  }
+  if (!good.length) return notes;
+  const sj = opts["supabase-js"] ?? (opts["supabase-js"] = {});
+  sj.subscribeCalls = [...new Set([...(sj.subscribeCalls ?? []), ...good.flatMap(([, o]) => o.subscribeCalls)])];
+  for (const [, o] of good) delete o.subscribeCalls;
+  if (nx && !Object.keys(nx).length) delete opts.nextjs.refs;
+  if (!config.extractors.includes("supabase-js")) config.extractors = [...config.extractors, "supabase-js"];
+  changes.push(`${good.map(([w]) => `extractorOptions.${w}.subscribeCalls`).join(" and ")} → ${into} (0.9, decision 0037: the Supabase client's calls are read there)`);
+  return notes;
+}
+// border: end
+
 function migrateRenames(config, changes) {
   // Each step on its own (CR-305): a half-migrated config — the new extractor
   // name beside the old options key, or the old strict kind — is finished
@@ -2389,14 +2350,15 @@ function migrateMapLinks(ledger, mapDir, metadataDir = "zdd/metadata") {
   }
   return { touched, skipped };
 }
+// border: names a stack (each release's upgrade note, as that release printed it)
 export const UPGRADE_NOTES = {
-  "1.1.0": ({ version }) => [
+  [oldLine("1.1.0")]: ({ version }) => [
     "1.1 adds a blocking lint (a blessing citing a superseded or missing ADR fails `lint`) — run `npx -y " + ENGINE_PACKAGE + "@" + version + " lint` before pushing; a red result is the lint doing its job on a stale blessing",
   ],
-  "1.2.0": () => [
+  [oldLine("1.2.0")]: () => [
     "1.2 adds the `react-router` extractor (detection offers it), a lint warning listing unclaimed records (never a failure), and their count in the human index header — the human index re-renders on the bump",
   ],
-  "1.3.0": ({ config }) => [
+  [oldLine("1.3.0")]: ({ config }) => [
     "1.3 adds the `extractor` skill: it scaffolds a local extractor for a stack ZDD does not read yet",
     ...(config.claims === undefined
       ? [
@@ -2404,23 +2366,24 @@ export const UPGRADE_NOTES = {
         ]
       : []),
   ],
-  "1.3.1": () => ["1.3.1 fixes the ADR index link cut — render bytes change only where an index line was cut inside a link"],
-  "2.0.0": ({ paths }) => [
+  [oldLine("1.3.1")]: () => ["1.3.1 fixes the ADR index link cut — render bytes change only where an index line was cut inside a link"],
+  [oldLine("2.0.0")]: ({ paths }) => [
     `2.0 adds "choose patterns" (skill: patterns) and a fifth generated artifact, ${paths.blessingIndex} — run \`render\` and commit it in this PR, or render --check fails`,
     '2.0 makes a blessing that does not open with its trigger question ("Adding an endpoint? …") FAIL lint — run `lint` and show the developer every blessing it names; upgrade never rewrites the map, so add each question on their word',
   ],
-  "2.1.0": ({ root, config }) => {
+  [oldLine("2.1.0")]: ({ root, config }) => {
     const notes = [];
     const have = extractorsOn(config);
     // The opt-in extractors are offered by every upgrade (offerOptIns), not here.
-    // Per web extractor (CR-009); a malformed list counts as unnamed (CR-011).
+    // Naming every web extractor (CR-009); a malformed list counts as unnamed
+    // (CR-011). Since 0.9 the names live in one place, supabase-js's
+    // (decision 0037) — this note runs after the upgrade moved them there.
     const opts = isPlainObject(config.extractorOptions) ? config.extractorOptions : {};
-    const named = { "react-router": opts["react-router"]?.subscribeCalls, nextjs: opts.nextjs?.refs?.subscribeCalls };
-    const unnamed = have.has("supabase") ? ["react-router", "nextjs"].filter((w) => have.has(w) && !(isCallList(named[w]) && named[w].length)) : [];
+    const named = opts["supabase-js"]?.subscribeCalls;
+    const unnamed = have.has("supabase") && !(isCallList(named) && named.length) ? ["react-router", "nextjs"].filter((w) => have.has(w)) : [];
     if (unnamed.length) {
       notes.push(
-        '2.1 maps realtime subscriptions as `subscribes` edges: the Supabase client\'s own `.on("postgres_changes", { table })` needs nothing, but a wrapper (e.g. `live.onInsert("table", …)`) is invisible until named — ask whether the app has one, and record it in ' +
-          unnamed.map((w) => SUBSCRIBE_CALLS[w]).join(" / "),
+        `2.1 maps realtime subscriptions as \`subscribes\` edges: the Supabase client's own \`.on("postgres_changes", { table })\` needs nothing, but a wrapper (e.g. \`live.onInsert("table", …)\`) is invisible until named — ask whether the ${unnamed.join(" or the ")} app has one, and record it in extractorOptions["supabase-js"].subscribeCalls (there since 0.9)`,
       );
     }
     if (config.claims?.strict === true && config.claims.strictKinds === undefined) {
@@ -2431,15 +2394,15 @@ export const UPGRADE_NOTES = {
     );
     return notes;
   },
-  "2.1.1": () => [
+  [oldLine("2.1.1")]: () => [
     "2.1.1 moves bytes wherever a fix applies — schema-qualified tables (`public.x`) gain their edges and trigger facts, component descriptions come from the comment attached to the component, an External services list links `.json` — so re-derive and re-render on the bump",
   ],
-  "2.2.0": () => [
+  [oldLine("2.2.0")]: () => [
     '2.2 locks the repo to its ZDD release (decision 0021) and adds a spoken verb, "upgrade ZDD" (skill: upgrade) — this guided flow. The instruction block gains the rules every adopter needs: a release or skew line is the first line of the reply; generated-file conflicts are merged, committed, then regenerated, never hand-resolved; "update ZDD" is never delegated; a developer joining the repo installs zdd for this project',
     "2.2 next step for the team: after this PR merges, each developer's next session start prints one line naming the exact commands that move their machine to this release — run them, then restart",
   ],
-  "2.2.1": () => ["2.2.1 makes the session-start checks read Claude Code's own profile (CLAUDE_CONFIG_DIR when set, CLAUDE_CODE_PLUGIN_CACHE_DIR for the plugins folder, and the transcript path when a hook's environment is scrubbed) — in the repo only the engine pins and the lock move"],
-  "2.3.0": ({ config, paths }) => {
+  [oldLine("2.2.1")]: () => ["2.2.1 makes the session-start checks read Claude Code's own profile (CLAUDE_CONFIG_DIR when set, CLAUDE_CODE_PLUGIN_CACHE_DIR for the plugins folder, and the transcript path when a hook's environment is scrubbed) — in the repo only the engine pins and the lock move"],
+  [oldLine("2.3.0")]: ({ config, paths }) => {
     const notes = [
       `2.3 moves ZDD's rules out of the marked block in CLAUDE.md into ${paths.bundleDir === "." ? "instructions.md" : `${paths.bundleDir}/instructions.md`}, loaded by one line (\`@${paths.bundleDir === "." ? "" : paths.bundleDir + "/"}instructions.md\`) — this run replaces the block with the line once and never edits CLAUDE.md again; AGENTS.md keeps a block (Codex has no import). The rules gained: both install commands in order, the three cases a release line can mean, the merge-conflict steps, reuse-first in "choose patterns", and where a ZDD defect is filed (decision 0024)`,
       "2.3 reads your own CLAUDE.md / AGENTS.md text against ZDD's rules per paragraph or bullet, with what ZDD now says beside each (the plan lists them), and sweeps your files for names a release retired — each hit above names its replacement",
@@ -2456,13 +2419,13 @@ export const UPGRADE_NOTES = {
     notes.push("2.3 writes .gitattributes (zdd/ pinned to LF) and runs a preflight (Node 20+, npx, git, github.com, the npm registry, the pinned engine) before an install or an upgrade; the CI workflow is offered only on GitHub — elsewhere the merge gate is three commands for your own pipeline");
     return notes;
   },
-  "2.4.0": ({ paths }) => [
+  [oldLine("2.4.0")]: ({ paths }) => [
     `2.4 adds the ZDD record (decisions 0027–0029): the instructions file (${paths.bundleDir === "." ? "instructions.md" : `${paths.bundleDir}/instructions.md`}, rewritten by this run) now asks the agent to say one \`ZDD: …\` line, at the moment and without stopping, whenever an artifact turned or confirmed a decision or showed code to reuse — and "update ZDD" writes those lines into the update commit's message as a \`ZDD record:\` with five sections (glossary, adrs, blessings, map, comments) in plain sentences. The \`Pattern record:\` it replaces is still read as the blessings section`,
     "2.4 adds `zdd-engine tally [--since <ref|date>] [--json]`: per section, how often an artifact turned, confirmed, was reused or stored, over the branch's history, then the ADRs, glossary terms and blessings in the stores that no record ever named — the evidence of what ZDD buys this repo. A squash merge loses the record unless the merger keeps the message; a merge commit keeps it",
     "2.4 makes `lint --merge` (the CI step) WARN, never fail, on a record the tally cannot fully read — a missing section, an unknown verb, a `turned` or `confirmed` that does not say what would otherwise have happened; a branch with no update commit is never warned. No config-schema or metadata-contract change; derive and render bytes do not move on the bump",
   ],
   // 2.4.1: the findings from both adopters' moves to 2.4.0.
-  "2.4.1": ({ paths, config }) => {
+  [oldLine("2.4.1")]: ({ paths, config }) => {
     const notes = [
       `2.4.1 rewrites the instructions file (${instructionsRel(paths.bundleDir)}): every \`ZDD: …\` line, and every moment the agent finds or creates an artifact, names it as ZDD's ("ZDD blessing", "ZDD ADR", "the ZDD glossary"); a merge conflict in a generated file is regenerated mid-merge (derive, render, add, commit the merge, then render once more) — never a checked-out side, which the fence refuses; two ADRs with one number are renumbered by the later branch. The text pass below now asks only about rules changed since this repo's engine pin (decision 0030)`,
       "2.4.1: a declared background job whose start command names a file not in the repo (build output, e.g. `node dist/server.js`) now WARNS on every derive with the `jobs.entries` remedy, instead of being skipped silently. No config-schema or metadata-contract change; derive and render bytes do not move on the bump",
@@ -2472,19 +2435,39 @@ export const UPGRADE_NOTES = {
     }
     return notes;
   },
-  "2.5.0": ({ paths }) => [
+  [oldLine("2.5.0")]: ({ paths }) => [
     `2.5 moves blessings out of the semantic map into ${paths.blessingsDir}/, one file each with where: and kind: in its header (decisions 0031, 0032) — the list is below; run upgrade again with --move-blessings once the developer has read it and checked each kind, then render: the blessing index says where and why on every line, and render --check moves`,
     "2.5 makes these FAIL lint, each cleared by the move or named by it (decision 0035): a Blessings section left on a map page, a blessing with no where: or one naming no file, no kind: or one that is neither copy nor extend, an applies-to: naming no app or package page",
     "2.5 adds an opt-in harness ADR set (decisions 0033, 0034): how-the-team-builds decisions in a folder and index of their own, on one number line with the product's, so the application index can be handed to a stakeholder as it stands. Upgrading splits nothing; when the team wants it, `split-adrs --plan` proposes a set per ADR (a `Scope:` tag line decides) and the write moves them on the developer's word",
   ],
+  // The new line (decision 0042): every note above is the old line's.
+  "0.9.0": ({ config, version }) => [
+    `0.9 starts a new line (decision 0042): the engine is ${ENGINE_PACKAGE}, numbered from 0.9.0 — zdd/config.json's "engine" pin becomes "release", every pin ZDD owns names the new package, and ${OLD_ENGINE_PACKAGE} anywhere else in the repo is listed below. The engine's files can no longer be imported (an exports map): the command line, \`npx -y ${ENGINE_PACKAGE}@${version}\`, is the contract`,
+    "0.9 splits the engine into a core that knows no stack and a catalogue of adapters (decision 0036). Route and screen adapters no longer read the Supabase client: supabase-js, supabase-py and sqlalchemy read data access, and a route reaches a table through a data-access record (decision 0037) — the upgrade adds the ones detection proposes (named above), and the human index gains data-access boxes between routes and tables: check it after the regenerate",
+    "0.9 renames the record `job` to `background-task`, read by one background-* reader per platform file (decision 0038); the upgrade moved the config, the strict kinds and the map's links where they named the old ones (named above)",
+    "0.9 moves detection into each adapter, and adds `zdd-engine coverage` and the map check you do together (`bootstrap.mjs check`, decision 0039)",
+    `0.9 gives every adapter a contract number and one standard suite (decision 0040): CI runs \`suite\` after lint, and zdd/config.json's suiteChecks says how many checks block (now ${config.suiteChecks ?? "unset — every check warns"})`,
+    "0.9 sends a ZDD defect to the developer in plain words and to ZDD's Discussions, under Bug reports — the repo has no Issues (decision 0041)",
+    ...(Array.isArray(config.nonAreaTags) || isPlainObject(config.viewer)
+      ? []
+      : ["0.9 drops the built-in non-area tags (`rls-disabled`, `media-project`): a record's area is its feature's first tag that nonAreaTags does not list — if your human index grouped by one of them, list it in zdd/config.json's nonAreaTags"]),
+    ...(Array.isArray(config.localExtractors) || typeof config.localExtractorDir === "string"
+      ? ["0.9: a local extractor's test scaffolded before 0.9 runs `npx -y @rich-rees/zdd-engine@<engine pin>` — point it at `release` and @rich-rees/zdd, as a fresh scaffold does (the retired-name list below names the line)"]
+      : []),
+  ],
 };
+// border: end
 
-export function compareVersions(a, b) {
-  const pa = String(a).replace(/^v/, "").split(/[.-]/).map(Number);
-  const pb = String(b).replace(/^v/, "").split(/[.-]/).map(Number);
-  for (let i = 0; i < 3; i++) if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) - (pb[i] || 0);
-  return 0;
-}
+// On one line or across the two (decision 0042): `zdd-engine@X.Y.Z` is the
+// old line, before every new-line release.
+export const compareVersions = compareReleases;
+// Every tag the old line's repository carried: a lock naming one is read as
+// the old line's release, behind every new-line release; any other tag is
+// the new line's. The new repository carries none of them (ZDD-4), and from
+// 1.0.0 the numbers collide — a test fails a 1.x plugin that still lists
+// them.
+export const OLD_LINE_TAGS = ["v0.1.0", "v0.2.0", "v0.3.0", "v0.3.1", "v1.0.0", "v1.1.0", "v1.2.0", "v1.3.0", "v1.3.1", "v2.0.0", "v2.1.0", "v2.1.1", "v2.2.0", "v2.2.1", "v2.3.0", "v2.4.0", "v2.4.1", "v2.5.0"];
+export const lockRelease = (ref) => (OLD_LINE_TAGS.includes(ref) ? oldLine(ref.slice(1)) : ref);
 
 // ---------------------------------------------------------------------------
 // Duplicates outside the managed block (2.2.0). A markdown section — its
@@ -2514,19 +2497,19 @@ export function compareVersions(a, b) {
 // asked again until ZDD changes that rule (the second adopter's 2.3 run listed 33
 // paragraphs, none droppable). A test pins each `says` to its `since`.
 export const INSTRUCTION_RULES = [
-  { id: "load", since: "2.4.0", match: /\bload ZDD\b/i, says: '"load ZDD" before designing or building in an area: read the glossary whole, the ADR index whole and the ADRs the task cites, say what you loaded, then read the code fresh' },
-  { id: "patterns", since: "2.3.0", match: /\bchoose patterns\b|\bblessing-index\b|\bpatterns-plan\b/i, says: '"choose patterns" once the design is settled, before any code: check for existing code to reuse first, then the blessings that match, and commit zdd/patterns-plan.md' },
-  { id: "update", since: "2.4.0", match: /\bupdate ZDD\b/i, says: '"update ZDD" before finishing a unit of work: curate what the change touched, reconcile the pattern plan, regenerate, commit with the code; never handed to a subagent' },
-  { id: "upgrade", since: "2.3.0", match: /\bupgrade ZDD\b|\bbootstrap\s+--upgrade\b/i, says: '"upgrade ZDD" moves the repo to a newer release and shows every change before writing it' },
-  { id: "skew", since: "2.3.0", match: /\b(?:release|engine[- ]skew|skew|mismatch) line\b|release mismatch|first line of (?:your|the) reply/i, says: "a release or engine-skew line is the first line of the reply, verbatim, and is fixed before the task — the fix depends on the case (machine behind the lock: the commands printed; branch behind main: merge main; repo behind the newest release: upgrade ZDD, by choice)" },
-  { id: "generated", since: "2.4.1", match: /hand-edit|\bzdd\/(?:metadata|graph\.json|agent-index\.md|adr-index\.md|blessing-index\.md|human-index\.html)\b|\bzdd\/agent-index\/|generated artifacts?\b/i, says: "the generated artifacts (zdd/metadata/, graph.json, the agent index and its area folder when it has two levels, the ADR and blessing indexes, the human index) and zdd/instructions.md are never hand-edited" },
-  { id: "merge", since: "2.4.1", match: /(?:merge|rebase)[^.\n]*\b(?:deriv|render|regenerat|generated|conflict)|\b(?:conflict|generated)[^.\n]*\b(?:merge|rebase)/i, says: "a merge conflict in a generated file is never resolved by hand nor by checking out a side: with the merge open, derive then render (they overwrite it), git add, commit the merge, then render once more and commit (the changed-on-this-branch section reads the merge-base); on a rebase, at each stop derive, render, git add, git rebase --continue, then render once more at the end and commit" },
-  { id: "renumber", since: "2.4.1", match: /\bduplicate ADR number\b|\brenumber\b|\btwo ADRs (?:with|sharing) (?:one|a|the same) number\b/i, says: "two ADRs with one number fail lint: the first to merge keeps it; the later branch takes the next free number, renames its file, and rewrites every citation (supersession stamps, glossary and map links, code comments; a ZDD record already committed gets an amended record line), then regenerates" },
-  { id: "install", since: "2.3.0", match: /plugin (?:install|update) (?:zdd|mattpocock-skills)|skills are missing|zdd@zero-drift-docs|mattpocock-skills@/i, says: "if ZDD's skills are missing: from the repo's folder, claude plugin install mattpocock-skills@zero-drift-docs --scope project, then claude plugin install zdd@zero-drift-docs --scope project, then restart; this repo switches other copies of Matt Pocock's skills off on purpose" },
-  { id: "grill", since: "2.3.0", match: /\bgrill\b/i, says: "grill is optional: a design interview that writes glossary terms and ADRs as they crystallize; without Matt Pocock's skills, plan mode plus \"update ZDD\"" },
-  { id: "findings", since: "2.3.0", match: /zero-drift-docs\/issues|\bZDD defect\b/i, says: "a ZDD defect goes to ZDD's issues page, labelled finding, proposed to the developer first" },
-  { id: "blessings", since: "2.5.0", match: /\bblessings?\b/i, says: "blessings live in zdd/blessings/, one file each with where: and kind: in its header, never on a semantic-map page; the map holds the groupings and edges; extending an extend blessing's code means retesting what uses it" },
-  { id: "record", since: "2.4.1", match: /\bZDD record\b|\bPattern record\b|\bzdd-engine tally\b|`ZDD: |\bZDD: \S+ (?:turned|confirmed|reused)\b/i, says: "when a ZDD artifact turns or confirms a decision, or shows code to reuse, say one `ZDD: …` line at the moment with what would otherwise have happened, and carry on; name the artifact as ZDD's (\"ZDD blessing\", \"ZDD ADR\", \"the ZDD glossary\") there and whenever you find or create one; \"update ZDD\" writes those lines as the ZDD record (five sections, plain sentences) into the update commit's message, which `zdd-engine tally` counts over history" },
+  { id: "load", since: oldLine("2.4.0"), match: /\bload ZDD\b/i, says: '"load ZDD" before designing or building in an area: read the glossary whole, the ADR index whole and the ADRs the task cites, say what you loaded, then read the code fresh' },
+  { id: "patterns", since: oldLine("2.3.0"), match: /\bchoose patterns\b|\bblessing-index\b|\bpatterns-plan\b/i, says: '"choose patterns" once the design is settled, before any code: check for existing code to reuse first, then the blessings that match, and commit zdd/patterns-plan.md' },
+  { id: "update", since: oldLine("2.4.0"), match: /\bupdate ZDD\b/i, says: '"update ZDD" before finishing a unit of work: curate what the change touched, reconcile the pattern plan, regenerate, commit with the code; never handed to a subagent' },
+  { id: "upgrade", since: oldLine("2.3.0"), match: /\bupgrade ZDD\b|\bbootstrap\s+--upgrade\b/i, says: '"upgrade ZDD" moves the repo to a newer release and shows every change before writing it' },
+  { id: "skew", since: oldLine("2.3.0"), match: /\b(?:release|engine[- ]skew|skew|mismatch) line\b|release mismatch|first line of (?:your|the) reply/i, says: "a release or engine-skew line is the first line of the reply, verbatim, and is fixed before the task — the fix depends on the case (machine behind the lock: the commands printed; branch behind main: merge main; repo behind the newest release: upgrade ZDD, by choice)" },
+  { id: "generated", since: oldLine("2.4.1"), match: /hand-edit|\bzdd\/(?:metadata|graph\.json|agent-index\.md|adr-index\.md|blessing-index\.md|human-index\.html)\b|\bzdd\/agent-index\/|generated artifacts?\b/i, says: "the generated artifacts (zdd/metadata/, graph.json, the agent index and its area folder when it has two levels, the ADR and blessing indexes, the human index) and zdd/instructions.md are never hand-edited" },
+  { id: "merge", since: oldLine("2.4.1"), match: /(?:merge|rebase)[^.\n]*\b(?:deriv|render|regenerat|generated|conflict)|\b(?:conflict|generated)[^.\n]*\b(?:merge|rebase)/i, says: "a merge conflict in a generated file is never resolved by hand nor by checking out a side: with the merge open, derive then render (they overwrite it), git add, commit the merge, then render once more and commit (the changed-on-this-branch section reads the merge-base); on a rebase, at each stop derive, render, git add, git rebase --continue, then render once more at the end and commit" },
+  { id: "renumber", since: oldLine("2.4.1"), match: /\bduplicate ADR number\b|\brenumber\b|\btwo ADRs (?:with|sharing) (?:one|a|the same) number\b/i, says: "two ADRs with one number fail lint: the first to merge keeps it; the later branch takes the next free number, renames its file, and rewrites every citation (supersession stamps, glossary and map links, code comments; a ZDD record already committed gets an amended record line), then regenerates" },
+  { id: "install", since: oldLine("2.3.0"), match: /plugin (?:install|update) (?:zdd|mattpocock-skills)|skills are missing|zdd@zero-drift-docs|mattpocock-skills@/i, says: "if ZDD's skills are missing: from the repo's folder, claude plugin install mattpocock-skills@zero-drift-docs --scope project, then claude plugin install zdd@zero-drift-docs --scope project, then restart; this repo switches other copies of Matt Pocock's skills off on purpose" },
+  { id: "grill", since: oldLine("2.3.0"), match: /\bgrill\b/i, says: "grill is optional: a design interview that writes glossary terms and ADRs as they crystallize; without Matt Pocock's skills, plan mode plus \"update ZDD\"" },
+  { id: "findings", since: "0.9.0", match: /zero-drift-docs\/(?:issues|discussions)|\bZDD defect\b/i, says: "a ZDD defect is explained to the developer in plain words, with a ready-written report offered for ZDD's Discussions (Bug reports); ZDD's repo has no Issues" },
+  { id: "blessings", since: oldLine("2.5.0"), match: /\bblessings?\b/i, says: "blessings live in zdd/blessings/, one file each with where: and kind: in its header, never on a semantic-map page; the map holds the groupings and edges; extending an extend blessing's code means retesting what uses it" },
+  { id: "record", since: oldLine("2.4.1"), match: /\bZDD record\b|\bPattern record\b|\bzdd-engine tally\b|`ZDD: |\bZDD: \S+ (?:turned|confirmed|reused)\b/i, says: "when a ZDD artifact turns or confirms a decision, or shows code to reuse, say one `ZDD: …` line at the moment with what would otherwise have happened, and carry on; name the artifact as ZDD's (\"ZDD blessing\", \"ZDD ADR\", \"the ZDD glossary\") there and whenever you find or create one; \"update ZDD\" writes those lines as the ZDD record (five sections, plain sentences) into the update commit's message, which `zdd-engine tally` counts over history" },
 ];
 const talksZdd = (heading, own) => new RegExp(ZDD_MENTION.source, "i").test(heading) || ZDD_VERB.test(own) || (own.match(ZDD_MENTION) ?? []).length >= 2;
 export function findDuplicates(text) {
@@ -2648,9 +2631,9 @@ export function findDuplicateSections(text) {
 // its X.Y.Z core, a prerelease as BEFORE that release, so a rule changed in
 // 2.4.0 is still read from 2.4.0-rc.1 (CR-008).
 export function ruleChangedSince(rule, from) {
-  const v = typeof from === "string" ? /^(\d+\.\d+\.\d+)(-[^+]*)?(\+.*)?$/.exec(from) : null;
+  const v = typeof from === "string" ? /^((?:zdd-engine@)?\d+\.\d+\.\d+)(-[^+]*)?(\+.*)?$/.exec(from) : null;
   if (!v || !rule) return true;
-  const cmp = compareVersions(rule.since, v[1]);
+  const cmp = compareVersions(rule.since, v[1]); // across the two lines too (decision 0042)
   return cmp > 0 || (cmp === 0 && v[2] !== undefined);
 }
 function findAllDuplicates(ledger, from = null) {
@@ -2717,12 +2700,16 @@ export const RETIRED_NAMES = [
   { since: "2.3.0", find: /\bextractorOptions\.services\b|\bmetadata\/service\/|"services"(?=\s*[,\]])/g, now: "the `external-services` extractor and `metadata/external-service/` (the 2.3 rename)" },
   { since: "2.3.0", find: /\bstrictKinds\b[^\n\]]*"service"|(?<![-\w])service:[a-z0-9][a-z0-9-]*\b/g, now: "the strict kind `external-service` and `external-service:<id>` ids (the 2.3 rename)" },
   { since: "2.3.0", find: /<!-- zdd:begin -->/g, now: "one import line, `@zdd/instructions.md`, in CLAUDE.md (AGENTS.md keeps the block for Codex)", skip: ["AGENTS.md"] },
+  { since: "0.9.0", find: /@rich-rees\/zdd-engine\b/g, now: "the engine's package from 0.9, `@rich-rees/zdd` (decision 0042: a new line, numbered from 0.9.0)", skip: [".github/workflows/zdd.yml", ".githooks/pre-push"] },
+  { since: "0.9.0", find: /\bextractorOptions\.jobs\b|\bmetadata\/job\//g, now: "the background-* readers and `metadata/background-task/` (0.9, decision 0038)" },
 ];
 const RETIRED_SCAN_EXT = /\.(md|ya?ml|json|mjs|cjs|js|ts|sh|ps1|toml|txt)$/i;
 const RETIRED_SKIP_FILES = /(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|CHANGELOG\.md)$/i;
 const MAX_RETIRED_FILES = 3000;
 const MAX_RETIRED_NOTES = 20;
+// border: names a stack (build folders the retired-name sweep never reads)
 const RETIRED_SKIP_DIRS = new Set(["node_modules", ".git", ".next", "dist", "build", "coverage", ".venv", "venv", "__pycache__", ".expo"]);
+// border: end
 // The files swept: git's tracked list where git can answer (deterministic,
 // honours the repo's ignores, never starved by build output — CR-417), else
 // a bounded walk that says when it was cut short.
@@ -2785,7 +2772,15 @@ function sweepList(ledger, metadataRel) {
   rec(ledger.root, 0);
   return { files: out, truncated, source: "walk" };
 }
-export function findRetiredNames(ledger, { oldEngine = null, oldLock = null, metadataRel = "zdd/metadata" } = {}) {
+// ZDD's generated files (the graph, the indexes, the agent index's area
+// folder) say whatever the last derive and render wrote: the regenerate this
+// upgrade asks for rewrites them, so a retired name there is never the
+// team's to fix (found by the slice 6 dry run: `metadata/job/` in graph.json
+// and the agent index). The metadata folder is skipped by sweepList.
+// Files match exactly; only the area folder is a folder (CR-161: a generated
+// path naming a folder must not hide that folder from the sweep).
+const generatedArtifacts = (paths) => ({ files: GENERATED_KEYS.filter((k) => k !== "metadataDir").map((k) => paths[k]).filter((p) => typeof p === "string" && p), dirs: [agentIndexAreaDir(paths.agentIndex)].filter((p) => typeof p === "string" && p) });
+export function findRetiredNames(ledger, { oldEngine = null, oldLock = null, metadataRel = "zdd/metadata", generated = generatedArtifacts(artifactPaths({})) } = {}) {
   const rules = [...RETIRED_NAMES];
   if (oldLock && /^v\d+\.\d+\.\d+$/.test(oldLock) && oldLock !== `v${oldEngine}`) {
     rules.push({ since: "this upgrade", find: new RegExp(`\\b${oldLock.replace(/\./g, "\\.")}\\b`, "g"), now: `the new release's tag (v${pluginVersion()}) — the lock moved; your repo may hold the old tag somewhere ZDD does not write (a lock test, a setup guide)`, skip: [".claude/settings.json", "zdd/config.json", ".github/workflows/zdd.yml", ".githooks/pre-push"] });
@@ -2799,6 +2794,7 @@ export function findRetiredNames(ledger, { oldEngine = null, oldLock = null, met
   for (const rel of list.files) {
     if (hits.length > MAX_RETIRED_NOTES) break;
     if (written.has(rel) || rel.endsWith(`/${INSTRUCTIONS_NAME}`) || rel === INSTRUCTIONS_NAME) continue;
+    if (generated.files.includes(rel) || generated.dirs.some((g) => rel.startsWith(`${g}/`))) continue;
     let st;
     try {
       st = lstatSync(ledger.abs(rel));
@@ -2845,7 +2841,7 @@ export function newestTag(lsRemote) {
   let best = null;
   for (const line of String(lsRemote).split(/\r?\n/)) {
     const m = /\trefs\/tags\/(\S+)$/.exec(line);
-    if (!m || !RELEASE_TAG.test(m[1])) continue;
+    if (!m || !RELEASE_TAG.test(m[1]) || OLD_LINE_TAGS.includes(m[1])) continue; // the new line's tags only (decision 0042)
     if (!best || compareVersions(m[1], best) > 0) best = m[1];
   }
   return best;
@@ -2875,7 +2871,7 @@ export function releaseStatus(root, remote = `https://github.com/${MARKETPLACE_R
   const out = remoteTags(remote);
   const newest = newestTag(out);
   const newer = newest !== null && compareVersions(newest, running) > 0;
-  const lockBehind = lock !== null && RELEASE_TAG.test(lock) && compareVersions(lock, running) < 0;
+  const lockBehind = lock !== null && RELEASE_TAG.test(lock) && compareVersions(lockRelease(lock), running) < 0;
   const ready = newest !== null && !newer && newest === `v${running}` && catalogue === newest;
   return { lock, running, newest, catalogue, newer, lockBehind, ready };
 }
@@ -2888,6 +2884,7 @@ function remoteTags(remote = `https://github.com/${MARKETPLACE_REPO}.git`) {
 // --plan writes nothing.
 function moveLockOnly(root, version, to, { plan = false, lock = false, remote, home } = {}) {
   if (!RELEASE_TAG.test(String(to))) throw new Error("--to must be a release tag, vX.Y.Z");
+  if (OLD_LINE_TAGS.includes(String(to))) throw new Error(`--to ${to} is a release of the old line (${OLD_ENGINE_PACKAGE}), before every 0.9 release — upgrade never moves a lock backwards (decision 0042)`);
   if (compareVersions(to, version) < 0) throw new Error(`--to ${to} is older than this plugin (${version}) — upgrade never moves a lock backwards`);
   const ledger = new Ledger(root, { dryRun: plan });
   let obj = {};
@@ -2907,7 +2904,7 @@ function moveLockOnly(root, version, to, { plan = false, lock = false, remote, h
   if (d === undefined && !lock) throw new Error(`no lock in ${SETTINGS_FILE} — add --lock to lock this repo at ${to} (on the user's word; decision 0021)`);
   if (d !== undefined && !isOurDeclaration(d)) throw new Error(`${SETTINGS_FILE} declares ${MARKETPLACE} from ${describeSource(d)}, not this plugin's repository — move it by hand`);
   const was = d === undefined ? null : typeof d.source.ref === "string" ? d.source.ref : null;
-  if (was && RELEASE_TAG.test(was) && compareVersions(to, was) < 0) throw new Error(`--to ${to} is older than this repo's lock (${was}) — upgrade never moves a lock backwards`);
+  if (was && RELEASE_TAG.test(was) && compareVersions(to, lockRelease(was)) < 0) throw new Error(`--to ${to} is older than this repo's lock (${was}) — upgrade never moves a lock backwards`);
   let tags;
   try {
     tags = remoteTags(remote);
@@ -2945,6 +2942,196 @@ function moveLockOnly(root, version, to, { plan = false, lock = false, remote, h
 }
 
 // ---------------------------------------------------------------------------
+// The standard suite and the adapter contract (decision 0040).
+// ---------------------------------------------------------------------------
+// How many checks the engine's suite has: a mirror the upgrade uses without
+// running the engine, held equal to the engine's SUITE_CHECK_COUNT by a test.
+export const SUITE_CHECK_COUNT = 5;
+
+// The adapters config selects that the repo wrote itself: a name with a
+// module in localExtractorDir (`<name>.mjs` or `<name>/index.mjs`). The
+// engine refuses a local name that shadows a catalogue one, so a module
+// there is the repo's own.
+export function ownAdapters(root, config) {
+  const dir = typeof config.localExtractorDir === "string" ? config.localExtractorDir : null;
+  if (!dir || !Array.isArray(config.extractors)) return [];
+  let abs;
+  try {
+    abs = resolveInside(root, dir, `localExtractorDir ${dir}`);
+  } catch {
+    return [];
+  }
+  return config.extractors.filter((n) => typeof n === "string" && /^[a-z][a-z0-9-]*$/.test(n) && (existsSync(join(abs, `${n}.mjs`)) || existsSync(join(abs, n, "index.mjs"))));
+}
+
+// The interview's material: the engine's suite report, turned into what to
+// ask and what to fix, per adapter. `raise` writes suiteChecks up to the
+// engine's count, and only when every check of every adapter passes.
+export function adapters(root, { raise = false } = {}) {
+  const cfg = readConfig(root);
+  if (cfg.state !== "valid") throw new Error(cfg.state === "invalid" ? `${cfg.error} — fix it first` : "no zdd/config.json here — bootstrap first");
+  let r;
+  try {
+    r = JSON.parse(runEngine(["suite", "--json", `--root=${root}`]));
+  } catch (e) {
+    // The suite exits 1 with its report on stdout when a check blocks.
+    try {
+      r = JSON.parse(String(e.stdout ?? ""));
+    } catch {
+      throw new Error(`the standard suite could not run — the engine said: ${String(e.stderr || e.message).trim().split(/\r?\n/).slice(-3).join(" ")}`);
+    }
+  }
+  const rows = new Map(r.table.map((row) => [row.step, row]));
+  const out = r.adapters.map((a) => {
+    const ask = [];
+    if (a.declared === null && !a.loadError && rows.get("CONTRACT")?.ask) ask.push({ step: "CONTRACT", required: true, ask: rows.get("CONTRACT").ask });
+    for (const step of a.behind ?? []) {
+      const row = rows.get(step);
+      if (row?.ask) ask.push({ step, required: row.required, since: row.since, ask: row.ask });
+    }
+    const fix = (a.checks ?? []).filter((c) => !c.ok).map((c) => ({ n: c.n, title: r.checks[c.n - 1].title, fix: r.checks[c.n - 1].fix, detail: c.detail, blocking: c.blocking }));
+    return { name: a.name, declared: a.declared ?? null, loadError: a.loadError ?? null, contractFail: a.contractFail ?? null, ask, fix };
+  });
+  // A configured adapter the suite could not find was checked by nobody
+  // (CR-123): nothing is clean while one is named.
+  const unknown = r.unknown ?? [];
+  const clean = !unknown.length && out.every((a) => !a.loadError && !a.contractFail && a.declared !== null && !a.fix.length);
+  const ledger = new Ledger(root);
+  let raised = false;
+  if (raise) {
+    if (!clean) {
+      const left = [...unknown.map((n) => `${n} (not found in localExtractorDir)`), ...out.filter((a) => a.loadError || a.contractFail || a.declared === null || a.fix.length).map((a) => a.name)];
+      throw new Error(`suiteChecks stays at ${r.suiteChecks}: ${left.join(", ")} ${left.length === 1 ? "does" : "do"} not pass the standard suite yet (or declare no CONTRACT) — fix them through the extractor skill, then --raise again`);
+    }
+    if (cfg.config.suiteChecks !== r.count) {
+      ledger.overwrite("zdd/config.json", JSON.stringify({ ...cfg.config, suiteChecks: r.count }, null, 2) + "\n");
+      ledger.notes.push(`zdd/config.json: suiteChecks ${cfg.config.suiteChecks ?? "(none)"} → ${r.count} — every check of the standard suite now blocks in CI`);
+      raised = true;
+    } else ledger.kept.push("zdd/config.json");
+  }
+  return { suiteChecks: r.suiteChecks, count: r.count, contract: r.contract, adapters: out, skipped: r.skipped, unknown, clean, raised, ...ledgerOut(ledger) };
+}
+
+export function narrateAdapters(r) {
+  const missing = (r.unknown ?? []).map((n) => `${n}: not found in localExtractorDir (or a retired name) — the suite checked nothing for it. Restore the module, or take the name out of zdd/config.json's extractors.`);
+  if (!r.adapters.length && missing.length) return [...missing, ...(r.notes ?? [])].map(printable).join("\n");
+  if (!r.adapters.length) return printable(`No adapter of this repo's own is configured: nothing to interview. (ZDD's own adapters are updated by the release and pass the standard suite in ZDD's CI.)${r.notes?.length ? `\n${r.notes.join("\n")}` : ""}`);
+  const out = [`This engine speaks adapter contract ${r.contract}; the standard suite has ${r.count} checks, and ${r.suiteChecks ? `checks 1–${r.suiteChecks} block in CI` : "none blocks in CI yet"}.`, ...missing];
+  for (const a of r.adapters) {
+    out.push("", `${a.name} — written for contract ${a.declared ?? "(not declared)"}`);
+    if (a.loadError) out.push(`  It ${a.loadError}.`);
+    if (a.contractFail) out.push(`  Derive stops on it: ${a.contractFail}`);
+    for (const q of a.ask) out.push(`  Ask (${q.required ? "required" : "optional"}, ${q.step}): ${q.ask}`);
+    for (const f of a.fix) out.push(`  Fails check ${f.n}${f.blocking ? " (blocks CI)" : " (warns only)"}: ${f.title}.`, `    ${String(f.detail).split("\n")[0]}`, `    Fix: ${f.fix}.`);
+    if (!a.ask.length && !a.fix.length && !a.contractFail && !a.loadError) out.push("  Passes every check; nothing to ask.");
+  }
+  out.push("", r.clean ? (r.raised ? "Every adapter passes: suiteChecks raised." : r.suiteChecks === r.count ? "Every adapter passes, and every check already blocks." : "Every adapter passes: run `bootstrap.mjs adapters --raise` to make every check block in CI.") : "Ask the questions one at a time, update each adapter through the extractor skill (its tests red, then green), run this again, then `--raise`.");
+  if (r.notes?.length) out.push(...r.notes);
+  return out.map(printable).join("\n");
+}
+
+// Check it together (decision 0039 points 3 and 4). After the adapters are
+// attached and derive has run, the engine's coverage report names, per record
+// kind, what the records link to and which link to nothing; the developer
+// says which gaps are fine and which are wrong, then opens the human index.
+// Bootstrap records the check as owed (`mapCheck` in the config) and
+// `check --done` clears it; on a greenfield repo it stays owed until the
+// first derive finds records, and `check --status` says so at session start.
+// ---------------------------------------------------------------------------
+// Whether derive has written any record: the configured metadataDir, reached
+// only inside the checkout and never through a link (CR-104), read entry by
+// entry and stopped at the first record or a bounded count.
+const RECORDS_PROBE_ENTRIES = 20_000;
+function hasRecords(root, config) {
+  const rel = artifactPaths(config, { lenient: true }).metadataDir;
+  const dir = resolveInside(root, rel, `metadataDir ${rel}`); // throws on an escape or a link
+  let seen = 0;
+  const each = (abs, fn) => {
+    let d;
+    try {
+      d = opendirSync(abs);
+    } catch {
+      return false;
+    }
+    try {
+      for (let e; (e = d.readSync()) !== null; ) {
+        if (++seen > RECORDS_PROBE_ENTRIES) return false;
+        if (fn(e)) return true;
+      }
+      return false;
+    } finally {
+      d.closeSync();
+    }
+  };
+  return each(dir, (k) => k.isDirectory() && each(join(dir, k.name), (f) => f.isFile() && f.name.endsWith(".json")));
+}
+
+export function mapCheck(root, { done = false, status = false } = {}) {
+  const cfg = readConfig(root);
+  // A repo that has not adopted ZDD owes no check: --status is silent (CR-099).
+  if (status && cfg.state === "absent") return { owed: false, records: false, due: false };
+  if (cfg.state !== "valid") throw new Error(cfg.state === "invalid" ? `${cfg.error} — fix it first` : "no zdd/config.json here — bootstrap first");
+  const config = cfg.config;
+  const owed = config.mapCheck === "owed";
+  const records = hasRecords(root, config);
+  if (status) return { owed, records, due: owed && records };
+  if (done) {
+    const ledger = new Ledger(root);
+    if (owed) {
+      const { mapCheck: _, ...rest } = config;
+      ledger.overwrite("zdd/config.json", JSON.stringify(rest, null, 2) + "\n");
+      ledger.notes.push("zdd/config.json: the first map check is done (mapCheck cleared)");
+    } else ledger.kept.push("zdd/config.json");
+    return { owed: false, records, ...ledgerOut(ledger) };
+  }
+  let coverage;
+  try {
+    coverage = JSON.parse(runEngine(["coverage", "--json", `--root=${root}`])).kinds;
+  } catch (e) {
+    throw new Error(`the coverage report could not run — the engine said: ${String(e.stderr || e.message).trim().split(/\r?\n/).slice(-3).join(" ")}`);
+  }
+  return { owed, records, coverage, humanIndex: artifactPaths(config, { lenient: true }).humanIndex };
+}
+
+const plural = (n, word) => `${n} ${word}${n === 1 ? "" : word.endsWith("s") ? "es" : "s"}`; // a kind ending in s: data-accesses
+const namedList = (l) => (l.named.length ? `: ${l.named.map((n) => `\`${n}\``).join(", ")}${l.count > l.named.length ? `, and ${l.count - l.named.length} more` : ""}` : "");
+export function narrateCheck(r) {
+  if (r.coverage === undefined) {
+    if (r.wrote || r.kept) return r.notes?.length ? r.notes.join("\n") : "The first map check was already done.";
+    return r.due ? "The first map check is owed: derive now finds records. Run `bootstrap.mjs check` and go through it with the developer." : "";
+  }
+  if (!r.coverage.length) return "No records yet — derive found nothing to check. The check stays owed until code appears.";
+  const out = ["What derive found, kind by kind — say which gaps are fine and which are wrong:"];
+  for (const k of r.coverage) {
+    const links = Object.entries(k.linksTo).map(([kind, n]) => `${n} link to a ${kind}`);
+    out.push(`  - ${plural(k.count, k.kind)}${links.length ? `; ${links.join("; ")}` : ""}`);
+    if (k.linkNothing.count) out.push(`      ${k.linkNothing.count} link to nothing${namedList(k.linkNothing)}`);
+    if (k.reachedByNothing.count) out.push(`      ${k.reachedByNothing.count} nothing links to${namedList(k.reachedByNothing)}`);
+  }
+  out.push(`Then open ${r.humanIndex} and ask: does this all look right, and is any link missing?`);
+  out.push("Every \"that's wrong\" becomes a fixture test in the adapter before it is fixed. When you are both done: `bootstrap.mjs check --done`.");
+  return out.map(printable).join("\n");
+}
+
+// The greenfield preview (0039 point 4): the chosen adapters' own examples,
+// derived and rendered in a temporary folder outside the repo.
+export function preview(root, names) {
+  if (!names.length) throw new Error("preview needs --extractors=<a,b,…>");
+  for (const n of names) if (!/^[a-z][a-z0-9-]*$/.test(n)) throw new Error(`preview: '${n}' is not an adapter name`);
+  try {
+    return JSON.parse(runEngine(["preview", `--extractors=${names.join(",")}`, `--root=${root}`, "--json"]));
+  } catch (e) {
+    throw new Error(`the preview could not run — the engine said: ${String(e.stderr || e.message).trim().split(/\r?\n/).slice(-3).join(" ")}`);
+  }
+}
+export function narratePreview(r) {
+  const out = [];
+  if (r.humanIndex) out.push(`A preview of ${r.used.join(", ")}, outside your repo: ${r.humanIndex}`);
+  if (r.skipped.length) out.push(`No example ships for ${r.skipped.join(", ")} — the preview shows the rest.`);
+  return out.map(printable).join("\n");
+}
+
+// ---------------------------------------------------------------------------
 // Narration. Every line is one ledger entry; evidence and paths inside it come
 // from the checkout (directory names, config values), which on POSIX may hold
 // a newline or an ANSI escape. The skill reads this output, so a control
@@ -2960,7 +3147,7 @@ export function narrateDetect(d, pocock) {
   } else {
     out.push(`Mode: EXISTING codebase (${d.sourceFiles} source files). Proposed extractors, with the evidence:`);
   }
-  if (d.host) out.push(`Hosted on: ${d.host.kind === "none" ? "no remote yet (the GitHub default stands; ask where it will live)" : `${d.host.kind} (${d.host.remote})`}${d.host.kind !== "github" && d.host.kind !== "none" ? " — the CI workflow ZDD ships runs only on GitHub Actions; the merge gate is three commands for your own pipeline" : ""}`);
+  if (d.host) out.push(`Hosted on: ${d.host.kind === "none" ? "no remote yet (the GitHub default stands; ask where it will live)" : `${d.host.kind} (${d.host.remote})`}${d.host.kind !== "github" && d.host.kind !== "none" ? " — the CI workflow ZDD ships runs only on GitHub Actions; the merge gate is four commands for your own pipeline" : ""}`);
   if (d.mode !== "greenfield") {
     for (const p of d.proposals) {
       out.push(`  - ${p.name}`);
@@ -2969,6 +3156,21 @@ export function narrateDetect(d, pocock) {
     }
     for (const a of d.apps) out.push(`  - map only: ${a.name} — ${a.evidence}; extractor ${a.extractor}`);
     for (const q of d.questions ?? []) out.push(`  ask: ${q.ask} (recorded under ${q.records})`);
+    // Part by part (decision 0039): what an adapter covers, and what nothing does.
+    if (d.coverage) {
+      out.push("Coverage, part by part:");
+      for (const c of d.coverage) if (c.adapters.length) out.push(`  ${c.part}: ${c.adapters.join(", ")}`);
+      const gaps = d.coverage.filter((c) => !c.adapters.length).map((c) => c.part);
+      if (gaps.length) out.push(`  not covered: ${gaps.join(", ")} — no adapter recognises any here. Ask whether the app has them; one in a stack ZDD has no adapter for is built together with the \`extractor\` skill (it takes longer, and is tested with fixtures)`);
+    }
+    if (d.limits?.walkTruncated) out.push(`  (detection reads ${d.limits.depth} folders deep, within one walk budget: code deeper than that was not seen)`);
+    if (d.limits?.readBudgetSpent) out.push("  (detection's read budget ran out: some source was not read — confirm the proposals by hand)");
+    if (d.limits?.refused) out.push(`  (${d.limits.refused} file${d.limits.refused === 1 ? "" : "s"} could not be read — over 1 MiB, unreadable or a link: ${d.limits.refusedFirst.map((f) => `\`${f}\``).join(", ")}${d.limits.refused > d.limits.refusedFirst.length ? ", …" : ""} — evidence in ${d.limits.refused === 1 ? "it" : "them"} was not seen)`);
+  } else if (d.catalogue) {
+    // A greenfield repo with no stack chosen (0039 point 6): the stacks with
+    // ready-made adapters, by part, and no recommendation.
+    out.push("Ready-made adapters, by part (no recommendation — any stack works; an uncovered one gets an adapter built with the `extractor` skill):");
+    for (const c of d.catalogue) if (c.adapters.length) out.push(`  ${c.part}: ${c.adapters.join(", ")}`);
   }
   out.push(narratePocock(pocock));
   return out.map(printable).join("\n");
@@ -3039,9 +3241,9 @@ export function narrateApply(r) {
   if (r.optIns.ci) {
     out.push("One step only you can do: in branch protection, require the `zdd` check to pass and require branches to be up to date before merging. Now stale generated artifacts cannot merge.");
   } else if (r.host && !["github", "none"].includes(r.host.kind)) {
-    out.push(`This repo is hosted on ${r.host.kind}, where the workflow ZDD ships (GitHub Actions) cannot run. The merge gate for your own pipeline is three commands, run on every pull request:`);
+    out.push(`This repo is hosted on ${r.host.kind}, where the workflow ZDD ships (GitHub Actions) cannot run. The merge gate for your own pipeline is four commands, run on every pull request:`);
     for (const c of r.ciCommands ?? ciCommands(r.version)) out.push(`  ${c}`);
-    out.push("Fail the pipeline when any of them fails; the first two say when the generated artifacts are stale, the third refuses a merge while a pattern plan is left behind." + (r.optIns.prePush ? " Until then the pre-push hook makes a forgotten update loud on each developer's machine." : ""));
+    out.push("Fail the pipeline when any of them fails; the first two say when the generated artifacts are stale, the third refuses a merge while a pattern plan is left behind, and the fourth runs the standard suite on this repo's own adapters (it passes when there are none)." + (r.optIns.prePush ? " Until then the pre-push hook makes a forgotten update loud on each developer's machine." : ""));
   } else {
     out.push(
       "CI declined: ZDD runs on the spoken verbs alone" +
@@ -3070,7 +3272,7 @@ export const ARTIFACT_EXPLANATIONS = [
   { match: /(^|\/)map\/apps\/[^/]+\.md$/, what: "one page per app you named (web, mobile, API) in the semantic map", why: "a home for what the whole app is and what belongs to it; a house rule for the app is a blessing that names it (applies-to)", who: "ZDD writes the stub at install; you fill it", handEdited: "yes — yours" },
   { match: /(^|\/)map\/(features|apps|external-services)\/\.gitkeep$|(^|\/)map\/?$/, what: "the semantic map: short pages grouping the code into features, apps and the third-party systems it depends on, and the links the code cannot show", why: "grouping is a thing the code cannot say about itself", who: "you and the AI, one mapping session at install and then as each piece of work touches a feature", handEdited: "yes — yours; the links inside it are kept in step with the code by the drift check" },
   { match: /(^|\/)blessings\/(\.gitkeep|[^/]+\.md)?$/, what: "the blessings: one short file per kind of work done more than once (\"Adding an upload?\"), naming the existing code to copy or extend (where:), the trap to refuse, and why", why: "the most common pattern in a codebase is often the deprecated one; a blessing is how the AI copies the right code, and reuses a helper instead of writing a second one", who: "you and the AI: \"choose patterns\" proposes one, \"update ZDD\" mints it once the code exists", handEdited: "yes — yours; lint fails one whose where: names no file" },
-  { match: /(^|\/)metadata\/?$/, what: "the inventory of the code (routes, tables, screens, jobs, components, external services), one small JSON file each", why: "a mechanical, always-correct map of what exists, so the AI finds its way without grepping", who: "the engine (derive) — regenerated by \"update ZDD\"", handEdited: "never — the drift check fails if it is" },
+  { match: /(^|\/)metadata\/?$/, what: "the inventory of the code (routes, tables, screens, background tasks, components, external services), one small JSON file each", why: "a mechanical, always-correct map of what exists, so the AI finds its way without grepping", who: "the engine (derive) — regenerated by \"update ZDD\"", handEdited: "never — the drift check fails if it is" },
   { match: /(^|\/)graph\.json$/, what: "the whole generated picture in one machine-readable file: every record and every link", why: "the human index is rendered from it, and other tools can read it", who: "the engine (render)", handEdited: "never" },
   { match: /(^|\/)agent-index\.md$/, what: "the short index the AI reads at the start of every session: each feature with pointers to its code", why: "orientation in one screen, so each session starts knowing where things are", who: "the engine (render)", handEdited: "never" },
   { match: /(^|\/)adr-index\.md$/, what: "one line per decision record, with what supersedes what", why: "the AI reads the whole list before work, then only the decisions its task cites", who: "the engine (render)", handEdited: "never" },
@@ -3093,7 +3295,7 @@ export function explain(rel) {
 // Preflight (2.3.0, C7): every piece of tech ZDD needs, checked before a
 // question is asked and again before an upgrade's engine run. Today the
 // plugin carries no engine: every skill that does real work runs `npx -y
-// @rich-rees/zdd-engine@<pin>`, so the engine is downloaded from the public
+// @rich-rees/zdd@<pin>`, so the engine is downloaded from the public
 // npm registry on a machine's first run; the plugin and Matt Pocock's skills
 // come from public GitHub repositories. No account is needed anywhere.
 // ---------------------------------------------------------------------------
@@ -3106,7 +3308,7 @@ const USES = {
   git: "ZDD reads the repo's history for freshness and locks a release by a git tag",
   repo: "ZDD reads the repo's history for freshness and locks a release by a git tag; run `git init` in the folder first",
   github: "ZDD and Matt Pocock's skills are installed from public GitHub repositories, and the release check reads the list of releases there",
-  registry: "ZDD's engine, @rich-rees/zdd-engine, is downloaded from the public npm registry by npx; no npm account is needed, the package is public",
+  registry: "ZDD's engine, @rich-rees/zdd, is downloaded from the public npm registry by npx; no npm account is needed, the package is public",
   engine: "the exact engine version this ZDD release pins must be there to download",
 };
 function head(url, timeoutMs = 5000) {
@@ -3166,7 +3368,7 @@ export async function preflight(root, { registry = REGISTRY_DEFAULT, github = GI
   if (reg.reachable) {
     const eng = await head(`${registry.replace(/\/$/, "")}/${ENGINE_PACKAGE.replace("/", "%2f")}/${version}`);
     const there = eng.reachable && eng.status >= 200 && eng.status < 300;
-    add("engine", there, there ? `${ENGINE_PACKAGE}@${version} on the registry` : null, there ? `the engine, ${ENGINE_PACKAGE}@${version} — there to download` : `the engine, ${ENGINE_PACKAGE}@${version} — the npm registry answered but does not have this version (${eng.status ?? eng.reason}); a release of ZDD is published before its tag, so this is a ZDD defect — report it at https://github.com/${MARKETPLACE_REPO}/issues`);
+    add("engine", there, there ? `${ENGINE_PACKAGE}@${version} on the registry` : null, there ? `the engine, ${ENGINE_PACKAGE}@${version} — there to download` : `the engine, ${ENGINE_PACKAGE}@${version} — the npm registry answered but does not have this version (${eng.status ?? eng.reason}); a release of ZDD is published before its tag, so this is a ZDD defect — report it in ZDD's Discussions, under Bug reports: https://github.com/${MARKETPLACE_REPO}/discussions`);
   } else add("engine", false, null, `the engine, ${ENGINE_PACKAGE}@${version} — not checked: the registry could not be reached`);
   return { ok: checks.every((c) => c.ok), version, checks };
 }
@@ -3317,6 +3519,16 @@ if (process.argv[1] && posixify(process.argv[1]).endsWith("/scripts/bootstrap.mj
       const p = await preflight(root, { ...(typeof flags.registry === "string" ? { registry: flags.registry } : {}), ...(typeof flags.github === "string" ? { github: flags.github } : {}) });
       process.stdout.write(flags.json ? JSON.stringify(p, null, 2) + "\n" : narratePreflight(p) + "\n");
       if (!p.ok) process.exit(1);
+    } else if (cmd === "check") {
+      const r = mapCheck(root, { done: flags.done === true, status: flags.status === true });
+      const text = narrateCheck(r);
+      process.stdout.write(flags.json ? JSON.stringify(r, null, 2) + "\n" : text ? text + "\n" : "");
+    } else if (cmd === "adapters") {
+      const r = adapters(root, { raise: flags.raise === true });
+      process.stdout.write(flags.json ? JSON.stringify(r, null, 2) + "\n" : narrateAdapters(r) + "\n");
+    } else if (cmd === "preview") {
+      const r = preview(root, String(flags.extractors ?? "").split(",").map((s) => s.trim()).filter(Boolean));
+      process.stdout.write(flags.json ? JSON.stringify(r, null, 2) + "\n" : narratePreview(r) + "\n");
     } else if (cmd === "estimate") {
       const e = estimate(root);
       process.stdout.write(flags.json ? JSON.stringify(e, null, 2) + "\n" : narrateEstimate(e) + "\n");
@@ -3324,7 +3536,7 @@ if (process.argv[1] && posixify(process.argv[1]).endsWith("/scripts/bootstrap.mj
       const s = releaseStatus(root, typeof flags.remote === "string" ? flags.remote : undefined, flags.home);
       process.stdout.write(flags.json ? JSON.stringify(s) + "\n" : printable(narrateReleaseStatus(s)) + "\n");
     } else {
-      process.stderr.write("Usage: bootstrap.mjs <preflight [--registry=<url>] [--github=<url>]|detect|estimate|apply --answers=<file>|upgrade [--plan] [--lock] [--drop=<ids>] [--move-blessings=<token> [--kinds=<name>:<copy|extend>,…]] [--to=vX.Y.Z]|split-adrs [--plan] [--token=<token> --harness=<nums> --application=<nums>] [--dir=<rel> --index=<rel>]|release-status [--remote=<url>]> [--root=<dir>] [--date=YYYY-MM-DD] [--home=<dir>] [--json]\n");
+      process.stderr.write("Usage: bootstrap.mjs <preflight [--registry=<url>] [--github=<url>]|detect|estimate|apply --answers=<file>|check [--status|--done]|adapters [--raise]|preview --extractors=<a,b>|upgrade [--plan] [--lock] [--drop=<ids>] [--move-blessings=<token> [--kinds=<name>:<copy|extend>,…]] [--to=vX.Y.Z]|split-adrs [--plan] [--token=<token> --harness=<nums> --application=<nums>] [--dir=<rel> --index=<rel>]|release-status [--remote=<url>]> [--root=<dir>] [--date=YYYY-MM-DD] [--home=<dir>] [--json]\n");
       process.exit(2);
     }
   } catch (e) {

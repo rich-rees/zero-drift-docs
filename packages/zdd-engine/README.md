@@ -1,4 +1,4 @@
-# @rich-rees/zdd-engine
+# @rich-rees/zdd
 
 The mechanical half of [Zero-Drift Docs](https://github.com/rich-rees/zero-drift-docs):
 derive the codebase metadata, render the agent + human indexes, and run the drift
@@ -8,14 +8,24 @@ half (curating the glossary, ADRs, comments, map and blessings) lives in the `zd
 Code plugin's skills; both call this engine, so CI and the agent can never
 disagree about what "fresh" means.
 
+From 0.9.0 the engine is this package, on a new version line; before it was
+`@rich-rees/zdd-engine`, 0.2.0 to 2.5.0 (decision 0042). The command line is
+its whole contract: an `exports` map opens `package.json` and no source
+file.
+
 ## Commands
 
 ```
-npx @rich-rees/zdd-engine derive [--check] [--verbose]
-npx @rich-rees/zdd-engine render [--check]
-npx @rich-rees/zdd-engine lint [--merge] [--tempstate]
-npx @rich-rees/zdd-engine freshness [--base <ref>]
-npx @rich-rees/zdd-engine tally [--since <ref|date>] [--json]
+npx @rich-rees/zdd derive [--check] [--verbose]
+npx @rich-rees/zdd render [--check]
+npx @rich-rees/zdd lint [--merge] [--tempstate]
+npx @rich-rees/zdd freshness [--base <ref>]
+npx @rich-rees/zdd tally [--since <ref|date>] [--json]
+npx @rich-rees/zdd detect [--root=<dir>]
+npx @rich-rees/zdd coverage [--json]
+npx @rich-rees/zdd preview --extractors=<a,b,…> [--out=<empty dir>] [--json]
+npx @rich-rees/zdd suite [--extractors=<a,b>] [--json]
+npx @rich-rees/zdd contract [--json]
 ```
 
 - **derive** — run the configured extractors over the repo and write
@@ -78,10 +88,38 @@ npx @rich-rees/zdd-engine tally [--since <ref|date>] [--json]
   refused. `--json` prints the same as one object, for a host harness to
   copy. Deterministic: same history, stores and arguments in, same bytes
   out; no dates of its own, no judgment.
+- **detect** — which catalogue adapters fit a repo (decision 0039), as one
+  JSON object: each proposal with its plain-words evidence, options and the
+  parts of the app it covers; coverage part by part and the parts nothing
+  covers; the greenfield stack rules and the ready-made adapters by part.
+  Each adapter answers for itself over one shared walk of the repo. Reads no
+  config and writes nothing; bootstrap asks it.
+- **coverage** — the automated half of the first map check: derives in
+  memory (writes nothing) and prints, per record kind, the count, what its
+  records link to, and by name the ones that link to nothing and the ones
+  nothing links to.
+- **preview** — for a repo with no code yet: copies the named adapters'
+  `example/` folders into a new temporary folder outside the repo, derives
+  and renders there, and prints where the human index landed.
 
-Every command locates the repo by walking up from the working directory to the
-first folder holding `zdd/config.json` (override with `--root=<dir>` /
-`--config=<file>`).
+- **suite** — the standard suite (decision 0040) on the adapters this repo
+  wrote itself (`localExtractorDir`), each on a copy of its own `fixture/`
+  outside the repo. Five checks, numbered in the order they were added: the
+  same bytes on another machine and on a second run; a gitignored path never
+  read; a missing root nothing to inventory; commented-out code (every line
+  of the fixture, by the adapter's `COMMENT` marks, which must classify
+  every file the adapter reads) and a `fixture-trap/`
+  folder never a record; every read through `io`. A failing check numbered
+  at or below `suiteChecks` fails the run, a newer one warns. Catalogue
+  adapters pass the same suite in this package's tests.
+- **contract** — the adapter contract this engine speaks and its table
+  (below). Reads no repo.
+
+Every command but `detect`, `preview` and `contract` locates the repo by walking up from
+the working directory to the first folder holding `zdd/config.json` (override
+with `--root=<dir>` / `--config=<file>`). `detect` reads the folder `--root`
+names (default: the working directory) and needs no config; `preview` reads
+none, and refuses an output folder inside `--root`.
 
 ## Config (`zdd/config.json`)
 
@@ -90,13 +128,14 @@ version:
 
 | Key | Default | What it is |
 |---|---|---|
-| `extractors` | *(required, unless legacy `adapter`)* | Extractors to run, composed per convention: `supabase`, `nextjs`, `fastapi`, `react-router`, `components`, `expo-router`, `jobs`, `external-services`, `generic` (built-in; `services` is the 2.1–2.2 name of `external-services`, accepted for one more release), or a name from `localExtractorDir`. Names only, never paths |
-| `extractorOptions` | — | Per-extractor source layout, keyed by name — `supabase`: `migrationNamespaces`, `externalBuckets`; `nextjs`: `appDir`, `apiPrefix`, `middlewarePath`, `authPatterns`, `refs` (+ `subscribeCalls`), `srcAliasRoot`; `fastapi`: `roots`, `excludeDirs`, `appVar`; `react-router`: `routesFile`, `srcAliasRoot`, `subscribeCalls`; `components`: `roots`, `pageDirs`, `sharedDirs`, …; `expo-router`: `appDir`; `jobs`: `roots`, `exclude`, `modes`, `entries`, `includeGithubActions`; `external-services`: `services`, `ignore`, `roots` — all in `config.schema.json` |
+| `extractors` | *(required, unless legacy `adapter`)* | Extractors to run, composed per convention: `supabase`, `nextjs`, `fastapi`, `react-router`, `components`, `expo-router`, the `background-*` readers (decision 0038), `external-services`, `supabase-js`, `supabase-py`, `sqlalchemy`, `generic` (built-in; `services` is the 2.1–2.2 name of `external-services`, accepted for one more release), or a name from `localExtractorDir`. Names only, never paths |
+| `extractorOptions` | — | Per-extractor source layout, keyed by name — `supabase`: `migrationNamespaces`, `externalBuckets`; `nextjs`: `appDir`, `apiPrefix`, `middlewarePath`, `authPatterns`, `refs`, `srcAliasRoot`; `supabase-js`: `roots`, `extensions`, `excludeDirs`, `excludeSuffixes`, `subscribeCalls`; `fastapi`: `roots`, `excludeDirs`, `appVar`; `react-router`: `routesFile`, `srcAliasRoot`; `components`: `roots`, `pageDirs`, `sharedDirs`, …; `expo-router`: `appDir`; each `background-*` reader: `roots`, `exclude`, `modes`, and `background-declared`: `entries` (listing `background-github-actions` is its opt-in); `external-services`: `services`, `ignore`, `roots` — all in `config.schema.json` |
 | `agentIndex.budgetTokens` | `2000` | The agent index's size budget in approximate tokens; over it, `render` warns and names the fix (2.3) |
 | `agentIndex.levels` | `1` | `2` lists the areas first and writes one file per area under `zdd/agent-index/`, each feature one hop away — for a repo whose feature list alone does not fit (2.3) |
-| `claims.strictKinds` | `[]` | The opt-in kinds (`component`, `job`, `external-service`) that `claims.strict` also fails on; unlisted they warn (decision 0017) |
+| `claims.strictKinds` | `[]` | The opt-in kinds (`component`, `background-task`, `external-service`) that `claims.strict` also fails on; unlisted they warn (decision 0017) |
 | `localExtractorDir` | — | Repo-relative folder of repo-local extractors (`<name>.mjs` or `<name>/index.mjs`) — the one place config may point at code |
-| `adapter` / `adapterOptions` | *(deprecated)* | The pre-1.0 single adapter; `nextjs-supabase` still expands to `[supabase, nextjs]` with a deprecation note |
+| `suiteChecks` | absent (every check warns) | How many of the standard suite's checks block for the repo's own adapters, 0 to 5 (decision 0040). Bootstrap writes 5 at a fresh install; "upgrade ZDD" raises it at once only where the repo has no adapter of its own, and otherwise `bootstrap.mjs adapters --raise` does, once they pass |
+| `adapter` / `adapterOptions` | *(deprecated)* | The pre-1.0 single adapter; `nextjs-supabase` still expands to `[supabase, supabase-js, nextjs]` with a deprecation note |
 | `name` | `"Codebase"` | Display name for the indexes |
 | `repoBase` | `""` | GitHub `/tree/<branch>/` URL prefix for source links in the human index — http(s) only, refused otherwise |
 | `nonAreaTags` | `[]` | Tags that are properties, not product areas (`react-flow`); a record inherits its area from its claiming feature's first tag not listed here. Shapes `graph.json`, so top-level (the old `viewer.nonAreaTags` still works, with a note) |
@@ -120,7 +159,7 @@ git history only. `test/determinism.test.mjs` is the guard; the blocking
 
 An extractor is one module implementing `derive({ repoRoot, options, io })` →
 `{ records, diagnostics, warnings? }` plus a `FACTS_KEY_ORDER` map, keyed to **one
-convention** (see `src/extractors/`). A record's `refs` may carry verbs
+convention** (see `src/adapters/`). A record's `refs` may carry verbs
 through `facts.edges` (`uses`, `usedBy`, `calls`, `subscribes`, `reads`,
 `writes`, `dependsOn`, `belongsTo` — decision 0016), which the graph keeps as
 `verb` on the edge. `io` (since 1.3.0) is the engine's safe
@@ -134,17 +173,44 @@ emits `?from:<name>` / `?function:<name>` / `?route:<url>` / `?surface:<file>` /
 into ids after the merge (a `*` in a url matches a route parameter only,
 never a fixed word — decision 0019). Missing
 source roots are "nothing to inventory", so a greenfield repo derives clean.
-Extractors are selected by name from a static registry in `src/derive.mjs` or
+Extractors are selected by name from the catalogue of adapter folders in `src/adapters/` or
 from the declared `localExtractorDir` — never by path. The plugin's `extractor`
 skill scaffolds a local one. To contribute one, see the
 repo's [CONTRIBUTING.md](https://github.com/rich-rees/zero-drift-docs/blob/main/CONTRIBUTING.md).
+
+### The adapter contract
+
+Every adapter declares the contract it was written for, `export const
+CONTRACT = 1`: a number of its own, raised only when what the core asks of
+an adapter changes (decision 0040). `derive` stops on an adapter written for
+a newer contract than the engine speaks, or one behind on a required step;
+it warns on one that declares none; an optional step an adapter lacks is
+said under `--verbose` only, and the adapter keeps working without it.
+Before 1.0 the contract is open and stays at 1; from 1.0 every change is a
+new row here, and "upgrade ZDD" interviews the adopter about the rows their
+own adapters are behind on.
+
+| Step | Since | Required | What the core asks |
+|---|---|---|---|
+| `CONTRACT` | 1 | yes | `export const CONTRACT = n`: the adapter contract the adapter was written for |
+| `derive` | 1 | yes | `derive({ repoRoot, options, io })` returns `{ records, diagnostics }`; the same source bytes give byte-identical records |
+| `io` | 1 | yes | every read and listing through the `io` the engine hands in, never `node:fs`, the environment or the network; a gitignored path is never read |
+| missing source | 1 | yes | a configured root that does not exist is nothing to inventory: no records and a diagnostic, never an error |
+| `COMMENT` | 1 | yes | `{ ".ext": "<line comment mark>" }` for every kind of file the adapter reads (`null` for one that takes no line comment, such as JSON), so the suite can comment out the fixture |
+| `SUITE` | 1 | yes (an adopter's own) | a `fixture/` folder beside the adapter and `export const SUITE = { options, companions? }`; a catalogue adapter's fixture lives in ZDD's tests |
+| `FACTS_KEY_ORDER` | 1 | no | facts in a stable order, per kind |
+| unresolved refs | 1 | no | `?table:<name>`, `?route:<url>`, … for another adapter's records; the core resolves them |
+| data access | 1 | no | `?code:<file>#<function>` refs, and `data-access` records naming the tables a function reaches (decision 0037) |
+| typed edges | 1 | no | `facts.edges`, a verb for a ref (decision 0016) |
+| `warnings` | 1 | no | a list printed on every derive |
+| detection | 1 | no | `DETECTION` and `detect({ scan, proposed })` (decision 0039; every catalogue adapter has it) |
 
 ## Viewers
 
 The human index is produced by a **viewer** — one module exporting
 `render({ graph, docs, changed, options, bundleName, repoBase })` and returning
 the page as a string — selected by name from the registry in
-`src/viewers/index.mjs`. `cytoscape` is the reference viewer (lanes / columns /
+`src/core/viewers/index.mjs`. `cytoscape` is the reference viewer (lanes / columns /
 explorer / force views, detail panel, glossary + ADR slide-outs; Apache-2.0-
 derived, isolated in its own folder under `LICENSE-NOTICE.md`); `minimal` is the
 no-library worked example. Viewers read `graph.json` and nothing else of the
@@ -167,6 +233,6 @@ three of twelve records), `test/fixture-components/` (a web app, an Expo app
 and a shared component kit over one API), `test/fixture-jobs/` (manifests
 that run processes, a Railway file, a Procfile), `test/fixture-services/`
 (Sentry and Resend by marker, Stripe undeclared) and `test/fixture-greenfield/`
-(config only). `test/golden/` pins v0.3.1 output: the composed `[supabase, nextjs]` pair must
+(config only). `test/golden/` pins v0.3.1 output: the composed `[supabase, supabase-js, nextjs]` must
 reproduce the adapter's metadata byte for byte, and the `cytoscape` viewer must
 embed the same `BUNDLE` the pre-registry renderer did.

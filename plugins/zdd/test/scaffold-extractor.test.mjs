@@ -13,7 +13,7 @@ import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, re
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { BUILT_INS, IO_SINCE } from "../scripts/scaffold-extractor.mjs";
+import { BUILT_INS, RETIRED_BUILT_INS, REMOVED_BUILT_INS, IO_SINCE } from "../scripts/scaffold-extractor.mjs";
 
 const PLUGIN = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SCRIPT = join(PLUGIN, "scripts", "scaffold-extractor.mjs");
@@ -118,7 +118,7 @@ test("fail loudly: without io the scaffolded module throws, naming the engine ve
   const repo = adopted(t);
   scaffoldJson(repo, CSHARP);
   const mod = await import(pathToFileURL(join(repo, "zdd", "extractors", "aspnet-routes", "index.mjs")).href);
-  assert.throws(() => mod.derive({ repoRoot: repo, options: {} }), new RegExp(`aspnet-routes needs @rich-rees/zdd-engine ${IO_SINCE.replace(/\./g, "\\.")} or later \\(io was not passed\\) — say "upgrade ZDD"`));
+  assert.throws(() => mod.derive({ repoRoot: repo, options: {} }), new RegExp(`aspnet-routes needs an engine that passes io — any @rich-rees/zdd, or @rich-rees/zdd-engine ${IO_SINCE.replace(/\./g, "\\.")} or later \\(io was not passed\\) — say "upgrade ZDD"`));
 });
 
 test("the scaffolded test is red until EXPECTED_IDS and a fixture exist, and green once fromSource() is written", (t) => {
@@ -167,14 +167,15 @@ test("the scaffolded test is red until EXPECTED_IDS and a fixture exist, and gre
   const green = runTests(repo, testFile);
   assert.equal(green.status, 0, green.stdout + green.stderr);
   // Exact counts per platform (1.3.0 CR-012): a hardening test deleted or
-  // newly skipped must turn this red. Nine tests — the POSIX file-symlink one
-  // skips on Windows; the recursion one passes once CONVENTION_RECURSES is answered.
+  // newly skipped must turn this red. Ten tests — the POSIX file-symlink one
+  // skips on Windows; the recursion one passes once CONVENTION_RECURSES is answered;
+  // the last runs the standard suite (decision 0040).
   const count = (what) => Number(new RegExp(`^# ${what} (\\d+)$`, "m").exec(green.stdout)?.[1]);
-  assert.equal(count("tests"), 9, green.stdout);
+  assert.equal(count("tests"), 10, green.stdout);
   assert.equal(count("fail"), 0, green.stdout);
   assert.equal(count("todo"), 0, green.stdout);
   assert.equal(count("skipped"), POSIX ? 0 : 1, green.stdout);
-  assert.equal(count("pass"), POSIX ? 9 : 8, green.stdout);
+  assert.equal(count("pass"), POSIX ? 10 : 9, green.stdout);
 });
 
 test("refusals: every bad answer or repo state stops before the first write", (t) => {
@@ -253,11 +254,15 @@ test("text bound for a generated comment is flattened to one line and every mask
   assert.equal(typeof loaded.derive, "function", "the flattened comment did not break the module");
 });
 
-test("the local-name guard mirrors the engine registry", () => {
-  const src = readFileSync(join(ENGINE, "src", "derive.mjs"), "utf8");
-  const block = /const EXTRACTORS = \{([\s\S]*?)\};/.exec(src)[1];
-  const names = [...block.matchAll(/^\s*"?([a-z][a-z0-9-]*)"?:/gm)].map((m) => m[1]);
+test("the local-name guard mirrors the engine's catalogue", () => {
+  // The catalogue is a folder of adapters beside the core (decision 0036):
+  // every <name>/index.mjs is a name, and catalogue.json carries the retired ones.
+  const dir = join(ENGINE, "src", "adapters");
+  const names = readdirSync(dir).filter((n) => existsSync(join(dir, n, "index.mjs")));
   assert.deepEqual([...BUILT_INS].sort(), names.sort());
+  const { aliases, retired } = JSON.parse(readFileSync(join(dir, "catalogue.json"), "utf8"));
+  assert.deepEqual(RETIRED_BUILT_INS, aliases);
+  assert.deepEqual([...REMOVED_BUILT_INS].sort(), Object.keys(retired ?? {}).sort(), "the names the engine stops on (CR-080)");
 });
 
 // The masks, lifted out of their templates and run on text that tries to
@@ -499,4 +504,46 @@ test("POSIX: a symlinked localExtractorDir is refused — nothing written throug
   assert.match(r.stderr, /symlink/);
   assert.deepEqual(readdirSync(outside), []);
   assert.ok(!existsSync(join(outside, "aspnet-routes")));
+});
+
+// Decision 0042 at the scaffold (slice 6 campaign).
+const onRelease = (t, release) => {
+  const repo = adopted(t);
+  const p = join(repo, "zdd", "config.json");
+  const { engine: _e, ...rest } = JSON.parse(readFileSync(p, "utf8"));
+  writeFileSync(p, JSON.stringify({ ...rest, release }, null, 2) + "\n");
+  return repo;
+};
+
+test("CR-152: the scaffold refuses a release pin that is not a version, and both keys, before any write", (t) => {
+  for (const cfg of [{ release: "v0.9.0" }, { release: "0.9.0", engine: "2.5.0" }]) {
+    const repo = adopted(t);
+    const p = join(repo, "zdd", "config.json");
+    const { engine: _e, ...rest } = JSON.parse(readFileSync(p, "utf8"));
+    writeFileSync(p, JSON.stringify({ ...rest, ...cfg }, null, 2) + "\n");
+    const before = snapshot(repo);
+    const r = scaffold(repo, CSHARP);
+    assert.equal(r.status, 1, r.stdout);
+    assert.match(r.stderr, cfg.engine ? /pins both 'release' and the old line's 'engine' — say "upgrade ZDD" first/ : /release pin is not a version/);
+    assert.deepEqual(snapshot(repo), before, JSON.stringify(cfg));
+  }
+});
+
+test("CR-158: on the new line the scaffold says nothing about io, and the scaffolded test runs @rich-rees/zdd at the release pin; on the old line, @rich-rees/zdd-engine at the engine pin", (t) => {
+  const repo = onRelease(t, "0.9.0");
+  const notes = scaffoldJson(repo, CSHARP).notes.join("\n");
+  assert.doesNotMatch(notes, /pins engine|engine pin|not a version/, notes);
+  // The generated test's own pin block, run as written against each config.
+  const text = readFileSync(join(repo, "zdd", "extractors", "aspnet-routes", "aspnet-routes.test.mjs"), "utf8");
+  const block = text.slice(text.indexOf("const CONFIG ="), text.indexOf("const SEMVER"));
+  const pick = (config) => new Function("readFileSync", "join", "repoRoot", `${block}; return { PIN_KEY, PIN, PACKAGE };`)(() => JSON.stringify(config), (...p) => p.join("/"), () => ".");
+  assert.deepEqual(pick({ release: "0.9.0" }), { PIN_KEY: "release", PIN: "0.9.0", PACKAGE: "@rich-rees/zdd" });
+  assert.deepEqual(pick({ engine: "2.5.0" }), { PIN_KEY: "engine", PIN: "2.5.0", PACKAGE: "@rich-rees/zdd-engine" });
+  assert.match(text, /\[npxCli\(\), "-y", `\$\{PACKAGE\}@\$\{PIN\}`/, "the package and pin it picks are what npx runs");
+});
+
+test("CR-153: the extractor skill's precondition accepts any release pin, and asks only an old-line engine pin for 1.3.0", () => {
+  const skill = readFileSync(join(PLUGIN, "skills", "extractor", "SKILL.md"), "utf8");
+  assert.match(skill, /any `release`[^\n]*\n?[^\n]*does; an old-line `engine` pin must be \*\*1\.3\.0 or later\*\*/);
+  assert.doesNotMatch(skill, /^- `engine` in that config is/m);
 });

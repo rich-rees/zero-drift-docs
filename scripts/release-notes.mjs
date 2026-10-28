@@ -27,4 +27,4 @@ if (start === -1) {
 let end = start + 1;
 while (end < lines.length && !/^- \*\*`\d+\.\d+\.\d+`/.test(lines[end]) && !/^#/.test(lines[end])) end++;
 const entry = lines.slice(start, end).join("\n").trimEnd();
-process.stdout.write(`${entry.replace(/^- /, "")}\n\nEngine: \`npx -y @rich-rees/zdd-engine@${version}\`. Plugin: \`claude plugin marketplace add rich-rees/zero-drift-docs@${tag} --scope project\`, then \`claude plugin install zdd@zero-drift-docs --scope project\`. Adopters on an earlier release say "upgrade ZDD".\n`);
+process.stdout.write(`${entry.replace(/^- /, "")}\n\nEngine: \`npx -y @rich-rees/zdd@${version}\`. Plugin: \`claude plugin marketplace add rich-rees/zero-drift-docs@${tag} --scope project\`, then \`claude plugin install zdd@zero-drift-docs --scope project\`. Adopters on an earlier release say "upgrade ZDD".\n`);

@@ -18,8 +18,8 @@ import { writeFileSync, rmSync, mkdtempSync, cpSync, mkdirSync, readFileSync } f
 import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { extractBlessings, forwardStamps, blessingShape } from "../src/lib/map-links.mjs";
-import { parseWhere, readBlessing, usersOf } from "../src/lib/blessings.mjs";
+import { extractBlessings, forwardStamps, blessingShape } from "../src/core/lib/map-links.mjs";
+import { parseWhere, readBlessing, usersOf } from "../src/core/lib/blessings.mjs";
 
 const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const BIN = join(PKG, "bin", "zdd-engine.mjs");

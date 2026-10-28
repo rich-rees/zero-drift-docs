@@ -1,0 +1,443 @@
+#!/usr/bin/env node
+// ZDD deriver — generates the codebase metadata: the mechanical inventory of
+// routes, tables, surfaces, etc.
+//
+//   zdd-engine derive             # write metadata records + prune stale
+//   zdd-engine derive --check     # exit 1 if metadata/ is stale
+//   zdd-engine derive --verbose   # extractor diagnostics to stderr
+//
+// Deterministic: same source bytes in, byte-identical metadata/*.json out (the
+// blocking CI check relies on this). No dependencies beyond Node stdlib, no
+// LLM anywhere. Nothing in this file may be stack- or project-specific — stack
+// facts belong in an extractor, project facts in zdd/config.json.
+//
+// Extractors are composed: config lists them by name, each one inventories one
+// convention, and this file merges their records and resolves cross-extractor
+// refs afterwards (lib/resolve-refs.mjs). Selection is by NAME only — from
+// the catalogue of adapters beside the core (lib/catalogue.mjs, decision
+// 0036), or from the one repo-local directory config may declare
+// (`localExtractorDir`), the single sanctioned place config can point at
+// code. A path in the extractors list is refused. This file names no adapter.
+
+import { readFileSync, writeFileSync, readdirSync, statSync, lstatSync, realpathSync, mkdirSync, rmSync, existsSync } from "node:fs";
+import { join, dirname, resolve, sep } from "node:path";
+import { pathToFileURL } from "node:url";
+import { loadConfig, resolveExtractors } from "./lib/config.mjs";
+import { resolveRefs } from "./lib/resolve-refs.mjs";
+import { mergeBackgroundTasks } from "./lib/background-tasks.mjs";
+import { insideRepo } from "./lib/paths.mjs";
+import { makeExtractorIo } from "./lib/extractor-io.mjs";
+import { gitIgnoredPredicate } from "./lib/ignored.mjs";
+import { catalogue } from "./lib/catalogue.mjs";
+import { judgeContract } from "./lib/contract.mjs";
+
+const NAME_RE = /^[a-z][a-z0-9-]*$/;
+
+const RECORD_KEYS = ["kind", "id", "title", "description", "resource", "refs", "facts"];
+const FILENAME_RE = /^[A-Za-z0-9._~()\[\]-]+\.json$/;
+// `kind` is a directory name under metadataDir — a record with kind `..`
+// would write outside it (CR-003).
+const KIND_RE = /^[a-z][a-z0-9_-]*$/;
+// An edge verb (decision 0016): `uses`, `calls`, `subscribes`, `reads`,
+// `writes`, `dependsOn`, `belongsTo` are the documented vocabulary; any
+// letters-only name is accepted so a local extractor may coin one.
+const VERB_RE = /^[a-z][A-Za-z]*$/;
+
+function fail(msg) {
+  console.error(msg);
+  process.exit(1);
+}
+
+// Canonical serializer: fixed top-level key order, per-kind facts key order
+// (unknown facts keys sort last, alphabetically), 2-space indent, LF, trailing
+// newline. Hand-rolled so byte-stability is a property of this file, not of
+// JSON.stringify implementation details. Fails closed on a value JSON has no
+// form for (undefined, a function, a symbol): JSON.stringify answers
+// `undefined` for those and the literal text `undefined` landed in a .json
+// file that no parser could read back (CR-093). The error names the path.
+function stableStringify(record, factsKeyOrder) {
+  const orderKeys = (obj, order) => {
+    const known = order.filter((k) => k in obj);
+    const unknown = Object.keys(obj).filter((k) => !order.includes(k)).sort();
+    return [...known, ...unknown];
+  };
+  const write = (value, indent, path) => {
+    if (Array.isArray(value)) {
+      if (!value.length) return "[]";
+      const inner = value.map((v, i) => `${indent}  ${write(v, indent + "  ", `${path}[${i}]`)}`).join(",\n");
+      return `[\n${inner}\n${indent}]`;
+    }
+    if (value && typeof value === "object") {
+      const keys = Object.keys(value);
+      if (!keys.length) return "{}";
+      const inner = keys.map((k) => `${indent}  ${JSON.stringify(k)}: ${write(value[k], indent + "  ", `${path}.${k}`)}`).join(",\n");
+      return `{\n${inner}\n${indent}}`;
+    }
+    const out = JSON.stringify(value);
+    if (out === undefined) throw new Error(`Record ${record.id}: ${path} is ${typeof value} — not serialisable as JSON`);
+    return out;
+  };
+  const ordered = {};
+  for (const key of RECORD_KEYS) {
+    if (key === "facts") {
+      const facts = {};
+      for (const k of orderKeys(record.facts, factsKeyOrder)) facts[k] = record.facts[k];
+      ordered.facts = facts;
+    } else {
+      ordered[key] = record[key];
+    }
+  }
+  return write(ordered, "", "record") + "\n";
+}
+
+function validateRecords(records) {
+  const ids = new Set();
+  const filenamesLower = new Set();
+  for (const r of records) {
+    for (const key of RECORD_KEYS) {
+      if (!(key in r)) fail(`Record ${r.id ?? "?"} missing required key '${key}'`);
+    }
+    if (typeof r.description !== "string") fail(`Record ${r.id}: description must be a string`);
+    if (!Array.isArray(r.resource)) fail(`Record ${r.id}: resource must be an array`);
+    if (!Array.isArray(r.refs)) fail(`Record ${r.id}: refs must be an array`);
+    if (!KIND_RE.test(r.kind)) fail(`Record ${r.id}: bad kind '${r.kind}' (lowercase name, it becomes a directory)`);
+    if (!FILENAME_RE.test(r.filename)) fail(`Record ${r.id}: bad filename '${r.filename}'`);
+    if (ids.has(r.id)) fail(`Duplicate record id '${r.id}' (two extractors minted it?)`);
+    ids.add(r.id);
+    const fileKey = `${r.kind}/${r.filename.toLowerCase()}`;
+    // Case-insensitive: Windows/macOS checkouts collapse case-variant names.
+    if (filenamesLower.has(fileKey)) fail(`Filename collision (case-insensitive): ${fileKey}`);
+    filenamesLower.add(fileKey);
+    for (const res of r.resource) {
+      if (res.includes("\\") || res.startsWith("/") || /^[A-Za-z]:/.test(res) || res.split("/").includes("..")) {
+        fail(`Record ${r.id}: resource '${res}' must be repo-relative POSIX (no '..')`);
+      }
+    }
+  }
+  // Every ref must resolve to an emitted record — dangling refs are extractor
+  // bugs, caught here rather than shipped. A typed edge (decision 0016) names
+  // a verb and ids that are also plain refs; the resolver guarantees the
+  // union, this checks the shape an extractor handed over.
+  for (const r of records) {
+    for (const ref of r.refs) {
+      if (!ids.has(ref)) fail(`Record ${r.id}: dangling ref '${ref}'`);
+    }
+    for (const [verb, list] of Object.entries(r.facts?.edges ?? {})) {
+      for (const id of list) if (!r.refs.includes(id)) fail(`Record ${r.id}: facts.edges.${verb} names '${id}', which is not among its refs`);
+    }
+  }
+}
+
+// The shape of `facts.edges` as an extractor handed it over, checked BEFORE
+// resolution (which would otherwise quietly drop a malformed entry): an
+// object, letters-only verbs, an array of refs per verb.
+function validateEdgeShapes(records) {
+  for (const r of records) {
+    const edges = r && r.facts ? r.facts.edges : undefined;
+    if (edges === undefined) continue;
+    if (!edges || typeof edges !== "object" || Array.isArray(edges)) fail(`Record ${r.id}: facts.edges must be an object mapping a verb to ids`);
+    for (const [verb, list] of Object.entries(edges)) {
+      if (!VERB_RE.test(verb)) fail(`Record ${r.id}: bad edge verb '${verb}' (letters only, camelCase)`);
+      if (!Array.isArray(list) || list.some((id) => typeof id !== "string")) fail(`Record ${r.id}: facts.edges.${verb} must be an array of ids`);
+    }
+  }
+}
+
+// Which names are loadable: the catalogue plus whatever the local dir holds
+// (`<dir>/<name>.mjs` or `<dir>/<name>/index.mjs`). Local names may not
+// shadow a catalogue adapter: a different take on one is a copy under a new
+// name (decision 0036 point 5).
+export function localExtractors(repoRoot, dir) {
+  const found = new Map();
+  if (!dir) return found;
+  // loadConfig already refused absolute / `..` values; this is the belt
+  // behind those braces (CR-004).
+  const abs = insideRepo(repoRoot, resolve(repoRoot, dir), "localExtractorDir");
+  if (!existsSync(abs)) return found;
+  for (const name of readdirSync(abs).sort()) {
+    const p = join(abs, name);
+    if (statSync(p).isDirectory() && existsSync(join(p, "index.mjs"))) found.set(name, join(p, "index.mjs"));
+    else if (name.endsWith(".mjs")) found.set(name.slice(0, -4), p);
+  }
+  return found;
+}
+
+async function loadExtractor(name, repoRoot, config) {
+  const localDir = config.localExtractorDir;
+  if (!NAME_RE.test(name)) {
+    fail(
+      `Extractor '${name}' is not a name: extractors are selected by name, never by path (config cannot import code). ` +
+        `Put the module in localExtractorDir${localDir ? ` (${localDir})` : ""} as <name>.mjs and list its name.`,
+    );
+  }
+  const local = localExtractors(repoRoot, localDir);
+  const { names, aliases, retired } = catalogue();
+  // A Map, and hasOwn on the aliases: a local extractor called `constructor`
+  // must not hit Object.prototype (CR-022).
+  if (names.has(name)) {
+    if (local.has(name)) fail(`Local extractor '${name}' shadows the built-in of the same name — rename it`);
+    return import(pathToFileURL(names.get(name)).href);
+  }
+  // catalogue() refused an alias whose target is not a catalogue adapter, so
+  // a retired name never falls through to a local one (CR-002).
+  if (Object.hasOwn(aliases, name)) return import(pathToFileURL(names.get(aliases[name])).href);
+  // A retired name stops derive before any local extractor of that name runs
+  // (CR-080): a stale config is told, never served by old local code.
+  if (Object.hasOwn(retired, name)) fail(`Extractor '${name}' was retired: ${retired[name]}`);
+  if (local.has(name)) return import(pathToFileURL(local.get(name)).href);
+  const known = [...names.keys(), ...Object.keys(aliases)].sort().join(", ");
+  const localList = localDir ? `; local ${localDir}: ${[...local.keys()].join(", ") || "(none)"}` : "";
+  fail(`Unknown extractor '${name}' (known: ${known}${localList})`);
+}
+
+// A module localExtractors found, for the standard suite (decision 0040):
+// the suite judges a repo's own adapter as derive would load it.
+export const importLocal = (entry) => import(pathToFileURL(entry).href);
+
+// Every catalogue adapter's module, in name order (decision 0039): detection
+// asks each one whether it fits a repo. The one other place a name becomes a
+// module, beside loadExtractor.
+export async function catalogueModules() {
+  const out = [];
+  for (const [name, entry] of catalogue().names) out.push({ name, mod: await import(pathToFileURL(entry).href) });
+  return out;
+}
+
+// The lexical check above is the braces; this is the belt (CR-060). A
+// metadataDir that is itself a symlink, or that sits under one, would carry
+// every write and the prune wherever the link points — a sibling checkout,
+// the user's home — while the string still starts with the repo root. So:
+// metadataDir must not be a link, and the real path of it (or, before the
+// first derive creates it, of its nearest existing ancestor) must sit under
+// the real path of the repo. Same discipline as render's safeOutputPath.
+function assertMetadataDirContained(repoRoot, metadataDir, metadataRel) {
+  let probe = metadataDir;
+  for (;;) {
+    let st = null;
+    try {
+      st = lstatSync(probe);
+    } catch {
+      /* not there yet — look one level up */
+    }
+    if (st) {
+      if (st.isSymbolicLink()) {
+        const what = probe === metadataDir ? "is a symlink" : `sits under a symlink (${probe})`;
+        fail(`metadataDir '${metadataRel}' ${what} — derive writes and prunes only through real directories inside the repo`);
+      }
+      break;
+    }
+    const up = dirname(probe);
+    if (up === probe) break;
+    probe = up;
+  }
+  try {
+    insideRepo(realpathSync(repoRoot), realpathSync(probe), `metadataDir '${metadataRel}'`);
+  } catch (e) {
+    fail(e.message);
+  }
+}
+
+// What is on disk under metadataDir. The folder holds exactly
+// `<kind>/<record>.json` and derive manages nothing else: any other JSON file
+// — or any directory that is not a kind — is FOREIGN, and the caller refuses
+// to run rather than prune it as an orphaned record (CR-059: a non-dedicated
+// metadataDir once deleted config.json). Non-JSON bystanders (a README, a
+// .gitkeep) are neither read nor pruned. Symlinks are skipped, never followed
+// (CR-060) — reported so `--verbose` shows why a linked file is ignored.
+function scanMetadata(metadataDir) {
+  const existing = new Map(); // "<kind>/<file>.json" -> content
+  const foreign = [];
+  const links = [];
+  if (!existsSync(metadataDir)) return { existing, foreign, links };
+  for (const name of readdirSync(metadataDir).sort()) {
+    const p = join(metadataDir, name);
+    const st = lstatSync(p);
+    if (st.isSymbolicLink()) {
+      links.push(name);
+    } else if (st.isDirectory()) {
+      if (!KIND_RE.test(name)) {
+        foreign.push(`${name}/`);
+        continue;
+      }
+      for (const file of readdirSync(p).sort()) {
+        const rel = `${name}/${file}`;
+        const fp = join(p, file);
+        const fst = lstatSync(fp);
+        if (fst.isSymbolicLink()) links.push(rel);
+        else if (fst.isDirectory()) foreign.push(`${rel}/`);
+        else if (file.endsWith(".json")) existing.set(rel, readFileSync(fp, "utf8"));
+      }
+    } else if (name.endsWith(".json")) {
+      foreign.push(name);
+    }
+  }
+  return { existing, foreign, links };
+}
+
+// Run every configured extractor, merge, resolve refs. Exported so tests can
+// observe records without the filesystem write.
+// `contract` ({ contract, table }) is for tests: the contract table derive
+// judges adapters by, in place of this engine's (CR-138).
+export async function deriveRecords({ repoRoot, config, contract }) {
+  const selection = resolveExtractors(config);
+  if (selection.error) fail(selection.error);
+  const diagnostics = [];
+  const warnings = [];
+  const configDiagnostics = selection.diagnostics;
+  let records = [];
+  const factsOrder = {};
+  // What git ignores is never source (pick 1): asked once, shared by every
+  // extractor's io.
+  const ignored = gitIgnoredPredicate(repoRoot);
+  if (ignored.error) fail(ignored.error); // fail closed (CR-403): never read ignored files as source
+  // The standard suite asks which files each adapter read (decision 0040,
+  // CR-118): ZDD_IO_TRACE names a file outside the repo that gets
+  // { "<adapter>": [paths read] }. Unset, nothing is kept.
+  const tracePath = process.env.ZDD_IO_TRACE;
+  const trace = tracePath ? {} : null;
+  for (const { name, options, legacyName } of selection.extractors) {
+    const extractor = await loadExtractor(name, repoRoot, config);
+    if (typeof extractor.derive !== "function") fail(`Extractor '${name}' exports no derive()`);
+    // The contract it was written for (decision 0040): newer than this
+    // engine, or behind on a required step, stops derive; no CONTRACT line
+    // warns; optional steps it is behind on are said under --verbose only.
+    const judged = judgeContract(name, extractor, contract);
+    if (judged.fail) fail(judged.fail);
+    if (judged.warning) warnings.push(`WARNING [contract]: ${judged.warning}`);
+    for (const r of judged.behind) diagnostics.push(`[contract] ${name} was written for contract ${judged.declared}; it does not have "${r.step}" (contract ${r.since}, optional): ${r.what}`);
+    let out;
+    try {
+      // A fresh io per extractor: one shared walk budget each, so a greedy
+      // extractor cannot starve the next one (decision 0010).
+      // `legacyName`: the retired name the config used (2.3: `services`), so
+      // the extractor can keep the old record kind until "upgrade ZDD"
+      // renames the key — an engine-only adopter sees nothing move (CR-302).
+      const onRead = trace ? (rel) => (trace[name] ??= []).push(rel) : undefined;
+      out = extractor.derive({ repoRoot, options, io: makeExtractorIo(repoRoot, name, { ignored, onRead }), ...(legacyName ? { legacyName } : {}) });
+    } catch (e) {
+      fail(`Extractor '${name}' failed: ${e.message}`);
+    }
+    if (!out || !Array.isArray(out.records) || !Array.isArray(out.diagnostics)) fail(`Extractor '${name}' must return { records: [], diagnostics: [] }`);
+    records.push(...out.records);
+    diagnostics.push(...out.diagnostics.map((d) => `[${name}] ${d}`));
+    // An optional third channel (2.1.0): warnings print on EVERY derive,
+    // not only under --verbose — for what the branch that caused it should
+    // hear (an environment name no declared service covers). Still never
+    // a failure.
+    if (out.warnings !== undefined) {
+      if (!Array.isArray(out.warnings) || out.warnings.some((w) => typeof w !== "string")) fail(`Extractor '${name}': warnings must be an array of strings`);
+      warnings.push(...out.warnings.map((w) => `WARNING [${name}]: ${w}`));
+    }
+    // Facts key orders merge per kind in config order: first extractor's keys
+    // first, later extractors' unseen keys appended.
+    for (const [kind, order] of Object.entries(extractor.FACTS_KEY_ORDER ?? {})) {
+      factsOrder[kind] = [...new Set([...(factsOrder[kind] ?? []), ...order])];
+    }
+  }
+  if (trace) writeFileSync(tracePath, JSON.stringify(trace) + "\n");
+  // One task seen by two background readers is one record (decision 0038).
+  const bg = mergeBackgroundTasks(records);
+  records = bg.records;
+  diagnostics.push(...bg.diagnostics.map((d) => `[background] ${d}`));
+  warnings.push(...bg.warnings);
+  validateEdgeShapes(records);
+  const resolved = resolveRefs(records);
+  records = resolved.records;
+  diagnostics.push(...resolved.diagnostics);
+  warnings.push(...resolved.warnings.map((w) => `WARNING [data-access]: ${w}`));
+  validateRecords(records);
+  records.sort((a, b) => (a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : a.id < b.id ? -1 : 1));
+  return { records, factsOrder, diagnostics, configDiagnostics, warnings };
+}
+
+export async function run(args) {
+  const CHECK = args.includes("--check");
+  const VERBOSE = args.includes("--verbose");
+  const { repoRoot: REPO, config, paths } = loadConfig(args);
+
+  const metadataRel = paths.metadataDir;
+  const metadataDir = resolve(REPO, metadataRel);
+  // Refuse to prune outside the repo — a config typo must not delete
+  // arbitrary trees.
+  if (!metadataDir.startsWith(REPO + sep)) fail(`metadataDir '${metadataRel}' resolves outside the repo`);
+  assertMetadataDirContained(REPO, metadataDir, metadataRel);
+
+  const { records, factsOrder, diagnostics, configDiagnostics, warnings } = await deriveRecords({ repoRoot: REPO, config });
+  // Config-level notes (deprecations) and extractor warnings always print;
+  // extractor diagnostics are opt-in noise.
+  for (const d of configDiagnostics) console.error(d);
+  for (const w of warnings) console.error(w);
+  if (VERBOSE) for (const d of diagnostics) console.error(d);
+
+  const expected = new Map(); // rel path under metadataDir -> content
+  try {
+    for (const r of records) expected.set(`${r.kind}/${r.filename}`, stableStringify(r, factsOrder[r.kind] ?? []));
+  } catch (e) {
+    fail(e.message);
+  }
+
+  const { existing, foreign, links } = scanMetadata(metadataDir);
+  if (foreign.length) {
+    fail(
+      `${metadataRel} is not a dedicated metadata folder — it holds ${foreign.length} file(s) derive did not write:\n` +
+        foreign.map((f) => `  ${f}`).join("\n") +
+        `\nderive manages only <kind>/<record>.json under paths.metadataDir and prunes the rest; ` +
+        `move these out or point paths.metadataDir at an empty folder.`,
+    );
+  }
+  if (VERBOSE) for (const l of links) console.error(`[derive] ${metadataRel}/${l} is a symlink — skipped (never read, written or pruned)`);
+
+  // Normalize CRLF so a core.autocrlf checkout doesn't fail the compare
+  // (.gitattributes pins these files to LF, this is belt-and-braces).
+  const norm = (s) => s.replace(/\r\n/g, "\n");
+
+  if (CHECK) {
+    const problems = [];
+    for (const [rel, content] of expected) {
+      const disk = existing.get(rel);
+      if (disk === undefined) problems.push(`missing: ${rel}`);
+      else if (norm(disk) !== content) problems.push(`stale: ${rel}`);
+    }
+    for (const rel of existing.keys()) {
+      if (!expected.has(rel)) problems.push(`orphaned (source concept gone): ${rel}`);
+    }
+    if (problems.length) {
+      fail(
+        `${metadataRel} is out of sync with the source (${problems.length} file(s)):\n` +
+          problems.map((p) => `  ${p}`).join("\n") +
+          "\nRun `zdd-engine derive` and commit the result.",
+      );
+    }
+    console.log(`codebase metadata in sync (${records.length} records)`);
+  } else {
+    // A link AT a record path (or a linked kind dir above it) would be
+    // followed by writeFileSync — scanMetadata skips links, but skipping is
+    // not enough where derive is about to write (CR-060). Fail closed before
+    // the first write: lstat each target and its kind dir, refuse anything
+    // that is not a plain file / plain directory.
+    const notPlain = (p, rel, want) => {
+      const st = lstatSync(p, { throwIfNoEntry: false }); // lstat, not exists: a dangling link must still count
+      if (!st) return;
+      const what = st.isSymbolicLink() ? "is a symlink" : want === "file" && !st.isFile() ? "is not a regular file" : want === "dir" && !st.isDirectory() ? "is not a directory" : null;
+      if (what) fail(`${metadataRel}/${rel} ${what} — derive writes only through plain files inside metadataDir; remove it and re-run`);
+    };
+    for (const rel of expected.keys()) {
+      const p = insideRepo(metadataDir, join(metadataDir, rel), `metadata path ${rel}`);
+      notPlain(dirname(p), rel.slice(0, rel.lastIndexOf("/")), "dir");
+      notPlain(p, rel, "file");
+    }
+    for (const [rel, content] of expected) {
+      const p = insideRepo(metadataDir, join(metadataDir, rel), `metadata path ${rel}`);
+      mkdirSync(dirname(p), { recursive: true });
+      writeFileSync(p, content);
+    }
+    for (const rel of existing.keys()) {
+      if (!expected.has(rel)) rmSync(insideRepo(metadataDir, join(metadataDir, rel), `metadata path ${rel}`));
+    }
+    const byKind = {};
+    for (const r of records) byKind[r.kind] = (byKind[r.kind] ?? 0) + 1;
+    const plural = (k) => (k.endsWith("ss") ? `${k}es` : `${k}s`); // data-access -> data-accesses; any other kind as before
+    const summary = Object.entries(byKind).map(([k, n]) => `${n} ${plural(k)}`).join(", ") || "nothing to inventory";
+    console.log(`Wrote ${records.length} records (${summary}) -> ${metadataRel}`);
+  }
+}

@@ -1,11 +1,11 @@
-// Extractor selection + path containment (src/lib/config.mjs, src/lib/paths.mjs).
+// Extractor selection + path containment (src/core/lib/config.mjs, src/core/lib/paths.mjs).
 // Review CR-001 / CR-006 / CR-019 (0.3.0 campaign).
 // Run: node --test "test/*.test.mjs"
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
-import { resolveExtractors, validateRepoBase, validatePathLayout, DEFAULT_PATHS } from "../src/lib/config.mjs";
-import { repoRelative, insideRepo, overlaps } from "../src/lib/paths.mjs";
+import { resolveExtractors, validateRepoBase, validatePathLayout, DEFAULT_PATHS } from "../src/core/lib/config.mjs";
+import { repoRelative, insideRepo, overlaps } from "../src/core/lib/paths.mjs";
 
 test("extractors list: names + per-name options; missing options default to {}", () => {
   const r = resolveExtractors({ extractors: ["supabase", "generic"], extractorOptions: { supabase: { a: 1 } } });
@@ -16,11 +16,13 @@ test("extractors list: names + per-name options; missing options default to {}",
   assert.deepEqual(r.diagnostics, []);
 });
 
-test("legacy adapter expands to [supabase, nextjs] with options split by key and one deprecation note", () => {
+test("legacy adapter expands to [supabase, supabase-js, nextjs] with options split by key and one deprecation note", () => {
   const r = resolveExtractors({ adapter: "nextjs-supabase", adapterOptions: { appDir: "src/app", migrationNamespaces: [{ name: "db", dir: "m" }], externalBuckets: [] } });
-  assert.deepEqual(r.extractors.map((e) => e.name), ["supabase", "nextjs"]);
+  // supabase-js reads the client calls nextjs read before 0.9 (decision 0037), at its defaults.
+  assert.deepEqual(r.extractors.map((e) => e.name), ["supabase", "supabase-js", "nextjs"]);
   assert.deepEqual(r.extractors[0].options, { migrationNamespaces: [{ name: "db", dir: "m" }], externalBuckets: [] });
-  assert.deepEqual(r.extractors[1].options, { appDir: "src/app" });
+  assert.deepEqual(r.extractors[1].options, {});
+  assert.deepEqual(r.extractors[2].options, { appDir: "src/app" });
   assert.equal(r.diagnostics.length, 1);
   assert.match(r.diagnostics[0], /deprecated/);
 });

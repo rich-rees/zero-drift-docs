@@ -3,8 +3,17 @@
   "baseBranch": "main",
   "extractors": [
     "supabase",
+    "supabase-js",
+    "supabase-py",
+    "sqlalchemy",
     "nextjs",
-    "jobs"
+    "background-railway",
+    "background-procfile",
+    "background-vercel",
+    "background-cloudflare",
+    "background-pg-cron",
+    "background-compose",
+    "background-bullmq"
   ],
   "render": {
     "storeChanges": false
@@ -18,17 +27,27 @@
         }
       ]
     },
-    "jobs": {
-      "modes": {
-        "worker": "worker"
-      }
-    },
     "nextjs": {
       "appDir": "apps/web/src/app",
       "refs": {
         "roots": [
           "apps/web/src"
         ]
+      }
+    },
+    "supabase-py": {
+      "roots": [
+        "apps/api"
+      ]
+    },
+    "sqlalchemy": {
+      "roots": [
+        "apps/api"
+      ]
+    },
+    "background-procfile": {
+      "modes": {
+        "worker": "worker"
       }
     }
   }

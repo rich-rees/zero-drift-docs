@@ -65,8 +65,8 @@ test("default viewer: BUNDLE (byte for byte) and agent index equal the v0.3.1 go
 // or the embed shows up as a golden diff without committing 400 KB of
 // cytoscape. Regenerate only deliberately (test/golden/README.md).
 const VENDOR = [
-  ["/*__CYTOSCAPE_JS__*/", join(PKG, "src", "viewers", "cytoscape", "vendor", "cytoscape.min.js")],
-  ["/*__MARKED_JS__*/", join(PKG, "src", "viewers", "cytoscape", "vendor", "marked.min.js")],
+  ["/*__CYTOSCAPE_JS__*/", join(PKG, "src", "core", "viewers", "cytoscape", "vendor", "cytoscape.min.js")],
+  ["/*__MARKED_JS__*/", join(PKG, "src", "core", "viewers", "cytoscape", "vendor", "marked.min.js")],
 ];
 const withoutVendor = (html) => {
   for (const [marker, file] of VENDOR) {
@@ -264,7 +264,7 @@ test("hostile inputs: the renderer refuses scheme-shaped resource and repoBase; 
   rmSync(repo, { recursive: true, force: true });
 
   // Viewer belt: a graph the renderer would never emit still comes out inert.
-  const { render } = await import("../src/viewers/minimal/index.mjs");
+  const { render } = await import("../src/core/viewers/minimal/index.mjs");
   const html = render({
     graph: { schema: "zdd-graph/1", nodes: [
       { id: "map/x", layer: "map", type: "<b>T</b>", title: "<img src=x onerror=alert(1)>", description: "\"><script>alert(2)</script>", resource: "javascript:alert(3)", tags: [], body: "" },
@@ -358,8 +358,8 @@ test("determinism per viewer: two fresh copies and a re-run are byte-identical a
   }
 });
 
-test("licence isolation: the Apache-derived files are exactly the ones the notice names, all under src/viewers/cytoscape", () => {
-  const dir = join(PKG, "src", "viewers", "cytoscape");
+test("licence isolation: the Apache-derived files are exactly the ones the notice names, all under src/core/viewers/cytoscape", () => {
+  const dir = join(PKG, "src", "core", "viewers", "cytoscape");
   const notice = readFileSync(join(dir, "LICENSE-NOTICE.md"), "utf8");
   assert.match(notice, /Apache License 2\.0/);
   // The notice names the derived files; they exist there and nowhere else
@@ -368,12 +368,12 @@ test("licence isolation: the Apache-derived files are exactly the ones the notic
     assert.ok(notice.includes(`\`${f}\``), `notice names ${f}`);
     assert.ok(existsSync(join(dir, f)));
     for (const [rel] of tree(join(PKG, "src"))) {
-      if (rel.endsWith("/" + f)) assert.equal(rel, `viewers/cytoscape/${f}`, `${f} only in the cytoscape viewer`);
+      if (rel.endsWith("/" + f)) assert.equal(rel, `core/viewers/cytoscape/${f}`, `${f} only in the cytoscape viewer`);
     }
   }
   // Nothing outside the folder imports from it — the registry loads it by name.
   for (const [rel, text] of tree(join(PKG, "src"))) {
-    if (rel.startsWith("viewers/cytoscape/") || !rel.endsWith(".mjs")) continue;
+    if (rel.startsWith("core/viewers/cytoscape/") || !rel.endsWith(".mjs")) continue;
     assert.ok(!/from\s+["'][^"']*cytoscape/.test(text), `${rel} does not import the cytoscape viewer`);
   }
   assert.ok(!existsSync(join(PKG, "src", "viewer")), "old src/viewer folder gone");
@@ -384,7 +384,7 @@ test("licence isolation: the Apache-derived files are exactly the ones the notic
 test("CONTRIBUTING names the graph schema and the registry step", () => {
   const text = readFileSync(join(PKG, "..", "..", "CONTRIBUTING.md"), "utf8");
   assert.ok(text.includes("zdd-graph/1"));
-  assert.ok(text.includes("src/viewers/index.mjs"));
+  assert.ok(text.includes("src/core/viewers/index.mjs"));
   assert.ok(text.includes("zdd/graph.json"));
 });
 
@@ -396,7 +396,7 @@ test("CR-069: cytoscape edge ids are injective — two edges that collide under 
   // cytoscape silently drops the second element with a duplicate id.
   //   (map/a -> map/b__map/c)  and  (map/a__map/b -> map/c)  both read
   //   `map/a__map/b__map/c`.
-  const { render } = await import("../src/viewers/cytoscape/index.mjs");
+  const { render } = await import("../src/core/viewers/cytoscape/index.mjs");
   const node = (id) => ({ id, title: id, type: "Feature", description: "", resource: `${id}.md`, tags: [], layer: "map", body: "" });
   const graph = {
     schema: "zdd-graph/1",
@@ -417,13 +417,13 @@ test("CR-100: the query-selected view is looked up as an own property — `?view
   // showView() runs against a DOM, so this pins the source: every VIEWS
   // lookup keyed by the URL value goes through Object.hasOwn, never a bare
   // `VIEWS[v]` truthiness test (which found Object.prototype.constructor).
-  const viz = readFileSync(join(PKG, "src", "viewers", "cytoscape", "viz.js"), "utf8");
+  const viz = readFileSync(join(PKG, "src", "core", "viewers", "cytoscape", "viz.js"), "utf8");
   assert.match(viz, /Object\.hasOwn\(VIEWS,\s*v\)/, "view routing uses Object.hasOwn");
   assert.ok(!/if\s*\(\s*!VIEWS\[v\]\s*\)/.test(viz), "no bare VIEWS[v] existence test");
 });
 
 test("CR-106: protocol-relative and backslash-shaped hrefs are not scheme-less — they render as plain text like any other off-site scheme", () => {
-  const dir = join(PKG, "src", "viewers", "cytoscape");
+  const dir = join(PKG, "src", "core", "viewers", "cytoscape");
   const ctx = vm.createContext({});
   vm.runInContext(readFileSync(join(dir, "vendor", "marked.min.js"), "utf8"), ctx);
   vm.runInContext(readFileSync(join(dir, "safe-marked.js"), "utf8"), ctx);
@@ -453,7 +453,7 @@ test("CR-106: protocol-relative and backslash-shaped hrefs are not scheme-less �
 test("CR-007: source-derived markdown cannot execute script in the Cytoscape viewer", () => {
   // Same load order as viz.html: the vendored marked, then the sanitiser, in
   // one browser-like global scope.
-  const dir = join(PKG, "src", "viewers", "cytoscape");
+  const dir = join(PKG, "src", "core", "viewers", "cytoscape");
   const ctx = vm.createContext({});
   vm.runInContext(readFileSync(join(dir, "vendor", "marked.min.js"), "utf8"), ctx);
   vm.runInContext(readFileSync(join(dir, "safe-marked.js"), "utf8"), ctx);

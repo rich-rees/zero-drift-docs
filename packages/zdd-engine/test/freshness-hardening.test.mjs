@@ -11,7 +11,7 @@ import { writeFileSync, rmSync, mkdtempSync, cpSync, mkdirSync, symlinkSync, app
 import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { cell, changedAgainstBase } from "../src/check-freshness.mjs";
+import { cell, changedAgainstBase } from "../src/core/check-freshness.mjs";
 
 const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const BIN = join(PKG, "bin", "zdd-engine.mjs");

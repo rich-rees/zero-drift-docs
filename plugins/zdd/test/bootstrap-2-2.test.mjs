@@ -28,12 +28,12 @@ test("Supabase beside a Next.js app: detection asks the Realtime-wrapper questio
   writeFileSync(join(repo, "supabase", "migrations", "001_init.sql"), "create table things (id int);\n");
   writeFileSync(join(repo, "package.json"), JSON.stringify({ dependencies: { next: "14.0.0" } }));
   const json = JSON.parse(detect(repo));
-  assert.deepEqual(json.proposals.map((p) => p.name), ["supabase", "nextjs"]);
+  assert.deepEqual(json.proposals.map((p) => p.name), ["supabase", "supabase-js", "nextjs"]);
   const q = json.questions.find((x) => x.topic === "realtime");
   assert.ok(q, JSON.stringify(json.questions));
   assert.match(q.ask, /wrapper of its own/);
   assert.match(q.ask, /\.on\("postgres_changes"/);
-  assert.deepEqual(q.records, "extractorOptions.nextjs.refs.subscribeCalls");
+  assert.deepEqual(q.records, "extractorOptions.supabase-js.subscribeCalls", "since 0.9 supabase-js reads the call names (decision 0037)");
   assert.match(detect(repo, false), /^ {2}ask: Does the Next.js app subscribe to Supabase Realtime through a wrapper of its own/m);
 });
 
@@ -108,7 +108,7 @@ const applyFails = (repo, answers) => {
   assert.fail("expected apply to fail");
 };
 
-test("Supabase beside BOTH a Next.js and a React Router app: one Realtime question per web extractor (CR-009)", (t) => {
+test("Supabase beside BOTH a Next.js and a React Router app: one Realtime question naming both apps — the call names live in one place since 0.9 (CR-009 superseded)", (t) => {
   const repo = scratch(t);
   mkdirSync(join(repo, "supabase", "migrations"), { recursive: true });
   writeFileSync(join(repo, "supabase", "migrations", "001_init.sql"), "create table things (id int);\n");
@@ -116,7 +116,9 @@ test("Supabase beside BOTH a Next.js and a React Router app: one Realtime questi
   mkdirSync(join(repo, "apps", "admin", "src"), { recursive: true });
   writeFileSync(join(repo, "apps", "admin", "src", "routes.tsx"), 'import { createBrowserRouter } from "react-router-dom";\nexport const router = createBrowserRouter([]);\n');
   const json = JSON.parse(detect(repo));
-  assert.deepEqual(json.questions.filter((q) => q.topic === "realtime").map((q) => q.records).sort(), ["extractorOptions.nextjs.refs.subscribeCalls", "extractorOptions.react-router.subscribeCalls"]);
+  const realtime = json.questions.filter((q) => q.topic === "realtime");
+  assert.deepEqual(realtime.map((q) => q.records), ["extractorOptions.supabase-js.subscribeCalls"]);
+  assert.match(realtime[0].ask, /Does the React Router or the Next\.js app subscribe/);
 });
 
 test("Supabase beside a web app with no Supabase: no Realtime question; a web app alone: none either", (t) => {
@@ -141,6 +143,7 @@ test("subscribeCalls must be an array of strings, in both places, before anythin
   writeFileSync(join(repo, "zdd", "config.json"), config);
   assert.match(applyFails(repo, { extractorOptions: { nextjs: { refs: { subscribeCalls: "live.onInsert" } } } }), /nextjs\.refs\.subscribeCalls must be an array of call names/);
   assert.match(applyFails(repo, { extractorOptions: { "react-router": { subscribeCalls: ["ok", 3] } } }), /react-router\.subscribeCalls must be an array of call names/);
+  assert.match(applyFails(repo, { extractorOptions: { "supabase-js": { subscribeCalls: [""] } } }), /supabase-js\.subscribeCalls must be an array of call names/, "where 0.9 reads it (decision 0037)");
   assert.equal(readFileSync(join(repo, "zdd", "config.json"), "utf8"), config);
   applyIn(repo, { extractorOptions: { nextjs: { refs: { subscribeCalls: ["live.onInsert"] } } } });
 });

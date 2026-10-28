@@ -9,15 +9,26 @@
     { "required": ["extractors"], "not": { "anyOf": [{ "required": ["adapter"] }, { "required": ["adapterOptions"] }] } },
     { "required": ["adapter"], "not": { "anyOf": [{ "required": ["extractors"] }, { "required": ["extractorOptions"] }] } }
   ],
+  "not": { "required": ["engine", "release"] },
   "additionalProperties": true,
   "properties": {
+    "mapCheck": {
+      "const": "owed",
+      "description": "The first map check, done with the developer (decision 0039): written \"owed\" by bootstrap at a fresh install, removed by `bootstrap.mjs check --done`. On a repo with no code yet it waits for the first derive that finds records. No engine command reads it."
+    },
+    "suiteChecks": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 5,
+      "description": "How many of the standard suite's checks block for this repo's own adapters (decision 0040): `zdd-engine suite` fails on a failing check numbered at or below it and warns on a newer one. Written by bootstrap at a fresh install (every check), raised by \"upgrade ZDD\" where the repo has no adapter of its own, and by `bootstrap.mjs adapters --raise` once its own adapters pass. Absent: every check warns."
+    },
     "extractors": {
       "type": "array",
       "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
       "minItems": 1,
       "uniqueItems": true,
-      "description": "Extractors to run, composed: one per convention in the stack (built-in: supabase, nextjs, fastapi, react-router, components, expo-router, jobs, external-services, generic; `services` is the pre-2.3 name of external-services). Selected by NAME from the engine's registry or from localExtractorDir — never by path. Records from every extractor are merged and cross-extractor refs resolved after the merge.",
-      "examples": [["supabase", "nextjs"], ["supabase", "fastapi"], ["fastapi", "react-router"], ["generic"]],
+      "description": "Extractors to run, composed: one per convention in the stack (built-in: supabase, nextjs, fastapi, react-router, components, expo-router, the background-* readers (vercel, railway, cloudflare, procfile, compose, pg-cron, bullmq, inngest, trigger-dev, sqs, github-actions, declared), external-services, supabase-js, supabase-py, sqlalchemy, generic; `services` is the pre-2.3 name of external-services). Selected by NAME from the engine's registry or from localExtractorDir — never by path. Records from every extractor are merged and cross-extractor refs resolved after the merge.",
+      "examples": [["supabase", "supabase-js", "nextjs"], ["supabase", "supabase-py", "fastapi"], ["supabase", "fastapi", "sqlalchemy"], ["fastapi", "react-router"], ["generic"]],
       "not": { "allOf": [{ "contains": { "const": "services" } }, { "contains": { "const": "external-services" } }] }
     },
     "extractorOptions": {
@@ -58,7 +69,7 @@
                 "extensions": { "type": "array", "items": { "type": "string" }, "default": [".ts", ".tsx", ".js", ".jsx"] },
                 "excludeDirs": { "type": "array", "items": { "type": "string" }, "default": ["node_modules"] },
                 "excludeSuffixes": { "type": "array", "items": { "type": "string" }, "default": [".test.ts", ".test.tsx", ".test.js", ".test.jsx", ".d.ts"] },
-                "subscribeCalls": { "type": "array", "items": { "type": "string" }, "default": [], "description": "Call names whose first string argument is a table a page subscribes to over Supabase Realtime, beside .on(\"postgres_changes\", { table }) — a `subscribes` edge (ZDD 2.1)." }
+                "subscribeCalls": { "type": "array", "items": { "type": "string" }, "deprecated": true, "description": "Read by supabase-js since 0.9 (decision 0037): set here, it is ignored with a warning — move it to extractorOptions.supabase-js.subscribeCalls." }
               }
             }
           }
@@ -72,13 +83,43 @@
             "appVar": { "type": "string", "default": "app" }
           }
         },
+        "supabase-js": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Data access through the Supabase JavaScript client (.from / .rpc / Realtime), one record per top-level declaration, the module's own top-level code as <module> (decision 0037). The route and screen extractors name the code they run; the core joins the two.",
+          "properties": {
+            "roots": { "type": "array", "items": { "type": "string" }, "default": ["."], "description": "Files or directories scanned for JS / TS source." },
+            "extensions": { "type": "array", "items": { "type": "string" }, "default": [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"] },
+            "excludeDirs": { "type": "array", "items": { "type": "string" }, "default": ["node_modules", ".git", ".next", "dist", "build", "coverage"] },
+            "excludeSuffixes": { "type": "array", "items": { "type": "string" }, "default": [".test.ts", ".test.tsx", ".test.js", ".test.jsx", ".spec.ts", ".spec.tsx", ".spec.js", ".spec.jsx", ".d.ts"] },
+            "subscribeCalls": { "type": "array", "items": { "type": "string" }, "default": [], "description": "Call names whose first string argument is a table the code subscribes to over Supabase Realtime (e.g. \"live.onInsert\"), beside the client's own .on(\"postgres_changes\", { table }) — a `subscribes` edge (ZDD 2.1; on the web extractors before 0.9)." }
+          }
+        },
+        "supabase-py": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Data access through the Supabase Python client (.table / .from_ / .rpc), one record per function (decision 0037).",
+          "properties": {
+            "roots": { "type": "array", "items": { "type": "string" }, "default": ["."], "description": "Files or directories scanned for .py functions." },
+            "excludeDirs": { "type": "array", "items": { "type": "string" }, "default": ["node_modules", ".venv", "venv", "__pycache__", ".git", "tests", "test"] }
+          }
+        },
+        "sqlalchemy": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Data access through raw SQL in Python string literals (SQLAlchemy text(), any driver), one record per function, with reads and writes edges (decision 0037). The ORM is not read.",
+          "properties": {
+            "roots": { "type": "array", "items": { "type": "string" }, "default": ["."], "description": "Files or directories scanned for .py functions." },
+            "excludeDirs": { "type": "array", "items": { "type": "string" }, "default": ["node_modules", ".venv", "venv", "__pycache__", ".git", "tests", "test"] }
+          }
+        },
         "react-router": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
             "routesFile": { "type": "string", "default": "src/routes.tsx", "description": "The file declaring the route tree in code: a RouteObject[] / createBrowserRouter([...]) array, or <Route> elements. One surface per route with a path; layout ancestors become facts.guards." },
             "srcAliasRoot": { "type": "string", "description": "Where the tsconfig @/ alias points; default the routes file's directory." },
-            "subscribeCalls": { "type": "array", "items": { "type": "string" }, "default": [], "description": "Call names whose first string argument is a table the screen subscribes to over Supabase Realtime (e.g. \"live.onInsert\"), beside the client's own .on(\"postgres_changes\", { table }) — a `subscribes` edge (ZDD 2.1)." }
+            "subscribeCalls": { "type": "array", "items": { "type": "string" }, "deprecated": true, "description": "Read by supabase-js since 0.9 (decision 0037): set here, it is ignored with a warning — move it to extractorOptions.supabase-js.subscribeCalls." }
           }
         },
         "components": {
@@ -104,17 +145,77 @@
             "srcAliasRoot": { "type": "string", "description": "Where the tsconfig @/ alias points; default appDir's parent." }
           }
         },
-        "jobs": {
+        "background-vercel": {
           "type": "object",
           "additionalProperties": false,
-          "description": "Background work — what runs without a click (ZDD 2.1, opt-in; decisions 0020 and 0025): scheduled jobs, workers and queues from where the repo says they run — Procfile lines, Railway startCommand (+ cronSchedule = scheduled), Compose services with a command, Vercel crons, a Cloudflare worker's triggers, pg_cron in a migration, BullMQ/Inngest/Trigger.dev/SQS queues in source. A package.json script counts only when one of those runs it (`pnpm run worker` in a Procfile); on its own it is a hand-run tool. GitHub Actions schedules are an opt-in (`includeGithubActions`), shown apart. The mode is never guessed: scheduled from a schedule, worker from `modes`, else unknown with a lint warning.",
-          "properties": {
-            "roots": { "type": "array", "items": { "type": "string" }, "default": ["."], "description": "Where manifests are looked for; node_modules and .git are never entered." },
-            "exclude": { "type": "array", "items": { "type": "string" }, "description": "Script names that are not jobs. Default: dev, start, test, lint, build, typecheck, format, prepare, postinstall, and anything test:*, lint:*, build:*, check:*." },
-            "modes": { "type": "object", "additionalProperties": { "type": "string", "enum": ["worker", "scheduled"] }, "description": "The mode of a job the manifests do not state, by job name." },
-            "includeGithubActions": { "type": "boolean", "default": false, "description": "ZDD 2.3: list `.github/workflows` schedules as background work too, shown apart as repo housekeeping. Off by default: they are the repo's upkeep, not the app." },
-            "entries": { "type": "array", "description": "Processes no manifest names.", "items": { "type": "object", "required": ["name"], "additionalProperties": false, "properties": { "name": { "type": "string" }, "module": { "type": "string", "description": "A Python module, dotted (app.housekeeping)." }, "file": { "type": "string", "description": "A JS/TS entry file, relative to cwd." }, "cwd": { "type": "string", "description": "The folder the command runs in (default the repo root)." }, "mode": { "type": "string", "enum": ["worker", "scheduled"] }, "schedule": { "type": "string" }, "command": { "type": "string" }, "description": { "type": "string" } } } }
-          }
+          "description": "Background work (decision 0038): Vercel crons from vercel.json: one scheduled task per crons entry, calling its route. One background-task record per task; the core joins two readers' views of one task (the same code file, or the same command from the same folder).",
+          "properties": { "roots": { "type": "array", "items": { "type": "string" }, "default": ["."], "description": "Where its files are looked for; dependencies and build output are never entered." }, "exclude": { "type": "array", "items": { "type": "string" }, "description": "Process names that are not background work. Default: dev, start, test, lint, build, typecheck, format, prepare, postinstall, and anything test:*, lint:*, build:*, check:*." }, "modes": { "type": "object", "additionalProperties": { "type": "string", "enum": ["worker", "scheduled"] }, "description": "The mode of a task the files do not state, by task name — the option lint names for an unknown mode (CR-010)." } }
+        },
+        "background-railway": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Background work (decision 0038): Railway's railway.toml / railway.json: a service's startCommand (+ cronSchedule = scheduled). A deployment record: it joins the task another reader names for the same code or the same command from the same folder. One background-task record per task; the core joins two readers' views of one task (the same code file, or the same command from the same folder).",
+          "properties": { "roots": { "type": "array", "items": { "type": "string" }, "default": ["."], "description": "Where its files are looked for; dependencies and build output are never entered." }, "exclude": { "type": "array", "items": { "type": "string" }, "description": "Process names that are not background work. Default: dev, start, test, lint, build, typecheck, format, prepare, postinstall, and anything test:*, lint:*, build:*, check:*." }, "modes": { "type": "object", "additionalProperties": { "type": "string", "enum": ["worker", "scheduled"] }, "description": "The mode of a task the files do not state, by task name — the option lint names for an unknown mode (CR-010)." } }
+        },
+        "background-cloudflare": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Background work (decision 0038): A Cloudflare Worker's [triggers] crons in wrangler.toml, running its main module's scheduled(). One background-task record per task; the core joins two readers' views of one task (the same code file, or the same command from the same folder).",
+          "properties": { "roots": { "type": "array", "items": { "type": "string" }, "default": ["."], "description": "Where its files are looked for; dependencies and build output are never entered." }, "exclude": { "type": "array", "items": { "type": "string" }, "description": "Process names that are not background work. Default: dev, start, test, lint, build, typecheck, format, prepare, postinstall, and anything test:*, lint:*, build:*, check:*." }, "modes": { "type": "object", "additionalProperties": { "type": "string", "enum": ["worker", "scheduled"] }, "description": "The mode of a task the files do not state, by task name — the option lint names for an unknown mode (CR-010)." } }
+        },
+        "background-procfile": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Background work (decision 0038): Procfile lines (not web), resolved to the module or file they run; the mode is the modes option, else unknown. One background-task record per task; the core joins two readers' views of one task (the same code file, or the same command from the same folder).",
+          "properties": { "roots": { "type": "array", "items": { "type": "string" }, "default": ["."], "description": "Where its files are looked for; dependencies and build output are never entered." }, "exclude": { "type": "array", "items": { "type": "string" }, "description": "Process names that are not background work. Default: dev, start, test, lint, build, typecheck, format, prepare, postinstall, and anything test:*, lint:*, build:*, check:*." }, "modes": { "type": "object", "additionalProperties": { "type": "string", "enum": ["worker", "scheduled"] }, "description": "The mode of a task the files do not state, by task name — the option lint names for an unknown mode (CR-010)." } }
+        },
+        "background-compose": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Background work (decision 0038): Docker Compose services with a job-shaped command and no published ports: workers. One background-task record per task; the core joins two readers' views of one task (the same code file, or the same command from the same folder).",
+          "properties": { "roots": { "type": "array", "items": { "type": "string" }, "default": ["."], "description": "Where its files are looked for; dependencies and build output are never entered." }, "exclude": { "type": "array", "items": { "type": "string" }, "description": "Process names that are not background work. Default: dev, start, test, lint, build, typecheck, format, prepare, postinstall, and anything test:*, lint:*, build:*, check:*." }, "modes": { "type": "object", "additionalProperties": { "type": "string", "enum": ["worker", "scheduled"] }, "description": "The mode of a task the files do not state, by task name — the option lint names for an unknown mode (CR-010)." } }
+        },
+        "background-pg-cron": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Background work (decision 0038): pg_cron schedules (cron.schedule) in SQL migrations, calling the database function their body names. One background-task record per task; the core joins two readers' views of one task (the same code file, or the same command from the same folder).",
+          "properties": { "roots": { "type": "array", "items": { "type": "string" }, "default": ["."], "description": "Where its files are looked for; dependencies and build output are never entered." }, "exclude": { "type": "array", "items": { "type": "string" }, "description": "Process names that are not background work. Default: dev, start, test, lint, build, typecheck, format, prepare, postinstall, and anything test:*, lint:*, build:*, check:*." }, "modes": { "type": "object", "additionalProperties": { "type": "string", "enum": ["worker", "scheduled"] }, "description": "The mode of a task the files do not state, by task name — the option lint names for an unknown mode (CR-010)." } }
+        },
+        "background-bullmq": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Background work (decision 0038): BullMQ queues in source: new Queue produces, new Worker consumes. One background-task record per task; the core joins two readers' views of one task (the same code file, or the same command from the same folder).",
+          "properties": { "roots": { "type": "array", "items": { "type": "string" }, "default": ["."], "description": "Where its files are looked for; dependencies and build output are never entered." }, "exclude": { "type": "array", "items": { "type": "string" }, "description": "Process names that are not background work. Default: dev, start, test, lint, build, typecheck, format, prepare, postinstall, and anything test:*, lint:*, build:*, check:*." }, "modes": { "type": "object", "additionalProperties": { "type": "string", "enum": ["worker", "scheduled"] }, "description": "The mode of a task the files do not state, by task name — the option lint names for an unknown mode (CR-010)." } }
+        },
+        "background-inngest": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Background work (decision 0038): Inngest functions in source: createFunction({ id }, { event | cron }). One background-task record per task; the core joins two readers' views of one task (the same code file, or the same command from the same folder).",
+          "properties": { "roots": { "type": "array", "items": { "type": "string" }, "default": ["."], "description": "Where its files are looked for; dependencies and build output are never entered." }, "exclude": { "type": "array", "items": { "type": "string" }, "description": "Process names that are not background work. Default: dev, start, test, lint, build, typecheck, format, prepare, postinstall, and anything test:*, lint:*, build:*, check:*." }, "modes": { "type": "object", "additionalProperties": { "type": "string", "enum": ["worker", "scheduled"] }, "description": "The mode of a task the files do not state, by task name — the option lint names for an unknown mode (CR-010)." } }
+        },
+        "background-trigger-dev": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Background work (decision 0038): Trigger.dev tasks in source: task({ id }), schedules.task({ id, cron }). One background-task record per task; the core joins two readers' views of one task (the same code file, or the same command from the same folder).",
+          "properties": { "roots": { "type": "array", "items": { "type": "string" }, "default": ["."], "description": "Where its files are looked for; dependencies and build output are never entered." }, "exclude": { "type": "array", "items": { "type": "string" }, "description": "Process names that are not background work. Default: dev, start, test, lint, build, typecheck, format, prepare, postinstall, and anything test:*, lint:*, build:*, check:*." }, "modes": { "type": "object", "additionalProperties": { "type": "string", "enum": ["worker", "scheduled"] }, "description": "The mode of a task the files do not state, by task name — the option lint names for an unknown mode (CR-010)." } }
+        },
+        "background-sqs": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Background work (decision 0038): Amazon SQS queues in source: a QueueUrl with SendMessage / ReceiveMessage. One background-task record per task; the core joins two readers' views of one task (the same code file, or the same command from the same folder).",
+          "properties": { "roots": { "type": "array", "items": { "type": "string" }, "default": ["."], "description": "Where its files are looked for; dependencies and build output are never entered." }, "exclude": { "type": "array", "items": { "type": "string" }, "description": "Process names that are not background work. Default: dev, start, test, lint, build, typecheck, format, prepare, postinstall, and anything test:*, lint:*, build:*, check:*." }, "modes": { "type": "object", "additionalProperties": { "type": "string", "enum": ["worker", "scheduled"] }, "description": "The mode of a task the files do not state, by task name — the option lint names for an unknown mode (CR-010)." } }
+        },
+        "background-github-actions": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Background work (decision 0038): GitHub Actions schedules (on.schedule cron), shown apart as repo housekeeping. Listing this reader is the opt-in (jobs.includeGithubActions before 0.9). One background-task record per task; the core joins two readers' views of one task (the same code file, or the same command from the same folder).",
+          "properties": { "roots": { "type": "array", "items": { "type": "string" }, "default": ["."], "description": "Where its files are looked for; dependencies and build output are never entered." }, "exclude": { "type": "array", "items": { "type": "string" }, "description": "Process names that are not background work. Default: dev, start, test, lint, build, typecheck, format, prepare, postinstall, and anything test:*, lint:*, build:*, check:*." }, "modes": { "type": "object", "additionalProperties": { "type": "string", "enum": ["worker", "scheduled"] }, "description": "The mode of a task the files do not state, by task name — the option lint names for an unknown mode (CR-010)." } }
+        },
+        "background-declared": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Background tasks declared by hand (decision 0038; jobs.entries before 0.9). One that runs a reader's code, or the same command from the same folder, is joined with it.",
+          "properties": { "roots": { "type": "array", "items": { "type": "string" }, "default": ["."], "description": "Where its files are looked for; dependencies and build output are never entered." }, "exclude": { "type": "array", "items": { "type": "string" }, "description": "Process names that are not background work. Default: dev, start, test, lint, build, typecheck, format, prepare, postinstall, and anything test:*, lint:*, build:*, check:*." }, "modes": { "type": "object", "additionalProperties": { "type": "string", "enum": ["worker", "scheduled"] }, "description": "The mode of a task the files do not state, by task name — the option lint names for an unknown mode (CR-010)." }, "entries": { "type": "array", "description": "Background tasks declared by hand: the fallback for a platform no reader covers yet, or a process whose manifest runs build output (name its source file).", "items": { "type": "object", "required": ["name"], "anyOf": [{ "required": ["module"] }, { "required": ["file"] }], "additionalProperties": false, "properties": { "name": { "type": "string" }, "module": { "type": "string", "description": "A Python module, dotted (app.housekeeping)." }, "file": { "type": "string", "description": "A JS/TS entry file, relative to cwd." }, "cwd": { "type": "string", "description": "The folder the command runs in (default the repo root)." }, "mode": { "type": "string", "enum": ["worker", "scheduled"] }, "schedule": { "type": "string" }, "command": { "type": "string" }, "description": { "type": "string" } } } } }
         },
         "external-services": {
           "type": "object",
@@ -152,7 +253,7 @@
     "adapter": {
       "type": "string",
       "deprecated": true,
-      "description": "DEPRECATED (pre-1.0): the single monolithic adapter. Still honoured — `nextjs-supabase` expands to extractors [supabase, nextjs] with adapterOptions split by key — but prints a deprecation note on every derive; \"upgrade ZDD\" migrates it for you.",
+      "description": "DEPRECATED (pre-1.0): the single monolithic adapter. Still honoured — `nextjs-supabase` expands to extractors [supabase, supabase-js, nextjs] with adapterOptions split by key — but prints a deprecation note on every derive; \"upgrade ZDD\" migrates it for you.",
       "examples": ["nextjs-supabase"]
     },
     "adapterOptions": {
@@ -161,11 +262,18 @@
       "description": "DEPRECATED (pre-1.0): options for the single `adapter`. Use extractorOptions.",
       "additionalProperties": true
     },
-    "engine": {
+    "release": {
       "type": "string",
       "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(\\.(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*))?(\\+([0-9a-zA-Z-]+(\\.[0-9a-zA-Z-]+)*))?$",
-      "description": "The @rich-rees/zdd-engine version this repo was bootstrapped for — written by bootstrap, rewritten by \"upgrade ZDD\", compared against the plugin by load (skew warning). Mirrors the pin in the CI workflow / pre-push hook so a repo without CI still has one.",
-      "examples": ["2.2.1"]
+      "description": "The ZDD release this repo is on (decision 0042): the plugin and the engine, @rich-rees/zdd, share its number. Written by bootstrap, rewritten by \"upgrade ZDD\", compared against the plugin by load (skew warning). Mirrors the pin in the CI workflow / pre-push hook so a repo without CI still has one.",
+      "examples": ["0.9.0"]
+    },
+    "engine": {
+      "type": "string",
+      "deprecated": true,
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(\\.(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*))?(\\+([0-9a-zA-Z-]+(\\.[0-9a-zA-Z-]+)*))?$",
+      "description": "DEPRECATED (before 0.9): the old line's pin, a version of @rich-rees/zdd-engine (0.2.0 to 2.5.0). \"upgrade ZDD\" replaces it with `release`. Beside a `release` it is stale (a plugin from before 0.9 wrote it) and the upgrade drops it; no release writes both (decision 0042).",
+      "examples": ["2.5.0"]
     },
     "hooks": {
       "type": "object",
@@ -256,10 +364,10 @@
         },
         "strictKinds": {
           "type": "array",
-          "items": { "type": "string", "enum": ["component", "job", "external-service", "service"] },
+          "items": { "type": "string", "enum": ["component", "background-task", "external-service", "service"] },
           "uniqueItems": true,
           "default": [],
-          "description": "The opt-in kinds (ZDD 2.1: component, job, external-service — spelt `service` until 2.3, still accepted while the config says `services`) that strict also governs. Unlisted, an unclaimed record of such a kind is a warning under strict, never a failure, so switching an extractor on never turns a green lint red by itself (decision 0017). A shared component is claimable; a page-private one is not."
+          "description": "The opt-in kinds (ZDD 2.1: component, background-task — `job` before 0.9 —, external-service — spelt `service` until 2.3, still accepted while the config says `services`) that strict also governs. Unlisted, an unclaimed record of such a kind is a warning under strict, never a failure, so switching an extractor on never turns a green lint red by itself (decision 0017). A shared component is claimable; a page-private one is not."
         }
       }
     },

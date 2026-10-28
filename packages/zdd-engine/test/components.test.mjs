@@ -11,11 +11,11 @@ import { readFileSync, writeFileSync, rmSync, mkdtempSync, cpSync } from "node:f
 import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { scanComponents, parseProps, importedNames, derive } from "../src/extractors/components/index.mjs";
-import { derive as reactRouter } from "../src/extractors/react-router/index.mjs";
-import { derive as fastapi } from "../src/extractors/fastapi/index.mjs";
-import { resolveRefs } from "../src/lib/resolve-refs.mjs";
-import { makeExtractorIo } from "../src/lib/extractor-io.mjs";
+import { scanComponents, parseProps, importedNames, derive } from "../src/adapters/components/index.mjs";
+import { derive as reactRouter } from "../src/adapters/react-router/index.mjs";
+import { derive as fastapi } from "../src/adapters/fastapi/index.mjs";
+import { resolveRefs } from "../src/core/lib/resolve-refs.mjs";
+import { makeExtractorIo } from "../src/core/lib/extractor-io.mjs";
 
 const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const BIN = join(PKG, "bin", "zdd-engine.mjs");
@@ -88,6 +88,7 @@ test("fixture: four records — props inline, from a same-file type, from an imp
   assert.equal(panel.facts.propsType, undefined);
   assert.deepEqual(panel.facts.edges, {
     calls: ["?route:/jobs/*/route", "?route:/jobs/*/route-search"],
+    reads: ["?code:apps/web/src/components/RouteSearchPanel.tsx#*"], // its file's code, for a data-access adapter (decision 0037)
     usedBy: ["?surface:apps/web/src/pages/JobsPage.tsx"],
     uses: ["component:apps/web/src/components/Badge.tsx#Badge"],
   });
@@ -109,6 +110,7 @@ test("fixture: four records — props inline, from a same-file type, from an imp
   const button = by("Button");
   assert.deepEqual(button.resource, ["packages/ui/src/Button.native.tsx", "packages/ui/src/Button.web.tsx"]);
   assert.deepEqual(button.facts.platforms, ["native", "web"]);
+  assert.deepEqual(button.facts.edges.reads, ["?code:packages/ui/src/Button.native.tsx#*", "?code:packages/ui/src/Button.web.tsx#*"], "each file of the pair names its code (CR-072)");
   assert.equal(button.facts.propsType, "ButtonProps");
   assert.equal(button.facts.propsFrom, "./types");
   assert.deepEqual(button.facts.usedBy, ["apps/web/src/pages/JobsPage.tsx"], "imported by the pair's base name");
@@ -122,7 +124,7 @@ test("fixture: four records — props inline, from a same-file type, from an imp
 test("after the merge: usedBy resolves to the surfaces by their element file, calls to the expanded routes (never /health), uses to the component", () => {
   const io = makeExtractorIo(FIXTURE, "components");
   const api = fastapi({ repoRoot: FIXTURE, options: { roots: ["apps/api"] } });
-  const web = reactRouter({ repoRoot: FIXTURE, options: { routesFile: "apps/web/src/routes.tsx" } });
+  const web = reactRouter({ repoRoot: FIXTURE, io: makeExtractorIo(FIXTURE, "reactRouter"), options: { routesFile: "apps/web/src/routes.tsx" } });
   const comps = derive({ repoRoot: FIXTURE, options: { roots: ["apps/web/src", "packages/ui/src"] }, io });
   const { records } = resolveRefs([...api.records, ...web.records, ...comps.records]);
   const panel = records.find((r) => r.title === "RouteSearchPanel");

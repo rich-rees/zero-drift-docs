@@ -10,10 +10,10 @@ import { readFileSync, writeFileSync, rmSync, mkdtempSync, cpSync, existsSync } 
 import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { scanEnvReads, scanImports, derive, CANDIDATE_SUFFIXES, BUILT_IN_IGNORE } from "../src/extractors/external-services/index.mjs";
-import { derive as fastapi } from "../src/extractors/fastapi/index.mjs";
-import { resolveRefs } from "../src/lib/resolve-refs.mjs";
-import { makeExtractorIo } from "../src/lib/extractor-io.mjs";
+import { scanEnvReads, scanImports, derive, CANDIDATE_SUFFIXES, BUILT_IN_IGNORE } from "../src/adapters/external-services/index.mjs";
+import { derive as fastapi } from "../src/adapters/fastapi/index.mjs";
+import { resolveRefs } from "../src/core/lib/resolve-refs.mjs";
+import { makeExtractorIo } from "../src/core/lib/extractor-io.mjs";
 
 const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const BIN = join(PKG, "bin", "zdd-engine.mjs");

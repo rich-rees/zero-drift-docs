@@ -9,10 +9,11 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { walkDir } from "../src/lib/walk.mjs";
-import { derive as supabase } from "../src/extractors/supabase/index.mjs";
-import { derive as fastapi } from "../src/extractors/fastapi/index.mjs";
-import { derive as nextjs } from "../src/extractors/nextjs/index.mjs";
+import { makeExtractorIo } from "../src/core/lib/extractor-io.mjs";
+import { walkDir } from "../src/core/lib/walk.mjs";
+import { derive as supabase } from "../src/adapters/supabase/index.mjs";
+import { derive as fastapi } from "../src/adapters/fastapi/index.mjs";
+import { derive as nextjs } from "../src/adapters/nextjs/index.mjs";
 
 const scratch = (files) => {
   const root = mkdtempSync(join(tmpdir(), "zdd-walk-"));
@@ -54,10 +55,10 @@ test("CR-062: walkDir skips a dangling file or directory link, reports it, and s
 test("CR-062: supabase — a dangling .sql link in a migrations dir is skipped with a diagnostic; the real migrations replay", (t) => {
   const root = scratch({ "migrations/0001_init.sql": "create table jobs (id uuid primary key);\n" });
   if (!dangle(t, root, "migrations/0002_ghost.sql")) return;
-  const { records, diagnostics } = supabase({ repoRoot: root, options: { migrationNamespaces: [{ name: "db", dir: "migrations" }] } });
+  const { records, diagnostics } = supabase({ repoRoot: root, io: makeExtractorIo(root, "supabase"), options: { migrationNamespaces: [{ name: "db", dir: "migrations" }] } });
   assert.deepEqual(records.map((r) => r.id), ["table:db/jobs"]);
   assert.equal(diagnostics.length, 1, JSON.stringify(diagnostics));
-  assert.match(diagnostics[0], /migrations\/0002_ghost\.sql.*dangling symlink/);
+  assert.match(diagnostics[0], /migrations\/0002_ghost\.sql.*symlink — not followed/); // through io since 0.9 (decision 0040)
   rmSync(root, { recursive: true, force: true });
 });
 
@@ -70,9 +71,10 @@ test("CR-062: fastapi and nextjs — a dangling link under a scanned root is ski
   symlinkSync(join(root, "nowhere"), join(root, "src", "app", "ghost"), "junction");
   const fast = fastapi({ repoRoot: root, options: { roots: ["api"] } });
   assert.deepEqual(fast.records.map((r) => r.id), ["route:/jobs/"]);
-  assert.ok(fast.diagnostics.some((d) => /api\/ghost\.py.*dangling symlink/.test(d)), JSON.stringify(fast.diagnostics));
-  const next = nextjs({ repoRoot: root, options: { appDir: "src/app" } });
+  // FastAPI reads through io (CR-015), which never follows a symlink, dangling or not.
+  assert.ok(fast.diagnostics.some((d) => /api\/ghost\.py.*(dangling symlink|symlink — not followed)/.test(d)), JSON.stringify(fast.diagnostics));
+  const next = nextjs({ repoRoot: root, io: makeExtractorIo(root, "nextjs"), options: { appDir: "src/app" } });
   assert.deepEqual(next.records.map((r) => r.id), ["surface:/"]);
-  assert.ok(next.diagnostics.some((d) => /src\/app\/ghost.*dangling symlink/.test(d)), JSON.stringify(next.diagnostics));
+  assert.ok(next.diagnostics.some((d) => /src\/app\/ghost.*symlink — not followed/.test(d)), JSON.stringify(next.diagnostics)); // through io since 0.9
   rmSync(root, { recursive: true, force: true });
 });

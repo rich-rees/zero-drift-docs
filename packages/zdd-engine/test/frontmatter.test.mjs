@@ -4,7 +4,7 @@
 // Run: node --test "test/*.test.mjs"
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseFrontmatter } from "../src/lib/frontmatter.mjs";
+import { parseFrontmatter } from "../src/core/lib/frontmatter.mjs";
 
 const LF = `---
 type: Feature

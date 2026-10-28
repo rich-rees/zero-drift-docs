@@ -65,6 +65,6 @@ Optional: `grill` runs a design interview that writes glossary terms and ADRs in
 work decisions out in plan mode and let "update ZDD" capture them). Matt Pocock's
 skills read a root `GLOSSARY.md` and `docs/adr/` by default; this repo's are under `<BUNDLE_DIR>/`. See `docs/agents/domain.md`.
 
-**A ZDD defect** — something ZDD itself got wrong, not something wrong in this
-repo — goes to ZDD's issues page, https://github.com/rich-rees/zero-drift-docs/issues,
-labelled `finding`. Propose filing it to the developer first, like any task.
+**A ZDD defect** — something ZDD itself got wrong, not something wrong in this repo — is
+explained to the developer first, in plain words, then offered as a ready-written report for
+ZDD's Discussions, "Bug reports": https://github.com/rich-rees/zero-drift-docs/discussions (no Issues).

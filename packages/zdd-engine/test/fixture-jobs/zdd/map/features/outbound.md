@@ -5,5 +5,5 @@ description: Reliable outbound work and its worker.
 tags: [outbound]
 ---
 
-- [The worker](../../metadata/job/worker.json)
+- [The worker](../../metadata/background-task/worker.json)
 - [Outbound messages](../../metadata/table/db--outbound_messages.json)

@@ -9,7 +9,7 @@
 # in --check mode and fails if the committed artifacts don't match source.
 #
 # No LLM in CI, by design — this job is deterministic and secret-free. It calls
-# the same @rich-rees/zdd-engine the plugin's skills call, so CI and the agent
+# the same engine (@rich-rees/zdd) the plugin's skills call, so CI and the agent
 # can never disagree about what "fresh" means.
 #
 # The engine version is PINNED (one place, below): an unpinned npx would pick up
@@ -24,7 +24,7 @@ on:
   workflow_dispatch:
 
 env:
-  ZDD_ENGINE: "@rich-rees/zdd-engine@2.5.0"
+  ZDD_ENGINE: "@rich-rees/zdd@0.9.0"
 
 jobs:
   zero-drift:
@@ -58,6 +58,14 @@ jobs:
       # deletes it in the update commit. A local lint only warns about it.
       - name: Store lints (supersession symmetry, blessings, no pattern plan left)
         run: npx -y "$ZDD_ENGINE" lint --merge
+
+      # The adapters this repo wrote itself (localExtractorDir) pass the
+      # standard suite, each on its own fixture, never on your code (decision
+      # 0040). A check newer than zdd/config.json's suiteChecks only warns
+      # until "upgrade ZDD" has your adapter pass it. With no adapter of your
+      # own this says so and passes; ZDD's adapters pass it in ZDD's own CI.
+      - name: Your own adapters pass the standard suite
+        run: npx -y "$ZDD_ENGINE" suite
 
       - name: Semantic-map freshness (advisory)
         run: npx -y "$ZDD_ENGINE" freshness >> "$GITHUB_STEP_SUMMARY"

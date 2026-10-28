@@ -5,7 +5,7 @@
 // Run: node --test "test/*.test.mjs"
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseRecord, recordsInLog, namesIn, glossaryTerms, itemMatcher, printable, SECTIONS, LOG_FORMAT } from "../src/lib/zdd-record.mjs";
+import { parseRecord, recordsInLog, namesIn, glossaryTerms, itemMatcher, printable, SECTIONS, LOG_FORMAT } from "../src/core/lib/zdd-record.mjs";
 
 const GOOD = `feat: offers (APP-1)
 

@@ -53,14 +53,20 @@ const assertTreesEqual = (a, b, label) => {
 const composedConfig = (legacy) => {
   const { adapter, adapterOptions, ...rest } = legacy;
   const { migrationNamespaces, externalBuckets, ...nextjs } = adapterOptions;
-  return { ...rest, extractors: ["supabase", "nextjs"], extractorOptions: { supabase: { migrationNamespaces, externalBuckets }, nextjs } };
+  return { ...rest, extractors: ["supabase", "supabase-js", "nextjs"], extractorOptions: { supabase: { migrationNamespaces, externalBuckets }, nextjs } };
 };
 
-test("extractors [supabase, nextjs] reproduce the v0.3.1 adapter output byte-for-byte", () => {
+test("extractors [supabase, supabase-js, nextjs] reproduce the v0.3.1 adapter output byte-for-byte; without supabase-js every derive warns", () => {
   const repo = mkRepo(FIXTURE);
-  writeConfig(repo, composedConfig(readConfig(repo)));
+  const composed = composedConfig(readConfig(repo));
+  writeConfig(repo, composed);
   run(repo, ["derive"]);
   assertTreesEqual(tree(join(repo, "zdd", "metadata")), tree(GOLDEN), "composed vs golden");
+  // The pre-0.9 composition: the client calls are nobody's to read now, and derive says so (CR-013).
+  writeConfig(repo, { ...composed, extractors: ["supabase", "nextjs"] });
+  const { status, stderr } = spawnSync(process.execPath, [BIN, "derive"], { cwd: repo, encoding: "utf8" });
+  assert.equal(status, 0, stderr);
+  assert.match(stderr, /WARNING \[data-access\].*no data-access adapter is configured/);
   rmSync(repo, { recursive: true, force: true });
 });
 
@@ -282,15 +288,40 @@ test("localExtractorDir: a repo-local extractor is selected by name; a path stri
   rmSync(repo, { recursive: true, force: true });
 });
 
-test("unknown extractor name lists the known names: registry + local dir", () => {
+test("unknown extractor name lists the known names: every catalogue adapter and alias, plus the local dir (CR-011)", async () => {
+  const { catalogue } = await import("../src/core/lib/catalogue.mjs");
+  const { names, aliases } = catalogue();
   const repo = mkRepo(FIXTURE_GREENFIELD);
   mkdirSync(join(repo, "zdd", "extractors"), { recursive: true });
   writeFileSync(join(repo, "zdd", "extractors", "demo.mjs"), DEMO_EXTRACTOR);
   writeConfig(repo, { ...readConfig(repo), localExtractorDir: "zdd/extractors", extractors: ["rails"] });
   const err = runFail(repo, ["derive"]);
   assert.match(err, /Unknown extractor 'rails'/);
-  for (const name of ["supabase", "nextjs", "fastapi", "react-router", "generic", "demo"]) assert.ok(err.includes(name), `${name} listed: ${err}`);
+  const known = /\(known: ([^;)]*)/.exec(err)?.[1].split(", ") ?? [];
+  assert.deepEqual(known, [...names.keys(), ...Object.keys(aliases)].sort(), err);
+  assert.match(err, /local zdd\/extractors: demo/);
   rmSync(repo, { recursive: true, force: true });
+});
+
+test("CR-007: a local adapter may not reuse a catalogue name, in either form, and nothing is written", () => {
+  for (const form of ["file", "folder"]) {
+    const repo = mkRepo(FIXTURE_GREENFIELD);
+    const dir = join(repo, "zdd", "extractors");
+    if (form === "file") {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, "generic.mjs"), DEMO_EXTRACTOR);
+    } else {
+      mkdirSync(join(dir, "generic"), { recursive: true });
+      writeFileSync(join(dir, "generic", "index.mjs"), DEMO_EXTRACTOR);
+    }
+    writeConfig(repo, { ...readConfig(repo), localExtractorDir: "zdd/extractors", extractors: ["generic"] });
+    const before = existsSync(join(repo, "zdd", "metadata")) ? [...tree(join(repo, "zdd", "metadata")).keys()] : [];
+    const err = runFail(repo, ["derive"]);
+    assert.match(err, /Local extractor 'generic' shadows the built-in of the same name — rename it/, `${form}: ${err}`);
+    const after = existsSync(join(repo, "zdd", "metadata")) ? [...tree(join(repo, "zdd", "metadata")).keys()] : [];
+    assert.deepEqual(after, before, `${form}: no metadata written`);
+    rmSync(repo, { recursive: true, force: true });
+  }
 });
 
 test("determinism: derive + render on two fresh copies of every fixture, and twice on one copy, is byte-identical across zdd/", () => {
@@ -299,6 +330,8 @@ test("determinism: derive + render on two fresh copies of every fixture, and twi
     ["fastapi", FIXTURE_FASTAPI, () => {}],
     ["react-router", join(PKG, "test", "fixture-react-router"), () => {}],
     ["greenfield", FIXTURE_GREENFIELD, () => {}],
+    ["sqlalchemy", join(PKG, "test", "fixture-sqlalchemy"), () => {}],
+    ["jobs (supabase-js, supabase-py, sqlalchemy)", join(PKG, "test", "fixture-jobs"), () => {}],
   ];
   for (const [label, fixture, prep] of cases) {
     const a = mkRepo(fixture);

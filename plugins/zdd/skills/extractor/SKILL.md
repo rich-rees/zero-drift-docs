@@ -39,14 +39,15 @@ Run everything from the adopter's repo root.
 ## Step 0 — preconditions
 
 - `zdd/config.json` exists. If not, stop: adopt first with `zdd:bootstrap`.
-- `engine` in that config is **1.3.0 or later** — the version that hands
-  extractors `io`. Older: say "upgrade ZDD" first. A local extractor may not take a built-in's name, nor a retired one the engine still answers to (`services`, the pre-2.3 name of `external-services`). A scaffolded
+- The config's pin hands extractors `io`: any `release` (the line from 0.9,
+  decision 0042) does; an old-line `engine` pin must be **1.3.0 or later**.
+  Older, or both keys: say "upgrade ZDD" first. A local extractor may not take a built-in's name, nor a retired one the engine still reserves (`services`, the pre-2.3 name of `external-services`; `jobs`, split into the `background-*` readers in 0.9). A scaffolded
   extractor stops `derive` on an older engine by design.
 - The convention is not already a built-in: `supabase` (SQL migrations),
   `nextjs` (App Router), `fastapi` (decorators), `react-router` (a route tree
   in one file), `components` (React / React Native components),
-  `expo-router` (an Expo Router folder tree), `jobs` (workers and scheduled
-  jobs from run manifests), `external-services` (third-party systems by declared
+  `expo-router` (an Expo Router folder tree), the `background-*` readers
+  (workers, schedules and queues, one per platform file), `external-services` (third-party systems by declared
   marker). If it is, the answer is config, not code.
 
 Done when all three hold.
@@ -97,7 +98,7 @@ the sample. Wait for each answer.
    | Vue Router / Angular route arrays, a route table in one file | `react-router` | surface |
    | Blazor `@page`, SvelteKit, Nuxt, Remix — the file tree is the route tree | `nextjs` | surface, route |
    | Vue / Svelte single-file components, Angular `@Component` classes | `components` | component |
-   | A cron table, Celery beat, a systemd timer — a manifest that names a process | `jobs` | job |
+   | A cron table, Celery beat, a systemd timer — a manifest that names a process | a local reader modelled on `background-procfile` (it reads only files named `Procfile`) | background-task |
    | Anything else | `generic` (the minimal example) | — |
 
 6. **Options** — `roots` (folders to walk) and `extensions` (suffixes
@@ -142,7 +143,12 @@ like the roots. It must hold:
 - ordinary declarations, including one that merges with another (two methods
   on one route, two statements on one table);
 - a declaration **commented out**, and one **inside a string** — neither may
-  become a record;
+  become a record (ZDD's standard suite also comments out every line of the
+  fixture itself, by the module's `COMMENT` marks, and expects nothing new
+  — COMMENT must name every kind of file the module reads, `null` for one
+  that takes no line comment;
+  a declaration inside a string goes in `fixture-trap/`, laid out like
+  `fixture/`, which must give nothing either);
 - the convention's awkward corner from Step 1 (a prefix, nesting, an
   include);
 - the answer to `CONVENTION_RECURSES` in the test file (its recursion test
@@ -165,6 +171,14 @@ test is skipped on Windows and runs in Linux CI. Two of the scaffold's tests
 guard the checklist below: one fails if the module's own files import `fs`,
 `child_process` or a network module, or read `process.env`; the other derives
 under a second timezone, locale and environment and requires the same bytes.
+The last runs **ZDD's standard suite** (`zdd-engine suite`, decision 0040)
+— the checks every adapter passes, the catalogue's and this one: the same
+bytes on any machine, a gitignored path never read, a missing root nothing
+to inventory, commented-out code never a record, every read through `io`.
+It runs on a copy of `fixture/` outside the repo, read with the module's
+`SUITE.options`; keep those equal to the fixture's layout. A failing check
+names what to fix. Keep `export const CONTRACT = 1` — the adapter contract
+the module was written for (`zdd-engine contract` prints the table).
 
 ### Hardening checklist
 
@@ -198,9 +212,9 @@ Done when the tests are green and every checklist item holds.
 ## Step 6 — the real repo
 
 ```
-npx -y @rich-rees/zdd-engine@2.5.0 derive --verbose
-npx -y @rich-rees/zdd-engine@2.5.0 render
-npx -y @rich-rees/zdd-engine@2.5.0 lint
+npx -y @rich-rees/zdd@0.9.0 derive --verbose
+npx -y @rich-rees/zdd@0.9.0 render
+npx -y @rich-rees/zdd@0.9.0 lint
 ```
 
 Read every `[<name>]` diagnostic and account for each: a real gap goes back
@@ -211,7 +225,12 @@ metadata together, and link the new records from the map in the next
 "update ZDD" (the lint lists them as unclaimed until a feature does).
 
 Offer the one CI line the script printed (`node --test <test path>`); adding
-it is the user's choice.
+it is the user's choice. ZDD's own workflow already runs the standard suite
+on every adapter of the repo's own (`zdd-engine suite`); it blocks on the
+checks up to `suiteChecks` in `zdd/config.json`, and the newer ones warn. If
+the repo's `suiteChecks` is below the suite's count, say "upgrade ZDD" once
+this adapter passes: `bootstrap.mjs adapters --raise` makes every check
+block.
 
 Done when derive, render and lint exit 0 and the three records are confirmed.
 

@@ -14,11 +14,11 @@ import { spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { gitIgnoredPredicate, ALWAYS_IGNORED } from "../src/lib/ignored.mjs";
-import { makeExtractorIo } from "../src/lib/extractor-io.mjs";
-import { derive as services } from "../src/extractors/external-services/index.mjs";
-import { derive as nextjs } from "../src/extractors/nextjs/index.mjs";
-import { derive as fastapi } from "../src/extractors/fastapi/index.mjs";
+import { gitIgnoredPredicate, ALWAYS_IGNORED } from "../src/core/lib/ignored.mjs";
+import { makeExtractorIo } from "../src/core/lib/extractor-io.mjs";
+import { derive as services } from "../src/adapters/external-services/index.mjs";
+import { derive as nextjs } from "../src/adapters/nextjs/index.mjs";
+import { derive as fastapi } from "../src/adapters/fastapi/index.mjs";
 
 const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const BIN = join(PKG, "bin", "zdd-engine.mjs");
@@ -169,8 +169,8 @@ test("CR-307: io.read refuses an ignored file with its own code; an ignored impo
 });
 
 test("CR-307/CR-320: supabase migrations, a react-router routes module, a FastAPI file root and a Next.js middleware file under an ignore rule are not source", async (t) => {
-  const { derive: supabase } = await import("../src/extractors/supabase/index.mjs");
-  const { derive: reactRouter } = await import("../src/extractors/react-router/index.mjs");
+  const { derive: supabase } = await import("../src/adapters/supabase/index.mjs");
+  const { derive: reactRouter } = await import("../src/adapters/react-router/index.mjs");
   const root = scratch({
     "db/migrations/001_a.sql": "create table public.a (id int);\n",
     "db/migrations/002_local.sql": "create table public.local_only (id int);\n",
@@ -227,9 +227,9 @@ test("CR-403: a repository whose ignored set git cannot list stops derive (fail 
   assert.ok(!existsSync(join(root, "zdd", "metadata")), "nothing was written");
 });
 
-test("CR-423: an ignored import target does not exist for the components extractor, nor an ignored command target for the jobs extractor", async (t) => {
-  const { derive: components } = await import("../src/extractors/components/index.mjs");
-  const { derive: jobs } = await import("../src/extractors/jobs/index.mjs");
+test("CR-423: an ignored import target does not exist for the components extractor, nor an ignored command target for a background reader", async (t) => {
+  const { derive: components } = await import("../src/adapters/components/index.mjs");
+  const { derive: procfile } = await import("../src/adapters/background-procfile/index.mjs");
   const root = scratch({
     "web/src/App.tsx": 'import { Gen } from "./gen/Gen";\nexport function App() { return <Gen /> }\n',
     "web/src/gen/Gen.tsx": "export function Gen() { return null }\n",
@@ -242,14 +242,18 @@ test("CR-423: an ignored import target does not exist for the components extract
   const c = components({ repoRoot: root, options: { roots: ["web/src"] }, io: makeExtractorIo(root, "components") });
   assert.ok(!c.records.some((r) => /gen/i.test(r.id)), "no record for the ignored component");
   assert.ok(!JSON.stringify(c.records).includes("web/src/gen/Gen.tsx"), "no edge into it either");
-  const j = jobs({ repoRoot: root, options: {}, io: makeExtractorIo(root, "jobs") });
-  assert.deepEqual(j.records, [], "a job whose file exists only as ignored build output resolves to no file");
+  const { mergeBackgroundTasks } = await import("../src/core/lib/background-tasks.mjs");
+  const read = procfile({ repoRoot: root, options: {}, io: makeExtractorIo(root, "background-procfile") });
+  assert.equal(read.records.length, 1);
+  assert.ok(read.records[0].unresolved && !read.records[0].runs, "a task whose file exists only as ignored build output resolves to no file");
+  const j = mergeBackgroundTasks(read.records);
+  assert.deepEqual(j.records, [], "the core drops it");
   // Since 2.4.1 said on every derive, as a warning naming the build output.
   assert.ok(j.warnings.some((w) => /'worker' runs dist\/worker\.mjs, which is not a file in the repo \(build output\?\)/.test(w)), j.warnings.join("\n"));
 });
 
 test("CR-408: a Next.js wrapper page does not take an ignored component as its resource; a React Router import never resolves to an ignored candidate that would shadow a tracked one", async (t) => {
-  const { derive: reactRouter } = await import("../src/extractors/react-router/index.mjs");
+  const { derive: reactRouter } = await import("../src/adapters/react-router/index.mjs");
   const root = scratch({
     "src/app/page.tsx": 'import Screen from "@/components/Screen";\nexport default function Page() { return <Screen /> }\n',
     "src/components/Screen.tsx": "export default function Screen() { return null }\n",
@@ -266,9 +270,10 @@ test("CR-408: a Next.js wrapper page does not take an ignored component as its r
   assert.ok(page, "the page is a surface");
   assert.deepEqual(page.resource, ["src/app/page.tsx"], "the ignored component is not its resource");
   const rr = reactRouter({ repoRoot: root, options: { routesFile: "web/src/routes.tsx" }, io: io() });
+  // The screen names the file it resolved (decision 0037: the call itself is supabase-js's to read).
   const text = JSON.stringify(rr.records);
-  assert.ok(text.includes("tracked_table"), "the tracked .js candidate is the one resolved");
-  assert.ok(!text.includes("ignored_table"), "the ignored .tsx never shadows it");
+  assert.ok(text.includes("?code:web/src/Widget.js#*"), "the tracked .js candidate is the one resolved");
+  assert.ok(!text.includes("Widget.tsx"), "the ignored .tsx never shadows it");
 });
 
 test("CR-525: the built-in worktree veto folds case — `.CLAUDE/Worktrees` is the same folder on a case-insensitive disk", (t) => {

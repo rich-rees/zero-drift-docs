@@ -4,12 +4,15 @@ A documentation architecture for repos built by **human + agent pairs**. ZDD kee
 eight documentation artifacts *at most one unit of work behind the code* — and, with
 CI, makes drift in the machine-generated ones **un-mergeable**.
 
-> **Status: 2.5.0.** The plugin installs in Claude Code
+> **Status: 0.9.0.** The plugin installs in Claude Code
 > and in Codex from this one repo; `bootstrap` detects your stack (or grills
 > for it on a greenfield repo), proposes extractors with evidence, and *writes*
-> the opt-ins; the engine (`packages/zdd-engine`, npm `@rich-rees/zdd-engine`)
-> carries composed extractors and the graph artifact + viewer registry. Two
-> plug-in points are open for contributors: extractors in, viewers out.
+> the opt-ins; the engine (`packages/zdd-engine`, npm `@rich-rees/zdd`) is a
+> core that knows no stack beside a catalogue of adapters, and carries the
+> graph artifact + viewer registry. Two plug-in points are open for
+> contributors: adapters in, viewers out. 0.9.0 starts a new version line:
+> the old one, `@rich-rees/zdd-engine` 0.2.0 to 2.5.0, came before it
+> ([decision 0042](docs/decisions/0042-the-engine-is-a-new-package-on-a-new-version-line.md)).
 
 ## What ZDD does, in two lines
 
@@ -143,7 +146,7 @@ Contents: seven skills (`bootstrap`, `load`, `patterns`, `update`, `upgrade`, `g
 shared authoring guide, three hooks (auto-load, fence, Stop prompt), the runbook
 and scaffold scripts, the engine + composed
 extractors + viewers (`packages/zdd-engine`, also the npm package
-`@rich-rees/zdd-engine`), and templates (ZDD's instructions, CI workflow, pre-push
+`@rich-rees/zdd`), and templates (ZDD's instructions, CI workflow, pre-push
 hook, config schema + example, the seed ADR-0001, and the extractor scaffold).
 
 ### What ZDD reads, per stack
@@ -151,16 +154,19 @@ hook, config schema + example, the seed ADR-0001, and the extractor scaffold).
 | Layer | Extractor | Reads |
 |---|---|---|
 | Database | `supabase` | SQL migrations: tables, functions, triggers, buckets |
-| API | `fastapi` | FastAPI decorators: routes, handlers, the tables a handler names |
-| API + pages | `nextjs` | the App Router tree: route handlers, pages, layouts, middleware auth, `fetch('/api/…')` and `.from('x')` refs |
-| Pages | `react-router` | a route tree declared in code: one surface per screen, its guards, the API calls one hop away |
+| API | `fastapi` | FastAPI decorators: routes, handlers, and the functions a handler calls (one hop, through the file's imports; an ambiguous target is skipped) |
+| Data access (JS / TS) | `supabase-js` | the Supabase JavaScript client — `.from()`, `.rpc()`, Realtime `.on("postgres_changes")` and the wrapper calls named in `subscribeCalls` — one record per top-level declaration (the module's own top-level code as `<module>`) |
+| Data access (Python) | `supabase-py` | the Supabase Python client — `.table()`, `.from_()`, `.rpc()` — one record per function |
+| Data access (Python) | `sqlalchemy` | raw SQL in string literals (`text("…")`, any driver): the tables after `FROM` / `JOIN` (**reads**) and `INTO` / `UPDATE` / `DELETE FROM` (**writes**), one record per function; the ORM is not read |
+| API + pages | `nextjs` | the App Router tree: route handlers, pages, layouts, middleware auth, `fetch('/api/…')` refs, and the code each file runs (for a data-access adapter) |
+| Pages | `react-router` | a route tree declared in code: one surface per screen, its guards, the API calls and the code it runs one hop away |
 | Native screens | `expo-router` *(early)* | the Expo Router folder tree: screens, layouts, `[id]` segments, platform pairs — namespaced so a native `/jobs` and a web `/jobs` are two surfaces |
 | Components | `components` | React and React Native: exported, capitalised, returning JSX; props as written; **used by** / **uses** / **calls**; shared vs page-private |
-| Background work | `jobs` | everything that runs without a user clicking (2.3): scheduled — Vercel crons (`vercel.json`), Railway `cronSchedule`, Cloudflare `wrangler.toml` triggers, Supabase `pg_cron` in migrations, Trigger.dev scheduled tasks, and GitHub Actions schedules as opt-in housekeeping; workers — Railway, a Procfile, Docker Compose; queues — BullMQ, Inngest, Trigger.dev, SQS, producer and consumer with the queue's name. Each record carries its trigger and what it hits (a route, a function, the module); a package script counts only when a manifest runs it; `reads` / `writes` from the tables a module names; the mode never guessed |
+| Background work | `background-vercel`, `background-railway`, `background-cloudflare`, `background-procfile`, `background-compose`, `background-pg-cron`, `background-bullmq`, `background-inngest`, `background-trigger-dev`, `background-sqs`, `background-github-actions` (opt-in), `background-declared` | everything that runs without a user clicking, one reader per platform file (0.9, decision 0038): scheduled — Vercel crons (`vercel.json`), Railway `cronSchedule`, Cloudflare `wrangler.toml` triggers, `pg_cron` in migrations, Trigger.dev scheduled tasks, and GitHub Actions schedules as housekeeping; workers — Railway, a Procfile, Docker Compose; queues — BullMQ, Inngest, Trigger.dev, SQS, producer and consumer with the queue's name; tasks declared by hand. One **background task** per task, however many readers see it (the same code, or the same command from the same folder). Each carries its trigger and what it hits (a route, a function, the module); a package script counts only when a manifest runs it; `reads` / `writes` from the tables the module's code reaches, as the data-access adapters read it; the mode never guessed |
 | External services | `external-services` (`services` before 2.3) | declared markers — a package import, an env-name prefix (names only, never values); **depends on** from the files that carry a marker — never a file that reaches the provider through a settings object; undeclared candidates warned about on every derive |
-| Realtime | *(in `react-router` / `nextjs`)* | a page's Supabase Realtime subscription — `.on('postgres_changes', { table })` or a helper you name — as a **subscribes** edge |
+| Realtime | *(in `supabase-js`)* | a Supabase Realtime subscription — `.on('postgres_changes', { table })` or a helper you name in `subscribeCalls` — as a **subscribes** edge on the page, screen, component or module whose code makes it |
 
-**A Railway file is read by Railway too.** The `jobs` extractor learns a
+**A Railway file is read by Railway too.** `background-railway` learns a
 Railway service's start command and schedule from a committed
 `railway.toml` / `railway.json`, but Railway applies that file as well — its
 values override the dashboard — and Railway is retiring the format (a
@@ -169,7 +175,7 @@ service cannot take it up; its Infrastructure as Code replaces it).
 Commit one only if you mean Railway to apply it; otherwise keep it matching
 what the dashboard runs, as a statement for the map. A start command that
 names build output (`node dist/server.js`) is not a file in the repo: derive
-warns, and a `jobs.entries` line in config names the source file.
+warns, and a `background-declared` entry in config names the source file.
 
 Vue, Svelte and Angular are not read: write a local extractor with the
 `extractor` skill (below) and, once it is proven on a real repo, lift it in.
@@ -237,7 +243,7 @@ asks a question, and an upgrade checks them again:
   own does not bring it.
 - **`npx`**, which comes with Node.js. ZDD's plugin carries no engine: the
   first time a skill does real work, `npx` downloads
-  `@rich-rees/zdd-engine` at the release's pinned version from the public
+  `@rich-rees/zdd` at the release's pinned version from the public
   npm registry, and again on each engine pin bump. No npm account is needed;
   the package is public.
 - **git**, and a git repository. The release lock is a git tag, the
@@ -316,7 +322,7 @@ reviewable file, never one question per item.
 from [the releases page](https://github.com/rich-rees/zero-drift-docs/releases)):
 
 ```
-claude plugin marketplace add rich-rees/zero-drift-docs@v2.5.0 --scope project
+claude plugin marketplace add rich-rees/zero-drift-docs@v0.9.0 --scope project
 claude plugin install zdd@zero-drift-docs --scope project
 ```
 
@@ -407,8 +413,10 @@ merge gate.
 - Vercel Queues are not read yet (the API was not stable enough to pin a
   shape to); BullMQ, Inngest, Trigger.dev and SQS are. Filed as a finding.
 - A Supabase Realtime subscription written as a direct
-  `.on('postgres_changes')` inside a hook yields no `subscribes` edge; name
-  the wrapper in `subscribeCalls`. Filed as a finding.
+  `.on('postgres_changes')` inside a hook gives the hook's own module its
+  `subscribes` edge (0.9), not the Next.js page that uses the hook: Next.js
+  pages are read by folder, not by import. Name the hook in
+  `supabase-js.subscribeCalls` and the page's call to it carries the edge.
 - **Still on 2.2.1? The `services` extractor's default roots read gitignored
   folders**, including the `.claude/worktrees/` folder the Claude desktop app
   creates (a second checkout of the repo): the committed records can name
@@ -436,13 +444,16 @@ state — with what ZDD says beside it — asks one question at a time, writes,
 regenerates, and lists what to commit — one PR. After it merges, each
 teammate's next session prints the commands that move their machine.
 
-**A repo on a release before 2.2** has no "upgrade ZDD" yet, so move the lock
-by hand once:
+**A repo on the old line (2.5.0 or earlier)** moves to 0.9 by hand once:
+the numbers start again at 0.9.0, so an old release's check for a newer one
+never finds it ([decision 0042](docs/decisions/0042-the-engine-is-a-new-package-on-a-new-version-line.md)).
+**A repo on a release before 2.2** has no "upgrade ZDD" at all. Either way,
+move the lock by hand:
 
 1. In `.claude/settings.json`, set
    `extraKnownMarketplaces["zero-drift-docs"].source.ref` to the new tag
-   (`"v2.5.0"`). No lock there? Add the marketplace from the repo's folder with
-   `claude plugin marketplace add rich-rees/zero-drift-docs@v2.5.0 --scope project`.
+   (`"v0.9.0"`). No lock there? Add the marketplace from the repo's folder with
+   `claude plugin marketplace add rich-rees/zero-drift-docs@v0.9.0 --scope project`.
 2. Restart Claude Code. The session's first line names the commands that move
    your machine (on a machine where the marketplace was ever added without a
    scope, that includes `claude plugin marketplace remove zero-drift-docs
@@ -479,9 +490,11 @@ plugins/zdd/
     adr-0001-adopt-zero-drift-docs.md   # seeded as the adopter's first ADR
   test/                             # seam 2: the runbook and hooks observed as files + processes
 packages/zdd-engine/                # deriver / renderer / checks + extractors + viewers
-  bin/zdd-engine.mjs                # the CLI (derive / render / lint / freshness / tally)
-  src/extractors/{supabase,nextjs,fastapi,react-router,components,expo-router,jobs,external-services,generic}/   # input end: one per convention
-  src/viewers/{cytoscape,minimal}/  # output end: human-index viewers over graph.json
+  bin/zdd-engine.mjs                # the CLI (derive / render / lint / freshness / tally / detect / coverage / preview)
+  src/core/                         # the stack-free core: derive, render, lint, the stores, the viewers
+  src/core/viewers/{cytoscape,minimal}/  # output end: human-index viewers over graph.json
+  src/adapters/{supabase,nextjs,fastapi,react-router,components,expo-router,background-*,external-services,supabase-js,supabase-py,sqlalchemy,generic}/   # input end: one adapter per convention
+  src/adapters/{js,python,background}/  # helpers adapters share (no index.mjs: not adapters)
   test/fixture*/                    # the miniature proving repos
 docs/patterns.md                    # blessings and "choose patterns", the whole system
 docs/decisions/                     # this repo's own decision record (ADR format)
@@ -519,6 +532,14 @@ as a yes/no, so saying no to one is a visible choice, not a fork.
 
 - [ ] Next: a second viewer; Vue / Svelte / Angular extractors on their first
       real adoption.
+- [x] **0.9.0** — a new line and a new package, `@rich-rees/zdd`: a core
+      that knows no stack beside a catalogue of adapters, routes reaching
+      tables through data-access records, background work one reader per
+      platform file, detection in each adapter with a coverage report and
+      a map check done together, an adapter contract number and one
+      standard suite, ZDD defects to Discussions, and "upgrade ZDD"
+      carrying an old-line repo across *(ZDD-3; decisions 0036–0042)*.
+      1.0.0 follows with the video.
 - [x] **2.5.0** — blessings in a store of their own, one file each with
       where and kind, the index saying where and why, an `extend`
       blessing's users worked out for retesting, and "upgrade ZDD" moving
@@ -667,6 +688,14 @@ Semver, tracked in both plugin manifests and the marketplace entry (kept in
 sync — a test pins them together), and marked with a matching git tag
 (`vX.Y.Z`). The plugin and the engine share a version line so `load`'s skew
 warning can say "behind".
+
+**Two lines.** The entries below up to `2.5.0` are the old line: the engine
+was `@rich-rees/zdd-engine`, and a repo's config pinned it as `engine`. From
+`0.9.0` the engine is `@rich-rees/zdd` and the pin is `release`; every
+old-line release comes before every new-line one, whatever the numbers say
+([decision 0042](docs/decisions/0042-the-engine-is-a-new-package-on-a-new-version-line.md)).
+Through 0.9.x the adapter contract stays at 1 and may still change; 1.0.0
+freezes it.
 
 - **`0.x` — private, pre-release.** Building and proving against the first adopter's
   instance. The API (skill names, config shape, engine CLI) may change freely.
@@ -908,6 +937,48 @@ warning can say "behind".
   - *The upgrade's text pass* re-reads an adopter's own paragraphs about
     blessings once, against the 2.5 rule, so a `CLAUDE.md` that still says
     blessings live on map pages is shown beside what ZDD now says.
+
+- **`0.9.0` — a stack-free core and a catalogue of adapters, on a new line.**
+  The engine is a new package, `@rich-rees/zdd`, numbered from 0.9.0
+  (decision 0042); the plugin keeps its marketplace address. Its files can
+  no longer be imported (an `exports` map opens `package.json` only): the
+  command line is the contract. The config's `engine` pin becomes
+  `release`; an `engine` found beside a `release` (written by a teammate's
+  plugin from before 0.9) is dropped and named, and a `release` that is not a
+  version is refused. **What moves on the
+  bump**: every pin ZDD owns (config, CI workflow, pre-push hook) names
+  `@rich-rees/zdd@0.9.0`; `derive --check` moves wherever a route or screen
+  reached a table — routes now reach tables through data-access records,
+  so each repo with a database gains data-access records and its graph
+  gains a box between route and table (one adopter: 327 records on 2.5,
+  313 without `supabase-js`, 327 with it; another gains 68 with
+  `sqlalchemy`) — and every `metadata/job/` record moves to
+  `metadata/background-task/`; `render --check` then moves `graph.json`,
+  the agent index and the human index with them. The CI workflow gains the
+  `suite` step. "upgrade ZDD" adds the data-access adapters detection
+  proposes, moves `subscribeCalls` to `supabase-js`, splits `jobs`, rewrites
+  the pins and `zdd/instructions.md`, and repairs map links to old `job:`
+  records — a minor by decision 0035, on the new line.
+  - *The core and the catalogue* (decision 0036): `src/core` names no
+    stack, held by a test; each adapter in `src/adapters` owns its reader,
+    detection, options and fixtures. The built-in fallback non-area tags
+    (`rls-disabled`, `media-project`) are gone: list them in `nonAreaTags`
+    if your areas leaned on them.
+  - *Data access* (decision 0037): `supabase-js`, `supabase-py` and
+    `sqlalchemy` record each function's tables; a route reaches them on
+    file + function. Without one, derive warns `[data-access]` on every run.
+  - *Background tasks* (decision 0038): `job` is `background-task`, one
+    reader per platform file (`background-vercel`, `-railway`,
+    `-cloudflare`, `-procfile`, `-compose` and the queue readers).
+  - *Detection in each adapter* (decision 0039): `zdd-engine detect`,
+    `coverage` and `preview`; bootstrap names what is covered and what is
+    not, and the first map check is done together.
+  - *The adapter contract and the suite* (decision 0040): `CONTRACT = 1`
+    and one standard suite, run in CI on a repo's own adapters;
+    `suiteChecks` says how many checks block.
+  - *Defects* (decision 0041): a ZDD defect is explained to the developer
+    and offered as a report to ZDD's Discussions; the repo has no Issues.
+
 ## Contributing
 
 Forks and pull requests welcome — the architecture is built for it, with a plug-in

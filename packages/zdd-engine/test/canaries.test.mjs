@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { deriveRecords } from "../src/derive.mjs";
+import { deriveRecords } from "../src/core/derive.mjs";
 
 const FIXTURE = resolve(dirname(fileURLToPath(import.meta.url)), "fixture");
 const config = JSON.parse(readFileSync(join(FIXTURE, "zdd", "config.json"), "utf8"));

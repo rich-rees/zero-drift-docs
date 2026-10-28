@@ -4,7 +4,7 @@
 // Run: node --test test/
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { refreshOriginBase } from "../src/lib/fetch-freshness.mjs";
+import { refreshOriginBase } from "../src/core/lib/fetch-freshness.mjs";
 
 test("fetches the configured base branch outside CI", () => {
   const calls = [];

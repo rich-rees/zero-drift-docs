@@ -19,10 +19,10 @@ and its tests move from the pinned engine to the checkout.
 
 A PR is complete when it holds every item:
 
-- [ ] **The module** — `packages/zdd-engine/src/extractors/<name>/index.mjs`,
+- [ ] **The module** — `packages/zdd-engine/src/adapters/<name>/index.mjs`,
       options documented in its leading comment, reads through `io`.
-- [ ] **The registry line** — `EXTRACTORS` in `packages/zdd-engine/src/derive.mjs`,
-      and the same name in `BUILT_INS` in `plugins/zdd/scripts/scaffold-extractor.mjs`
+- [ ] **The catalogue name** — the folder name is the name the engine loads;
+      add the same name to `BUILT_INS` in `plugins/zdd/scripts/scaffold-extractor.mjs`
       (a test holds the two together, and a local extractor of that name now
       refuses to load — say so in the PR).
 - [ ] **A fixture repo** — `packages/zdd-engine/test/fixture-<name>/` with a
@@ -32,10 +32,11 @@ A PR is complete when it holds every item:
       (`{ skip: process.platform === "win32" && … }`), and each mask edge the
       dialect has; plus the fixture added to the determinism matrix in
       `test/extractors.test.mjs` (two fresh copies, a second run, `--check`).
-- [ ] **A detection probe** — in `plugins/zdd/scripts/bootstrap.mjs` `detect()`:
-      the evidence it looks for, the options it implies, bounded reads. Proven
-      at the file seam in `plugins/zdd/test/bootstrap.test.mjs` (scripted
-      answers against a fixture, files on disk asserted).
+- [ ] **Its detection** — `DETECTION` and `detect({ scan, proposed })` in the
+      adapter's own folder (decision 0039; the contract is in CONTRIBUTING):
+      the evidence it looks for in plain words, the options it implies, the
+      parts it covers, its option shape. Never a probe in bootstrap. Proven in
+      `packages/zdd-engine/test/detect.test.mjs`.
 - [ ] **The schema block** — `extractorOptions.<name>` in
       `plugins/zdd/templates/config.schema.json`.
 - [ ] **The README rows** — the extractor list and its options in
@@ -58,7 +59,7 @@ cadence. The user publishes the engine under their own npm scope and points
 the plugin at it:
 
 - [ ] Rename the package in `packages/zdd-engine/package.json`
-      (`@<scope>/zdd-engine`) and publish it.
+      (`@<scope>/zdd`) and publish it.
 - [ ] Repin `ENGINE_PACKAGE` in `plugins/zdd/scripts/lib/repo.mjs`.
 - [ ] Repin the CI template (`plugins/zdd/templates/zdd.yml`), the pre-push
       template (`plugins/zdd/templates/pre-push`) and every skill's `npx` line.

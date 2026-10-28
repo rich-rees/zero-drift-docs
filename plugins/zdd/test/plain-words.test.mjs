@@ -3,7 +3,7 @@
 // and says, in plain words, what is missing, what ZDD uses it for and how to
 // get it (C7). `detect` names where the repo is hosted, and `apply` writes
 // the GitHub workflow only on GitHub — elsewhere it says the merge gate is
-// three commands for the adopter's own pipeline and offers the pre-push hook
+// four commands for the adopter's own pipeline and offers the pre-push hook
 // (C6). `estimate` sizes the repo for the three install scenarios and the
 // backfill offer. Every file bootstrap writes has an explanation — what it
 // is, why it exists, who writes it, whether it is ever hand-edited — and the
@@ -72,7 +72,7 @@ const serve = (handler) =>
 
 test("preflight: every requirement checked, each said in plain words with what ZDD uses it for; all present → exit 0 and one line per check", async (t) => {
   const registry = await serve((req, res) => {
-    if (req.url === `/@rich-rees%2fzdd-engine/${VERSION}`) res.writeHead(200).end("{}");
+    if (req.url === `/@rich-rees%2fzdd/${VERSION}`) res.writeHead(200).end("{}");
     else res.writeHead(404).end("{}");
   });
   const github = await serve((_req, res) => res.writeHead(200).end("ok"));
@@ -92,7 +92,8 @@ test("preflight: every requirement checked, each said in plain words with what Z
   assert.match(text, /^Before anything is written, the things ZDD needs:/m);
   assert.match(text, /^  ok +Node\.js \d+\.\d+\.\d+ — ZDD's scripts and its engine run on it \(20 or newer\)/m, text);
   assert.match(text, /^  ok +git — /m);
-  assert.match(text, /^  ok +the npm registry .* the engine, @rich-rees\/zdd-engine@[\d.]+, is there to download/m, text);
+  assert.match(text, /^  ok +the npm registry .* the engine, @rich-rees\/zdd@[\d.]+, is there to download/m, text);
+  assert.match(text, /^  ok +the npm registry .*ZDD's engine, @rich-rees\/zdd, is downloaded/m, "CR-162: the package it names is the one it downloads");
   assert.match(text, /No account is needed anywhere\./, text);
 });
 
@@ -106,7 +107,7 @@ test("preflight: an unreachable registry, a GitHub stand-in that is down, a miss
   const out = r.stdout;
   assert.match(out, /^  MISSING +a git repository — this folder is not one\. ZDD reads the repo's history for freshness and locks a release by a git tag; run `git init`/m, out);
   assert.match(out, /^  MISSING +github\.com — could not be reached .* ZDD and Matt Pocock's skills are installed from public GitHub repositories/m, out);
-  assert.match(out, /^  MISSING +the engine, @rich-rees\/zdd-engine@[\d.]+ — the npm registry answered but does not have this version/m, out);
+  assert.match(out, /^  MISSING +the engine, @rich-rees\/zdd@[\d.]+ — the npm registry answered but does not have this version/m, out);
   assert.match(out, /Nothing was written\. Fix what is missing and run bootstrap again\./, out);
   const json = JSON.parse((await runAsync(repo, ["preflight", `--registry=${dead}`, `--github=${dead}`, "--json"])).stdout);
   assert.equal(json.ok, false);
@@ -117,7 +118,7 @@ test("preflight: an unreachable registry, a GitHub stand-in that is down, a miss
 
 // --- C6: where the repo is hosted decides the CI offer ------------------------------
 
-test("hostOf reads the provider from a remote url; detect reports it; apply writes the GitHub workflow only on GitHub and otherwise prints the three commands and offers the pre-push hook", () => {
+test("hostOf reads the provider from a remote url; detect reports it; apply writes the GitHub workflow only on GitHub and otherwise prints the four commands and offers the pre-push hook", () => {
   assert.equal(hostOf("https://github.com/o/r.git").kind, "github");
   assert.equal(hostOf("git@github.com:o/r.git").kind, "github");
   assert.equal(hostOf("https://gitlab.com/o/r.git").kind, "gitlab");
@@ -146,8 +147,8 @@ test("hostOf reads the provider from a remote url; detect reports it; apply writ
   assert.ok(j2.wrote.includes(".githooks/pre-push"), "the fallback is offered and taken by default");
   assert.ok(j2.notes.some((n) => /CI workflow not written: this repo's origin is gitlab \(.*\), and the workflow ZDD ships runs only on GitHub Actions/.test(n)), j2.notes.join("\n"));
   const text = run(gl, ["apply", `--answers=${answers("h3", { optIns: { stop: true } })}`]);
-  assert.match(text, /The merge gate for your own pipeline is three commands, run on every pull request:/, text);
-  assert.match(text, new RegExp(`npx -y @rich-rees/zdd-engine@${VERSION.replace(/\\./g, "\\\\.")} derive --check`));
+  assert.match(text, /The merge gate for your own pipeline is four commands, run on every pull request:/, text); // the suite since 0.9 (CR-140)
+  assert.match(text, new RegExp(`npx -y @rich-rees/zdd@${VERSION.replace(/\\./g, "\\\\.")} derive --check`));
   assert.match(text, /lint --merge/);
   assert.doesNotMatch(text, /in branch protection, require the `zdd` check/, "no GitHub-only instruction on GitLab");
 

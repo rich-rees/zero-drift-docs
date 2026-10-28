@@ -22,7 +22,7 @@
 //   {
 //     "name": "aspnet-routes",                     // ^[a-z][a-z0-9-]*$, not a built-in
 //     "evidence": "[Route]/[HttpGet] attributes on controller classes",
-//     "shapedLike": "fastapi",                     // supabase | nextjs | fastapi | react-router | generic
+//     "shapedLike": "<adapter>",                   // a catalogue adapter whose template fits, or generic
 //     "kinds": ["route"],                          // record kinds it emits
 //     "idExample": "route:/api/orders/{id}",       // optional, shown in comments
 //     "refs": ["?table:"],                         // unresolved refs it may emit (optional)
@@ -40,25 +40,37 @@
 import { readFileSync, lstatSync, fstatSync, openSync, readSync, writeSync, closeSync, rmSync, mkdirSync, renameSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { join, dirname } from "node:path";
-import { PLUGIN_ROOT, parseArgs, adopterRoot, readConfig, artifactPaths, repoRelative, resolveInside, pathsOverlap, CONFIG_REL, posixify } from "./lib/repo.mjs";
+import { PLUGIN_ROOT, parseArgs, adopterRoot, readConfig, artifactPaths, repoRelative, resolveInside, pathsOverlap, CONFIG_REL, posixify, onNewLine, configRelease } from "./lib/repo.mjs";
 import { Ledger, printable } from "./bootstrap.mjs";
 
 const TEMPLATES = join(PLUGIN_ROOT, "templates", "extractor");
-// The engine version that first hands extractors `io` (decision 0010).
+// The old line's engine version that first hands extractors `io` (decision
+// 0010); every release of the new line does (decision 0042).
 export const IO_SINCE = "1.3.0";
-// Mirror of the engine's registry (packages/zdd-engine/src/derive.mjs
-// EXTRACTORS) — a local name may not shadow one. A test holds the two together.
-export const BUILT_INS = ["supabase", "nextjs", "fastapi", "react-router", "components", "expo-router", "jobs", "external-services", "generic"];
+// border: names a stack (a mirror of the engine's catalogue, held equal by a test)
+// Mirror of the engine's catalogue (the adapter folders in
+// packages/zdd-engine/src/adapters/) — a local name may not shadow one. A test
+// holds the two together.
+export const BUILT_INS = ["supabase", "nextjs", "fastapi", "react-router", "components", "expo-router", "background-vercel", "background-railway", "background-cloudflare", "background-procfile", "background-compose", "background-pg-cron", "background-bullmq", "background-inngest", "background-trigger-dev", "background-sqs", "background-github-actions", "background-declared", "external-services", "supabase-js", "supabase-py", "sqlalchemy", "generic"];
+// border: end
 // Names a release retired but the engine still answers to (2.3: `services`
 // is `external-services`, 2.3.0, pick 3) — a local one may not take them.
 export const RETIRED_BUILT_INS = { services: "external-services" };
+// Names the engine retired outright, mirroring catalogue.json's `retired`
+// (CR-080): `jobs`, split into the background-* readers in 0.9 (decision
+// 0038). The engine stops on the name, so a local extractor may not take it.
+export const REMOVED_BUILT_INS = ["jobs"];
 const NAME_RE = /^[a-z][a-z0-9-]*$/; // the engine's NAME_RE
 const KIND_RE = /^[a-z][a-z0-9_-]*$/; // the engine's KIND_RE
 const EXT_RE = /^\.[A-Za-z0-9][A-Za-z0-9._-]*$/;
-const REF_PREFIXES = ["?from:", "?table:", "?bucket:", "?function:", "?route:"];
+const REF_PREFIXES = ["?from:", "?table:", "?bucket:", "?function:", "?route:", "?code:"];
+// border: names a stack (SQL dialects a local extractor's source is read as)
 // `sql` is standard SQL (Postgres): `#` is an operator there. `mysql` adds
 // `#` comments and backslash escapes (1.3.0 CR-014, decision in the skill).
 const SYNTAXES = ["c-like", "sql", "mysql", "python"];
+// What starts a line comment in each, for the module's COMMENT export.
+const LINE_COMMENT = { "c-like": "//", sql: "--", mysql: "#", python: "#" };
+// border: end
 const SYNTAX_BY_EXT = {
   ".cs": "c-like", ".java": "c-like", ".kt": "c-like", ".scala": "c-like", ".go": "c-like", ".rs": "c-like",
   ".swift": "c-like", ".dart": "c-like", ".php": "c-like", ".js": "c-like", ".mjs": "c-like", ".cjs": "c-like",
@@ -88,6 +100,7 @@ export function validateAnswers(raw) {
   if (typeof raw.name !== "string" || !NAME_RE.test(raw.name)) fail("name must match ^[a-z][a-z0-9-]*$ (lowercase, digits, hyphens)");
   if (BUILT_INS.includes(raw.name)) fail(`name '${raw.name}' is a built-in extractor — a local one may not shadow it; pick another name`);
   if (Object.hasOwn(RETIRED_BUILT_INS, raw.name)) fail(`name '${raw.name}' is the old name of the built-in '${RETIRED_BUILT_INS[raw.name]}' extractor, which the engine still answers to — pick another name`);
+  if (REMOVED_BUILT_INS.includes(raw.name)) fail(`name '${raw.name}' is a retired built-in name the engine stops on (0.9 split it into the background-* readers) — pick another name`);
   if (WINDOWS_RESERVED.test(raw.name)) fail(`name '${raw.name}' is a device name Windows cannot create as a folder — pick another`);
   a.name = raw.name;
   if (typeof raw.evidence !== "string" || !flat(raw.evidence)) fail("evidence must say what file layout or code shape declares the thing");
@@ -189,6 +202,11 @@ export function scaffold(root, rawAnswers) {
   const cfg = readConfig(root);
   if (cfg.state === "absent") throw new Error("no zdd/config.json — adopt ZDD first (the zdd:bootstrap runbook), then scaffold an extractor");
   if (cfg.state === "invalid") throw new Error(`${cfg.error} — fix it first; the scaffold never replaces a config it cannot read`);
+  // The pin, judged before any write (CR-152): a `release` that is not a
+  // version is refused as the upgrade refuses it, and both keys — a stale
+  // `engine` a pre-0.9 plugin wrote — is the upgrade's to clear first.
+  configRelease(cfg.config);
+  if (Object.hasOwn(cfg.config, "engine") && Object.hasOwn(cfg.config, "release")) throw new Error(`zdd/config.json pins both 'release' and the old line's 'engine' — say "upgrade ZDD" first (it drops the stale 'engine', decision 0042), then scaffold; nothing was written`);
   const config = cfg.config;
   const paths = artifactPaths(config); // throws on a bad configured path
 
@@ -274,6 +292,9 @@ export function scaffold(root, rawAnswers) {
     FACTS_KEY_ORDER: kindsOrder,
     IO_SINCE,
     MASK: readFileSync(join(TEMPLATES, `mask-${a.syntax}.tmpl`), "utf8").trimEnd(),
+    // Each extension's line-comment mark, from the mask the answers chose:
+    // the standard suite comments out every line with it (decision 0040).
+    COMMENT: `{ ${a.extensions.map((e) => `${JSON.stringify(e)}: ${JSON.stringify(LINE_COMMENT[a.syntax])}`).join(", ")} }`,
     TEST_PATH: testPath,
     FIXTURE_OPTIONS: JSON.stringify(options),
     EXPECTED_EXAMPLE: `[${JSON.stringify(a.idExample)}]`,
@@ -401,9 +422,13 @@ export function scaffold(root, rawAnswers) {
   if (next.extractors.includes("generic") && next.extractors.length > 1) {
     ledger.notes.push("'generic' is still listed in extractors — it emits nothing; remove it now that a real extractor runs");
   }
-  const older = olderThan(next.engine, IO_SINCE);
-  if (older === true) ledger.notes.push(`zdd/config.json pins engine ${next.engine}; this extractor needs ${IO_SINCE} or later and will stop derive until then — say "upgrade ZDD"`);
-  else if (older === null) ledger.notes.push(`zdd/config.json's engine pin (${printable(String(next.engine))}) is not a version this can compare — this extractor needs ${IO_SINCE} or later`);
+  // Every new-line release hands extractors io; a `release` that is not a
+  // version was refused in the preflight (CR-152).
+  if (!onNewLine(next)) {
+    const older = olderThan(next.engine, IO_SINCE);
+    if (older === true) ledger.notes.push(`zdd/config.json pins engine ${next.engine}; this extractor needs ${IO_SINCE} or later and will stop derive until then — say "upgrade ZDD"`);
+    else if (older === null) ledger.notes.push(`zdd/config.json's engine pin (${printable(String(next.engine))}) is not a version this can compare — this extractor needs ${IO_SINCE} or later`);
+  }
   // Every root, judged without following links (1.3.0 CR-042).
   for (const r of a.roots) {
     const st = lstatOrNull(join(root, ...r.split("/")));

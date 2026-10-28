@@ -10,7 +10,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, cpSync, sy
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { makeExtractorIo, IO_MAX_READ_BYTES } from "../src/lib/extractor-io.mjs";
+import { makeExtractorIo, IO_MAX_READ_BYTES } from "../src/core/lib/extractor-io.mjs";
 
 const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const BIN = join(PKG, "bin", "zdd-engine.mjs");
@@ -183,7 +183,7 @@ test("1.3.0 CR-038: a directory link is never followed on any platform — a jun
 test("io is frozen: an extractor cannot swap read or walk for the next one", () => {
   const io = makeExtractorIo(PKG);
   assert.ok(Object.isFrozen(io));
-  assert.deepEqual(Object.keys(io).sort(), ["isIgnored", "read", "walk"]); // isIgnored: 2.3.0, pick 1
+  assert.deepEqual(Object.keys(io).sort(), ["isIgnored", "kind", "read", "walk"]); // isIgnored: 2.3.0, pick 1; kind: 0.9 (decision 0040)
 });
 
 test("POSIX: symlinks are never followed — a linked file, a file under a linked directory, a linked walk root", { skip: !POSIX && "symlinks need privileges on Windows" }, (t) => {

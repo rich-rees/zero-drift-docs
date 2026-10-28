@@ -12,10 +12,13 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, cpSync, sy
 import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { derive, parseRouteTree, joinRoutePath, scanApiCalls, normalizeApiPath, importMap, lex, topLevel, narrowModule, MAX_SOURCE_BYTES } from "../src/extractors/react-router/index.mjs";
-import { derive as fastapi } from "../src/extractors/fastapi/index.mjs";
-import { resolveRefs } from "../src/lib/resolve-refs.mjs";
-import { unclaimedRecords, unclaimedInGraph } from "../src/lib/claims.mjs";
+import { makeExtractorIo } from "../src/core/lib/extractor-io.mjs";
+import { derive, parseRouteTree, joinRoutePath } from "../src/adapters/react-router/index.mjs";
+import { scanApiCalls, normalizeApiPath, importMap, lex, topLevel, narrowModule, MAX_SOURCE_BYTES } from "../src/adapters/js/source.mjs";
+import { derive as fastapi } from "../src/adapters/fastapi/index.mjs";
+import { resolveRefs } from "../src/core/lib/resolve-refs.mjs";
+import { dataAccessOf, reach, withoutCode } from "./code-reach.mjs";
+import { unclaimedRecords, unclaimedInGraph } from "../src/core/lib/claims.mjs";
 
 const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const BIN = join(PKG, "bin", "zdd-engine.mjs");
@@ -44,7 +47,7 @@ const flat = (text, diagnostics = []) => parseRouteTree(text, diagnostics).map((
 const ROUTES = "apps/web/src/routes.tsx";
 
 test("fixture: one surface per leaf route; index routes take the parent path; layout elements become guards; the comment above a route is its description", () => {
-  const { records, diagnostics } = derive({ repoRoot: FIXTURE, options: { routesFile: ROUTES } });
+  const { records, diagnostics } = derive({ repoRoot: FIXTURE, io: makeExtractorIo(FIXTURE, "react-router"), options: { routesFile: ROUTES } });
   assert.deepEqual(diagnostics, []);
   assert.deepEqual(
     records.map((r) => r.id),
@@ -65,8 +68,10 @@ test("fixture: one surface per leaf route; index routes take the parent path; la
 });
 
 test("refs: a screen's own API calls and those of the names it imports resolve to the fastapi routes; a guard's calls belong to no surface", () => {
-  const web = derive({ repoRoot: FIXTURE, options: { routesFile: ROUTES } });
-  assert.deepEqual(web.records.find((r) => r.id === "surface:/activity").refs, ["?route:/activity"], "unresolved before the merge");
+  const web = derive({ repoRoot: FIXTURE, io: makeExtractorIo(FIXTURE, "react-router"), options: { routesFile: ROUTES } });
+  // Unresolved before the merge; the screen's own file and the unit it
+  // imports are named as code (decision 0037), for a data-access adapter.
+  assert.deepEqual(web.records.find((r) => r.id === "surface:/activity").refs, ["?code:apps/web/src/pages/ActivityPage.tsx#*", "?code:apps/web/src/services.ts#useServices", "?route:/activity"]);
   const api = fastapi({ repoRoot: FIXTURE, options: { roots: ["apps/api"] } });
   const { records } = resolveRefs([...api.records, ...web.records]);
   const by = (id) => records.find((r) => r.id === id);
@@ -166,8 +171,9 @@ test("1.3.0 CR-018/019/020/021/040: type-only imports bind nothing; Unicode name
     "src/lazy.ts": 'export function x() { return api.get("/lazy"); }\n',
   });
   try {
-    const { records, diagnostics } = derive({ repoRoot: root, options: { routesFile: "src/routes.tsx" } });
-    assert.deepEqual(records[0].refs, ["?route:/cafe", "?route:/lazy", "?route:/registered"]);
+    const { records, diagnostics } = derive({ repoRoot: root, io: makeExtractorIo(root, "react-router"), options: { routesFile: "src/routes.tsx" } });
+    assert.deepEqual(withoutCode(records[0].refs), ["?route:/cafe", "?route:/lazy", "?route:/registered"]);
+    assert.deepEqual(reach(records[0].refs, dataAccessOf(root)), ["?route:/cafe", "?route:/lazy", "?route:/registered"], "a data call in a string is no data access either");
     assert.ok(diagnostics.some((d) => /src\/A\.tsx imports src\/lazy\.ts through import\(\) — its calls are attributed whole/.test(d)), diagnostics.join("\n"));
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -190,10 +196,10 @@ test("1.3.0 CR-022: many screens importing different name sets from one large mo
   const root = scratch(files);
   try {
     const started = process.hrtime.bigint();
-    const { records } = derive({ repoRoot: root, options: { routesFile: "src/routes.tsx" } });
+    const { records } = derive({ repoRoot: root, io: makeExtractorIo(root, "react-router"), options: { routesFile: "src/routes.tsx" } });
     const ms = Number(process.hrtime.bigint() - started) / 1e6;
     assert.equal(records.length, N);
-    assert.deepEqual(records.find((r) => r.id === "surface:/s7").refs, ["?route:/r7", "?route:/r8"]);
+    assert.deepEqual(withoutCode(records.find((r) => r.id === "surface:/s7").refs), ["?route:/r7", "?route:/r8"]);
     assert.ok(ms < 10_000, `derive took ${ms} ms for ${N} distinct name sets of a ${Math.round(files["src/data.ts"].length / 1024)} KiB module`);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -204,12 +210,12 @@ test("1.3.0 CR-015/016: an oversized routes file, or one missing under a linked 
   const big = scratch({ "src/x.ts": "" });
   t.after(() => rmSync(big, { recursive: true, force: true }));
   writeFileSync(join(big, "src", "routes.tsx"), `export const routes = [];\n${" ".repeat(MAX_SOURCE_BYTES)}`);
-  assert.throws(() => derive({ repoRoot: big, options: { routesFile: "src/routes.tsx" } }), /react-router: routesFile 'src\/routes\.tsx' is over 1024 KiB — never read/);
+  assert.throws(() => derive({ repoRoot: big, io: makeExtractorIo(big, "react-router"), options: { routesFile: "src/routes.tsx" } }), /react-router: routesFile 'src\/routes\.tsx' is over 1024 KiB — never read/);
 
   const linked = scratch({ "real/src/other.tsx": "" });
   t.after(() => rmSync(linked, { recursive: true, force: true }));
   symlinkSync(join(linked, "real", "src"), join(linked, "src"), process.platform === "win32" ? "junction" : "dir");
-  assert.throws(() => derive({ repoRoot: linked, options: { routesFile: "src/routes.tsx" } }), /react-router: routesFile 'src\/routes\.tsx' is not a regular file inside the repo \(a symlink, a directory, or under a link\)/);
+  assert.throws(() => derive({ repoRoot: linked, io: makeExtractorIo(linked, "react-router"), options: { routesFile: "src/routes.tsx" } }), /react-router: routesFile 'src\/routes\.tsx' is not a regular file inside the repo \(a symlink, a directory, or under a link\)/);
 });
 
 test("1.3.0: named imports narrow a data module to the bodies they reach — helpers followed, top-level calls kept for every importer; anything unnarrowable falls back to the whole module with a diagnostic", () => {
@@ -271,8 +277,10 @@ test("1.3.0: named imports narrow a data module to the bodies they reach — hel
     "src/pages/BarrelPage.tsx": 'import { useTenants } from "../admin";\nexport function BarrelPage() { return <main>{String(useTenants())}</main>; }\n',
   });
   try {
-    const { records, diagnostics } = derive({ repoRoot: root, options: { routesFile: "src/routes.tsx" } });
-    const refs = (path) => records.find((r) => r.id === `surface:${path}`).refs;
+    const { records, diagnostics } = derive({ repoRoot: root, io: makeExtractorIo(root, "react-router"), options: { routesFile: "src/routes.tsx" } });
+    // What each screen reaches once supabase-js has read the same files.
+    const da = dataAccessOf(root);
+    const refs = (path) => reach(records.find((r) => r.id === `surface:${path}`).refs, da);
     const WHOLE = ["?from:avatars", "?route:/audit-events", "?route:/boot", "?route:/everything", "?route:/tenants", "?route:/users", "?route:/users/*/*"];
     assert.deepEqual(refs("/activity"), ["?route:/audit-events", "?route:/boot"]);
     assert.deepEqual(refs("/tenants"), ["?route:/boot", "?route:/tenants"]);
@@ -429,13 +437,13 @@ export const routes: RouteObject[] = [
     "src/pages/UsersRoute.tsx": `export function Component() { return api.get<{ users: Array<User> }>("/users"); }\n`,
     "src/admin/api.ts": `export type User = {}; export const x = () => api.get("/ghost-via-type-import");\n`,
   });
-  const { records, diagnostics } = derive({ repoRoot: root, options: {} });
+  const { records, diagnostics } = derive({ repoRoot: root, io: makeExtractorIo(root, "react-router"), options: {} });
   assert.deepEqual(diagnostics, []);
   const by = (id) => records.find((r) => r.id === id);
   assert.deepEqual(by("surface:/reports").resource, ["src/pages/Reports.tsx", "src/routes.tsx"]);
-  assert.deepEqual(by("surface:/reports").refs, ["?route:/reports"], "type-only import of admin/api does not pull its calls in");
+  assert.deepEqual(by("surface:/reports").refs, ["?code:src/pages/Reports.tsx#*", "?route:/reports"], "type-only import of admin/api does not pull its calls in");
   assert.deepEqual(by("surface:/users").resource, ["src/pages/UsersRoute.tsx", "src/routes.tsx"]);
-  assert.deepEqual(by("surface:/users").refs, ["?route:/users"]);
+  assert.deepEqual(by("surface:/users").refs, ["?code:src/pages/UsersRoute.tsx#*", "?route:/users"]);
   assert.equal(by("surface:/users").facts.element, "lazy(./pages/UsersRoute)");
   assert.deepEqual([...importMap(`import A, { b as c, type D } from "./x"; import type { E } from "./t"; import { e } from '@/y';`).entries()], [["A", "./x"], ["c", "./x"], ["e", "@/y"]]);
   rmSync(root, { recursive: true, force: true });
@@ -450,7 +458,7 @@ test("CR-012: optional segments — static and dynamic — get a filename derive
       { path: "/user/:id?", element: <D /> },
     ];`,
   });
-  const { records } = derive({ repoRoot: root, options: {} });
+  const { records } = derive({ repoRoot: root, io: makeExtractorIo(root, "react-router"), options: {} });
   assert.deepEqual(records.map((r) => [r.id, r.filename]), [
     ["surface:/project/task", "project--task.json"],
     ["surface:/project/task?", "project--task~.json"],
@@ -491,20 +499,21 @@ test("CR-001: a symlinked routes file, element file or one-hop module is never r
   writeFileSync(join(root, "src", "big.tsx"), "x".repeat(MAX_SOURCE_BYTES + 1));
   if (process.platform !== "win32") {
     symlinkSync(join(root, "outside.ts"), join(root, "src", "data.ts"));
-    const { records, diagnostics } = derive({ repoRoot: root, options: {} });
-    assert.deepEqual(records.find((r) => r.id === "surface:/a").refs, ["?route:/a"], "the linked data module contributes nothing");
+    const { records, diagnostics } = derive({ repoRoot: root, io: makeExtractorIo(root, "react-router"), options: {} });
+    assert.deepEqual(records.find((r) => r.id === "surface:/a").refs, ["?code:src/A.tsx#*", "?route:/a"], "the linked data module contributes nothing, not even its code");
     assert.ok(diagnostics.some((d) => /src\/data\.ts is not a regular file inside the repo/.test(d)), diagnostics.join("\n"));
     // CR-029: a linked earlier spelling does not shadow a real later one (`./data` -> data.tsx link, data.js real).
     symlinkSync(join(root, "outside.ts"), join(root, "src", "data.tsx"));
     rmSync(join(root, "src", "data.ts"));
     writeFileSync(join(root, "src", "data.js"), `export const x = api.get("/real-data");\n`);
-    const again = derive({ repoRoot: root, options: {} });
-    assert.deepEqual(again.records.find((r) => r.id === "surface:/a").refs, ["?route:/a", "?route:/real-data"]);
+    const again = derive({ repoRoot: root, io: makeExtractorIo(root, "react-router"), options: {} });
+    // Full arrays (CR-068): the code the screen names is exactly the files the import rules allow.
+    assert.deepEqual(again.records.find((r) => r.id === "surface:/a").refs, ["?code:src/A.tsx#*", "?code:src/data.js#x", "?route:/a", "?route:/real-data"]);
     // A linked routes file is never read — and, like a renamed one, it stops
     // derive rather than writing every surface record away (1.3.0).
     rmSync(join(root, "src", "routes.tsx"));
     symlinkSync(join(root, "outside.ts"), join(root, "src", "routes.tsx"));
-    assert.throws(() => derive({ repoRoot: root, options: {} }), /react-router: routesFile 'src\/routes\.tsx' is not a regular file inside the repo \(a symlink, a directory, or under a link\) — never read; fix extractorOptions\.react-router\.routesFile/);
+    assert.throws(() => derive({ repoRoot: root, io: makeExtractorIo(root, "react-router"), options: {} }), /react-router: routesFile 'src\/routes\.tsx' is not a regular file inside the repo \(a symlink, a directory, or under a link\) — never read; fix extractorOptions\.react-router\.routesFile/);
   } else t.diagnostic("symlink cases skipped on win32");
   // CR-030: an explicitly suffixed specifier (any extension) is tried as spelled only — never a synthetic
   // double extension. Every platform: no symlink involved — so the routes file
@@ -528,11 +537,12 @@ test("CR-001: a symlinked routes file, element file or one-hop module is never r
   writeFileSync(join(root, "src", "data2"), "not a module\n");
   writeFileSync(join(root, "src", "data2.tsx"), `export const v = api.get("/data2");\n`);
   writeFileSync(join(root, "src", "B.tsx"), readFileSync(join(root, "src", "B.tsx"), "utf8").replace("export const B", `import { v } from "./data2";\nexport const B`));
-  const suffixed = derive({ repoRoot: root, options: {} });
-  assert.deepEqual(suffixed.records.find((r) => r.id === "surface:/b").refs, ["?route:/b", "?route:/data2", "?route:/widget"]);
+  const suffixed = derive({ repoRoot: root, io: makeExtractorIo(root, "react-router"), options: {} });
+  // No code ref to a refused candidate (data.tsx.ts, other.mjs, styles.css.tsx, the extensionless data2) — CR-068.
+  assert.deepEqual(suffixed.records.find((r) => r.id === "surface:/b").refs, ["?code:src/B.tsx#*", "?code:src/Widget.client.tsx#w", "?code:src/data.tsx#x", "?code:src/data2.tsx#v", "?route:/b", "?route:/data2", "?route:/widget"]);
   // An oversized routes file is still never read — and since 1.3.0 CR-015
   // it stops derive: an empty tree here would write every surface away.
-  assert.throws(() => derive({ repoRoot: root, options: { routesFile: "src/big.tsx" } }), /routesFile 'src\/big\.tsx' is over 1024 KiB — never read/);
+  assert.throws(() => derive({ repoRoot: root, io: makeExtractorIo(root, "react-router"), options: { routesFile: "src/big.tsx" } }), /routesFile 'src\/big\.tsx' is over 1024 KiB — never read/);
   rmSync(root, { recursive: true, force: true });
 });
 
@@ -549,7 +559,7 @@ test("1.3.0 (the second adopter, 1.3.0): a routes file missing beside an existin
   const renamed = scratch({ "apps/web/src/router.tsx": "export const routes = [];\n" });
   try {
     assert.throws(
-      () => derive({ repoRoot: renamed, options: { routesFile: "apps/web/src/routes.tsx" } }),
+      () => derive({ repoRoot: renamed, io: makeExtractorIo(renamed, "react-router"), options: { routesFile: "apps/web/src/routes.tsx" } }),
       /react-router: routesFile 'apps\/web\/src\/routes\.tsx' does not exist, but its folder 'apps\/web\/src' does — a renamed or misspelt routes file would drop every surface record; fix extractorOptions\.react-router\.routesFile/,
     );
     // Through the CLI: exit 1, the message, and no metadata pruned.
@@ -565,7 +575,7 @@ test("1.3.0 (the second adopter, 1.3.0): a routes file missing beside an existin
   }
   const greenfield = scratch({ "package.json": "{}" });
   try {
-    const out = derive({ repoRoot: greenfield, options: { routesFile: "apps/web/src/routes.tsx" } });
+    const out = derive({ repoRoot: greenfield, io: makeExtractorIo(greenfield, "react-router"), options: { routesFile: "apps/web/src/routes.tsx" } });
     assert.deepEqual(out.records, []);
     assert.match(out.diagnostics[0], /apps\/web\/src\/routes\.tsx not found — nothing to inventory/);
   } finally {
@@ -582,7 +592,7 @@ test("1.3.0 (the second adopter's 1.3.0 review, finding 1) under decision 0019: 
   });
   try {
     const api = fastapi({ repoRoot: root, options: { roots: ["api"] } });
-    const web = derive({ repoRoot: root, options: { routesFile: "web/src/routes.tsx" } });
+    const web = derive({ repoRoot: root, io: makeExtractorIo(root, "react-router"), options: { routesFile: "web/src/routes.tsx" } });
     const { records, diagnostics } = resolveRefs([...api.records, ...web.records]);
     assert.deepEqual(records.find((r) => r.id === "surface:/things").refs, ["route:/things/{id}/a", "route:/things/{id}/b"]);
     assert.ok(!diagnostics.some((d) => /fits 2 routes/.test(d)), diagnostics.join("\n"));
@@ -594,18 +604,18 @@ test("1.3.0 (the second adopter's 1.3.0 review, finding 1) under decision 0019: 
 
 test("missing routes file is nothing to inventory; a path option outside the repo is refused; the `@/` alias resolves through srcAliasRoot", () => {
   const empty = scratch({ "package.json": "{}" });
-  const out = derive({ repoRoot: empty, options: {} });
+  const out = derive({ repoRoot: empty, io: makeExtractorIo(empty, "react-router"), options: {} });
   assert.deepEqual(out.records, []);
   assert.match(out.diagnostics[0], /src\/routes\.tsx not found — nothing to inventory/);
-  assert.throws(() => derive({ repoRoot: empty, options: { routesFile: "../x.tsx" } }), /repo-relative/);
+  assert.throws(() => derive({ repoRoot: empty, io: makeExtractorIo(empty, "react-router"), options: { routesFile: "../x.tsx" } }), /repo-relative/);
   rmSync(empty, { recursive: true, force: true });
   const aliased = scratch({
     "web/src/app/routes.tsx": `import { Home } from "@/screens/Home";\nexport const routes: RouteObject[] = [{ path: "/", element: <Home /> }];\n`,
     "web/src/screens/Home.tsx": `export function Home() { return fetch("/v1/home"); }\n`,
   });
-  const a = derive({ repoRoot: aliased, options: { routesFile: "web/src/app/routes.tsx", srcAliasRoot: "web/src" } });
+  const a = derive({ repoRoot: aliased, io: makeExtractorIo(aliased, "react-router"), options: { routesFile: "web/src/app/routes.tsx", srcAliasRoot: "web/src" } });
   assert.deepEqual(a.records[0].resource, ["web/src/screens/Home.tsx", "web/src/app/routes.tsx"]);
-  assert.deepEqual(a.records[0].refs, ["?route:/v1/home"]);
+  assert.deepEqual(a.records[0].refs, ["?code:web/src/screens/Home.tsx#*", "?route:/v1/home"]);
   rmSync(aliased, { recursive: true, force: true });
 });
 
@@ -614,10 +624,10 @@ test("derive: a duplicate path is a diagnostic and the second entry is skipped; 
     "src/routes.tsx": `import { Users } from "./Users";\nexport const routes = [{ path: "/u", Component: Users }, { path: "/u", element: <Dup /> }];\n`,
     "src/Users.tsx": `export const Users = () => api.get("/users");\n`,
   });
-  const { records, diagnostics } = derive({ repoRoot: root, options: {} });
+  const { records, diagnostics } = derive({ repoRoot: root, io: makeExtractorIo(root, "react-router"), options: {} });
   assert.equal(records.length, 1);
   assert.deepEqual(records[0].resource, ["src/Users.tsx", "src/routes.tsx"]);
-  assert.deepEqual(records[0].refs, ["?route:/users"]);
+  assert.deepEqual(records[0].refs, ["?code:src/Users.tsx#*", "?route:/users"]);
   assert.match(diagnostics[0], /route \/u declared twice — second entry skipped/);
   rmSync(root, { recursive: true, force: true });
 });

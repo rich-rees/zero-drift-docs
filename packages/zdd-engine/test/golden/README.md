@@ -28,7 +28,16 @@ golden was generated at engine 2.0.0 and regenerated at 2.5.0
 (ZDD-1), when blessings moved from map pages into the blessing store: the
 index gained where and why, and the two human-index goldens lost the map
 pages' Blessings sections (their bodies, and the node sizes that follow from
-them).
+them). The full-page human-index golden was regenerated again under ZDD-3
+(the stack-free core, decision 0036): the inlined viewer script lost its
+stack names from comments, and its fallback non-area tags (one project's
+`rls-disabled` / `media-project`) became none. No graph byte moved: the
+BUNDLE literal and every metadata golden are unchanged. Slice 2 regenerated it once more for the viewer's new Data Access lane
+(decision 0037), again with no graph byte moved; the FastAPI goldens did not
+move at all, with `supabase-py` added to that fixture's config. The slice 2a
+review then regenerated both human-index goldens for the Data Access colour
+(the BUNDLE literal's palette gains one entry) and the two viewer legends
+that now name the data-access step; nothing else in the bundle moved.
 
 ## Regenerating
 
@@ -46,7 +55,7 @@ node -e '
   const fs = require("fs"); const html = fs.readFileSync(process.argv[1] + "/zdd/human-index.html", "utf8");
   fs.writeFileSync("test/golden/human-index-bundle-v0.3.1-nextjs-supabase.json", /window\.BUNDLE = (.*);\n/.exec(html)[1] + "\n");
   let page = html;
-  for (const [marker, file] of [["/*__CYTOSCAPE_JS__*/", "src/viewers/cytoscape/vendor/cytoscape.min.js"], ["/*__MARKED_JS__*/", "src/viewers/cytoscape/vendor/marked.min.js"]]) {
+  for (const [marker, file] of [["/*__CYTOSCAPE_JS__*/", "src/core/viewers/cytoscape/vendor/cytoscape.min.js"], ["/*__MARKED_JS__*/", "src/core/viewers/cytoscape/vendor/marked.min.js"]]) {
     const body = fs.readFileSync(file, "utf8"); const at = page.indexOf(body);
     if (at === -1 || page.indexOf(body, at + 1) !== -1) throw new Error(file + " not inlined exactly once");
     page = page.slice(0, at) + marker + page.slice(at + body.length);

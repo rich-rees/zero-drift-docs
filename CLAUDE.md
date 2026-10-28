@@ -2,7 +2,8 @@
 
 This is the **plugin repo** for Zero-Drift Docs: a Claude Code / Codex plugin
 (`plugins/zdd`) and the engine it calls (`packages/zdd-engine`, npm
-`@rich-rees/zdd-engine`). Small on purpose — read it whole. The architecture has
+`@rich-rees/zdd` from 0.9.0 — a new version line; the old one was
+`@rich-rees/zdd-engine`, 0.2.0 to 2.5.0, decision 0042). Small on purpose — read it whole. The architecture has
 a plug-in point at both ends: **extractors** feed data in (one per convention),
 **viewers** render it out (one per visualization), and a stable graph artifact
 sits between them. Contracts for both: `CONTRIBUTING.md`.
@@ -43,6 +44,13 @@ Supersession points both ways; never edit an accepted decision into a new truth.
   Plugin version lives in both manifests (`plugins/zdd/.claude-plugin/plugin.json`,
   `plugins/zdd/.codex-plugin/plugin.json`) and the marketplace entry, kept in
   sync (a test pins them), tagged `vX.Y.Z`.
+- **Two version lines** (decision 0042). 0.9.0 starts the new one
+  (`@rich-rees/zdd`, the config's `release` pin); every release of the old
+  one (`@rich-rees/zdd-engine`, the config's `engine` pin, 0.2.0 to 2.5.0)
+  comes before it. Through 0.9.x the adapter contract stays at 1 and may
+  change without an upgrade interview; 1.0.0, with the video, freezes it
+  and must retire `OLD_LINE_TAGS` in `bootstrap.mjs` — the numbers collide
+  from there, and a test fails a 1.x plugin that still lists them.
 
 ## Releasing
 
@@ -67,6 +75,14 @@ already holds, so a red suite names what was forgotten.
       `derive --check` / `render --check` on the bump.
 - [ ] Both suites green on CI (ubuntu + windows × Node 20/22).
 
+**Once, for 0.9.0** (the new line's first release; ZDD-4 does the rest)
+
+- [ ] The tag is pushed from the relaunched repo, which carries none of the
+      old line's `vX.Y.Z` tags.
+- [ ] npm trusted publishing is set up for `@rich-rees/zdd` before the tag.
+- [ ] Each adopter's lock moves to `v0.9.0` by hand (README, "Upgrading"):
+      an old-line release's check never offers a lower number.
+
 **Release order** (since 2.3.0 the tag does the publishing —
 `.github/workflows/release.yml`; before it, the engine was published by hand
 first, which that workflow now refuses)
@@ -78,12 +94,13 @@ first, which that workflow now refuses)
 3. Tag the merge commit `vX.Y.Z` and push the tag. The workflow refuses a tag
    that is not on `main`, proves the pins, runs both suites, publishes the
    engine (no secret: npm trusts this workflow by name, set up once on the
-   package's npmjs.com settings), waits until the version is fetchable, and
+   package's npmjs.com settings — `@rich-rees/zdd` needs it set up before its
+   first tag, decision 0042), waits until the version is fetchable, and
    creates the GitHub release marked **Latest** with the Versioning entry as
    its notes. A failed run after the publish is rerun as it is: a version
    already on npm from this commit is resumed, not refused.
-4. Check from **outside** this repo: `npx -y @rich-rees/zdd-engine@X.Y.Z`
-   prints the engine's usage, and `npm view @rich-rees/zdd-engine version`
+4. Check from **outside** this repo: `npx -y @rich-rees/zdd@X.Y.Z`
+   prints the engine's usage, and `npm view @rich-rees/zdd version`
    names X.Y.Z (inside the repo, npm finds the workspace copy and installs
    nothing).
 5. Move this machine's install: the route the release check prints.

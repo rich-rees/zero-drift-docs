@@ -6,7 +6,7 @@ import {
   termsForRanges,
   changedTerms,
   parseNameStatus,
-} from "../src/lib/store-changes.mjs";
+} from "../src/core/lib/store-changes.mjs";
 
 const GLOSSARY = [
   "# Ubiquitous Language", // 1

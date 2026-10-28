@@ -87,9 +87,11 @@ test("detect: names the evidence for each proposed extractor (FastAPI + Supabase
   assert.match(text, /`APIRouter` under `api\/routes`/);
   assert.match(text, /`FastAPI\(\)` app at the repo root/);
   const json = JSON.parse(bootstrap(repo, ["detect", "--json"]));
-  assert.deepEqual(json.proposals.map((p) => p.name), ["supabase", "fastapi"]);
+  // 0.9 (decision 0039): the handlers' `supabase.table("…")` calls propose supabase-py, which links the routes to their tables.
+  assert.deepEqual(json.proposals.map((p) => p.name), ["supabase", "supabase-py", "fastapi"]);
   assert.deepEqual(json.proposals[0].options, { migrationNamespaces: [{ name: "db", dir: "supabase/migrations" }] });
-  assert.deepEqual(json.proposals[1].options, { roots: ["api", "main.py"] });
+  assert.ok(json.proposals[1].evidence.some((e) => e.includes("`api/routes/jobs.py`")), json.proposals[1].evidence.join("|"));
+  assert.deepEqual(json.proposals[2].options, { roots: ["api", "main.py"] });
   assert.equal(json.pocock.installed, false);
 });
 
@@ -108,11 +110,11 @@ test("detect: Next.js App Router + middleware + migrations (the engine's Next.js
   const repo = fresh("detect-next", join(ENGINE_FIXTURES, "fixture"));
   rmSync(join(repo, "zdd"), { recursive: true });
   const json = JSON.parse(bootstrap(repo, ["detect", "--json"]));
-  assert.deepEqual(json.proposals.map((p) => p.name), ["supabase", "nextjs", "components"], "ZDD 2.1: the .tsx files under src propose the components extractor too");
-  assert.deepEqual(json.proposals[2].options, { roots: ["src"] });
+  assert.deepEqual(json.proposals.map((p) => p.name), ["supabase", "supabase-js", "nextjs", "components"], "ZDD 2.1: the .tsx files under src propose the components extractor too; 0.9: supabase-js reads their client calls");
+  assert.deepEqual(json.proposals.find((p) => p.name === "components").options, { roots: ["src"] });
   assert.deepEqual(json.proposals[0].options.migrationNamespaces, [{ name: "db", dir: "migrations" }]);
-  assert.deepEqual(json.proposals[1].options, { appDir: "src/app", apiPrefix: "/api", middlewarePath: "src/middleware.ts" });
-  assert.ok(json.proposals[1].evidence.some((e) => e.includes("App Router tree at `src/app`")));
+  assert.deepEqual(json.proposals.find((p) => p.name === "nextjs").options, { appDir: "src/app", apiPrefix: "/api", middlewarePath: "src/middleware.ts" });
+  assert.ok(json.proposals.find((p) => p.name === "nextjs").evidence.some((e) => e.includes("App Router tree at `src/app`")));
   // dependency-only Next.js: no tree yet, `next` in package.json
   const bare = fresh("detect-next-dep");
   writeFileSync(join(bare, "package.json"), JSON.stringify({ dependencies: { next: "15", expo: "52", "react-router-dom": "7" } }));
@@ -207,9 +209,11 @@ test("apply seeds one example feature slice from the configured stack; a repair 
   bootstrap(custom, ["apply", `--answers=${answersFile("sc", { extractors: ["generic"] })}`]);
   // (paths are not an answer; prove the arithmetic on the exported function instead)
   const { exampleFeature } = await import(pathToFileURL(SCRIPT).href);
-  const text = exampleFeature({ extractors: ["fastapi"], extractorOptions: { fastapi: { roots: ["api"] } } }, { mapDir: "docs/map", metadataDir: "docs/generated/records" });
+  // The records an example may link are each adapter's own (decision 0039), read through detection.
+  const { adapters } = JSON.parse(bootstrap(repo, ["detect", "--json"]));
+  const text = exampleFeature({ extractors: ["fastapi"], extractorOptions: { fastapi: { roots: ["api"] } } }, { mapDir: "docs/map", metadataDir: "docs/generated/records" }, adapters);
   assert.match(text, /an API route: `\.\.\/\.\.\/generated\/records\/route\/things--_id\.json`/);
-  const same = exampleFeature({ extractors: ["fastapi"], extractorOptions: { fastapi: { roots: ["api"] } } }, { mapDir: "zdd/map", metadataDir: "zdd/metadata" });
+  const same = exampleFeature({ extractors: ["fastapi"], extractorOptions: { fastapi: { roots: ["api"] } } }, { mapDir: "zdd/map", metadataDir: "zdd/metadata" }, adapters);
   assert.match(same, /`\.\.\/\.\.\/metadata\/route\/things--_id\.json`/);
   // A features folder that already has a slice (renamed, or the adopter's own) gets no example.
   const own = fastapiRepo("seed-own");
@@ -279,14 +283,16 @@ test("apply on the FastAPI+Supabase fixture with all defaults: config, owned wor
   const out = bootstrap(repo, ["apply", `--answers=${answersFile("existing", { name: "Fixture FastAPI" })}`]);
 
   const config = JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8"));
-  assert.deepEqual(config.extractors, ["supabase", "fastapi"]);
+  assert.deepEqual(config.extractors, ["supabase", "supabase-py", "fastapi"], "0.9: the handlers' client calls bring supabase-py (decision 0039)");
   assert.deepEqual(config.extractorOptions.supabase.migrationNamespaces, [{ name: "db", dir: "supabase/migrations" }]);
   assert.deepEqual(config.extractorOptions.fastapi.roots, ["api", "main.py"]);
-  assert.equal(config.engine, PLUGIN_VERSION);
+  assert.equal(config.release, PLUGIN_VERSION);
+  assert.equal(config.engine, undefined, "the new line pins `release` (decision 0042)");
+  assert.equal(config.mapCheck, "owed", "the first map check is owed until it is done together (decision 0039)");
   assert.deepEqual(config.hooks, { autoLoad: true, fence: true, stop: true }, "auto-load + fence + stop registrations recorded");
 
   const wf = readFileSync(join(repo, ".github", "workflows", "zdd.yml"), "utf8");
-  assert.ok(wf.includes(`@rich-rees/zdd-engine@${PLUGIN_VERSION}`));
+  assert.ok(wf.includes(`@rich-rees/zdd@${PLUGIN_VERSION}`));
   assert.ok(wf.includes(OWNER), "workflow carries the ownership line");
   assert.ok(!existsSync(join(repo, ".githooks", "pre-push")), "pre-push not written when CI accepted");
 
@@ -317,9 +323,9 @@ test("the written workflow: exact ordered command list, the pin once in env, rea
   const wf = readFileSync(join(repo, ".github", "workflows", "zdd.yml"), "utf8");
   const lines = wf.split("\n");
   const runs = lines.filter((l) => /^\s*run:\s/.test(l)).map((l) => l.replace(/^\s*run:\s*/, "").trim());
-  assert.deepEqual(runs, ['npx -y "$ZDD_ENGINE" derive --check', 'npx -y "$ZDD_ENGINE" render --check', 'npx -y "$ZDD_ENGINE" lint --merge', 'npx -y "$ZDD_ENGINE" freshness >> "$GITHUB_STEP_SUMMARY"']);
-  const pins = lines.filter((l) => l.includes("@rich-rees/zdd-engine@"));
-  assert.deepEqual(pins, [`  ZDD_ENGINE: "@rich-rees/zdd-engine@${PLUGIN_VERSION}"`], "the pin appears exactly once, in env");
+  assert.deepEqual(runs, ['npx -y "$ZDD_ENGINE" derive --check', 'npx -y "$ZDD_ENGINE" render --check', 'npx -y "$ZDD_ENGINE" lint --merge', 'npx -y "$ZDD_ENGINE" suite', 'npx -y "$ZDD_ENGINE" freshness >> "$GITHUB_STEP_SUMMARY"']);
+  const pins = lines.filter((l) => l.includes("@rich-rees/zdd@") || l.includes("@rich-rees/zdd-engine"));
+  assert.deepEqual(pins, [`  ZDD_ENGINE: "@rich-rees/zdd@${PLUGIN_VERSION}"`], "the pin appears exactly once, in env");
   // A contributor's local extractor runs in this job (decision 0001): the token
   // it can reach is read-only and is not left in the checkout.
   const job = wf.slice(wf.indexOf("jobs:"));
@@ -512,7 +518,7 @@ test("CI declined: no workflow, owned pre-push written, closing text says the gu
   const hook = readFileSync(join(repo, ".githooks", "pre-push"), "utf8");
   assert.ok(hook.startsWith("#!/bin/sh"));
   assert.ok(hook.includes(OWNER));
-  assert.ok(hook.includes(`@rich-rees/zdd-engine@${PLUGIN_VERSION}`));
+  assert.ok(hook.includes(`@rich-rees/zdd@${PLUGIN_VERSION}`));
   assert.match(out, /weaker without CI/);
   assert.match(out, /core\.hooksPath/, "no .git in the fixture → the git config step is printed");
 });
@@ -618,7 +624,7 @@ const legacySnippet = readFileSync(join(PLUGIN, "test", "fixtures", "v0.3.1", "c
 test("upgrade replaces the pre-0.4 section only when it IS the v0.3.1 snippet modulo whitespace; an adopter's line inside it keeps the section (CR-080)", () => {
   const stock = fresh("legacy-stock");
   mkdirSync(join(stock, "zdd"));
-  writeFileSync(join(stock, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], engine: PLUGIN_VERSION }));
+  writeFileSync(join(stock, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], release: PLUGIN_VERSION }));
   // Reflowed and CRLF: whitespace differences alone do not make it the adopter's.
   const reflowed = legacySnippet.replace(/ +\n/g, "\n").replace(/([a-z,])\n([a-z`])/g, "$1 $2").replace(/\n/g, "\r\n");
   writeFileSync(join(stock, "CLAUDE.md"), "# Repo\r\n\r\n" + reflowed + "## After\r\n\r\nkeep\r\n");
@@ -629,7 +635,7 @@ test("upgrade replaces the pre-0.4 section only when it IS the v0.3.1 snippet mo
 
   const edited = fresh("legacy-edited");
   mkdirSync(join(edited, "zdd"));
-  writeFileSync(join(edited, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], engine: PLUGIN_VERSION }));
+  writeFileSync(join(edited, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], release: PLUGIN_VERSION }));
   const mine = legacySnippet.trimEnd() + "\n- **House rule:** ADRs need two reviewers.\n\n";
   const before = "# Repo\n\n" + mine + "## After\n\nkeep\n";
   writeFileSync(join(edited, "CLAUDE.md"), before);
@@ -656,7 +662,7 @@ test("upgrade a v0.3.1 repo: adapter → extractors, every owned file rewritten 
   mkdirSync(join(repo, ".github", "workflows"), { recursive: true });
   writeFileSync(join(repo, ".github", "workflows", "zdd.yml"), `# ${OWNER}\nenv:\n  ZDD_ENGINE: "@rich-rees/zdd-engine@0.3.1"\n`);
   mkdirSync(join(repo, ".githooks"), { recursive: true });
-  writeFileSync(join(repo, ".githooks", "pre-push"), readFileSync(join(PLUGIN, "templates", "pre-push"), "utf8").replace(/@rich-rees\/zdd-engine@[0-9.]+/, "@rich-rees/zdd-engine@0.3.1"));
+  writeFileSync(join(repo, ".githooks", "pre-push"), readFileSync(join(PLUGIN, "templates", "pre-push"), "utf8").replace(/@rich-rees\/zdd@[0-9.]+/, "@rich-rees/zdd-engine@0.3.1"));
   const CANARY = ["glossary.md", "adr", "map", "metadata", "graph.json", "agent-index.md", "adr-index.md", "human-index.html"];
   const untouched = CANARY.map((p) => hashTree(join(repo, "zdd", p)));
   assert.ok(!untouched.includes("absent"), "every canary exists before upgrade");
@@ -667,10 +673,10 @@ test("upgrade a v0.3.1 repo: adapter → extractors, every owned file rewritten 
   const json = JSON.parse(bootstrap(repo, ["upgrade", "--json"])); // second run: nothing to do
   // 1.1's two migration notes: the unanswered Stop opt-in, and the lint that can newly go red (CR-031, CR-027).
   assert.ok(crossing.notes.some((n) => /hooks\.stop is not set .*stays OFF until answered/.test(n)), crossing.notes.join("\n"));
-  assert.ok(crossing.notes.some((n) => n.includes(`@rich-rees/zdd-engine@${PLUGIN_VERSION} lint`) && /blessing/.test(n)), "the lint note names the pinned command");
+  assert.ok(crossing.notes.some((n) => n.includes(`@rich-rees/zdd@${PLUGIN_VERSION} lint`) && /blessing/.test(n)), "the lint note names the pinned command");
 
   const config = JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8"));
-  assert.deepEqual(config.extractors, ["supabase", "nextjs"]);
+  assert.deepEqual(config.extractors, ["supabase", "supabase-js", "nextjs"]);
   assert.equal(config.adapter, undefined);
   assert.equal(config.adapterOptions, undefined);
   assert.deepEqual(config.extractorOptions.supabase.migrationNamespaces, [{ name: "db", dir: "migrations" }]);
@@ -679,12 +685,13 @@ test("upgrade a v0.3.1 repo: adapter → extractors, every owned file rewritten 
   assert.equal(config.extractorOptions.nextjs.migrationNamespaces, undefined);
   assert.deepEqual(config.nonAreaTags, ["react-flow"]);
   assert.deepEqual(config.viewer, { defaultFocus: "map/features/things" });
-  assert.equal(config.engine, PLUGIN_VERSION);
+  assert.equal(config.release, PLUGIN_VERSION);
+  assert.equal(config.engine, undefined, "the new line pins `release` (decision 0042)");
 
   for (const f of ["zdd/config.json", ".github/workflows/zdd.yml", ".githooks/pre-push", "CLAUDE.md"]) assert.match(out, new RegExp(`changed ${f.replace(/[./]/g, "\\$&")}`), out);
   assert.match(out, /adapter "nextjs-supabase" → extractors/);
-  assert.ok(readFileSync(join(repo, ".github", "workflows", "zdd.yml"), "utf8").includes(`@rich-rees/zdd-engine@${PLUGIN_VERSION}`));
-  assert.ok(readFileSync(join(repo, ".githooks", "pre-push"), "utf8").includes(`@rich-rees/zdd-engine@${PLUGIN_VERSION}`));
+  assert.ok(readFileSync(join(repo, ".github", "workflows", "zdd.yml"), "utf8").includes(`@rich-rees/zdd@${PLUGIN_VERSION}`));
+  assert.ok(readFileSync(join(repo, ".githooks", "pre-push"), "utf8").includes(`@rich-rees/zdd@${PLUGIN_VERSION}`));
   const claude = readFileSync(join(repo, "CLAUDE.md"), "utf8");
   assert.ok(claude.includes("@zdd/instructions.md") && !claude.includes("/zdd:orient") && claude.includes("## Other section\n\nkeep me"), claude);
   assert.ok(existsSync(join(repo, "zdd", "instructions.md")), "the instructions file is written by the upgrade");
@@ -700,7 +707,7 @@ test("upgrade a v0.3.1 repo: adapter → extractors, every owned file rewritten 
 test("upgrade leaves alone what it does not own: a customised legacy section, an unmarked pre-push, malformed markers", () => {
   const repo = fresh("upgrade-unowned");
   mkdirSync(join(repo, "zdd"));
-  writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], engine: PLUGIN_VERSION }));
+  writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], release: PLUGIN_VERSION }));
   const custom = "# Repo\n\n## Documentation — Zero-Drift Docs (ZDD)\n\nOur own house rules about docs, nothing to do with the stock snippet.\n\n## Next\n\nx\n";
   writeFileSync(join(repo, "CLAUDE.md"), custom);
   mkdirSync(join(repo, ".githooks"));
@@ -746,19 +753,19 @@ test("upgrade recognises the exact v0.3.1 workflow (no owner line, floating npx)
   ]) {
     const repo = fresh(`upgrade-v031-${label.replace(/\s/g, "-")}`);
     mkdirSync(join(repo, "zdd"));
-    writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], engine: PLUGIN_VERSION }));
+    writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], release: PLUGIN_VERSION }));
     mkdirSync(join(repo, ".github", "workflows"), { recursive: true });
     writeFileSync(join(repo, ".github", "workflows", "zdd.yml"), text);
     const out = bootstrap(repo, ["upgrade"]);
     assert.equal(readFileSync(join(repo, ".github", "workflows", "zdd.yml"), "utf8"), template, label);
     assert.match(out, /changed \.github\/workflows\/zdd\.yml/, label);
     assert.match(out, /v0\.3\.1 workflow.*replaced/i, label);
-    assert.ok(template.includes(`@rich-rees/zdd-engine@${PLUGIN_VERSION}`) && template.includes(OWNER));
+    assert.ok(template.includes(`@rich-rees/zdd@${PLUGIN_VERSION}`) && template.includes(OWNER));
   }
   // One edit away from v0.3.1 is the adopter's: left untouched and called out.
   const edited = fresh("upgrade-v031-edited");
   mkdirSync(join(edited, "zdd"));
-  writeFileSync(join(edited, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], engine: PLUGIN_VERSION }));
+  writeFileSync(join(edited, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], release: PLUGIN_VERSION }));
   mkdirSync(join(edited, ".github", "workflows"), { recursive: true });
   const mine = v031.replace("node-version: \"20\"", "node-version: \"22\"");
   writeFileSync(join(edited, ".github", "workflows", "zdd.yml"), mine);
@@ -817,7 +824,7 @@ test("docs/agents/domain.md honours paths.* from zdd/config.json", () => {
   mkdirSync(join(repo, "zdd"));
   writeFileSync(
     join(repo, "zdd", "config.json"),
-    JSON.stringify({ extractors: ["generic"], engine: PLUGIN_VERSION, paths: { glossary: "docs/zdd/terms.md", adrDir: "docs/decisions", adrIndex: "docs/zdd/decisions.md" } }),
+    JSON.stringify({ extractors: ["generic"], release: PLUGIN_VERSION, paths: { glossary: "docs/zdd/terms.md", adrDir: "docs/decisions", adrIndex: "docs/zdd/decisions.md" } }),
   );
   applyJson(repo, "domain-paths", {});
   const doc = readFileSync(join(repo, "docs", "agents", "domain.md"), "utf8");
@@ -844,7 +851,7 @@ test("a hand-written docs/agents/domain.md is kept byte for byte by apply and by
 test("upgrade offers docs/agents/domain.md to an existing adopter: written when absent and narrated, kept on the next run", () => {
   const repo = fresh("domain-upgrade");
   mkdirSync(join(repo, "zdd"));
-  writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], engine: PLUGIN_VERSION }));
+  writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify({ extractors: ["generic"], release: PLUGIN_VERSION }));
   const out = bootstrap(repo, ["upgrade"]);
   assert.match(out, /changed docs\/agents\/domain\.md/, out);
   assert.match(out, /note\s+docs\/agents\/domain\.md: .*Pocock/, out);
@@ -861,9 +868,10 @@ test("upgrade (2.0.0, 2.0): an owned workflow's bare lint step gains --merge and
   const repo = fresh("upgrade-merge-gate");
   applyJson(repo, "mg", { extractors: ["generic"], optIns: { autoLoad: true, fence: true, stop: true, ci: true } });
   const wf = join(repo, ".github", "workflows", "zdd.yml");
-  writeFileSync(wf, readFileSync(wf, "utf8").replace("lint --merge", "lint").replace(/@rich-rees\/zdd-engine@[0-9.]+/, "@rich-rees/zdd-engine@1.3.1"));
+  writeFileSync(wf, readFileSync(wf, "utf8").replace("lint --merge", "lint").replace(/@rich-rees\/zdd@[0-9.]+/, "@rich-rees/zdd-engine@1.3.1"));
   const cfgPath = join(repo, "zdd", "config.json");
-  writeFileSync(cfgPath, JSON.stringify({ ...JSON.parse(readFileSync(cfgPath, "utf8")), engine: "1.3.1" })); // a 1.3.1 repo: this run crosses 2.0
+  const { release: _r, ...cfg } = JSON.parse(readFileSync(cfgPath, "utf8"));
+  writeFileSync(cfgPath, JSON.stringify({ ...cfg, engine: "1.3.1" })); // a 1.3.1 repo (the old line's `engine` pin): this run crosses 2.0
   const json = JSON.parse(bootstrap(repo, ["upgrade", "--json"]));
   assert.ok(readFileSync(wf, "utf8").includes('run: npx -y "$ZDD_ENGINE" lint --merge'));
   assert.ok(json.notes.some((n) => /zdd\.yml: the lint step now runs `lint --merge` \(2\.0\)/.test(n)), json.notes.join("\n"));
@@ -891,4 +899,45 @@ test("CR-013 (decision 0031): bootstrap writes the blessing store — at its def
   writeFileSync(cfg, JSON.stringify({ ...JSON.parse(readFileSync(cfg, "utf8")), paths: { blessingsDir: "docs/blessings" } }, null, 2) + "\n");
   const custom = applyJson(repo, "bs3", {});
   assert.ok(custom.wrote.includes("docs/blessings/.gitkeep"), custom.wrote.join("\n"));
+});
+
+// ---- ZDD-3 slice 2b: supabase-js beside every JS reader (CR-045, CR-070) ----
+
+test("greenfield: a stated Supabase + JS-app stack writes supabase-js after supabase, for each JS reader; Supabase alone or with FastAPI does not (CR-045)", () => {
+  const cases = [
+    [["Supabase", "Next.js"], ["supabase", "supabase-js", "nextjs"]],
+    [["Supabase", "React Router web"], ["supabase", "supabase-js", "react-router"]],
+    [["Supabase", "Expo Router"], ["supabase", "supabase-js", "expo-router"]],
+    [["FastAPI", "Supabase"], ["fastapi", "supabase"]],
+    [["Next.js"], ["nextjs"]],
+  ];
+  for (const [i, [stack, want]] of cases.entries()) {
+    const repo = fresh(`gf-sbjs-${i}`);
+    bootstrap(repo, ["apply", `--answers=${answersFile(`gf-sbjs-${i}`, { stack })}`]);
+    const config = JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8"));
+    assert.deepEqual(config.extractors, want, JSON.stringify(stack));
+    if (want.includes("supabase-js")) assert.deepEqual(config.extractorOptions["supabase-js"], {});
+  }
+});
+
+test("detect: supabase-js is proposed once beside Supabase and each JS reader on its own — Next.js, React Router, components, Expo Router (CR-070)", () => {
+  const readers = {
+    nextjs: { "package.json": JSON.stringify({ dependencies: { next: "15" } }) },
+    "react-router": { "package.json": JSON.stringify({ dependencies: { "react-router-dom": "7" } }), "src/routes.tsx": 'import { createBrowserRouter } from "react-router-dom";\nexport const router = createBrowserRouter([]);\n' },
+    components: { "src/components/Badge.tsx": "export function Badge() { return <span />; }\n" },
+    "expo-router": { "package.json": JSON.stringify({ dependencies: { expo: "52", "expo-router": "4" } }), "app/_layout.tsx": "export default function Layout() { return null; }\n", "app/index.tsx": "export default function Home() { return null; }\n" },
+  };
+  for (const [reader, files] of Object.entries(readers)) {
+    const repo = fresh(`detect-sbjs-${reader}`);
+    mkdirSync(join(repo, "supabase", "migrations"), { recursive: true });
+    writeFileSync(join(repo, "supabase", "migrations", "001_init.sql"), "create table things (id int);\n");
+    for (const [rel, text] of Object.entries(files)) {
+      mkdirSync(join(repo, rel, ".."), { recursive: true });
+      writeFileSync(join(repo, rel), text);
+    }
+    const names = JSON.parse(bootstrap(repo, ["detect", "--json"])).proposals.map((p) => p.name);
+    assert.ok(names.includes(reader), `${reader}: ${names.join(", ")}`);
+    assert.equal(names.filter((n) => n === "supabase-js").length, 1, `${reader}: ${names.join(", ")}`);
+    assert.equal(names.indexOf("supabase-js"), names.indexOf("supabase") + 1, "right after supabase");
+  }
 });

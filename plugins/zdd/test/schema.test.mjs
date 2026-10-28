@@ -115,11 +115,20 @@ test("repoBase: the schema pattern refuses internal whitespace exactly as the en
 });
 
 test("the schema's documented refs defaults are the engine's defaults (CR-116)", async () => {
-  const refs = await import(pathToFileURL(resolve(PLUGIN, "..", "..", "packages", "zdd-engine", "src", "extractors", "nextjs", "refs.mjs")).href);
+  const refs = await import(pathToFileURL(resolve(PLUGIN, "..", "..", "packages", "zdd-engine", "src", "adapters", "nextjs", "refs.mjs")).href);
   const doc = SCHEMA.properties.extractorOptions.properties.nextjs.properties.refs.properties;
   assert.deepEqual(doc.extensions.default, refs.DEFAULT_REFS.extensions);
   assert.deepEqual(doc.excludeSuffixes.default, refs.DEFAULT_REFS.excludeSuffixes);
   assert.deepEqual(doc.excludeDirs?.default ?? refs.DEFAULT_REFS.excludeDirs, refs.DEFAULT_REFS.excludeDirs);
+});
+
+test("the schema's documented supabase-js defaults are the engine's (ZDD-3 slice 2b, CR-073)", async () => {
+  const js = await import(pathToFileURL(resolve(PLUGIN, "..", "..", "packages", "zdd-engine", "src", "adapters", "js", "source.mjs")).href);
+  const doc = SCHEMA.properties.extractorOptions.properties["supabase-js"].properties;
+  assert.deepEqual(doc.extensions.default, js.DEFAULT_EXTENSIONS);
+  assert.deepEqual(doc.excludeDirs.default, js.DEFAULT_EXCLUDE_DIRS);
+  assert.deepEqual(doc.excludeSuffixes.default, js.DEFAULT_EXCLUDE_SUFFIXES);
+  assert.deepEqual(doc.roots.default, ["."]);
 });
 
 test("CR-516/CR-517: the schema refuses what the engine refuses — an external service with no nonblank marker or a name with no letter or digit, an agent-index budget under 200 — and accepts what it accepts", () => {
@@ -137,4 +146,20 @@ test("CR-516/CR-517: the schema refuses what the engine refuses — an external 
   assert.match(engineRejects(budget(199), "render") ?? "", /at least 200/);
   assert.deepEqual(validate(SCHEMA, budget(200)), []);
   assert.doesNotMatch(engineRejects(budget(200), "render") ?? "", /budgetTokens/);
+});
+
+test("ZDD-3 slice 3: background-declared takes the shared reader options (CR-082); a declared entry needs a module or a file, as the engine does (CR-083)", () => {
+  const cfg = (declared) => ({ extractors: ["background-declared"], extractorOptions: { "background-declared": declared } });
+  assert.deepEqual(validate(SCHEMA, cfg({ roots: ["."], exclude: ["release"], modes: { nightly: "scheduled" }, entries: [{ name: "nightly", file: "src/nightly.ts" }] })), []);
+  assert.deepEqual(validate(SCHEMA, cfg({ entries: [{ name: "py", module: "app.worker" }] })), []);
+  assert.notDeepEqual(validate(SCHEMA, cfg({ entries: [{ name: "nothing-to-run" }] })), [], "neither module nor file");
+});
+
+test("CR-157 (decision 0042): `release` alone and `engine` alone are valid, both are not; `release` is a version, `engine` is deprecated", () => {
+  assert.deepEqual(validate(SCHEMA, { extractors: ["generic"], release: "0.9.0" }), []);
+  assert.deepEqual(validate(SCHEMA, { extractors: ["generic"], engine: "2.5.0" }), []);
+  assert.ok(validate(SCHEMA, { extractors: ["generic"], release: "0.9.0", engine: "2.5.0" }).some((e) => /forbidden shape/.test(e)));
+  for (const bad of ["v0.9.0", "0.9", "zdd-engine@0.9.0", "00.9.0"]) assert.ok(validate(SCHEMA, { extractors: ["generic"], release: bad }).length, bad);
+  assert.deepEqual(validate(SCHEMA, { extractors: ["generic"], release: "0.9.0-rc.1" }), []);
+  assert.equal(SCHEMA.properties.engine.deprecated, true);
 });
