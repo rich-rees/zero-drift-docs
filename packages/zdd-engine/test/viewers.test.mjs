@@ -607,9 +607,15 @@ test("CR-168: a body link opens an ADR in the peek only when it is a sibling ADR
   assert.equal(at("../../docs/0002-setup.md", "zdd/blessings"), null, "a numbered doc is not ADR-0002");
   assert.equal(at("../adr/0002-other-name.md", "zdd/blessings"), null, "the file must be the ADR's own");
   assert.equal(at("../adr/0009-missing.md", "zdd/blessings"), null);
-  // An ADR's sibling link, from its own folder, as before.
+  // An ADR's sibling link, from its own folder (either set), as before; and
+  // the glossary's, as before.
   assert.equal(at("0002-anything.md", "zdd/adr"), "0002");
+  assert.equal(at("0002-anything.md", "docs/harness-adr"), "0002");
+  assert.equal(at("0002-anything.md", ""), "0002");
   assert.equal(at("0009-anything.md", "zdd/adr"), null);
+  // CR-180: from a blessing, a bare numbered file is a file beside it.
+  assert.equal(at("0002-example.md", "zdd/blessings"), null);
+  assert.equal(at("0002-things.md", "zdd/blessings"), null);
 });
 
 test("CR-178: a hostile blessing is embedded inert — no tag closes the script, and the body round-trips as text", () => {

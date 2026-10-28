@@ -645,13 +645,16 @@
     for (const p of parts) p === ".." ? stack.pop() : stack.push(p);
     return stack.join("/");
   }
-  // The embedded ADR a body link opens in the peek, or null: a sibling
-  // NNNN-*.md (an ADR citing another), or a link that resolves to an ADR's
-  // own file (a blessing's ../adr/0002-x.md). A numbered file anywhere else
-  // is not an ADR (CR-168).
+  // The embedded ADR a body link opens in the peek, or null: a bare
+  // NNNN-*.md read from an ADR folder (an ADR citing another) or from the
+  // glossary (as it always was), or a link that resolves to an ADR's own
+  // file (a blessing's ../adr/0002-x.md). A numbered file anywhere else is
+  // not an ADR — from a blessing, `0002-x.md` is a file beside it (CR-168,
+  // CR-180).
+  const ADR_DIRS = new Set(((bundle.docs && bundle.docs.adrs) || []).map((a) => a.dir || "zdd/adr"));
   function adrForLink(href, baseDir) {
     const sibling = /^(\d{4})-[\w.-]+\.md$/.exec(href);
-    if (sibling && ADR_BY_NUM[sibling[1]]) return sibling[1];
+    if (sibling && ADR_BY_NUM[sibling[1]] && (baseDir === "" || ADR_DIRS.has(baseDir))) return sibling[1];
     return ADR_BY_PATH[resolveLink(href, baseDir).split("/").filter(Boolean).join("/")] || null;
   }
   const BLESSINGS = (bundle.docs && bundle.docs.blessings) || [];
