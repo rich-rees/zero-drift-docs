@@ -297,3 +297,31 @@ test("render (campaign CR-217): a local adapter's own IMPORTS names the users of
   assert.equal(r.status, 0, r.stderr);
   assert.match(lineOf(readFileSync(join(repo, "zdd", "blessing-index.md"), "utf8"), "Sharing config"), /`conf\/base\.cfg`, used by 1: conf\/prod\.cfg ·/);
 });
+
+test("verify pass 1 (CR-219, 220, 203): the exports fallback never crosses import and require; a reader's test verdict is its own; an extends chain past the guard is an incomplete read", (t) => {
+  const root = tmp(t);
+  put(root, {
+    // CR-219: the import target is built output (not in the repo); the
+    // require target is; a custom `source` branch is the fallback.
+    "packages/p/package.json": JSON.stringify({ name: "@acme/p", exports: { ".": { import: "./dist/esm.js", require: "./cjs.cts" }, "./s": { import: "./dist/s.js", source: "./src/s.ts", require: "./s.cts" } } }),
+    "packages/p/cjs.cts": "", "packages/p/src/s.ts": "", "packages/p/s.cts": "",
+    "src/a.ts": "",
+    "src/one.test.ts": 'import "./a";\n// #uses src/a.ts\n',
+  });
+  const importsOf = resolverOver(root, JS);
+  assert.deepEqual(importsOf("apps/x.mjs", 'import "@acme/p";'), [], "an import never lands on the require target");
+  assert.deepEqual(importsOf("apps/x.mjs", 'import "@acme/p/s";'), ["packages/p/src/s.ts"]);
+  assert.deepEqual(importsOf("apps/x.cjs", 'require("@acme/p/s");'), ["packages/p/s.cts"]);
+  // CR-220: a second reader that does not call the file a test keeps it.
+  const marker = { label: "markers", extensions: [".ts"], skipDirs: [], isTest: () => false, resolver: () => (rel, text) => [...text.matchAll(/#uses (\S+)/g)].map((m) => m[1]) };
+  assert.deepEqual(importersOf(root, [JS, marker], ["src/a.ts"]).users.get("src/a.ts").importers, ["src/one.test.ts"]);
+  assert.deepEqual(importersOf(root, [JS], ["src/a.ts"]).users.get("src/a.ts").importers, [], "the JS reader alone: a test is not a user");
+  // CR-203: a chain longer than the guard.
+  const deep = tmp(t);
+  const files = { "src/b.ts": "", "src/c.ts": 'import "@/b";\n' };
+  for (let k = 0; k < 70; k++) files[`cfg/t${k}.json`] = JSON.stringify(k === 69 ? { compilerOptions: { baseUrl: "..", paths: { "@/*": ["src/*"] } } } : { extends: `./t${k + 1}.json` });
+  files["src/tsconfig.json"] = JSON.stringify({ extends: "../cfg/t0.json" });
+  put(deep, files);
+  const found = importersOf(deep, [JS], ["src/b.ts"]);
+  assert.match(found.incomplete ?? "", /extends/);
+});

@@ -40,7 +40,10 @@ const ACTIVE = {
   import: new Set(["types", "import", "module", "browser", "node", "development", "production", "default"]),
   require: new Set(["types", "require", "browser", "node", "development", "production", "default"]),
 };
-// A guard on an `extends` loop, never a depth a real repo reaches.
+// The conditions of the other form: a fallback never crosses to them.
+const OTHER_FORM = { import: new Set(["require"]), require: new Set(["import", "module"]) };
+// A guard on an `extends` loop, never a depth a real repo reaches; a chain
+// past it is said (`io.incomplete`), so the answer reads as incomplete.
 const MAX_EXTENDS = 64;
 
 // Test code is a user only of test code (a fixture, a helper): changing a
@@ -140,7 +143,11 @@ export function resolver(io, files = null) {
   // `baseUrl` (a child's overrides an inherited one, inherited paths and
   // all), else under the folder of the config that declared them.
   const loadConfig = (rel, seen = new Set()) => {
-    if (seen.has(rel) || seen.size > MAX_EXTENDS) return null;
+    if (seen.has(rel)) return null;
+    if (seen.size > MAX_EXTENDS) {
+      io.incomplete?.(`${rel}: a tsconfig extends chain longer than ${MAX_EXTENDS} files was not followed`);
+      return null;
+    }
     seen.add(rel);
     const text = read(rel);
     const json = text === null ? null : parseJsonc(text);
@@ -216,7 +223,7 @@ export function resolver(io, files = null) {
   // `mode`, keys in the manifest's order. A target that is not in the repo
   // (built output, which git ignores) is passed over, so a branch naming
   // the source (a custom `source` condition) is taken when no active one
-  // resolves.
+  // resolves — never the other form's (an import never lands on `require`).
   const pick = (v, mode, dir, star, tsFirst, anyCondition = false) => {
     if (typeof v === "string") return probe(norm(posix.join(dir || ".", slash(v).replace("*", star))), tsFirst);
     if (Array.isArray(v)) {
@@ -228,7 +235,7 @@ export function resolver(io, files = null) {
     }
     if (v && typeof v === "object") {
       for (const k of Object.keys(v)) {
-        if (!anyCondition && !ACTIVE[mode].has(k)) continue;
+        if (anyCondition ? OTHER_FORM[mode].has(k) : !ACTIVE[mode].has(k)) continue;
         const s = pick(v[k], mode, dir, star, tsFirst, anyCondition);
         if (s) return s;
       }

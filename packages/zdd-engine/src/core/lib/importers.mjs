@@ -9,6 +9,10 @@
 //     isTest(rel) test code: a user only of test code
 //     resolver(io, files) -> (rel, text) -> [repo-relative files it imports] }
 //
+// The `io` a resolver gets also has `incomplete(why)`: a resolver that
+// gives up on something (a config chain past its guard) says so, and the
+// answer reads as incomplete.
+//
 // The repo is walked once through an extractor-style `io` (never a path git
 // ignores, never through a link, the same caps), each file a reader claims
 // is read once, and the answer is inverted for the wanted files only.
@@ -60,7 +64,8 @@ export function importersOf(repoRoot, readers, wanted, { limits = {} } = {}) {
     if (!r.ok && !ABSENT.has(r.code)) refused.push(r);
     return r;
   };
-  const counted = { ...io, read };
+  const notes = [];
+  const counted = { ...io, read, incomplete: (why) => notes.push(why) };
   const skip = new Set([".git", ...readers.flatMap((r) => r.skipDirs ?? [])]);
   const files = [];
   const walked = io.walk(".", (rel) => files.push(rel), { enter: (_rel, name) => !skip.has(name) });
@@ -71,21 +76,25 @@ export function importersOf(repoRoot, readers, wanted, { limits = {} } = {}) {
     if (!mine.length) continue;
     const text = read(rel);
     if (!text.ok) continue;
-    const targets = new Set();
-    for (const reader of mine) for (const t of resolvers.get(reader)(rel, text.text)) if (wantedSet.has(t)) targets.add(t);
     // Test code uses test code only: a module's own tests are not what a
-    // change to it asks to retest.
+    // change to it asks to retest. Each reader judges by its own verdict:
+    // a file one reader calls a test may be another's ordinary user.
     const isTest = (reader, f) => reader.isTest?.(f) === true;
-    for (const target of targets) {
-      const entry = result.get(target);
-      if (mine.some((r) => isTest(r, rel)) && !entry.readers.some((r) => isTest(r, target))) continue;
-      entry.importers.push(rel);
+    const users = new Set();
+    for (const reader of mine) {
+      for (const target of resolvers.get(reader)(rel, text.text)) {
+        if (!wantedSet.has(target) || users.has(target)) continue;
+        if (isTest(reader, rel) && !result.get(target).readers.some((r) => isTest(r, target))) continue;
+        users.add(target);
+      }
     }
+    for (const target of users) result.get(target).importers.push(rel);
   }
   let incomplete = null;
   if (walked.truncated) incomplete = "ZDD's read of the source ran out of budget";
   else if (refused.some((r) => r.code === "over-budget")) incomplete = "ZDD's read of the source ran out of budget";
   else if (refused.length) incomplete = `ZDD could not read ${refused.length === 1 ? "one file" : `${refused.length} files`} (${refused[0].reason})`;
+  else if (notes.length) incomplete = [...new Set(notes)].sort()[0];
   for (const v of result.values()) {
     if (!v.importers) continue;
     v.importers.sort();
