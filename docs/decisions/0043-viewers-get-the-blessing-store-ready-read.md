@@ -1,6 +1,6 @@
 # 0043 — Viewers get the blessing store ready-read; every peek has a filter and a back history
 
-**Date:** 2026-10-28 · **Status:** accepted · **Origin:** ZDD-2 part 2, the design session on 2026-10-28 (Rich's calls, questions 1–9). Builds on 0031 (the blessing store and its one reader).
+**Date:** 2026-10-28 · **Status:** accepted; point 1's order (by trigger question, then id) and point 3's "flat, by trigger question" superseded in part by [0045](0045-blessings-carry-an-importance-high-or-nothing-kept-scarce.md) (2026-10-28: high blessings first, then by question, then id, still flat, marked with a chip; each entry gains `importance`) · **Origin:** ZDD-2 part 2, the design session on 2026-10-28 (Rich's calls, questions 1–9). Builds on 0031 (the blessing store and its one reader).
 
 ## Context
 

@@ -2458,6 +2458,9 @@ export const UPGRADE_NOTES = {
   "0.10.0": () => [
     "0.10 adds a Blessings peek to the human index, beside Glossary and ADRs (decision 0043): every blessing by trigger question, with its exemplar, app, users and cited ADRs; every peek gains a filter box and a back history. with the reference (cytoscape) viewer, only human-index.html moves on the regenerate — open it and try the Blessings button; the minimal viewer or one of your own may show no change",
   ],
+  "0.11.0": () => [
+    "0.11 lets a blessing say `importance: high` (decision 0045): often needed and costly to reinvent — the index lists it first in its section with a bold **high**, the reference human index pins it with a chip, and a plan that departs from it says why. Optional, and never set by the upgrade: a session proposes it at \"choose patterns\" and \"update ZDD\" writes it on the developer's yes. With the reference viewer human-index.html moves, and ZDD's instructions gain one clause; blessing-index.md moves only once a blessing is marked high",
+  ],
 };
 // border: end
 
@@ -2501,7 +2504,7 @@ export const lockRelease = (ref) => (OLD_LINE_TAGS.includes(ref) ? oldLine(ref.s
 // paragraphs, none droppable). A test pins each `says` to its `since`.
 export const INSTRUCTION_RULES = [
   { id: "load", since: oldLine("2.4.0"), match: /\bload ZDD\b/i, says: '"load ZDD" before designing or building in an area: read the glossary whole, the ADR index whole and the ADRs the task cites, say what you loaded, then read the code fresh' },
-  { id: "patterns", since: oldLine("2.3.0"), match: /\bchoose patterns\b|\bblessing-index\b|\bpatterns-plan\b/i, says: '"choose patterns" once the design is settled, before any code: check for existing code to reuse first, then the blessings that match, and commit zdd/patterns-plan.md' },
+  { id: "patterns", since: "0.11.0", match: /\bchoose patterns\b|\bblessing-index\b|\bpatterns-plan\b/i, says: '"choose patterns" once the design is settled, before any code: check for existing code to reuse first, then the blessings that match (one marked high is not to be reinvented: follow it, or say in the plan why not), and commit zdd/patterns-plan.md' },
   { id: "update", since: oldLine("2.4.0"), match: /\bupdate ZDD\b/i, says: '"update ZDD" before finishing a unit of work: curate what the change touched, reconcile the pattern plan, regenerate, commit with the code; never handed to a subagent' },
   { id: "upgrade", since: oldLine("2.3.0"), match: /\bupgrade ZDD\b|\bbootstrap\s+--upgrade\b/i, says: '"upgrade ZDD" moves the repo to a newer release and shows every change before writing it' },
   { id: "skew", since: oldLine("2.3.0"), match: /\b(?:release|engine[- ]skew|skew|mismatch) line\b|release mismatch|first line of (?:your|the) reply/i, says: "a release or engine-skew line is the first line of the reply, verbatim, and is fixed before the task — the fix depends on the case (machine behind the lock: the commands printed; branch behind main: merge main; repo behind the newest release: upgrade ZDD, by choice)" },

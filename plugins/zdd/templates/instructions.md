@@ -9,10 +9,10 @@ verbs carry it, and all work with any coding agent:
   cites; say what you loaded (`ZDD: loaded …`); then read the code fresh.
   Never trust the docs over the code. (Skill: `load`.)
 - **"choose patterns"** — once the design is settled, before any code. First
-  check for existing code to reuse, then read `<BLESSING_INDEX>` whole and
-  open the blessings that match the work; commit `<PATTERNS_PLAN>`: per
-  piece, reuse this code, follow a blessing, depart from one and why, none
-  applies, or a new pattern to bless. (Skill: `patterns`.)
+  check for existing code to reuse, then read `<BLESSING_INDEX>` whole and open the blessings that
+  match the work (one marked **high** is not to be reinvented: follow it, or say in the plan
+  why not); commit `<PATTERNS_PLAN>`: per piece, reuse this code, follow a blessing, depart
+  from one and why, none applies, or a new pattern to bless. (Skill: `patterns`.)
 - **"update ZDD"** — before finishing a unit of work. Curate the artifacts the
   change touched (glossary / ADRs / comments / map / blessings); reconcile the pattern
   plan (mint the blessings that survived, record the rest in the commit

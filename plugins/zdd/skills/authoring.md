@@ -167,6 +167,16 @@ just tidy. The whole lifecycle, with examples, is in
   decides where the blessing applies.
 - **`adr:`** (optional) — the ADR that blessed it (`ADR-0012`, or several,
   comma-separated). A citation in the text counts too.
+- **`importance: high`** (optional; no line means normal) — for a blessing
+  that is **often needed and costly to reinvent**: the side peek every
+  details page uses, so nobody builds a modal of their own. The index lists
+  it first in its section with a bold **high**, the human index pins it to
+  the top of the Blessings peek, and a plan that departs from it says why.
+  A session **proposes** it, with its reason against that test, and the
+  developer **confirms** it, as with `kind:`; nothing sets it by default.
+  `high` is the only value — `lint` fails any other, case-exact — and it is
+  kept scarce: `lint` warns when more than a fifth of the store (at least
+  one) is high, because a pin on many pins none (decision 0045).
 
 **The text**, after the header:
 

@@ -1,6 +1,7 @@
 // The blessing index (2.0.0; where and why since ZDD-1, decision 0031):
 // one line per blessing in the store, house rules under their app first,
-// then every other blessing by question. The builder on its own, then the
+// then every other blessing; each section high first, then by question
+// (decision 0045). The builder on its own, then the
 // fixture's index against its golden, render --check catching a stale or
 // missing index, and the agent index's reading path naming it.
 // Run: node --test "test/*.test.mjs"
@@ -78,6 +79,49 @@ test("buildBlessingIndex: no house rules means one 'Blessings' list; more than f
   assert.match(lost.text, /## Applies to apps\/gone _\(no such map page\)_/);
 });
 
+test("ZDD-7 (decision 0045): a high blessing comes first in its own section, its line opening with a bold high; house rules stay under their app; only the exact value pins", () => {
+  const { text } = buildBlessingIndex(
+    [
+      b("adding-a", "where: a.ts\nkind: copy", "Adding A? Copy a because x."),
+      b("showing-details", "where: ui/Peek.tsx (SidePeek)\nkind: extend\nimportance: high", "Showing a record's details? Extend SidePeek because a modal of your own drifts."),
+      b("styling", "where: web/tokens.css\nkind: copy\napplies-to: apps/web", "Styling anything? Use tokens because x."),
+      b("routing", "where: web/routes.ts\nkind: copy\napplies-to: apps/web\nimportance: high", "Routing? Copy routes because x."),
+      b("shouting", "where: s.ts\nkind: copy\nimportance: High", "Adding B? Copy b because x."),
+    ],
+    opts(() => []),
+  );
+  assert.equal(
+    text.slice(text.indexOf("## Applies to")),
+    [
+      "## Applies to [Web](map/apps/web.md)",
+      "",
+      "- **high** [Routing?](blessings/routing.md) — copy: `web/routes.ts` · why: because x",
+      "- [Styling anything?](blessings/styling.md) — copy: `web/tokens.css` · why: because x",
+      "",
+      "## Every other blessing",
+      "",
+      "- **high** [Showing a record's details?](blessings/showing-details.md) — extend: `ui/Peek.tsx` (SidePeek), used by nothing ZDD sees · why: because a modal of your own drifts",
+      "- [Adding A?](blessings/adding-a.md) — copy: `a.ts` · why: because x",
+      "- [Adding B?](blessings/shouting.md) — copy: `s.ts` · why: because x",
+      "",
+    ].join("\n"),
+  );
+  assert.match(text, /A line\nthat opens with \*\*high\*\* is a blessing not to reinvent: follow it, or say in\nthe pattern plan why not\./);
+});
+
+test("ZDD-7 (decision 0045): viewerBlessings puts high first, then by question, then id; importance is \"high\" or null, never a value lint fails", () => {
+  const out = viewerBlessings(
+    [
+      b("adding-a", "where: a.ts\nkind: copy", "Adding A? Copy a."),
+      b("zeta-high", "where: z.ts\nkind: copy\nimportance: high", "Zeta? Copy z."),
+      b("beta-high", "where: z.ts\nkind: copy\nimportance: high", "Beta? Copy z."),
+      b("shouting", "where: s.ts\nkind: copy\nimportance: High", "Adding B? Copy b."),
+    ],
+    { mapPage: () => null, usersOf: () => null },
+  );
+  assert.deepEqual(out.map((x) => [x.id, x.importance]), [["beta-high", "high"], ["zeta-high", "high"], ["adding-a", null], ["shouting", null]]);
+});
+
 test("buildBlessingIndex: an empty store says so, and control characters never reach the index", () => {
   const empty = buildBlessingIndex([], opts());
   assert.equal(empty.count, 0);
@@ -146,6 +190,7 @@ test("viewerBlessings: the index's order and facts, a page that is not on the ma
     question: "Styling anything?",
     opening: null,
     kind: "copy",
+    importance: null,
     where: { path: "web/tokens.css", symbol: "tokens" },
     appliesTo: { path: "apps/web", node: "map/apps/web", title: "Web" },
     firstBuiltIn: { path: "features/gone", node: null, title: null },

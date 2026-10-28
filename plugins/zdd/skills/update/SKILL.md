@@ -47,13 +47,13 @@ Run this as the definition of done for every unit of work — the spoken form is
    for a new pattern or a copied precedent worth a blessing.
 3. **Run the deriver.** Regenerates the codebase metadata from source:
    ```
-   npx -y @rich-rees/zdd@0.10.0 derive
+   npx -y @rich-rees/zdd@0.11.0 derive
    ```
 4. **Run the renderer.** Rebuilds the graph artifact (`zdd/graph.json`), the
    agent index, the ADR index (and the harness ADR index, when the repo has
    one), the blessing index, and the human index:
    ```
-   npx -y @rich-rees/zdd@0.10.0 render
+   npx -y @rich-rees/zdd@0.11.0 render
    ```
 5. **Lint the stores.** Supersession symmetry, blessing citations and every
    blessing's trigger question (blocking); a blessing with no reason or over
@@ -97,7 +97,7 @@ Run this as the definition of done for every unit of work — the spoken form is
      its kind; otherwise it is a warning, so that
      switching an extractor on never turns a green lint red by itself.
    ```
-   npx -y @rich-rees/zdd@0.10.0 lint
+   npx -y @rich-rees/zdd@0.11.0 lint
    ```
 6. **Write the ZDD record and commit all of it in the PR.** Code and docs
    merge atomically; the doc delta is reviewed alongside the code delta.
@@ -185,14 +185,21 @@ kill a pattern, change it, or create one the plan never saw.
      with `where:` (**the existing, reusable code**: a shared helper or base
      layer before a pattern to imitate), `kind:` (`copy` or `extend`),
      `applies-to:` when it is a house rule for a whole app,
-     `first-built-in:` (the slice this work built it for) and `adr:` when an
-     ADR blessed it; then the text, trigger question first, naming a *kind*
+     `first-built-in:` (the slice this work built it for), `adr:` when an
+     ADR blessed it, and `importance: high` **only** when the plan proposed
+     it and the developer confirms it now (often needed and costly to
+     reinvent; [authoring.md](../authoring.md)) — never by default; then the text, trigger question first, naming a *kind*
      of work, the one trap it refuses, and the reason (an ADR, or
      "because …"). A candidate whose substance is a
      rule with no code to point at becomes an ADR and a code comment at the
      site instead. Otherwise **drop it**, and record why.
    - **no blessing applies** — nothing to do, unless the build ended up
      copying something; then treat that as precedent.
+   - **Proposed high** — for each existing blessing the plan proposed
+     marking `importance: high`: confirm the reason still holds against the
+     final diff and ask the developer; on their yes add the line to that
+     blessing's header, otherwise record the proposal as dropped, with why.
+     Never on silence (decision 0045).
    - **Retest** — for every piece that extended an `extend` blessing's code,
      confirm each user on its *Retest* line was retested (its tests ran, or
      it was checked by hand), or that the plan says why not. A user left

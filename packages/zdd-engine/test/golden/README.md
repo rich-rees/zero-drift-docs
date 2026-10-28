@@ -46,6 +46,13 @@ metadata, agent-index or blessing-index byte moved. The ZDD-2 campaign's
 fixes (CR-167 to CR-179) regenerated the full-page golden once more: every
 changed line is a changed line of viz.js or viz.html; the BUNDLE literal did
 not move. Verify pass 1 (CR-180) moved it again, by viz.js lines only.
+ZDD-7 (0.11.0, decision 0045) marked the fixture's `saving-a-thing`
+blessing `importance: high` and regenerated the blessing-index golden (its
+line moves first in its section with a bold **high**, and the header gains
+the marker's sentence) and both human-index goldens: each `docs.blessings`
+entry gains `importance` and the high one comes first; otherwise the BUNDLE
+literal is unchanged, and the full page's other changed lines are viz.js and
+viz.css lines (the high chip). No graph, metadata or agent-index byte moved.
 
 ## Regenerating
 

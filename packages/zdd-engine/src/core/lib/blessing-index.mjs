@@ -7,11 +7,14 @@
 //
 // House rules first: a blessing with `applies-to` is listed under its app or
 // package, and every one is read in full for an app the work touches. Then
-// every other blessing in one list, by question. Each line carries two
+// every other blessing in one list; each section high first, then by
+// question (decision 0045). Each line carries two
 // pointers, where (the exemplar, and for an `extend` blessing who uses it)
 // and why (the ADRs it cites, else its "because …" clause). A blessing with
 // no question is still listed, flagged, so nothing in the store is invisible
-// here even before lint fails it. Measured on a real map: ~95 tokens per
+// here even before lint fails it. A blessing marked `importance: high`
+// (decision 0045) comes first in its own section, its line opening with a
+// bold **high**, so the house-rule sections stay whole. Measured on a real map: ~95 tokens per
 // blessing in full against ~25 per line here, which keeps the index loadable
 // whole at hundreds of blessings.
 
@@ -32,6 +35,11 @@ const code = (t) => {
   return run ? `${fence} ${s} ${fence}` : `\`${s}\``;
 };
 const byText = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+// High first (decision 0045), then by trigger question, then id — the one
+// order of the index and of the viewer's list.
+const highFirst = (a, b) => (b.importance === "high") - (a.importance === "high");
+const question = (b) => b.shape.question ?? "";
+const storeOrder = (a, b) => highFirst(a, b) || byText(question(a), question(b)) || byText(a.id, b.id);
 
 // `blessings`: the store as lib/blessings.mjs reads it.
 // `opts.adrHref(num)`: index-relative href of an ADR, or null if it does not
@@ -51,15 +59,16 @@ export function buildBlessingIndex(blessings, opts) {
     "Read this whole when choosing patterns, and open a blessing in full only when",
     "its question matches the work. A house rule for an app is listed under that",
     "app: for an app the work touches, read every one of them in full. An `extend`",
-    "blessing names who uses the code: extending it means retesting them.",
+    "blessing names who uses the code: extending it means retesting them. A line",
+    "that opens with **high** is a blessing not to reinvent: follow it, or say in",
+    "the pattern plan why not.",
     "",
   );
   if (!blessings.length) {
     lines.push("No blessings yet. A blessing names the exemplar to copy or extend and the", "pattern to refuse, one file per blessing in the blessing store; `update` mints them.", "");
     return { text: lines.join("\n"), count: 0 };
   }
-  const question = (b) => b.shape.question ?? "";
-  const ordered = [...blessings].sort((a, b) => byText(question(a), question(b)) || byText(a.id, b.id));
+  const ordered = [...blessings].sort(storeOrder);
   const houseRules = new Map();
   const rest = [];
   for (const b of ordered) {
@@ -103,13 +112,13 @@ function line(b, opts) {
   if (b.adrs.length) why = b.adrs.map((n) => (opts.adrHref(n) ? `[ADR-${n}](${opts.adrHref(n)})` : `ADR-${n}`)).join(", ");
   else if (shape.because) why = printable(shape.because);
   else why = "_no reason given_";
-  return `${head} — ${kind}: ${where} · why: ${why}`;
+  return `${b.importance === "high" ? "**high** " : ""}${head} — ${kind}: ${where} · why: ${why}`;
 }
 
 // The blessing store as a viewer embeds it (ZDD-2, decision 0043): the
 // same facts as an index line, read once here so the viewer never parses
-// the store, in the index's order (by question, then id) and with its cap on
-// users. A missing fact is null, never guessed; `usedBy` is only on an
+// the store, high first and then by question, then id (decision 0045), and
+// with the index's cap on users. `importance` is "high" or null (normal). A missing fact is null, never guessed; `usedBy` is only on an
 // `extend` blessing with a `where` (null: unknown to ZDD).
 // `blessings`: the store as lib/blessings.mjs reads it (with `file`).
 // `opts.mapPage(id)`: { node, title } for a semantic-map page by its path
@@ -117,14 +126,13 @@ function line(b, opts) {
 // `opts.usersOf(blessing)`: [{ node, title }] (node: a graph node id, or
 //   null) using an `extend` blessing's exemplar, or null.
 export function viewerBlessings(blessings, opts) {
-  const question = (b) => b.shape.question ?? "";
   const page = (id) => {
     if (!id) return null;
     const p = opts.mapPage(id);
     return { path: id, node: p ? p.node : null, title: p ? p.title : null };
   };
   return [...blessings]
-    .sort((a, b) => byText(question(a), question(b)) || byText(a.id, b.id))
+    .sort(storeOrder)
     .map((b) => {
       const visible = b.shape.visible;
       const out = {
@@ -133,6 +141,7 @@ export function viewerBlessings(blessings, opts) {
         question: b.shape.question,
         opening: b.shape.question ? null : visible.length > OPENING_MAX ? visible.slice(0, OPENING_MAX - 1).trimEnd() + "…" : visible,
         kind: b.kind,
+        importance: b.importance === "high" ? "high" : null,
         where: b.where,
         appliesTo: page(b.appliesTo),
         firstBuiltIn: page(b.firstBuiltIn),

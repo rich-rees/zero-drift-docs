@@ -48,11 +48,13 @@ npx @rich-rees/zdd contract [--json]
   `zdd/blessings/`: a blessing that cites a superseded or non-existent ADR
   fails, and so does one that does not open with its trigger question, one
   whose `where:` is missing or names no file, one with no `kind:` or neither
-  `copy` nor `extend`, and one whose `applies-to:` names no app or package
-  page; a Blessings heading left on a semantic-map page fails too; one with
+  `copy` nor `extend`, one whose `applies-to:` names no app or package
+  page, and one whose `importance:` is anything but `high`; a Blessings
+  heading left on a semantic-map page fails too; one with
   no reason — neither an ADR nor "because …" — or over 300 visible
   characters, or citing a partially superseded ADR, or an unknown
-  `first-built-in:` or header line, is a warning), and the **pattern plan**
+  `first-built-in:` or header line, is a warning, and so are more high
+  blessings than a fifth of the store), and the **pattern plan**
   (`zdd/patterns-plan.md`): with `--merge` — the CI step that gates the merge
   — its presence fails, and without it a warning, so a branch stays pushable
   mid-build. With `--tempstate` a tracked `TEMPSTATE.md` fails. See

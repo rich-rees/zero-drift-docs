@@ -212,9 +212,9 @@ Done when the tests are green and every checklist item holds.
 ## Step 6 — the real repo
 
 ```
-npx -y @rich-rees/zdd@0.10.0 derive --verbose
-npx -y @rich-rees/zdd@0.10.0 render
-npx -y @rich-rees/zdd@0.10.0 lint
+npx -y @rich-rees/zdd@0.11.0 derive --verbose
+npx -y @rich-rees/zdd@0.11.0 render
+npx -y @rich-rees/zdd@0.11.0 lint
 ```
 
 Read every `[<name>]` diagnostic and account for each: a real gap goes back

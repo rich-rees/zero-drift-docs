@@ -9,6 +9,7 @@
 //   applies-to: apps/web
 //   first-built-in: features/fixed-routes
 //   adr: ADR-0017
+//   importance: high
 //   ---
 //
 //   A refusal that has to name things? Copy RefundRefusal … — never …
@@ -16,7 +17,9 @@
 // `where` and `kind` are required (lint fails without them); `applies-to`
 // and `first-built-in` name semantic-map pages by their path under the map
 // folder, without `.md`; `adr` is optional, a reason beside any ADR the text
-// cites. The file name (without `.md`) is the blessing's stable id.
+// cites. `importance: high` (ZDD-7, decision 0045) marks a blessing that is
+// often needed and costly to reinvent: listed first and marked; no line is
+// normal. The file name (without `.md`) is the blessing's stable id.
 
 import { relative } from "node:path";
 import { parseFrontmatter } from "./frontmatter.mjs";
@@ -24,7 +27,8 @@ import { blessingShape } from "./map-links.mjs";
 import { walkMarkdown, readBounded, MAX_STORE_FILE_BYTES } from "./walk-markdown.mjs";
 
 export const BLESSING_KINDS = ["copy", "extend"];
-export const HEADER_KEYS = ["where", "kind", "applies-to", "first-built-in", "adr"];
+export const IMPORTANCE_VALUES = ["high"];
+export const HEADER_KEYS = ["where", "kind", "applies-to", "first-built-in", "adr", "importance"];
 const CITATION_RE = /\bADR[-\s]?(\d{4})\b/g;
 
 // `path` or `path (Symbol)` -> { path, symbol } with a posix path, or null
@@ -58,6 +62,9 @@ export function readBlessing(text, id) {
     header,
     where: parseWhere(header.where),
     kind: header.kind === undefined ? null : String(header.kind).trim(),
+    // As written, so lint can name a value it does not know; only "high"
+    // pins the blessing (isHigh).
+    importance: header.importance === undefined ? null : String(header.importance).trim(),
     appliesTo: header["applies-to"] ? String(header["applies-to"]).trim().replace(/\.md$/, "") : null,
     firstBuiltIn: header["first-built-in"] ? String(header["first-built-in"]).trim().replace(/\.md$/, "") : null,
     text: blessingText,
@@ -68,6 +75,14 @@ export function readBlessing(text, id) {
     unknownKeys: Object.keys(header).filter((k) => !HEADER_KEYS.includes(k)).sort(),
   };
 }
+
+// A blessing pinned first in the index and the peek (decision 0045): the
+// exact value, so `High` is not high (lint fails it).
+export const isHigh = (b) => b.importance === "high";
+
+// At most this many high blessings before lint warns (decision 0045): a
+// fifth of the store, and always at least one.
+export const highBudget = (count) => Math.max(1, Math.floor(count / 5));
 
 // Every blessing in the store, sorted by id, read the hardened way (symlinks
 // skipped, reads bounded). `unreadable` lists the files over the cap or

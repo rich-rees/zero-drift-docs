@@ -26,6 +26,11 @@
 //    to a session choosing patterns. A blessing with no reason (neither an
 //    ADR citation nor an inline "because …") is a WARNING, and so is one over
 //    the length budget: the detail belongs in the ADR.
+//    Importance (0.11.0, decision 0045): `importance:` is `high` or absent;
+//    any other value FAILS (case-exact, as `kind:` is). More high blessings
+//    than a fifth of the store (always at least one allowed) is a WARNING:
+//    high means often needed and costly to reinvent, and a pin on half the
+//    store pins nothing.
 // 3. TEMPSTATE lint (--tempstate, PRs only — tautological on the base
 //    branch): the branch working file must be deleted before merge.
 //    Enforced by construction, not ritual.
@@ -54,7 +59,7 @@ import { join, resolve, relative } from "node:path";
 import { loadConfig, absentStoreNotes } from "./lib/config.mjs";
 import { parseFrontmatter } from "./lib/frontmatter.mjs";
 import { extractBlessings, blessingHeadings, forwardStamps, BLESSING_LENGTH_BUDGET } from "./lib/map-links.mjs";
-import { loadBlessings, BLESSING_KINDS, HEADER_KEYS } from "./lib/blessings.mjs";
+import { loadBlessings, BLESSING_KINDS, HEADER_KEYS, IMPORTANCE_VALUES, isHigh, highBudget } from "./lib/blessings.mjs";
 import { adrSets, listAdrFiles } from "./lib/adr-sets.mjs";
 import { walkMarkdown, readBounded, MAX_STORE_FILE_BYTES } from "./lib/walk-markdown.mjs";
 import { unclaimedRecords, CLAIMABLE_KINDS, OPT_IN_CLAIMABLE_KINDS } from "./lib/claims.mjs";
@@ -284,6 +289,9 @@ for (const b of store.blessings) {
   }
   if (b.kind === null) problems.push(`${where}: has no 'kind:' — 'copy' (imitate this method) or 'extend' (reuse this shared code; extending it means retesting what uses it)`);
   else if (!BLESSING_KINDS.includes(b.kind)) problems.push(`${where}: 'kind: ${printable(b.kind)}' is neither 'copy' nor 'extend'`);
+  if (b.importance !== null && !IMPORTANCE_VALUES.includes(b.importance)) {
+    problems.push(`${where}: 'importance: ${printable(b.importance)}' is not 'high' — write 'importance: high' for a blessing that is often needed and costly to reinvent, or remove the line for a normal one`);
+  }
   if (b.appliesTo !== null) {
     const type = mapPages.get(b.appliesTo);
     if (type === undefined) problems.push(`${where}: 'applies-to: ${printable(b.appliesTo)}' names no semantic-map page — give an app or package page's path under ${paths.mapDir}/, without .md ("apps/web")`);
@@ -315,6 +323,16 @@ for (const b of store.blessings) {
     } else if (partial.length) {
       console.error(`WARNING: ${where} cites ADR-${num}, superseded in part by ADR-${partial.map((s) => s.by).join(", ADR-")} — check the blessed pattern still stands`);
     }
+  }
+}
+{
+  const high = store.blessings.filter(isHigh);
+  const budget = highBudget(store.blessings.length);
+  if (high.length > budget) {
+    console.error(
+      `WARNING: ${high.length} of ${store.blessings.length} blessings are 'importance: high' (at most ${budget}: a fifth of the store, at least one) — ` +
+        `keep high for a blessing that is often needed and costly to reinvent; a pin on many pins none (${high.map((b) => printable(b.file)).join(", ")})`,
+    );
   }
 }
 

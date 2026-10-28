@@ -19,7 +19,7 @@ import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { extractBlessings, forwardStamps, blessingShape } from "../src/core/lib/map-links.mjs";
-import { parseWhere, readBlessing, usersOf } from "../src/core/lib/blessings.mjs";
+import { parseWhere, readBlessing, usersOf, highBudget } from "../src/core/lib/blessings.mjs";
 
 const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const BIN = join(PKG, "bin", "zdd-engine.mjs");
@@ -193,7 +193,43 @@ test("decision 0031: an unknown first-built-in and an unknown header key are WAR
   const r = lint(repo);
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stderr, /^WARNING: zdd\/blessings\/lost\.md .*'first-built-in: features\/nowhere' names no semantic-map page/m);
-  assert.match(r.stderr, /^WARNING: zdd\/blessings\/lost\.md .*has header line ZDD does not read \(apply-to\) — the header is where, kind, applies-to, first-built-in, adr/m);
+  assert.match(r.stderr, /^WARNING: zdd\/blessings\/lost\.md .*has header line ZDD does not read \(apply-to\) — the header is where, kind, applies-to, first-built-in, adr, importance$/m);
+  rmSync(repo, { recursive: true, force: true });
+});
+
+test("ZDD-7 (decision 0045): importance is 'high' or absent — any other value FAILS, case-exact, naming the fix; high passes", () => {
+  const repo = mkRepo();
+  bless(repo, "shouting", "Adding a page? Copy it because x.", "where: src/app/page.tsx\nkind: copy\nimportance: High");
+  bless(repo, "critical", "Adding a page? Copy it because x.", "where: src/app/page.tsx\nkind: copy\nimportance: critical");
+  bless(repo, "low", "Adding a page? Copy it because x.", "where: src/app/page.tsx\nkind: copy\nimportance: low");
+  bless(repo, "blank", "Adding a page? Copy it because x.", "where: src/app/page.tsx\nkind: copy\nimportance:");
+  const r = lint(repo);
+  assert.equal(r.status, 1, r.stderr);
+  assert.match(r.stderr, /shouting\.md .*'importance: High' is not 'high' — write 'importance: high' for a blessing that is often needed and costly to reinvent, or remove the line for a normal one/);
+  assert.match(r.stderr, /critical\.md .*'importance: critical' is not 'high'/);
+  assert.match(r.stderr, /low\.md .*'importance: low' is not 'high'/);
+  assert.match(r.stderr, /blank\.md .*'importance: ' is not 'high'/);
+  assert.match(r.stderr, /Store lints failed \(4\)/);
+  assert.doesNotMatch(r.stderr, /does not read/, "importance is a header key ZDD reads");
+  rmSync(repo, { recursive: true, force: true });
+});
+
+test("ZDD-7 (decision 0045): more high blessings than a fifth of the store (at least one allowed) is a WARNING, exit 0, naming them", () => {
+  assert.deepEqual([0, 1, 3, 4, 5, 9, 10, 14, 15, 60].map(highBudget), [1, 1, 1, 1, 1, 1, 2, 2, 3, 12]);
+  const repo = mkRepo();
+  // The fixture: three blessings, one of them high — at the budget, no warning.
+  let r = lint(repo);
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stderr, /importance: high'/);
+  bless(repo, "showing-details", "Showing details? Copy it because x.", "where: src/app/page.tsx\nkind: copy\nimportance: high");
+  r = lint(repo);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stderr, /^WARNING: 2 of 4 blessings are 'importance: high' \(at most 1: a fifth of the store, at least one\) — keep high for a blessing that is often needed and costly to reinvent; a pin on many pins none \(zdd\/blessings\/saving-a-thing\.md, zdd\/blessings\/showing-details\.md\)$/m);
+  // Ten blessings allow two high: six normal ones lift the budget.
+  for (let i = 0; i < 6; i++) bless(repo, `normal-${i}`, `Adding page ${i}? Copy it because x.`);
+  r = lint(repo);
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stderr, /importance: high'/);
   rmSync(repo, { recursive: true, force: true });
 });
 

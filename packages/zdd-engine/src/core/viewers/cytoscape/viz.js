@@ -889,8 +889,9 @@
 
   // ---------- blessings (decision 0043) ----------
   // A blessing names the code to start from for a kind of work, asked as a
-  // trigger question. The list is the store in the index's order (by
-  // question); kind and app are chips, never headings.
+  // trigger question. The list is the store in the engine's order (high
+  // first, then by question, then id — decision 0045); importance, kind and
+  // app are chips, never headings.
   function chip(text, cls, title) {
     const s = document.createElement("span");
     s.className = `tag ${cls}`;
@@ -898,6 +899,9 @@
     if (title) s.title = title;
     return s;
   }
+  // A high blessing (decision 0045) arrives first in the list, so pinning
+  // is the engine's order; the viewer only marks it.
+  const HIGH_TITLE = "High importance: often needed and costly to reinvent — follow it, or say in the pattern plan why not";
   const pageName = (p) => (p ? p.title || p.path : "");
   const whereText = (w) => (w ? w.path + (w.symbol ? ` (${w.symbol})` : "") : "");
   function renderBlessingIndex() {
@@ -923,13 +927,14 @@
       btn.appendChild(head);
       const meta = document.createElement("span");
       meta.className = "muted blessing-meta";
+      if (b.importance === "high") meta.append(chip("high", "high-chip", HIGH_TITLE));
       if (b.where) meta.append(Object.assign(document.createElement("code"), { textContent: whereText(b.where) }));
       if (b.kind) meta.append(chip(b.kind, "kind-chip", "How to use the exemplar"));
       if (b.appliesTo) meta.append(chip(pageName(b.appliesTo), "app-chip", "A house rule for this app"));
       btn.appendChild(meta);
       btn.addEventListener("click", () => peekGo({ kind: "blessing", id: b.id }));
       docsBody.appendChild(btn);
-      filterEntries.push({ els: [btn], text: norm([b.question, b.opening, b.id, whereText(b.where), b.kind, b.appliesTo && b.appliesTo.path, pageName(b.appliesTo)].join(" ")) });
+      filterEntries.push({ els: [btn], text: norm([b.question, b.opening, b.id, whereText(b.where), b.kind, b.importance, b.appliesTo && b.appliesTo.path, pageName(b.appliesTo)].join(" ")) });
     }
   }
   // A map page or record a blessing names: a link that opens its node, with
@@ -952,6 +957,7 @@
     docsBody.innerHTML = "";
     const chips = document.createElement("div");
     chips.className = "blessing-chips";
+    if (b.importance === "high") chips.append(chip("high", "high-chip", HIGH_TITLE));
     if (b.kind) chips.append(chip(b.kind, "kind-chip", "How to use the exemplar"));
     if (b.appliesTo) chips.append(chip(pageName(b.appliesTo), "app-chip", "A house rule for this app"));
     if (chips.childNodes.length) docsBody.appendChild(chips);

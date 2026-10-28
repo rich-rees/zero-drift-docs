@@ -6,7 +6,7 @@ at **both ends** of the pipeline: **extractors** feed data in (one per
 convention), and **viewers** render it out (one per visualization), with a stable
 graph in the middle.
 
-> **Status.** ZDD is `0.10.0` and public, on the new line that 0.9.0 started
+> **Status.** ZDD is `0.11.0` and public, on the new line that 0.9.0 started
 > (decision 0042). The engine (`packages/zdd-engine`, on npm as
 > `@rich-rees/zdd`) is what the plugin's skills and adopters' CI
 > both run, and both contracts below — extractors and viewers — are the ones it
@@ -233,8 +233,9 @@ A viewer is one module exporting
 `render({ graph, docs, changed, options, bundleName, repoBase })` and returning
 the page as a string. `graph` is exactly what was written to `graph.json`; `docs`
 is `{ glossary, adrs, blessings }` (the store text, for viewers that embed it;
-`blessings` comes ready-read — exemplar, app, users, cited ADRs — so no viewer
-parses the store, [decision 0043](docs/decisions/0043-viewers-get-the-blessing-store-ready-read.md)); `changed` is
+`blessings` comes ready-read — exemplar, app, users, cited ADRs, and
+`importance` (`"high"` or null, high entries first) — so no viewer
+parses the store, [decision 0043](docs/decisions/0043-viewers-get-the-blessing-store-ready-read.md), [0045](docs/decisions/0045-blessings-carry-an-importance-high-or-nothing-kept-scarce.md)); `changed` is
 the latest-store-change highlight; `options` is whatever the adopter put in
 `viewer` besides `name`, plus the resolved top-level `nonAreaTags` whenever it
 is non-empty (your area model should exclude the same tags the graph did). A viewer is a good contribution when it honours the

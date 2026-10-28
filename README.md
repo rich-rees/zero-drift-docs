@@ -4,7 +4,7 @@ A documentation architecture for repos built by **human + agent pairs**. ZDD kee
 eight documentation artifacts *at most one unit of work behind the code* — and, with
 CI, makes drift in the machine-generated ones **un-mergeable**.
 
-> **Status: 0.10.0.** The plugin installs in Claude Code
+> **Status: 0.11.0.** The plugin installs in Claude Code
 > and in Codex from this one repo; `bootstrap` detects your stack (or grills
 > for it on a greenfield repo), proposes extractors with evidence, and *writes*
 > the opt-ins; the engine (`packages/zdd-engine`, npm `@rich-rees/zdd`) is a
@@ -322,7 +322,7 @@ reviewable file, never one question per item.
 from [the releases page](https://github.com/rich-rees/zero-drift-docs/releases)):
 
 ```
-claude plugin marketplace add rich-rees/zero-drift-docs@v0.10.0 --scope project
+claude plugin marketplace add rich-rees/zero-drift-docs@v0.11.0 --scope project
 claude plugin install zdd@zero-drift-docs --scope project
 ```
 
@@ -452,8 +452,8 @@ move the lock by hand:
 
 1. In `.claude/settings.json`, set
    `extraKnownMarketplaces["zero-drift-docs"].source.ref` to the new tag
-   (`"v0.10.0"`). No lock there? Add the marketplace from the repo's folder with
-   `claude plugin marketplace add rich-rees/zero-drift-docs@v0.10.0 --scope project`.
+   (`"v0.11.0"`). No lock there? Add the marketplace from the repo's folder with
+   `claude plugin marketplace add rich-rees/zero-drift-docs@v0.11.0 --scope project`.
 2. Restart Claude Code. The session's first line names the commands that move
    your machine (on a machine where the marketplace was ever added without a
    scope, that includes `claude plugin marketplace remove zero-drift-docs
@@ -532,6 +532,10 @@ as a yes/no, so saying no to one is a visible choice, not a fork.
 
 - [ ] Next: a second viewer; Vue / Svelte / Angular extractors on their first
       real adoption.
+- [x] **0.11.0** — blessings carry an importance: `importance: high` for
+      one that is often needed and costly to reinvent, listed first and
+      marked in the blessing index, pinned with a chip in the Blessings
+      peek, kept scarce by a lint warning *(ZDD-7; decision 0045)*.
 - [x] **0.10.0** — a Blessings peek in the human index, beside Glossary
       and ADRs: every blessing by trigger question, its exemplar, app,
       users and cited ADRs; a filter and a back history in every peek
@@ -570,6 +574,21 @@ A repo still on the old line moves its lock by hand once, then says "upgrade
 ZDD" (see Upgrading). Before 1.0 the adapter contract stays at 1 and may
 still change; 1.0.0 freezes it.
 
+- **`0.11.0` — blessings carry an importance.** A blessing file's header
+  may say `importance: high` for a blessing that is often needed **and**
+  costly to reinvent (the side peek every details page uses, so nobody
+  builds a modal of their own). The blessing index lists it first in its
+  section with a bold **high**; the human index pins it to the top of the
+  Blessings peek with a chip; ZDD's instructions say a plan that departs
+  from it says why. A session proposes it and the developer confirms;
+  `lint` fails any value but `high` and warns when more than a fifth of
+  the store is high. The viewer contract's blessing entry gains
+  `importance`, high entries first (decision 0045). **What moves on the
+  bump**: every pin ZDD owns names `@rich-rees/zdd@0.11.0`; with the
+  reference viewer `render --check` moves `human-index.html`; "upgrade ZDD" rewrites `zdd/instructions.md`
+  and the `AGENTS.md` block (one clause); `blessing-index.md` moves only
+  once a blessing is marked high; no graph or metadata byte changes.
+  Nothing to answer — the upgrade never marks a blessing high.
 - **`0.10.0` — a Blessings peek in the human index.** A Blessings button
   beside Glossary and ADRs opens every blessing in the store, listed by
   trigger question with its kind and app as chips; a blessing's page shows
