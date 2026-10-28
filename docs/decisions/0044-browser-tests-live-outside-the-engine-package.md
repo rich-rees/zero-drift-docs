@@ -30,6 +30,10 @@ and a contributor runs its suite with nothing installed.
    goldens never move for the browser's sake.
 4. **One CI job, `browser-smoke`: ubuntu, Node 22**, with Chromium cached.
    The engine and plugin suites keep the full matrix.
+5. **The release gate for it is the release checklist**, not the tag
+   workflow: `browser-smoke` green on the merge commit is a checklist line
+   (`CLAUDE.md`, Releasing). `release.yml` and `pre-tag.mjs` run only the
+   two suites, so a release never needs Playwright or Chromium.
 
 ## Consequences
 
@@ -38,13 +42,17 @@ and a contributor runs its suite with nothing installed.
 - The flows the human index promises (each header button, a list's filter
   across back, blessing → ADR → back → back, blessing → node → back with a
   node already selected, a hostile blessing, the empty store) fail a CI job
-  when they break.
+  when they break, and so does any uncaught page error, dialog, or request
+  that leaves the page (the viewer contract promises none).
+- The downloaded Chromium is trusted as the npm install is: Playwright's
+  own download, no digest of our own. The job holds no secret and a
+  read-only token.
 - A Windows-only or Node-20-only browser bug is not caught here. What is
   under test runs inside Chromium, which neither choice touches; the page's
   data still runs on the full matrix through the goldens.
 - The smoke test reads one internal of the page — cytoscape's instance on
   its container — only to find where a node is drawn, so the test taps the
-  real canvas. A cytoscape upgrade that moves it fails the test loudly, not
+  real canvas, and whether a node is still selected after Reset. A cytoscape upgrade that moves it fails the test loudly, not
   silently.
 - A second browser test (a third-party viewer's, a stack's fixture) goes in
   `test/browser/` too, under this decision.

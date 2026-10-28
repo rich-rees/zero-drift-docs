@@ -13,7 +13,7 @@ graph in the middle.
 > executes today. Pull requests are welcome, and bug reports go to the repo's
 > Discussions ("Bug reports"; decision 0041 — the repo has no Issues); the tests are the contract
 > (`node --test` in `packages/zdd-engine` and over `plugins/zdd/test`), and CI
-> runs both suites on every PR.
+> runs both suites, and a browser smoke test of the human index, on every PR.
 
 ## The shape of a contribution
 
@@ -276,10 +276,13 @@ builds its own private data shape from the graph.
 The reference viewer is also clicked in CI: `test/browser/` renders the
 engine's fixture and drives `human-index.html` in headless Chromium — the
 header buttons, the peek's filter and back history, a blessing to a node and
-back, a hostile blessing, the empty store. It lives outside the published
+back, a hostile blessing, the empty store; any page error, dialog or request
+that leaves the page fails the flow. It lives outside the published
 package, so the engine stays dependency-free
 ([decision 0044](docs/decisions/0044-browser-tests-live-outside-the-engine-package.md));
-run it with `cd test/browser && npm ci && npx playwright install chromium && node --test "*.test.mjs"`.
+run it with `cd test/browser && npm ci && npx playwright install chromium && node --test "*.test.mjs"`
+(on a clean Linux machine, `npx playwright install --with-deps chromium` also
+installs Chromium's system libraries).
 A change to the reference viewer's behaviour adds or changes a flow there.
 
 ## Other welcome contributions
