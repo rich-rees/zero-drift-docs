@@ -1,10 +1,14 @@
 // The human index, clicked (decision 0044). The engine suite proves the page's
 // data (the BUNDLE golden) and its structure; this drives it in headless
-// Chromium: the header buttons, the peek's filter and back history, a blessing
-// to its cited ADR and back, a blessing to a node and back WITH A NODE ALREADY
-// SELECTED (CR-167: the detail panel opened and closed at once, and no test
-// or hand pass saw it), a hostile blessing and the empty store.
+// Chromium: every header button, the peek's filter and back history, a
+// blessing to its cited ADR and back, a blessing to a node and back WITH A NODE
+// ALREADY SELECTED (CR-167: the detail panel opened and closed at once, and no
+// test or hand pass saw it), a hostile blessing and the empty store. Every
+// flow also fails on an uncaught page error, a dialog, or a request that
+// leaves the page (the viewer contract promises none).
 // Run: cd test/browser && npm ci && npx playwright install chromium && node --test "*.test.mjs"
+// (on a clean Linux machine, `npx playwright install --with-deps chromium` also
+// installs the system libraries Chromium needs).
 import { test, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -37,18 +41,26 @@ function renderFixture(edit) {
   return pathToFileURL(join(repo, "zdd", "human-index.html")).href;
 }
 
-// A blessing that tries every way into the page: raw HTML, an event
-// handler, script-scheme links (markdown and raw) and an iframe. Its trigger
-// question carries markup too, so the list row and the title are tried.
+// A blessing that tries every way into the page: raw HTML, event handlers
+// (which would also raise a dialog), script-scheme links (markdown and raw),
+// an iframe, and markup that fetches on its own (a stylesheet import, a
+// stylesheet link, a video poster, a markdown image: a beacon the request
+// guard catches). Its trigger question carries markup too, so the list row
+// and the title are tried.
 const HOSTILE = `---
 where: src/app/page.tsx
 kind: copy
 ---
 
-Adding a <img src=x onerror="window.__pwned=1">hostile page? Never run
-<script>window.__pwned=1</script> markup, never follow
+Adding a <img src=x onerror="window.__pwned=1;alert(1)">hostile page? Never run
+<script>window.__pwned=1;alert(2)</script> markup, never follow
 [this link](javascript:window.__pwned=1) or <a href="javascript:window.__pwned=1">this one</a>,
-and never frame <iframe src="javascript:window.__pwned=1"></iframe> or <svg onload="window.__pwned=1"></svg> anything.
+and never frame <iframe src="javascript:window.__pwned=1"></iframe> or <svg onload="window.__pwned=1;alert(3)"></svg> anything.
+<style>@import url(https://beacon.invalid/import.css);</style>
+<link rel="stylesheet" href="https://beacon.invalid/link.css">
+<video poster="https://beacon.invalid/poster.png"></video>
+
+![a beacon](https://beacon.invalid/pixel.png)
 `;
 
 let browser, urls;
@@ -64,28 +76,36 @@ before(() => {
 });
 before(async () => { browser = await chromium.launch(); });
 after(async () => {
-  await browser?.close();
-  for (const r of repos) rmSync(r, { recursive: true, force: true });
+  try {
+    await browser?.close();
+  } finally {
+    for (const r of repos) rmSync(r, { recursive: true, force: true });
+  }
 });
 
-// One page per test; a page error fails the test it happened in.
-let context, page, pageErrors, dialogs;
+// One page per test. An uncaught page error, a dialog, or a request that
+// leaves the page fails the flow it happened in; an off-page request is also
+// refused, so a beacon never reaches the network.
+let context, page, pageErrors, dialogs, offPage;
 beforeEach(async () => {
   context = await browser.newContext({ viewport: { width: 1600, height: 1000 } });
   page = await context.newPage();
   pageErrors = [];
   dialogs = [];
+  offPage = [];
   page.on("pageerror", (e) => pageErrors.push(String(e)));
   page.on("dialog", (d) => { dialogs.push(d.message()); d.dismiss(); });
+  page.on("request", (r) => { if (!/^(file|data|blob|about):/i.test(r.url())) offPage.push(r.url()); });
+  await context.route(/^(?!file:|data:|blob:|about:)/i, (route) => route.abort());
 });
-afterEach(async () => {
-  await context.close();
-  assert.deepEqual(pageErrors, [], "no uncaught page errors");
-});
+afterEach(async () => { await context.close(); });
 // A failing flow leaves a screenshot of the page as it failed; CI uploads it.
 const smoke = (name, fn) => test(name, async () => {
   try {
     await fn();
+    assert.deepEqual(pageErrors, [], "no uncaught page errors");
+    assert.deepEqual(dialogs, [], "no dialogs");
+    assert.deepEqual(offPage, [], "no request leaves the page");
   } catch (e) {
     mkdirSync(ARTIFACTS, { recursive: true });
     await page.screenshot({ path: join(ARTIFACTS, `${name.replace(/[^\w-]+/g, "_")}.png`) }).catch(() => {});
@@ -142,7 +162,7 @@ async function tapNode(id) {
   await page.mouse.click(at.x, at.y);
 }
 
-smoke("each header button opens its peek", async () => {
+smoke("each header button does its job", async () => {
   await open(urls.fixture);
   await page.click("#btn-glossary");
   await expectDocs("Glossary", null);
@@ -163,6 +183,24 @@ smoke("each header button opens its peek", async () => {
   await page.keyboard.press("Escape");
   await settle();
   assert.equal(await isOpen("#docs"), false, "Escape closes the peek");
+
+  // The theme toggle flips the theme and redraws; again flips it back.
+  const theme = () => page.evaluate(() => document.documentElement.dataset.theme || "light");
+  const first = await theme();
+  await page.click("#theme-toggle");
+  await page.waitForSelector("#graph canvas");
+  assert.notEqual(await theme(), first, "the theme toggle changes the theme");
+  await page.click("#theme-toggle");
+  assert.equal(await theme(), first, "and changes it back");
+
+  // Reset redraws the view and closes an open node.
+  await tapNode("metadata/table/db--things");
+  await settle();
+  assert.equal(await isOpen("#detail"), true, "a tap opens the node");
+  await page.click("#reset");
+  await settle();
+  assert.equal(await isOpen("#detail"), false, "Reset closes the node");
+  assert.equal(await page.evaluate(() => document.getElementById("graph")._cyreg.cy.$("node:selected").length), 0, "Reset clears the selection");
 });
 
 smoke("each list keeps its filter text across back", async () => {
@@ -249,28 +287,31 @@ smoke("a hostile blessing shows no executable markup", async () => {
   await page.click("#btn-blessings");
   const row = page.locator("#docs-body .blessing-item", { hasText: "hostile page" });
   assert.equal(await row.count(), 1, "the hostile blessing is listed");
+  await expectInert("the list");
   await row.click();
   await settle();
   assert.match(await text("#docs-body"), /hostile page/);
-  for (const sel of ["#docs", "#detail"]) {
-    const found = await page.$eval(sel, (root) => ({
-      tags: [...root.querySelectorAll("script, iframe, object, embed, svg, img")].map((e) => e.tagName),
-      handlers: [...root.querySelectorAll("*")].flatMap((e) => [...e.attributes].filter((a) => /^on/i.test(a.name)).map((a) => `${e.tagName}[${a.name}]`)),
-      // The viewer's own in-page links are `javascript:void(0)` with a click
-      // handler; any other script-scheme href came from the store.
-      hrefs: [...root.querySelectorAll("[href], [src]")].map((e) => e.getAttribute("href") ?? e.getAttribute("src"))
-        .filter((h) => /^\s*(javascript|data|vbscript):/i.test(h) && h !== "javascript:void(0)"),
-    }));
-    assert.deepEqual(found, { tags: [], handlers: [], hrefs: [] }, `${sel} carries no executable markup`);
-  }
+  await expectInert("the blessing");
   for (const name of ["this link", "this one"]) {
     const link = page.locator("#docs-body a", { hasText: name });
     if (await link.count()) await link.first().click();
   }
   await settle();
   assert.equal(await page.evaluate(() => window.__pwned), undefined, "nothing in the blessing ran");
-  assert.deepEqual(dialogs, []);
 });
+
+// The peek, where the store renders, carries nothing that runs or fetches.
+async function expectInert(where) {
+  const found = await page.$eval("#docs", (root) => ({
+    tags: [...root.querySelectorAll("script, iframe, object, embed, svg, img, style, link, video, audio, source")].map((e) => e.tagName),
+    handlers: [...root.querySelectorAll("*")].flatMap((e) => [...e.attributes].filter((a) => /^on/i.test(a.name)).map((a) => `${e.tagName}[${a.name}]`)),
+    // The viewer's own in-page links are `javascript:void(0)` with a click
+    // handler; any other script-scheme href came from the store.
+    hrefs: [...root.querySelectorAll("[href], [src]")].map((e) => e.getAttribute("href") ?? e.getAttribute("src"))
+      .filter((h) => /^\s*(javascript|data|vbscript):/i.test(h) && h !== "javascript:void(0)"),
+  }));
+  assert.deepEqual(found, { tags: [], handlers: [], hrefs: [] }, `${where} carries no executable markup`);
+}
 
 smoke("an empty blessing store says so", async () => {
   await open(urls.empty);
