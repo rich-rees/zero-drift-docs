@@ -10,3 +10,6 @@ CLAUDE.local.md
 # The check-5 scan test's scratch folder (packages/zdd-engine/test/suite-campaign.test.mjs),
 # beside the test so a relative path reaches the core on any drive.
 packages/zdd-engine/test/.zdd-io-scan-*/
+
+# The browser smoke test's screenshots of failing flows (test/browser, decision 0044).
+test/browser/artifacts/
