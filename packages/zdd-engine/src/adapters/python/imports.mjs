@@ -6,7 +6,8 @@
 //
 // Read on the masked text (adapters/python), logical lines joined, so an
 // import in a comment or a string is not one: `import a.b [as c], d` and
-// `from [.]*a.b import x, (y, z)`. Resolution, as the interpreter runs it:
+// `from [.]*a.b import x, (y, z)`, also after a `;` and in a one-line suite
+// (`if TYPE_CHECKING: import c`). Resolution, as the interpreter runs it:
 //   relative     one dot is the file's own folder, each further dot one up
 //   absolute     from the nearest folder above the importing file that
 //                holds the first name as a package (a folder) or a module
@@ -34,10 +35,35 @@ export function importStatements(text) {
   const out = [];
   let parts = [];
   let depth = 0;
+  // One logical line may hold several statements (`a(); import b`) and a
+  // compound statement's one-line suite (`if TYPE_CHECKING: import c`):
+  // split on `;` outside brackets, then take what follows such a colon.
+  const statements = (line) => {
+    const out = [];
+    let cur = "";
+    let d = 0;
+    for (const ch of line) {
+      if ("([{".includes(ch)) d++;
+      else if (")]}".includes(ch)) d = Math.max(0, d - 1);
+      if (ch === ";" && d === 0) {
+        out.push(cur);
+        cur = "";
+      } else cur += ch;
+    }
+    out.push(cur);
+    return out.map((st) => {
+      let rest = st;
+      for (let m; (m = /^\s*(?:if|elif|else|try|except|finally|with|for|while)\b[^:]*:\s*(\S.*)$/.exec(rest)); ) rest = m[1];
+      return rest;
+    });
+  };
   const flush = () => {
-    const line = parts.join(" ");
+    const joined = parts.join(" ");
     parts = [];
     depth = 0;
+    for (const st of statements(joined)) one(st);
+  };
+  const one = (line) => {
     const plain = /^\s*import\s+(.+)$/.exec(line);
     if (plain) {
       for (const part of plain[1].split(",")) {
@@ -50,8 +76,6 @@ export function importStatements(text) {
     if (from && from[1]) out.push({ module: from[1], names: from[2].split(",").map((s) => /^\s*(\w+)/.exec(s)?.[1]).filter((n) => n && n !== "as") });
   };
   for (const raw of code.split("\n")) {
-    // A statement after a `;` or a `:` on one line is rare; the line's own
-    // first statement is what matters here.
     parts.push(parts.length ? raw.trim() : raw);
     depth += (raw.match(/\(/g) ?? []).length - (raw.match(/\)/g) ?? []).length;
     const continued = /\\\s*$/.test(raw);

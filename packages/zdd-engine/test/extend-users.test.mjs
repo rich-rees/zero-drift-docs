@@ -17,6 +17,8 @@ import { fileURLToPath } from "node:url";
 import { IMPORTS as JS } from "../src/adapters/js/imports.mjs";
 import { IMPORTS as PY } from "../src/adapters/python/imports.mjs";
 import { makeExtractorIo } from "../src/core/lib/extractor-io.mjs";
+import { importersOf, importReaders } from "../src/core/lib/importers.mjs";
+import { buildBlessingIndex } from "../src/core/lib/blessing-index.mjs";
 
 const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const BIN = join(PKG, "bin", "zdd-engine.mjs");
@@ -81,6 +83,54 @@ test("JS reader: relative, tsconfig `paths` (with baseUrl and extends), workspac
   assert.ok(JS.isTest("apps/web/src/lib/upload.test.ts") && JS.isTest("apps/web/src/__tests__/x.ts") && JS.isTest("types/x.d.ts") && !JS.isTest("apps/web/src/lib/upload.ts"));
 });
 
+test("JS reader, toolchain cases (campaign CR-201–204, 213, 214): exact alias before a catch-all; the effective baseUrl rebases inherited paths (TypeScript's rule); an extends loop ends; exports by condition order and import form, a target outside the repo passed over; wildcard exports and main; `.js` names `.ts` from TypeScript; backslashes in a config", (t) => {
+  const root = tmp(t);
+  put(root, {
+    // CR-202: `foo` is exact, `*` a catch-all; both targets exist.
+    "a/tsconfig.json": JSON.stringify({ compilerOptions: { baseUrl: ".", paths: { "*": ["fallback/*"], foo: ["exact"] } } }),
+    "a/fallback/foo.ts": "", "a/exact.ts": "",
+    // CR-201 (verified against TypeScript, kept): the child's baseUrl is the
+    // effective one, so the parent's paths resolve under it.
+    "b/tsconfig.base.json": JSON.stringify({ compilerOptions: { baseUrl: ".", paths: { "@/*": ["shared/*"] } } }),
+    "b/app/tsconfig.json": JSON.stringify({ extends: "../tsconfig.base.json", compilerOptions: { baseUrl: "." } }),
+    "b/app/shared/x.ts": "", "b/shared/x.ts": "",
+    // A parent declaring paths with no baseUrl anywhere: its own folder.
+    "c/tsconfig.base.json": JSON.stringify({ compilerOptions: { paths: { "~/*": ["lib/*"] } } }),
+    "c/app/tsconfig.json": JSON.stringify({ extends: "../tsconfig.base.json" }),
+    "c/lib/y.ts": "",
+    // CR-203: a loop of extends ends, paths and all.
+    "d/tsconfig.json": JSON.stringify({ extends: "./other.json", compilerOptions: { paths: { "#d": ["./d.ts"] } } }),
+    "d/other.json": JSON.stringify({ extends: "./tsconfig.json" }),
+    "d/d.ts": "",
+    // CR-214: a config written on Windows.
+    "e/tsconfig.json": '{ "extends": ".\\\\base\\\\tsconfig.json" }',
+    "e/base/tsconfig.json": '{ "compilerOptions": { "paths": { "@e/*": ["..\\\\src\\\\*"] } } }',
+    "e/src/z.ts": "",
+    // CR-204: conditions in the manifest's order, by import form; a dist
+    // target git ignores is not in the repo, so the source branch is taken.
+    "packages/p/package.json": JSON.stringify({ name: "@acme/p", exports: { ".": { require: "./cjs.cts", import: "./esm.ts" }, "./tools/*": { source: "./src/tools/*.ts", default: "./dist/tools/*.js" } } }),
+    "packages/p/cjs.cts": "", "packages/p/esm.ts": "", "packages/p/src/tools/fmt.ts": "",
+    "packages/q/package.json": JSON.stringify({ name: "@acme/q", main: "./lib/main.js" }),
+    "packages/q/lib/main.ts": "",
+    "packages/r/package.json": JSON.stringify({ name: "@acme/r" }),
+    "packages/r/index.ts": "",
+    // CR-213: both files present.
+    "f/shared.ts": "", "f/shared.js": "",
+  });
+  const importsOf = resolverOver(root, JS);
+  assert.deepEqual(importsOf("a/x.ts", 'import "foo";'), ["a/exact.ts"]);
+  assert.deepEqual(importsOf("b/app/x.ts", 'import "@/x";'), ["b/app/shared/x.ts"]);
+  assert.deepEqual(importsOf("c/app/x.ts", 'import "~/y";'), ["c/lib/y.ts"]);
+  assert.deepEqual(importsOf("d/x.ts", 'import "#d";'), ["d/d.ts"]);
+  assert.deepEqual(importsOf("e/x.ts", 'import "@e/z";'), ["e/src/z.ts"]);
+  assert.deepEqual(importsOf("apps/x.mjs", 'import "@acme/p";'), ["packages/p/esm.ts"]);
+  assert.deepEqual(importsOf("apps/x.cjs", 'const p = require("@acme/p");'), ["packages/p/cjs.cts"]);
+  assert.deepEqual(importsOf("apps/x.ts", 'import "@acme/p/tools/fmt";'), ["packages/p/src/tools/fmt.ts"]);
+  assert.deepEqual(importsOf("apps/x.ts", 'import "@acme/q";\nimport "@acme/r";'), ["packages/q/lib/main.ts", "packages/r/index.ts"]);
+  assert.deepEqual(importsOf("f/a.ts", 'import "./shared.js";'), ["f/shared.ts"]);
+  assert.deepEqual(importsOf("f/a.mjs", 'import "./shared.js";'), ["f/shared.js"], "from JavaScript the file as named");
+});
+
 test("Python reader: absolute imports from the package's root folder, relative imports, `from pkg import module`, `import a.b as c`; a string or a comment is not one", (t) => {
   const root = tmp(t);
   put(root, {
@@ -107,6 +157,14 @@ test("Python reader: absolute imports from the package's root folder, relative i
     "    a,",
     ")",
   ].join("\n");
+  // Campaign CR-205: after a `;`, and in a one-line suite.
+  assert.deepEqual(importsOf("apps/api/app/x.py", "setup(); from app.audit import record\nif TYPE_CHECKING: from app.auth import gate\ntry: import app.jobs\nexcept ImportError: pass\n"), [
+    "apps/api/app/__init__.py",
+    "apps/api/app/audit.py",
+    "apps/api/app/auth/__init__.py",
+    "apps/api/app/auth/gate.py",
+    "apps/api/app/jobs/__init__.py",
+  ]);
   assert.deepEqual(importsOf("apps/api/app/routes/jobs.py", text), [
     "apps/api/app/__init__.py",
     "apps/api/app/audit.py",
@@ -180,4 +238,62 @@ test("render: a Python repo's extend blessing is used by the modules that import
   const line = lineOf(readFileSync(join(repo, "zdd", "blessing-index.md"), "utf8"), "Recording an audit");
   assert.match(line, /`api\/audit\.py`, used by 2: [^·]*api\/routes\/billing\.py/, line);
   assert.doesNotMatch(line, /test_audit/);
+});
+
+test("importers (campaign CR-200, 215, 217): a scan cut short is incomplete, never a confident zero; every reader for an ending reads it, answers joined; a test is a user of a test fixture", (t) => {
+  const root = tmp(t);
+  put(root, {
+    "src/a.ts": "export const a = 1;\n",
+    "src/b.ts": 'import { a } from "./a";\n',
+    "src/c.ts": "// a big file\n" + "x".repeat(4096) + '\nimport { a } from "./a";\n',
+    "test/fixture.ts": "export const f = 1;\n",
+    "test/one.test.ts": 'import { f } from "./fixture";\n',
+    "src/d.ts": 'import { f } from "../test/fixture";\n', // product code using a fixture: still a user
+    "src/e.ts": "// #uses src/a.ts\n",
+  });
+  const full = importersOf(root, [JS], ["src/a.ts", "test/fixture.ts"]);
+  assert.equal(full.incomplete, null);
+  assert.deepEqual(full.users.get("src/a.ts").importers, ["src/b.ts", "src/c.ts"]);
+  assert.deepEqual(full.users.get("test/fixture.ts").importers, ["src/d.ts", "test/one.test.ts"], "a test file uses a test fixture");
+  // The read budget runs out before every file is read.
+  const cut = importersOf(root, [JS], ["src/a.ts"], { limits: { maxTotalBytes: 200 } });
+  assert.match(cut.incomplete, /ran out of budget/);
+  assert.equal(cut.users.get("src/a.ts").incomplete, cut.incomplete);
+  // The index never says "used by nothing" of a scan cut short.
+  const b = { id: "x", kind: "extend", where: { path: "src/a.ts" }, adrs: [], shape: { question: "Extending a?", visible: "", because: "because" } };
+  const line = (users, incomplete) => buildBlessingIndex([b], { adrHref: () => null, blessingHref: () => "b.md", mapPage: () => null, usersOf: () => users, incomplete: () => incomplete }).text.split("\n").find((l) => l.includes("Extending a?"));
+  assert.match(line([], "ZDD's read of the source ran out of budget"), /users unknown to ZDD \(ZDD's read of the source ran out of budget\)/);
+  assert.match(line([{ id: "src/b.ts", title: "src/b.ts" }], "ZDD's read of the source ran out of budget"), /used by 1 or more: src\/b\.ts \(ZDD's read of the source ran out of budget\)/);
+  // Two readers claiming `.ts`: both read every file, answers joined.
+  const marker = { label: "markers", extensions: [".ts"], skipDirs: [], isTest: () => false, resolver: () => (rel, text) => [...text.matchAll(/#uses (\S+)/g)].map((m) => m[1]) };
+  assert.deepEqual(importersOf(root, [JS, marker], ["src/a.ts"]).users.get("src/a.ts").importers, ["src/b.ts", "src/c.ts", "src/e.ts"]);
+  assert.deepEqual(importersOf(root, [marker, JS], ["src/a.ts"]).users.get("src/a.ts").importers, ["src/b.ts", "src/c.ts", "src/e.ts"], "order does not matter");
+  assert.equal(importReaders([{ IMPORTS: JS }, { IMPORTS: JS }, {}, { IMPORTS: marker }]).length, 2, "a reader shared by adapters is one reader");
+});
+
+test("render (campaign CR-217): a local adapter's own IMPORTS names the users of a blessing on a file only it reads", (t) => {
+  const repo = tmp(t);
+  cpSync(FIXTURE, repo, { recursive: true });
+  put(repo, {
+    "zdd/extractors/cfg.mjs": [
+      "export const CONTRACT = 1;",
+      "export const COMMENT = { '.cfg': '#' };",
+      "export function derive() { return { records: [], diagnostics: [] }; }",
+      "export const IMPORTS = { label: 'cfg', extensions: ['.cfg'], skipDirs: [], isTest: () => false,",
+      "  resolver: () => (rel, text) => [...text.matchAll(/^include (\\S+)$/gm)].map((m) => m[1]) };",
+      "",
+    ].join("\n"),
+    "conf/base.cfg": "key = 1\n",
+    "conf/prod.cfg": "include conf/base.cfg\n",
+    "zdd/blessings/sharing-config.md": bless("Sharing config", "conf/base.cfg"),
+  });
+  const p = join(repo, "zdd", "config.json");
+  const config = JSON.parse(readFileSync(p, "utf8"));
+  config.localExtractorDir = "zdd/extractors";
+  const { adapter: _bundle, adapterOptions: { migrationNamespaces, externalBuckets, ...nextjs }, ...rest } = config;
+  writeFileSync(p, JSON.stringify({ ...rest, extractors: ["supabase", "supabase-js", "nextjs", "cfg"], extractorOptions: { supabase: { migrationNamespaces, externalBuckets }, nextjs } }, null, 2));
+  assert.equal(run(repo, ["derive"]).status, 0, run(repo, ["derive"]).stderr);
+  const r = run(repo, ["render"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(lineOf(readFileSync(join(repo, "zdd", "blessing-index.md"), "utf8"), "Sharing config"), /`conf\/base\.cfg`, used by 1: conf\/prod\.cfg ·/);
 });

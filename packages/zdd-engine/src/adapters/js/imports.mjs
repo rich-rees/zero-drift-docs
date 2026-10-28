@@ -16,10 +16,13 @@
 //                       (else the declaring file's folder), the longest
 //                       matching pattern first, one `*`
 //   workspace packages  a package.json `name` in the repo, its `exports`
-//                       ("." and "./sub", conditions read in order, one `*`)
-//                       or `main`, else the folder itself
-// then the file as named, with each extension, as a folder's index, and a
-// `.js` written for a `.ts` (ESM TypeScript). A package from outside the
+//                       ("." and "./sub", one `*`; conditions in the
+//                       manifest's order, those active for an import or a
+//                       require; a target not in the repo passed over) or
+//                       `main`, else the folder's index
+// then the file as named, with each extension, as a folder's index; from a
+// TypeScript file a `.js` names its `.ts` first (ESM TypeScript). A
+// backslash in a config's path is a separator. A package from outside the
 // repo resolves to nothing. Deterministic: the answer depends only on the
 // files handed in and their bytes.
 
@@ -29,8 +32,16 @@ import { lex } from "./source.mjs";
 const EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts"];
 const PROBE = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts"];
 const TS_FOR_JS = { ".js": [".ts", ".tsx"], ".jsx": [".tsx"], ".mjs": [".mts"], ".cjs": [".cts"] };
-const CONDITIONS = ["import", "module", "default", "require", "node", "browser", "types"];
-const MAX_EXTENDS = 8;
+const TS_FAMILY = /\.[cm]?tsx?$/;
+// The conditions a toolchain resolving this file would have on, by how the
+// specifier was written (TypeScript adds `types`; bundlers `browser` and
+// `module`). An object's keys are tried in the manifest's order.
+const ACTIVE = {
+  import: new Set(["types", "import", "module", "browser", "node", "development", "production", "default"]),
+  require: new Set(["types", "require", "browser", "node", "development", "production", "default"]),
+};
+// A guard on an `extends` loop, never a depth a real repo reaches.
+const MAX_EXTENDS = 64;
 
 // Test code is a user only of test code (a fixture, a helper): changing a
 // shared module means retesting the code that runs it, which its tests do.
@@ -42,18 +53,21 @@ const SPECIFIERS = [
   /\b(require|import)\s*\(\s*(['"])([^'"\n]+)\2\s*\)/g,
 ];
 
+// [{ spec, mode }]: each specifier once per mode, `require` for a
+// `require("x")`, `import` for every other form.
 export function specifiers(text) {
   const { code, mask } = lex(text);
-  const out = new Set();
+  const out = new Map();
   for (const re of SPECIFIERS) {
     for (const m of code.matchAll(re)) {
       // The keyword itself must be code, not the body of a string.
       if (mask.slice(m.index, m.index + m[1].length) !== m[1]) continue;
       if (m.index > 0 && /[\w$.]/.test(code[m.index - 1])) continue;
-      out.add(m[3]);
+      const mode = m[1] === "require" ? "require" : "import";
+      out.set(`${mode}\0${m[3]}`, { spec: m[3], mode });
     }
   }
-  return [...out];
+  return [...out.values()];
 }
 
 // A tsconfig is JSON with comments and trailing commas.
@@ -89,6 +103,8 @@ const norm = (p) => {
   return n === "." ? "" : n.replace(/^\.\//, "");
 };
 const inside = (p) => p !== ".." && !p.startsWith("../") && !posix.isAbsolute(p);
+// A config written on Windows may spell a path with backslashes.
+const slash = (p) => p.replace(/\\/g, "/");
 
 // `files`: every file of the repo (repo-relative, POSIX), the walk the core
 // made; `read(rel)` returns a file's text or null.
@@ -99,35 +115,49 @@ export function resolver(io, files = null) {
     const r = io.read(rel);
     return r.ok ? r.text : null;
   };
-  const probe = (p) => {
+  // From a TypeScript file, `./x.js` names `x.ts` first (TypeScript's
+  // extension substitution), and the `.js` only when no source stands in.
+  const probe = (p, tsFirst = false) => {
     if (!inside(p)) return null;
+    const ext = posix.extname(p);
+    const substitute = () => {
+      for (const e of TS_FOR_JS[ext] ?? []) if (has.has(p.slice(0, -ext.length) + e)) return p.slice(0, -ext.length) + e;
+      return null;
+    };
+    if (tsFirst) {
+      const s = substitute();
+      if (s) return s;
+    }
     if (has.has(p)) return p;
     for (const e of PROBE) if (has.has(p + e)) return p + e;
     for (const e of PROBE) if (has.has(`${p}/index${e}`)) return `${p}/index${e}`;
-    const ext = posix.extname(p);
-    for (const e of TS_FOR_JS[ext] ?? []) if (has.has(p.slice(0, -ext.length) + e)) return p.slice(0, -ext.length) + e;
-    return null;
+    return substitute();
   };
 
   // tsconfig per folder, nearest first, with its `extends` merged.
   const configCache = new Map();
-  const loadConfig = (rel, depth = 0) => {
-    if (depth > MAX_EXTENDS) return null;
+  // As TypeScript merges them: `paths` resolve under the effective
+  // `baseUrl` (a child's overrides an inherited one, inherited paths and
+  // all), else under the folder of the config that declared them.
+  const loadConfig = (rel, seen = new Set()) => {
+    if (seen.has(rel) || seen.size > MAX_EXTENDS) return null;
+    seen.add(rel);
     const text = read(rel);
     const json = text === null ? null : parseJsonc(text);
     if (!json || typeof json !== "object") return null;
-    const dir = posix.dirname(rel);
-    let base = { paths: null, pathsBase: null, baseUrl: null };
+    const dir = posix.dirname(rel) === "." ? "" : posix.dirname(rel);
+    let base = { paths: null, pathsDir: null, baseUrl: null };
     if (typeof json.extends === "string" && json.extends.startsWith(".")) {
-      let parent = norm(posix.join(dir, json.extends));
+      let parent = norm(posix.join(dir || ".", slash(json.extends)));
       if (!parent.endsWith(".json")) parent += ".json";
-      base = loadConfig(parent, depth + 1) ?? base;
+      base = loadConfig(parent, seen) ?? base;
     }
     const co = json.compilerOptions ?? {};
-    const baseUrl = typeof co.baseUrl === "string" ? norm(posix.join(dir, co.baseUrl)) : base.baseUrl;
-    const paths = co.paths && typeof co.paths === "object" ? co.paths : base.paths;
-    const pathsBase = co.paths && typeof co.paths === "object" ? baseUrl ?? (dir === "." ? "" : dir) : (typeof co.baseUrl === "string" ? baseUrl : base.pathsBase);
-    return { paths, pathsBase, baseUrl };
+    const own = co.paths && typeof co.paths === "object" && !Array.isArray(co.paths);
+    const baseUrl = typeof co.baseUrl === "string" ? norm(posix.join(dir || ".", slash(co.baseUrl))) : base.baseUrl;
+    const paths = own ? co.paths : base.paths;
+    const pathsDir = own ? dir : base.pathsDir;
+    return { paths, pathsDir, baseUrl, pathsBase: baseUrl ?? pathsDir };
   };
   const configFor = (dir) => {
     if (configCache.has(dir)) return configCache.get(dir);
@@ -143,17 +173,19 @@ export function resolver(io, files = null) {
     configCache.set(dir, found);
     return found;
   };
-  const viaPaths = (spec, dir) => {
+  const viaPaths = (spec, dir, tsFirst) => {
     const c = configFor(dir);
     if (!c?.paths) return null;
+    // An exact key first, then the pattern with the longest prefix
+    // (TypeScript's order).
     const keys = Object.keys(c.paths)
-      .filter((k) => (k.includes("*") ? spec.startsWith(k.slice(0, k.indexOf("*"))) && spec.endsWith(k.slice(k.indexOf("*") + 1)) : k === spec))
-      .sort((a, b) => b.indexOf("*") - a.indexOf("*") || b.length - a.length || (a < b ? -1 : 1));
+      .filter((k) => (k.includes("*") ? spec.startsWith(k.slice(0, k.indexOf("*"))) && spec.endsWith(k.slice(k.indexOf("*") + 1)) && spec.length >= k.length - 1 : k === spec))
+      .sort((a, b) => (a.includes("*") ? 1 : 0) - (b.includes("*") ? 1 : 0) || b.indexOf("*") - a.indexOf("*") || (a < b ? -1 : 1));
     for (const k of keys) {
       const star = k.includes("*") ? spec.slice(k.indexOf("*"), spec.length - (k.length - k.indexOf("*") - 1)) : "";
       for (const target of Array.isArray(c.paths[k]) ? c.paths[k] : []) {
         if (typeof target !== "string") continue;
-        const hit = probe(norm(posix.join(c.pathsBase ?? "", target.replace("*", star))));
+        const hit = probe(norm(posix.join(c.pathsBase || ".", slash(target).replace("*", star))), tsFirst);
         if (hit) return hit;
       }
     }
@@ -180,59 +212,57 @@ export function resolver(io, files = null) {
     }
     return packages.find((p) => spec === p.name || spec.startsWith(`${p.name}/`)) ?? null;
   };
-  const pick = (v) => {
-    if (typeof v === "string") return v;
+  // The repo file an exports target names, by the conditions active for
+  // `mode`, keys in the manifest's order. A target that is not in the repo
+  // (built output, which git ignores) is passed over, so a branch naming
+  // the source (a custom `source` condition) is taken when no active one
+  // resolves.
+  const pick = (v, mode, dir, star, tsFirst, anyCondition = false) => {
+    if (typeof v === "string") return probe(norm(posix.join(dir || ".", slash(v).replace("*", star))), tsFirst);
     if (Array.isArray(v)) {
       for (const x of v) {
-        const s = pick(x);
+        const s = pick(x, mode, dir, star, tsFirst, anyCondition);
         if (s) return s;
       }
       return null;
     }
     if (v && typeof v === "object") {
-      for (const k of CONDITIONS) if (k in v) {
-        const s = pick(v[k]);
-        if (s) return s;
-      }
       for (const k of Object.keys(v)) {
-        const s = pick(v[k]);
+        if (!anyCondition && !ACTIVE[mode].has(k)) continue;
+        const s = pick(v[k], mode, dir, star, tsFirst, anyCondition);
         if (s) return s;
       }
+      if (!anyCondition) return pick(v, mode, dir, star, tsFirst, true);
     }
     return null;
   };
-  const viaPackage = (spec) => {
+  const viaPackage = (spec, mode, tsFirst) => {
     const pkg = packageFor(spec);
     if (!pkg) return null;
     const sub = spec === pkg.name ? "." : `.${spec.slice(pkg.name.length)}`;
     let exp = pkg.json.exports;
     if (exp !== undefined && exp !== null) {
-      if (typeof exp === "string" || Array.isArray(exp) || !Object.keys(exp).some((k) => k.startsWith("."))) exp = { ".": exp };
-      let target = null;
-      if (sub in exp) target = pick(exp[sub]);
-      else {
-        for (const k of Object.keys(exp).filter((x) => x.includes("*")).sort((a, b) => b.length - a.length)) {
-          const [pre, post] = [k.slice(0, k.indexOf("*")), k.slice(k.indexOf("*") + 1)];
-          if (sub.startsWith(pre) && sub.endsWith(post) && sub.length >= pre.length + post.length) {
-            const t = pick(exp[k]);
-            if (t) target = t.replace("*", sub.slice(pre.length, sub.length - post.length));
-            break;
-          }
-        }
+      if (typeof exp === "string" || Array.isArray(exp) || typeof exp !== "object" || !Object.keys(exp).some((k) => k.startsWith("."))) exp = { ".": exp };
+      if (Object.hasOwn(exp, sub)) return pick(exp[sub], mode, pkg.dir, "", tsFirst);
+      for (const k of Object.keys(exp).filter((x) => x.includes("*")).sort((a, b) => b.indexOf("*") - a.indexOf("*") || (a < b ? -1 : 1))) {
+        const [pre, post] = [k.slice(0, k.indexOf("*")), k.slice(k.indexOf("*") + 1)];
+        if (sub.startsWith(pre) && sub.endsWith(post) && sub.length >= pre.length + post.length) return pick(exp[k], mode, pkg.dir, sub.slice(pre.length, sub.length - post.length), tsFirst);
       }
-      return target ? probe(norm(posix.join(pkg.dir, target))) : null;
+      return null;
     }
-    if (sub === "." && typeof pkg.json.main === "string") return probe(norm(posix.join(pkg.dir, pkg.json.main))) ?? probe(norm(pkg.dir || ".") || "index");
-    return probe(norm(posix.join(pkg.dir, sub)));
+    const at = (p) => norm(posix.join(pkg.dir || ".", p));
+    if (sub === ".") return (typeof pkg.json.main === "string" ? probe(at(slash(pkg.json.main)), tsFirst) : null) ?? probe(at("index"), tsFirst);
+    return probe(at(sub), tsFirst);
   };
 
   return (rel, text) => {
     const dir = posix.dirname(rel) === "." ? "" : posix.dirname(rel);
     const out = new Set();
-    for (const spec of specifiers(text)) {
+    const tsFirst = TS_FAMILY.test(rel);
+    for (const { spec, mode } of specifiers(text)) {
       let hit = null;
-      if (spec.startsWith("./") || spec.startsWith("../") || spec === "." || spec === "..") hit = probe(norm(posix.join(dir, spec)));
-      else if (!spec.startsWith("/") && !/^[a-z]+:/i.test(spec)) hit = viaPaths(spec, dir) ?? viaPackage(spec);
+      if (spec.startsWith("./") || spec.startsWith("../") || spec === "." || spec === "..") hit = probe(norm(posix.join(dir || ".", spec)), tsFirst);
+      else if (!spec.startsWith("/") && !/^[a-z]+:/i.test(spec)) hit = viaPaths(spec, dir, tsFirst) ?? viaPackage(spec, mode, tsFirst);
       if (hit && hit !== rel) out.add(hit);
     }
     return [...out].sort();
@@ -248,4 +278,4 @@ function walkAll(io) {
 // Folders of installed or built code: never source.
 const SKIP_DIRS = [".git", "node_modules", ".next", ".expo", "dist", "build", "coverage", ".turbo", ".vercel"];
 
-export const IMPORTS = { label: "JavaScript and TypeScript", extensions: EXTENSIONS, skipDirs: SKIP_DIRS, isTest, resolver };
+export const IMPORTS = { label: ["JavaScript", "TypeScript"], extensions: EXTENSIONS, skipDirs: SKIP_DIRS, isTest, resolver };

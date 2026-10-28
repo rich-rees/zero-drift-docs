@@ -782,14 +782,19 @@ async function render() {
   if (exemplars.length) {
     const found = importersOf(REPO, importReaders(await selectedModules(REPO, CONFIG)), exemplars);
     if (found.error) throw new Error(found.error);
-    if (found.truncated) console.error("WARNING: the read of the source for who imports each extend blessing's code ran out of budget — some users may be missing from the blessing index");
+    if (found.incomplete) console.error(`WARNING: who imports each extend blessing's code is incomplete — ${found.incomplete}; the blessing index says "or more" on those lines, or "users unknown" where it found none`);
     imports = found.users;
   }
   const extendUsers = (b) => usersOf(b.where, records, b.where ? imports.get(b.where.path) ?? null : null);
   const unknownWhy = (b) => (b.where ? imports.get(b.where.path)?.why ?? null : null);
+  const incomplete = (b) => (b.where ? imports.get(b.where.path)?.incomplete ?? null : null);
   const blessingsForViewer = viewerBlessings(store.blessings, {
     mapPage: (id) => (pages.has(id) ? { node: pages.get(id).id, title: pages.get(id).title } : null),
-    usersOf: (b) => extendUsers(b)?.map((r) => ({ node: r.file ? null : nodeOfRecord.get(r) ?? null, title: r.title ?? r.id })) ?? null,
+    // A scan cut short that found none is unknown, as in the index.
+    usersOf: (b) => {
+      const users = extendUsers(b);
+      return users && !(users.length === 0 && incomplete(b)) ? users.map((r) => ({ node: r.file ? null : nodeOfRecord.get(r) ?? null, title: r.title ?? r.id })) : null;
+    },
   });
   // An ADR outside zdd/adr — a harness ADR, or a custom adrDir's — carries
   // its folder (`dir`), so the viewer names its source and resolves its links
@@ -839,6 +844,7 @@ async function render() {
     mapPage: (id) => (pages.has(id) ? { title: pages.get(id).title, href: `${pages.get(id).id}.md` } : null),
     usersOf: extendUsers,
     unknownWhy,
+    incomplete,
   });
   // ~4 chars/token; the budget is a warning, not a gate — the fix is trimming
   // semantic link lists, which is a judgment call (spec §4).

@@ -3,7 +3,7 @@
 // no language (decision 0036): each adapter the repo configures may export
 // an import reader, `IMPORTS`:
 //
-//   { label       the files it reads, in words ("… files")
+//   { label       the languages it reads, a name or a list of names
 //     extensions  the file endings it reads
 //     skipDirs    folder names that are never source (installed, built)
 //     isTest(rel) test code: a user only of test code
@@ -33,40 +33,63 @@ export function importReaders(modules) {
   return out;
 }
 
-// For each wanted file: { importers: [files], reader } when a reader claims
-// its ending (importers may be empty: used by nothing), else { importers:
-// null, why }. `truncated`: the walk's budget ran out, so some importers
-// may be missing.
-export function importersOf(repoRoot, readers, wanted) {
+// For each wanted file: { importers: [files], readers, incomplete } when a
+// reader claims its ending (importers may be empty: used by nothing), else
+// { importers: null, why }. `incomplete` names why the scan could not read
+// everything (the walk's or the read budget ran out, a file was too large
+// or unreadable), or is null: a scan cut short never reads as "used by
+// nothing". Every reader claiming a file's ending reads it, and their
+// answers are joined. `limits` lowers the io's caps (the tests).
+const ABSENT = new Set(["missing", "ignored"]);
+export function importersOf(repoRoot, readers, wanted, { limits = {} } = {}) {
   const result = new Map();
-  const labels = readers.map((r) => r.label);
-  const why = labels.length ? `it reads the imports of ${labels.join(", ").replace(/, ([^,]*)$/, " and $1")} files only` : "no extractor this repo uses reads imports";
-  const claim = (rel) => readers.find((r) => r.extensions.includes(extOf(rel))) ?? null;
+  const labels = readers.flatMap((r) => r.label);
+  const why = labels.length ? `it reads the imports of ${labels.length > 1 ? `${labels.slice(0, -1).join(", ")} and ${labels.at(-1)}` : labels[0]} files only` : "no extractor this repo uses reads imports";
+  const claim = (rel) => readers.filter((r) => r.extensions.includes(extOf(rel)));
   const want = [...new Set(wanted)].sort();
-  for (const w of want) result.set(w, claim(w) ? { importers: [], reader: claim(w) } : { importers: null, why });
-  if (!want.some((w) => result.get(w).importers)) return { users: result, truncated: false, error: null };
+  for (const w of want) result.set(w, claim(w).length ? { importers: [], readers: claim(w), incomplete: null } : { importers: null, why });
+  if (!want.some((w) => result.get(w).importers)) return { users: result, incomplete: null, error: null };
   const ignored = gitIgnoredPredicate(repoRoot);
-  if (ignored.error) return { users: result, truncated: false, error: ignored.error };
-  const io = makeExtractorIo(repoRoot, "importers", { ignored });
+  if (ignored.error) return { users: result, incomplete: null, error: ignored.error };
+  const io = makeExtractorIo(repoRoot, "importers", { ignored, ...limits });
+  const refused = [];
+  // Every read, the readers' own (a tsconfig, a package.json) included: a
+  // refusal that is not absence makes the answer incomplete.
+  const read = (rel, opts) => {
+    const r = io.read(rel, opts);
+    if (!r.ok && !ABSENT.has(r.code)) refused.push(r);
+    return r;
+  };
+  const counted = { ...io, read };
   const skip = new Set([".git", ...readers.flatMap((r) => r.skipDirs ?? [])]);
   const files = [];
   const walked = io.walk(".", (rel) => files.push(rel), { enter: (_rel, name) => !skip.has(name) });
-  const resolvers = new Map(readers.map((r) => [r, r.resolver(io, files)]));
+  const resolvers = new Map(readers.map((r) => [r, r.resolver(counted, files)]));
   const wantedSet = new Set(want.filter((w) => result.get(w).importers));
   for (const rel of files) {
-    const reader = claim(rel);
-    if (!reader) continue;
-    const read = io.read(rel);
-    if (!read.ok) continue;
-    for (const target of resolvers.get(reader)(rel, read.text)) {
-      if (!wantedSet.has(target)) continue;
+    const mine = claim(rel);
+    if (!mine.length) continue;
+    const text = read(rel);
+    if (!text.ok) continue;
+    const targets = new Set();
+    for (const reader of mine) for (const t of resolvers.get(reader)(rel, text.text)) if (wantedSet.has(t)) targets.add(t);
+    // Test code uses test code only: a module's own tests are not what a
+    // change to it asks to retest.
+    const isTest = (reader, f) => reader.isTest?.(f) === true;
+    for (const target of targets) {
       const entry = result.get(target);
-      // Test code uses test code only: a module's own tests are not what a
-      // change to it asks to retest.
-      if (reader.isTest?.(rel) && !entry.reader.isTest?.(target)) continue;
+      if (mine.some((r) => isTest(r, rel)) && !entry.readers.some((r) => isTest(r, target))) continue;
       entry.importers.push(rel);
     }
   }
-  for (const v of result.values()) if (v.importers) v.importers.sort();
-  return { users: result, truncated: walked.truncated, error: null };
+  let incomplete = null;
+  if (walked.truncated) incomplete = "ZDD's read of the source ran out of budget";
+  else if (refused.some((r) => r.code === "over-budget")) incomplete = "ZDD's read of the source ran out of budget";
+  else if (refused.length) incomplete = `ZDD could not read ${refused.length === 1 ? "one file" : `${refused.length} files`} (${refused[0].reason})`;
+  for (const v of result.values()) {
+    if (!v.importers) continue;
+    v.importers.sort();
+    v.incomplete = incomplete;
+  }
+  return { users: result, incomplete, error: null };
 }
