@@ -158,7 +158,7 @@ hook, config schema + example, the seed ADR-0001, and the extractor scaffold).
 | Data access (JS / TS) | `supabase-js` | the Supabase JavaScript client — `.from()`, `.rpc()`, Realtime `.on("postgres_changes")` and the wrapper calls named in `subscribeCalls` — one record per top-level declaration (the module's own top-level code as `<module>`) |
 | Data access (Python) | `supabase-py` | the Supabase Python client — `.table()`, `.from_()`, `.rpc()` — one record per function |
 | Data access (Python) | `sqlalchemy` | raw SQL in string literals (`text("…")`, any driver): the tables after `FROM` / `JOIN` (**reads**) and `INTO` / `UPDATE` / `DELETE FROM` (**writes**), one record per function; the ORM is not read |
-| API + pages | `nextjs` | the App Router tree: route handlers, pages, layouts, middleware auth, `fetch('/api/…')` refs, and the code each file runs (for a data-access adapter) |
+| API + pages | `nextjs` | the App Router tree: route handlers, pages, layouts, middleware auth, `fetch('/api/…')` refs, and the code each file runs (for a data-access adapter). A `lib/` file it records as a module holds its own data access, so routes reach its tables through it and no separate Data Access box is drawn; one appears for code reached from a file that does not hold it (decision 0037) |
 | Pages | `react-router` | a route tree declared in code: one surface per screen, its guards, the API calls and the code it runs one hop away |
 | Native screens | `expo-router` *(early)* | the Expo Router folder tree: screens, layouts, `[id]` segments, platform pairs — namespaced so a native `/jobs` and a web `/jobs` are two surfaces |
 | Components | `components` | React and React Native: exported, capitalised, returning JSX; props as written; **used by** / **uses** / **calls**; shared vs page-private |
@@ -446,25 +446,36 @@ teammate's next session prints the commands that move their machine.
 
 **A repo on the old line (2.5.0 or earlier)** moves to 0.9 by hand once:
 the numbers start again at 0.9.0, so an old release's check for a newer one
-never finds it ([decision 0042](docs/decisions/0042-the-engine-is-a-new-package-on-a-new-version-line.md)).
-**A repo on a release before 2.2** has no "upgrade ZDD" at all. Either way,
-move the lock by hand:
+never finds it ([decision 0042](docs/decisions/0042-the-engine-is-a-new-package-on-a-new-version-line.md)),
+and the route an old release's session-start line prints does not move a
+machine across. **A repo on a release before 2.2** has no "upgrade ZDD" at
+all. Either way, from the repo's folder, in a terminal:
 
-1. In `.claude/settings.json`, set
-   `extraKnownMarketplaces["zero-drift-docs"].source.ref` to the new tag
-   (`"v0.11.0"`). No lock there? Add the marketplace from the repo's folder with
-   `claude plugin marketplace add rich-rees/zero-drift-docs@v0.11.0 --scope project`.
-2. Restart Claude Code. The session's first line names the commands that move
-   your machine (on a machine where the marketplace was ever added without a
-   scope, that includes `claude plugin marketplace remove zero-drift-docs
-   --scope user`) — run them, and restart again.
-3. Say **"upgrade ZDD"**: from here it is the guided flow above.
+1. If your user settings (`~/.claude/settings.json`, or `settings.json` in
+   `$CLAUDE_CONFIG_DIR` when you set it) mention `zero-drift-docs`, run
+   `claude plugin marketplace remove zero-drift-docs --scope user` first (a
+   plain `marketplace add` once left it there, and it holds the catalogue).
+2. `claude plugin marketplace add rich-rees/zero-drift-docs@v0.11.0 --scope project`
+   — this moves the catalogue on this machine **and** the lock in
+   `.claude/settings.json`. It also rewrites that file in its own key order
+   and drops `"autoUpdate": false`; step 4 puts `autoUpdate` back. To keep
+   the committed key order instead, `git restore .claude/settings.json` and
+   set `extraKnownMarketplaces["zero-drift-docs"].source.ref` to `"v0.11.0"`
+   by hand: the catalogue on this machine has moved either way.
+3. `claude plugin update zdd@zero-drift-docs --scope project` and
+   `claude plugin update mattpocock-skills@zero-drift-docs --scope project`.
+   Use `update`, not `install`: with the old line installed, `install`
+   answers "already installed … run `claude plugin update`". (A machine with
+   no ZDD install for this repo uses `claude plugin install
+   zdd@zero-drift-docs --scope project` instead.)
+4. Restart Claude Code and say **"upgrade ZDD"**: from here it is the guided
+   flow above.
 
-From 1.3.1 (no session-start release check yet), step 2 is: `claude plugin
-marketplace remove zero-drift-docs --scope user` if your user settings
-(`~/.claude/settings.json`, or `settings.json` in `$CLAUDE_CONFIG_DIR` when you
-set it) mention `zero-drift-docs`, restart, `claude plugin update
-zdd@zero-drift-docs`, restart.
+Once that PR merges, each teammate runs steps 1 to 3 (step 2 then changes
+only the key order and `autoUpdate` in the committed file: `git restore
+.claude/settings.json`) and restarts. A session-start line from the old plugin may still name
+`claude plugin install` or an `update` without `--scope project`; follow the
+steps here instead. From 0.12, the line names the scoped `update` itself.
 
 ## Repo layout
 
