@@ -424,12 +424,12 @@ merge gate.
   move, set `extractorOptions.services.roots` to the folders that hold your
   source (for example `["apps", "scripts"]`). Fixed in 2.3.0: what git
   ignores is never source.
-- Findings — things ZDD got wrong, as opposed to things wrong in your repo —
-  live as [GitHub Issues labelled `finding`](https://github.com/rich-rees/zero-drift-docs/issues?q=is%3Aopen+label%3Afinding);
-  a `blocker` is one a new user following this README can hit. A finding
-  with a workaround on your side is logged, not released; findings ship
-  together in a release train, and you move only when a release carries
-  something you need.
+- Something ZDD got wrong, as opposed to something wrong in your repo, goes
+  to the repo's [Discussions](https://github.com/rich-rees/zero-drift-docs/discussions),
+  in "Bug reports"; your agent explains it and offers a ready-written report
+  ([decision 0041](docs/decisions/0041-a-zdd-defect-goes-to-the-developer-and-the-repos-discussions.md)).
+  Fixes ship together in a release, and you move only when a release
+  carries something you need.
 
 ### Upgrading
 
