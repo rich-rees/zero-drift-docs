@@ -49,6 +49,7 @@ const storeOrder = (a, b) => highFirst(a, b) || byText(question(a), question(b))
 //   under the map folder, or null.
 // `opts.usersOf(blessing)`: the records using an `extend` blessing's
 //   exemplar, or null when ZDD does not know them.
+// `opts.unknownWhy(blessing)`: why the users are unknown, in words, or null.
 // Returns the index text and the number of blessings in it.
 export function buildBlessingIndex(blessings, opts) {
   const lines = [];
@@ -101,7 +102,7 @@ function line(b, opts) {
   let where = b.where ? `${code(b.where.path)}${b.where.symbol ? ` (${printable(b.where.symbol)})` : ""}` : "_none given_";
   if (b.kind === "extend" && b.where) {
     const users = opts.usersOf(b);
-    if (users === null) where += ", users unknown to ZDD";
+    if (users === null) where += `, users unknown to ZDD${opts.unknownWhy?.(b) ? ` (${printable(opts.unknownWhy(b))})` : ""}`;
     else if (!users.length) where += ", used by nothing ZDD sees";
     else {
       const names = users.slice(0, USERS_SHOWN).map((u) => printable(u.title ?? u.id));

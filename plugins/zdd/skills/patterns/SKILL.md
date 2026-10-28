@@ -148,7 +148,7 @@ Apps touched: <app>, <app> (house rules read in full)
 ## Retest
 
 - **<piece>** — extends `<blessing>`'s `<where>`: retest <user>, <user> (from
-  the index; or "users unknown to ZDD — found by grep: …")
+  the index; or, where it says "users unknown to ZDD (…)", found by grep: …)
 
 ## Reuse
 

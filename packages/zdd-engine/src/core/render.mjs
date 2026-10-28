@@ -35,6 +35,8 @@ import { buildAdrIndex } from "./lib/adr-index.mjs";
 import { adrSets } from "./lib/adr-sets.mjs";
 import { buildBlessingIndex, viewerBlessings } from "./lib/blessing-index.mjs";
 import { loadBlessings, usersOf } from "./lib/blessings.mjs";
+import { importReaders, importersOf } from "./lib/importers.mjs";
+import { selectedModules } from "./derive.mjs";
 import { MAX_STORE_FILE_BYTES } from "./lib/walk-markdown.mjs";
 import { slugify } from "./lib/slug.mjs";
 import { loadConfig, resolveViewer, resolveNonAreaTags, validateRepoBase, absentStoreNotes } from "./lib/config.mjs";
@@ -773,9 +775,21 @@ async function render() {
   // The blessing store, read once above, rides along ready-read (decision
   // 0043): the viewer never parses it, and its names link to graph nodes.
   const nodeOfRecord = new Map([...RECORDS_BY_NODE].map(([node, record]) => [record, node]));
+  // Who imports each `extend` exemplar, from the source (decision 0046),
+  // through the import readers of the adapters this repo selects.
+  const exemplars = store.blessings.filter((b) => b.kind === "extend" && b.where?.path).map((b) => b.where.path);
+  let imports = new Map();
+  if (exemplars.length) {
+    const found = importersOf(REPO, importReaders(await selectedModules(REPO, CONFIG)), exemplars);
+    if (found.error) throw new Error(found.error);
+    if (found.truncated) console.error("WARNING: the read of the source for who imports each extend blessing's code ran out of budget — some users may be missing from the blessing index");
+    imports = found.users;
+  }
+  const extendUsers = (b) => usersOf(b.where, records, b.where ? imports.get(b.where.path) ?? null : null);
+  const unknownWhy = (b) => (b.where ? imports.get(b.where.path)?.why ?? null : null);
   const blessingsForViewer = viewerBlessings(store.blessings, {
     mapPage: (id) => (pages.has(id) ? { node: pages.get(id).id, title: pages.get(id).title } : null),
-    usersOf: (b) => usersOf(b.where, records)?.map((r) => ({ node: nodeOfRecord.get(r) ?? null, title: r.title ?? r.id })) ?? null,
+    usersOf: (b) => extendUsers(b)?.map((r) => ({ node: r.file ? null : nodeOfRecord.get(r) ?? null, title: r.title ?? r.id })) ?? null,
   });
   // An ADR outside zdd/adr — a harness ADR, or a custom adrDir's — carries
   // its folder (`dir`), so the viewer names its source and resolves its links
@@ -823,7 +837,8 @@ async function render() {
     adrHref: (num) => (adrOf.has(num) ? adrHrefFromBundle(adrOf.get(num)) : null),
     blessingHref: (id) => `${blessingsRel}/${id}.md`,
     mapPage: (id) => (pages.has(id) ? { title: pages.get(id).title, href: `${pages.get(id).id}.md` } : null),
-    usersOf: (b) => usersOf(b.where, records),
+    usersOf: extendUsers,
+    unknownWhy,
   });
   // ~4 chars/token; the budget is a warning, not a gate — the fix is trimming
   // semantic link lists, which is a judgment call (spec §4).

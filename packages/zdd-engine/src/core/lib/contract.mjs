@@ -110,6 +110,13 @@ export const CONTRACT_TABLE = [
     what: "`DETECTION` and `detect({ scan, proposed })`, so bootstrap can propose the adapter (a catalogue adapter has it; a local one may)",
     ask: null,
   },
+  {
+    step: "import reader",
+    since: 1,
+    required: false,
+    what: "`IMPORTS` — `{ label, extensions, skipDirs, isTest(rel), resolver(io, files) }`, the files one file imports, so the blessing index names who uses an `extend` blessing's code (decision 0046)",
+    ask: null,
+  },
 ];
 
 // The rows an adapter declaring `declared` is behind on, against `contract`.

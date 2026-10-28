@@ -194,6 +194,17 @@ async function loadExtractor(name, repoRoot, config) {
 // the suite judges a repo's own adapter as derive would load it.
 export const importLocal = (entry) => import(pathToFileURL(entry).href);
 
+// The modules of the adapters this repo's config selects, in its order:
+// render asks them for their import readers (decision 0046). A selection
+// derive would refuse is derive's to report, so here it yields nothing.
+export async function selectedModules(repoRoot, config) {
+  const selection = resolveExtractors(config);
+  if (selection.error) return [];
+  const out = [];
+  for (const { name } of selection.extractors) out.push(await loadExtractor(name, repoRoot, config));
+  return out;
+}
+
 // Every catalogue adapter's module, in name order (decision 0039): detection
 // asks each one whether it fits a repo. The one other place a name becomes a
 // module, beside loadExtractor.

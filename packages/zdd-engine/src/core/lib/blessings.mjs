@@ -113,9 +113,48 @@ export function loadBlessings(dir, repoRoot) {
 // using them (`facts.edges.usedBy`) — every inbound reference counts, the
 // side decision 0011 errs on. Returns null when no record has the file:
 // "unknown to ZDD", never zero.
-export function usersOf(where, records) {
+//
+// `imports` (ZDD-10, decision 0046): lib/importers.mjs's answer for the
+// exemplar's file, when a reader claims it. Every file importing it is a
+// user too: by the record that holds that file (a route, a surface, a
+// component before a plain module), else as the file itself
+// ({ id: <file>, title: <file>, file: true }). Users are one per file —
+// two records of one file (its component and its module) are one user.
+// With imports, a file no record holds is known: none is "used by nothing".
+const resourcesOf = (r) => (Array.isArray(r.resource) ? r.resource : [r.resource]).filter((p) => typeof p === "string").map((p) => p.split("\\").join("/").replace(/^\.\//, ""));
+const KIND_RANK = ["route", "surface", "component"];
+const rank = (r, file) => [resourcesOf(r)[0] === file ? 0 : 1, KIND_RANK.includes(r.kind) ? KIND_RANK.indexOf(r.kind) : r.kind === "module" ? KIND_RANK.length + 1 : KIND_RANK.length];
+const byRank = (file) => (a, b) => {
+  const [x, y] = [rank(a, file), rank(b, file)];
+  return x[0] - y[0] || x[1] - y[1] || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+};
+export function usersOf(where, records, imports = null) {
   if (!where) return null;
-  const has = (r) => (Array.isArray(r.resource) ? r.resource : [r.resource]).some((p) => typeof p === "string" && p.split("\\").join("/").replace(/^\.\//, "") === where.path);
+  const users = refUsersOf(where, records);
+  const importers = imports?.importers ?? null;
+  if (users === null && importers === null) return null;
+  const chosen = new Map(); // primary file -> the record shown for it
+  const keep = (r) => {
+    const file = resourcesOf(r)[0] ?? r.id;
+    const cur = chosen.get(file);
+    if (!cur || byRank(file)(r, cur) < 0) chosen.set(file, r);
+  };
+  for (const r of users ?? []) keep(r);
+  const plain = [];
+  for (const file of importers ?? []) {
+    if (file === where.path) continue;
+    const holders = records.filter((r) => resourcesOf(r).includes(file) && !resourcesOf(r).includes(where.path));
+    if (holders.length) keep(holders.sort(byRank(file))[0]);
+    else plain.push(file);
+  }
+  const held = new Set([...chosen.values()].flatMap(resourcesOf));
+  const out = [...chosen.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  for (const file of plain) if (!held.has(file)) out.push({ id: file, title: file, file: true });
+  return out;
+}
+
+function refUsersOf(where, records) {
+  const has = (r) => resourcesOf(r).includes(where.path);
   let own = records.filter(has);
   if (!own.length) return null;
   if (where.symbol) {
