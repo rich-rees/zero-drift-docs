@@ -243,7 +243,8 @@ main {
   font: inherit;
   font-size: 13px;
 }
-/* Blessings: kind and app are chips beside the exemplar, never headings. */
+/* Blessings: importance, kind and app are chips beside the exemplar, never
+   headings; a high blessing is pinned first by the engine's order (0045). */
 .blessing-meta { margin-top: 2px; }
 .blessing-meta code {
   font-family: ui-monospace, "SF Mono", Consolas, monospace;
@@ -253,6 +254,7 @@ main {
 }
 .blessing-meta .tag, .blessing-chips .tag { font-size: 11px; }
 .tag.app-chip { background: var(--sel-wash); color: var(--link); }
+.tag.high-chip { background: var(--auth-bg); color: var(--authx); border: 1px solid var(--auth-border); font-weight: 600; }
 .blessing-chips { margin: 4px 0 6px; }
 #docs dl.frontmatter { grid-template-columns: 110px 1fr; }
 #docs dl.frontmatter code {

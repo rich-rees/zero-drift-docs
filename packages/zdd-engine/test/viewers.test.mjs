@@ -503,19 +503,19 @@ test("CR-007: source-derived markdown cannot execute script in the Cytoscape vie
 // one filter box and the two back buttons; the peek's source keeps the
 // viewer's rules. Behaviour (drill-in, back history, the filter) is proved in
 // a browser pass, as the rest of the page's script is.
-test("ZDD-2: the human index embeds the blessing store ready-read, linked to graph nodes, in the index's order", () => {
+test("ZDD-2: the human index embeds the blessing store ready-read, linked to graph nodes, in the index's order (high first, decision 0045)", () => {
   const repo = mkRepo(FIXTURE);
   run(repo, ["derive"]);
   run(repo, ["render"]);
   const bundle = readBundle(repo);
   const nodes = new Set(bundle.nodes.map((n) => n.data.id));
   const blessings = bundle.docs.blessings;
-  assert.deepEqual(blessings.map((b) => [b.id, b.question, b.kind, b.file]), [
-    ["adding-a-page", "Adding a page?", "copy", "zdd/blessings/adding-a-page.md"],
-    ["adding-an-endpoint-for-things", "Adding an endpoint for things?", "copy", "zdd/blessings/adding-an-endpoint-for-things.md"],
-    ["saving-a-thing", "Saving a thing?", "extend", "zdd/blessings/saving-a-thing.md"],
+  assert.deepEqual(blessings.map((b) => [b.id, b.question, b.kind, b.importance, b.file]), [
+    ["saving-a-thing", "Saving a thing?", "extend", "high", "zdd/blessings/saving-a-thing.md"],
+    ["adding-a-page", "Adding a page?", "copy", null, "zdd/blessings/adding-a-page.md"],
+    ["adding-an-endpoint-for-things", "Adding an endpoint for things?", "copy", null, "zdd/blessings/adding-an-endpoint-for-things.md"],
   ]);
-  const [page, endpoint, saving] = blessings;
+  const [saving, page, endpoint] = blessings;
   assert.deepEqual(page.appliesTo, { path: "apps/fixture-app", node: "map/apps/fixture-app", title: "Fixture App" });
   assert.deepEqual(endpoint.adrs, ["0002"]);
   assert.deepEqual(saving.where, { path: "migrations/00002_things.sql", symbol: "save_thing" });
