@@ -4,7 +4,7 @@ A documentation architecture for repos built by **human + agent pairs**. ZDD kee
 eight documentation artifacts *at most one unit of work behind the code* — and, with
 CI, makes drift in the machine-generated ones **un-mergeable**.
 
-> **Status: 0.9.0.** The plugin installs in Claude Code
+> **Status: 0.10.0.** The plugin installs in Claude Code
 > and in Codex from this one repo; `bootstrap` detects your stack (or grills
 > for it on a greenfield repo), proposes extractors with evidence, and *writes*
 > the opt-ins; the engine (`packages/zdd-engine`, npm `@rich-rees/zdd`) is a
@@ -322,7 +322,7 @@ reviewable file, never one question per item.
 from [the releases page](https://github.com/rich-rees/zero-drift-docs/releases)):
 
 ```
-claude plugin marketplace add rich-rees/zero-drift-docs@v0.9.0 --scope project
+claude plugin marketplace add rich-rees/zero-drift-docs@v0.10.0 --scope project
 claude plugin install zdd@zero-drift-docs --scope project
 ```
 
@@ -452,8 +452,8 @@ move the lock by hand:
 
 1. In `.claude/settings.json`, set
    `extraKnownMarketplaces["zero-drift-docs"].source.ref` to the new tag
-   (`"v0.9.0"`). No lock there? Add the marketplace from the repo's folder with
-   `claude plugin marketplace add rich-rees/zero-drift-docs@v0.9.0 --scope project`.
+   (`"v0.10.0"`). No lock there? Add the marketplace from the repo's folder with
+   `claude plugin marketplace add rich-rees/zero-drift-docs@v0.10.0 --scope project`.
 2. Restart Claude Code. The session's first line names the commands that move
    your machine (on a machine where the marketplace was ever added without a
    scope, that includes `claude plugin marketplace remove zero-drift-docs
@@ -532,6 +532,10 @@ as a yes/no, so saying no to one is a visible choice, not a fork.
 
 - [ ] Next: a second viewer; Vue / Svelte / Angular extractors on their first
       real adoption.
+- [x] **0.10.0** — a Blessings peek in the human index, beside Glossary
+      and ADRs: every blessing by trigger question, its exemplar, app,
+      users and cited ADRs; a filter and a back history in every peek
+      *(ZDD-2; decision 0043)*.
 - [x] **0.9.0** — a new line and a new package, `@rich-rees/zdd`: a core
       that knows no stack beside a catalogue of adapters, routes reaching
       tables through data-access records, background work one reader per
@@ -566,6 +570,19 @@ A repo still on the old line moves its lock by hand once, then says "upgrade
 ZDD" (see Upgrading). Through 0.9.x the adapter contract stays at 1 and may
 still change; 1.0.0 freezes it.
 
+- **`0.10.0` — a Blessings peek in the human index.** A Blessings button
+  beside Glossary and ADRs opens every blessing in the store, listed by
+  trigger question with its kind and app as chips; a blessing's page shows
+  its body, its exemplar on GitHub (via `repoBase`), the app it applies to,
+  the slice it was first built in, who uses an `extend` exemplar, and the
+  ADRs it cites, which open in the same peek. One filter box now serves the
+  glossary, the ADRs and the blessings, and the peek keeps a back history
+  that names where back goes. The viewer contract's `docs` gains
+  `blessings`, ready-read by the engine (decision 0043). **What moves on the
+  bump**: every pin ZDD owns names `@rich-rees/zdd@0.10.0`, and
+  `render --check` moves `human-index.html` only — no graph, metadata,
+  agent-index or blessing-index byte changes. "upgrade ZDD" rewrites the
+  pins and re-renders; nothing to answer.
 - **`0.9.0` — a stack-free core and a catalogue of adapters, on a new line.**
   The engine is a new package, `@rich-rees/zdd`, numbered from 0.9.0
   (decision 0042); the plugin keeps its marketplace address. Its files can
