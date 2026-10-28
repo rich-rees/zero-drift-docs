@@ -6,7 +6,7 @@ at **both ends** of the pipeline: **extractors** feed data in (one per
 convention), and **viewers** render it out (one per visualization), with a stable
 graph in the middle.
 
-> **Status.** ZDD is `0.11.0` and public, on the new line that 0.9.0 started
+> **Status.** ZDD is `0.12.0` and public, on the new line that 0.9.0 started
 > (decision 0042). The engine (`packages/zdd-engine`, on npm as
 > `@rich-rees/zdd`) is what the plugin's skills and adopters' CI
 > both run, and both contracts below — extractors and viewers — are the ones it

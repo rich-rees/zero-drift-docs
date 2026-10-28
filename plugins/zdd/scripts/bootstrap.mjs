@@ -2475,6 +2475,10 @@ export const UPGRADE_NOTES = {
   "0.11.0": () => [
     "0.11 lets a blessing say `importance: high` (decision 0045): often needed and costly to reinvent — the index lists it first in its section with a bold **high**, the reference human index pins it with a chip, and a plan that departs from it says why. Optional, and never set by the upgrade: a session proposes it at \"choose patterns\" and \"update ZDD\" writes it on the developer's yes. With the reference viewer human-index.html moves, and ZDD's instructions gain one clause; blessing-index.md moves only once a blessing is marked high",
   ],
+  "0.12.0": () => [
+    "0.12 reads an `extend` blessing's users from the source's imports (decision 0046): the files that import its exemplar, through tsconfig `paths` and workspace packages, and Python imports, one per file; a file ZDD cannot read says why. Expect the blessing index's extend lines to name users where they said \"unknown\" or \"used by nothing\" — the Retest line of the next plan comes from them",
+    "0.12 fixes ZDD's own text and checks: generated headers and footers say `npx -y @rich-rees/zdd render|derive`, not `zdd-engine`; this run's retired-names list now names code reading zdd/config.json's old `engine` key (fix those by hand: read `.release`) and no longer lists a lock test asserting the old marker is absent, or your accepted ADRs; the fence passes a PowerShell write whose text only mentions a generated file. The regenerate moves blessing-index.md, agent-index.md, adr-index.md and human-index.html; no graph or metadata byte",
+  ],
 };
 // border: end
 
