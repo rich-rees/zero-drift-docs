@@ -226,6 +226,39 @@ test("fence blocks write-shaped shell over generated paths in the common spellin
   }
 });
 
+test("ZDD-10, finding 5: a PowerShell writer is judged by its target — the text it writes may name a generated path; a generated target is still refused", () => {
+  const note = join(scratch, "notes", "scratch.md");
+  for (const command of [
+    `Add-Content -Path "${note}" -Value "regenerated zdd/blessing-index.md and zdd/graph.json today"`,
+    `Add-Content "${note}" "see zdd/blessing-index.md"`,
+    `Add-Content -Value 'zdd/agent-index.md' -Path "${note}"`,
+    `Set-Content -LiteralPath "${note}" -Value zdd/graph.json -Encoding utf8`,
+    `Set-Content -Path:"${note}" -Value:"zdd/graph.json"`,
+    `Out-File -FilePath "${note}" -InputObject "zdd/graph.json" -Append`,
+    `"zdd/graph.json" | Out-File "${note}"`,
+    `New-Item -ItemType File -Path "${note}" -Value "zdd/graph.json" -Force`,
+  ]) {
+    silent(fence("PowerShell", { command }), command);
+    silent(fence("Bash", { command }), `bash: ${command}`);
+  }
+  for (const command of [
+    "Add-Content -Value x -Path zdd/graph.json",
+    "Add-Content zdd/graph.json 'x'",
+    "ac -Path zdd/agent-index.md -Value x",
+    "Set-Content -Value x zdd/graph.json",
+    "Set-Content -Path:zdd/graph.json -Value x",
+    `Set-Content -Path "${note}",zdd/graph.json -Value x`,
+    `Set-Content "${note}",zdd/graph.json x`,
+    "Set-Content -Encoding utf8 -Force zdd/graph.json x",
+    "Out-File -FilePath zdd/adr-index.md",
+    "'x' | Out-File zdd/adr-index.md -Append",
+    "Clear-Content zdd/graph.json",
+    "New-Item -ItemType File -Path zdd/graph.json -Force",
+    "New-Item zdd/graph.json",
+    "New-Item -Path zdd -Name graph.json -ItemType File",
+  ]) blocked(fence("PowerShell", { command }), command);
+});
+
 test("2.4.1: taking a side of a conflicted generated file is still refused, and the reason gives the regenerate-mid-merge route; any other refusal does not", () => {
   for (const command of ["git checkout --theirs -- zdd/human-index.html", "git checkout --ours zdd/agent-index.md", "git restore --theirs zdd/graph.json"]) {
     const r = fence("Bash", { command });

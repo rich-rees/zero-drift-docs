@@ -52,6 +52,14 @@ const DESTRUCTIVE = /^(rm|rmdir|rd|del|erase|unlink|remove-item|ri)$/i;
 // PowerShell writers, touch/truncate/dd/tee. `sed` only with -i (checked
 // separately); `git` by sub-verb.
 const WRITE_VERB = /^(mv|move-item|mi|move|rename-item|rni|ren|rename|tee|truncate|dd|touch|set-content|sc|out-file|add-content|ac|clear-content|clc|new-item|ni)$/i;
+// The PowerShell writers name their target in a parameter (`-Path`,
+// `-LiteralPath`, `-FilePath`, or the first positional); every other
+// parameter is content or a setting, so a `-Value` that mentions a
+// generated path is text, not a target (ZDD-10, finding 5).
+const PS_WRITER = /^(set-content|sc|out-file|add-content|ac|clear-content|clc|new-item|ni)$/i;
+const PS_TARGET_PARAM = /^(path|literalpath|lp|pspath|filepath)$/i;
+// Parameters that take no value: the next word is not theirs.
+const PS_SWITCH = /^(force|nonewline|passthru|whatif|confirm|append|noclobber|asbytestream|verbose|debug)$/i;
 const GIT_WRITE_SUBVERB = /^(checkout|restore|clean|rm|mv)$/i;
 // git's global options that take a separate value (`-C <dir>`, `-c k=v` …).
 const GIT_GLOBAL_WITH_VALUE = /^(-C|-c|--git-dir|--work-tree|--namespace|--super-prefix|--config-env|--exec-path|--list-cmds|--attr-source)$/;
@@ -233,6 +241,8 @@ function shellTarget(command, cwd, hit) {
       // Globs and variables stay opaque — decision 0003's ceiling.
       destructive = true;
       candidates.push(...operands, ...literals());
+    } else if (PS_WRITER.test(verb)) {
+      candidates.push(...psWriterTargets(words));
     } else if (WRITE_VERB.test(verb) || sedInPlace || (isGit && GIT_WRITE_SUBVERB.test(sub))) {
       candidates.push(...operands, ...literals(), ...targetDirs);
     } else if (INTERPRETER.test(verb) && WRITE_API.test(simple)) {
@@ -253,6 +263,36 @@ function shellTarget(command, cwd, hit) {
     }
   }
   return null;
+}
+
+// A PowerShell writer's targets: the values of its path parameters, else
+// its first positional word; a list (`-Path a,b`) is every item, and New-Item's
+// `-Name` sits under its `-Path` (or the cwd). `-Name:value` is one word.
+function psWriterTargets(words) {
+  const paths = [];
+  const positional = []; // groups: a word and the `,item` words after it
+  let name = null;
+  const unquote = (v) => v.replace(/^["']|["']$/g, "");
+  const list = (v) => v.split(",").map(unquote).filter(Boolean);
+  for (let i = 1; i < words.length; i++) {
+    const w = words[i];
+    const p = /^-([A-Za-z]+)(?::(.*))?$/.exec(w);
+    if (!p) {
+      if (w.startsWith(",") && positional.length) positional[positional.length - 1].push(...list(w));
+      else positional.push(list(w));
+      continue;
+    }
+    if (PS_SWITCH.test(p[1])) continue;
+    let value = p[2];
+    if (value === undefined) value = words[++i] ?? "";
+    const items = list(value);
+    while (words[i + 1]?.startsWith(",")) items.push(...list(words[++i]));
+    if (PS_TARGET_PARAM.test(p[1])) paths.push(...items);
+    else if (/^name$/i.test(p[1])) name = items[0] ?? null;
+  }
+  if (!paths.length && positional.length) paths.push(...positional[0]);
+  if (name !== null) return (paths.length ? paths : ["."]).map((d) => join(d, name));
+  return paths;
 }
 
 // The path-like literals a write API is called with. A call with
