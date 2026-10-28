@@ -38,6 +38,11 @@ move at all, with `supabase-py` added to that fixture's config. The slice 2a
 review then regenerated both human-index goldens for the Data Access colour
 (the BUNDLE literal's palette gains one entry) and the two viewer legends
 that now name the data-access step; nothing else in the bundle moved.
+ZDD-2 (0.10.0, decision 0043) regenerated both human-index goldens for the
+Blessings peek: the BUNDLE literal gains `docs.blessings` (the fixture's
+three blessings, ready-read) and nothing else; the full page also carries
+the viewer's new button, filter box, back buttons and peek script. No graph,
+metadata, agent-index or blessing-index byte moved.
 
 ## Regenerating
 
