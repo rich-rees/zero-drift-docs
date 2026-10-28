@@ -6,7 +6,7 @@ at **both ends** of the pipeline: **extractors** feed data in (one per
 convention), and **viewers** render it out (one per visualization), with a stable
 graph in the middle.
 
-> **Status.** ZDD is `0.11.0` and public, on the new line that 0.9.0 started
+> **Status.** ZDD is `0.12.0` and public, on the new line that 0.9.0 started
 > (decision 0042). The engine (`packages/zdd-engine`, on npm as
 > `@rich-rees/zdd`) is what the plugin's skills and adopters' CI
 > both run, and both contracts below — extractors and viewers — are the ones it
@@ -144,7 +144,7 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
   `export const CONTRACT = 1`, a number of its own that moves only when the
   table below does, and `export const COMMENT`, the line-comment mark for
   each kind of file it reads (`null` for one that takes none, like JSON; the
-  suite fails a file the adapter read that COMMENT does not classify). The suite (`zdd-engine suite`, run on a copy
+  suite fails a file the adapter read that COMMENT does not classify). The suite (the engine's `suite`, run on a copy
   of the adapter's fixture outside any repo) holds every adapter to five
   checks: byte-identical records on another machine and on a second run, a
   gitignored path never read, a missing root nothing to inventory,
@@ -173,6 +173,7 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
   | typed edges | 1 | no | `facts.edges`, a verb for a ref (decision 0016) |
   | `warnings` | 1 | no | a list printed on every derive |
   | detection | 1 | no | `DETECTION` and `detect({ scan, proposed })` (decision 0039; every catalogue adapter has it) |
+  | import reader | 1 | no | `IMPORTS`: `{ label, extensions, skipDirs, isTest(rel), resolver(io, files) }`, the repo files one file imports, read at render for an `extend` blessing's users (decision 0046; the JavaScript and Python adapters share `adapters/js/imports.mjs` and `adapters/python/imports.mjs`) |
 
   Before 1.0 the contract is open (it stays at 1 and may change without
   interviews). From 1.0 a change is a new row with `since` one higher and
@@ -199,7 +200,7 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
   ("`APIRouter` under `api/routes`"). The `scan` is one walk of the repo
   shared by every adapter (six folders deep, gitignored paths never seen,
   under one io's caps): `files`, `read(rel)`, `json(rel)` and `memo(key,
-  fn)`. `zdd-engine detect` prints what they all answer.
+  fn)`. The engine's `detect` prints what they all answer.
 
 A stack without statically derivable structure keeps thinner metadata and a
 larger semantic map — the *contract* is fixed, not the coverage. When in doubt,

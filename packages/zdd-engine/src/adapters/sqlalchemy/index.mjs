@@ -232,3 +232,6 @@ export { DETECTION, detect } from "./detect.mjs";
 // (decision 0040). `{}`: nothing it reads takes a line comment.
 export const CONTRACT = 1;
 export const COMMENT = { ".py": "#" };
+
+// Who imports what, for an extend blessing's users (decision 0046).
+export { IMPORTS } from "../python/imports.mjs";

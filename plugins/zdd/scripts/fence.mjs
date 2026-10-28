@@ -52,6 +52,30 @@ const DESTRUCTIVE = /^(rm|rmdir|rd|del|erase|unlink|remove-item|ri)$/i;
 // PowerShell writers, touch/truncate/dd/tee. `sed` only with -i (checked
 // separately); `git` by sub-verb.
 const WRITE_VERB = /^(mv|move-item|mi|move|rename-item|rni|ren|rename|tee|truncate|dd|touch|set-content|sc|out-file|add-content|ac|clear-content|clc|new-item|ni)$/i;
+// The PowerShell writers name their target in a parameter (`-Path`,
+// `-LiteralPath`, `-FilePath`, or the first positional); every other
+// parameter is content or a setting, so a `-Value` that mentions a
+// generated path is text, not a target (ZDD-10, finding 5).
+const PS_WRITER = /^(set-content|sc|out-file|add-content|ac|clear-content|clc|new-item|ni)$/i;
+// PowerShell takes any unambiguous prefix of a parameter's name (`-Pa`
+// for -Path), so a word is matched against every name it could shorten.
+// One that could name a path parameter is a target; one that could name
+// only switches takes no value; one that could name only content or a
+// setting takes a value that is not a target; an unknown one's value is
+// judged as a target (fail closed).
+const PS_PATH_PARAMS = ["path", "literalpath", "pspath", "filepath"];
+const PS_CONTENT_PARAMS = ["value", "inputobject", "encoding", "itemtype", "type", "width", "stream", "delimiter", "filter", "include", "exclude", "credential"];
+const PS_SWITCHES = ["force", "nonewline", "passthru", "whatif", "confirm", "append", "noclobber", "asbytestream", "verbose", "debug"];
+function psParam(word) {
+  const n = word.toLowerCase();
+  if (n === "lp") return "path";
+  const could = (names) => names.some((x) => x.startsWith(n));
+  if (could(PS_PATH_PARAMS)) return "path";
+  if (n.length && "name".startsWith(n) && !could(PS_SWITCHES) && !could(PS_CONTENT_PARAMS)) return "name";
+  if (could(PS_SWITCHES) && !could(PS_CONTENT_PARAMS) && !"name".startsWith(n)) return "switch";
+  if (could(PS_CONTENT_PARAMS) || "name".startsWith(n)) return "content";
+  return "unknown";
+}
 const GIT_WRITE_SUBVERB = /^(checkout|restore|clean|rm|mv)$/i;
 // git's global options that take a separate value (`-C <dir>`, `-c k=v` …).
 const GIT_GLOBAL_WITH_VALUE = /^(-C|-c|--git-dir|--work-tree|--namespace|--super-prefix|--config-env|--exec-path|--list-cmds|--attr-source)$/;
@@ -233,6 +257,8 @@ function shellTarget(command, cwd, hit) {
       // Globs and variables stay opaque — decision 0003's ceiling.
       destructive = true;
       candidates.push(...operands, ...literals());
+    } else if (PS_WRITER.test(verb)) {
+      candidates.push(...psWriterTargets(words));
     } else if (WRITE_VERB.test(verb) || sedInPlace || (isGit && GIT_WRITE_SUBVERB.test(sub))) {
       candidates.push(...operands, ...literals(), ...targetDirs);
     } else if (INTERPRETER.test(verb) && WRITE_API.test(simple)) {
@@ -253,6 +279,46 @@ function shellTarget(command, cwd, hit) {
     }
   }
   return null;
+}
+
+// A PowerShell writer's targets: the values of its path parameters (and
+// of any parameter it does not know), else its first positional word; a
+// list (`-Path a,b`, `-Path a, b`) is every item, and New-Item's `-Name`
+// sits under its `-Path` (or the cwd). `-Name:value` is one word.
+function psWriterTargets(words) {
+  const paths = [];
+  const positional = []; // groups: a word and the list items after it
+  let name = null;
+  let named = false;
+  const unquote = (v) => v.replace(/^["']|["']$/g, "");
+  const list = (v) => v.split(",").map(unquote).filter(Boolean);
+  // A list goes on while a word ends with a comma or the next starts with one.
+  const more = (prev, i) => prev.trimEnd().endsWith(",") || words[i + 1]?.startsWith(",");
+  for (let i = 1; i < words.length; i++) {
+    const w = words[i];
+    const p = /^-([A-Za-z]+)(?::(.*))?$/.exec(w);
+    if (!p) {
+      const items = list(w);
+      let last = w;
+      while (more(last, i) && words[i + 1] !== undefined && !/^-[A-Za-z]/.test(words[i + 1])) items.push(...list((last = words[++i])));
+      positional.push(items);
+      continue;
+    }
+    const kind = psParam(p[1]);
+    if (kind === "switch") continue;
+    let value = p[2];
+    if (value === undefined) value = words[++i] ?? "";
+    const items = list(value);
+    let last = value;
+    while (more(last, i) && words[i + 1] !== undefined && !/^-[A-Za-z]/.test(words[i + 1])) items.push(...list((last = words[++i])));
+    if (kind === "path") named = true;
+    if (kind === "path" || kind === "unknown") paths.push(...items);
+    else if (kind === "name") name = items[0] ?? null;
+  }
+  // With no path parameter, the first positional word is the path.
+  if (!named && positional.length) paths.push(...positional[0]);
+  if (name !== null) return (paths.length ? paths : ["."]).map((d) => join(d, name));
+  return paths;
 }
 
 // The path-like literals a write API is called with. A call with
@@ -399,7 +465,7 @@ function main() {
       `To lift the fence for this repo set "hooks": { "fence": false } in zdd/config.json.`
     : `ZDD fence: ${target} is a generated artifact — never hand-edit it. ` +
       `Run the ZDD update ritual ("update ZDD" / the \`update\` skill) to regenerate it ` +
-      `(zdd-engine derive + render). ` +
+      `(the engine's derive + render). ` +
       // Taking a side of a conflicted generated file (2.4.1): the
       // instructions' route never checks one out, so say it here too.
       (SHELL_TOOLS.has(tool) && SIDE_CHECKOUT.test(str(args.command))

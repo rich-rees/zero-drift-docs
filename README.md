@@ -4,7 +4,7 @@ A documentation architecture for repos built by **human + agent pairs**. ZDD kee
 eight documentation artifacts *at most one unit of work behind the code* — and, with
 CI, makes drift in the machine-generated ones **un-mergeable**.
 
-> **Status: 0.11.0.** The plugin installs in Claude Code
+> **Status: 0.12.0.** The plugin installs in Claude Code
 > and in Codex from this one repo; `bootstrap` detects your stack (or grills
 > for it on a greenfield repo), proposes extractors with evidence, and *writes*
 > the opt-ins; the engine (`packages/zdd-engine`, npm `@rich-rees/zdd`) is a
@@ -83,8 +83,9 @@ has since been superseded, or whose `where:` names a file that no longer
 exists, so a stale blessing cannot sit quietly (the format is in
 [`skills/authoring.md`](plugins/zdd/skills/authoring.md)). A blessing is
 **`copy`** (imitate this method) or **`extend`** (reuse this shared code); for
-an `extend` blessing the index names who uses the code, worked out from the
-metadata, because extending it means retesting them.
+an `extend` blessing the index names who uses the code (the files that import
+it, read from the source: decision 0046), because extending it means
+retesting them.
 
 The ADRs can come in **two sets** (decisions 0033, 0034), when a team opts in:
 the **application** set says what the product does, and can be handed to a
@@ -158,7 +159,7 @@ hook, config schema + example, the seed ADR-0001, and the extractor scaffold).
 | Data access (JS / TS) | `supabase-js` | the Supabase JavaScript client — `.from()`, `.rpc()`, Realtime `.on("postgres_changes")` and the wrapper calls named in `subscribeCalls` — one record per top-level declaration (the module's own top-level code as `<module>`) |
 | Data access (Python) | `supabase-py` | the Supabase Python client — `.table()`, `.from_()`, `.rpc()` — one record per function |
 | Data access (Python) | `sqlalchemy` | raw SQL in string literals (`text("…")`, any driver): the tables after `FROM` / `JOIN` (**reads**) and `INTO` / `UPDATE` / `DELETE FROM` (**writes**), one record per function; the ORM is not read |
-| API + pages | `nextjs` | the App Router tree: route handlers, pages, layouts, middleware auth, `fetch('/api/…')` refs, and the code each file runs (for a data-access adapter) |
+| API + pages | `nextjs` | the App Router tree: route handlers, pages, layouts, middleware auth, `fetch('/api/…')` refs, and the code each file runs (for a data-access adapter). A `lib/` file it records as a module holds its own data access, so routes reach its tables through it and no separate Data Access box is drawn; one appears for code reached from a file that does not hold it (decision 0037) |
 | Pages | `react-router` | a route tree declared in code: one surface per screen, its guards, the API calls and the code it runs one hop away |
 | Native screens | `expo-router` *(early)* | the Expo Router folder tree: screens, layouts, `[id]` segments, platform pairs — namespaced so a native `/jobs` and a web `/jobs` are two surfaces |
 | Components | `components` | React and React Native: exported, capitalised, returning JSX; props as written; **used by** / **uses** / **calls**; shared vs page-private |
@@ -322,7 +323,7 @@ reviewable file, never one question per item.
 from [the releases page](https://github.com/rich-rees/zero-drift-docs/releases)):
 
 ```
-claude plugin marketplace add rich-rees/zero-drift-docs@v0.11.0 --scope project
+claude plugin marketplace add rich-rees/zero-drift-docs@v0.12.0 --scope project
 claude plugin install zdd@zero-drift-docs --scope project
 ```
 
@@ -446,25 +447,36 @@ teammate's next session prints the commands that move their machine.
 
 **A repo on the old line (2.5.0 or earlier)** moves to 0.9 by hand once:
 the numbers start again at 0.9.0, so an old release's check for a newer one
-never finds it ([decision 0042](docs/decisions/0042-the-engine-is-a-new-package-on-a-new-version-line.md)).
-**A repo on a release before 2.2** has no "upgrade ZDD" at all. Either way,
-move the lock by hand:
+never finds it ([decision 0042](docs/decisions/0042-the-engine-is-a-new-package-on-a-new-version-line.md)),
+and the route an old release's session-start line prints does not move a
+machine across. **A repo on a release before 2.2** has no "upgrade ZDD" at
+all. Either way, from the repo's folder, in a terminal:
 
-1. In `.claude/settings.json`, set
-   `extraKnownMarketplaces["zero-drift-docs"].source.ref` to the new tag
-   (`"v0.11.0"`). No lock there? Add the marketplace from the repo's folder with
-   `claude plugin marketplace add rich-rees/zero-drift-docs@v0.11.0 --scope project`.
-2. Restart Claude Code. The session's first line names the commands that move
-   your machine (on a machine where the marketplace was ever added without a
-   scope, that includes `claude plugin marketplace remove zero-drift-docs
-   --scope user`) — run them, and restart again.
-3. Say **"upgrade ZDD"**: from here it is the guided flow above.
+1. If your user settings (`~/.claude/settings.json`, or `settings.json` in
+   `$CLAUDE_CONFIG_DIR` when you set it) mention `zero-drift-docs`, run
+   `claude plugin marketplace remove zero-drift-docs --scope user` first (a
+   plain `marketplace add` once left it there, and it holds the catalogue).
+2. `claude plugin marketplace add rich-rees/zero-drift-docs@v0.12.0 --scope project`
+   — this moves the catalogue on this machine **and** the lock in
+   `.claude/settings.json`. It also rewrites that file in its own key order
+   and drops `"autoUpdate": false`; step 4 puts `autoUpdate` back. To keep
+   the committed key order instead, `git restore .claude/settings.json` and
+   set `extraKnownMarketplaces["zero-drift-docs"].source.ref` to `"v0.12.0"`
+   by hand: the catalogue on this machine has moved either way.
+3. `claude plugin update zdd@zero-drift-docs --scope project` and
+   `claude plugin update mattpocock-skills@zero-drift-docs --scope project`.
+   Use `update`, not `install`: with the old line installed, `install`
+   answers "already installed … run `claude plugin update`". (A machine with
+   no ZDD install for this repo uses `claude plugin install
+   zdd@zero-drift-docs --scope project` instead.)
+4. Restart Claude Code and say **"upgrade ZDD"**: from here it is the guided
+   flow above.
 
-From 1.3.1 (no session-start release check yet), step 2 is: `claude plugin
-marketplace remove zero-drift-docs --scope user` if your user settings
-(`~/.claude/settings.json`, or `settings.json` in `$CLAUDE_CONFIG_DIR` when you
-set it) mention `zero-drift-docs`, restart, `claude plugin update
-zdd@zero-drift-docs`, restart.
+Once that PR merges, each teammate runs steps 1 to 3 (step 2 then changes
+only the key order and `autoUpdate` in the committed file: `git restore
+.claude/settings.json`) and restarts. A session-start line from the old plugin may still name
+`claude plugin install` or an `update` without `--scope project`; follow the
+steps here instead. From 0.12, the line names the scoped `update` itself.
 
 ## Repo layout
 
@@ -532,6 +544,11 @@ as a yes/no, so saying no to one is a visible choice, not a fork.
 
 - [ ] Next: a second viewer; Vue / Svelte / Angular extractors on their first
       real adoption.
+- [x] **0.12.0** — the fixes from the first adopter's move to 0.11.0: an
+      `extend` blessing's users read from the source's imports, an upgrade
+      that catches code reading the renamed config key, the crossing route
+      from the old line, a fence that judges write targets, and no
+      `zdd-engine` left in ZDD's own text *(ZDD-10; decision 0046)*.
 - [x] **0.11.0** — blessings carry an importance: `importance: high` for
       one that is often needed and costly to reinvent, listed first and
       marked in the blessing index, pinned with a chip in the Blessings
@@ -574,6 +591,53 @@ A repo still on the old line moves its lock by hand once, then says "upgrade
 ZDD" (see Upgrading). Before 1.0 the adapter contract stays at 1 and may
 still change; 1.0.0 freezes it.
 
+- **`0.12.0` — the fixes from the first adopter's move to 0.11.0.**
+  Six findings, one release, before the next adopter crosses from the old
+  line:
+  1. **An `extend` blessing names its real users.** Render reads which
+     files import the exemplar's file from the source: JavaScript and
+     TypeScript (relative imports, tsconfig `paths` such as `@/`, workspace
+     packages) and Python. One user per file, by the record that holds it.
+     Tests are not users of product code. A file no reader can read says
+     why ("users unknown to ZDD (it reads the imports of … files only)").
+     On the adopter, 31 of 32 extend blessings now name their users, where
+     6 did, so the Retest line `choose patterns` writes is no longer empty
+     (decision 0046).
+  2. **The upgrade's retired-names sweep reads code.** It lists a property
+     read of `zdd/config.json`'s old `engine` key (`config.engine`,
+     `require(…).engine`, `["engine"]`, `get("engine")`, in JS, shell and
+     Python) in a file that names the config. It stops listing a lock test
+     that asserts `<!-- zdd:begin -->` is absent, a line about AGENTS.md's
+     block, and accepted ADRs.
+  3. **No `zdd-engine` in ZDD's own text.** Generated headers and the
+     agent index's footer say `npx -y @rich-rees/zdd@<release> render|derive` (the release zdd/config.json pins), and the
+     skills and instructions say "the engine's `tally`". The upgrade
+     rewrites the old package's name in a managed `zdd.yml`'s comments.
+  4. **The crossing route from the old line is written down.** It is
+     `marketplace add …@vX --scope project`, then `plugin update …
+     --scope project` (`install` answers "already installed"), and it warns
+     that `marketplace add` reorders `.claude/settings.json` and drops
+     `autoUpdate`. The session-start line's `update` now names
+     `--scope project`.
+  5. **The fence judges a PowerShell writer by its target**
+     (`-Path` / `-LiteralPath` / `-FilePath` or the first plain argument),
+     never by the text it writes.
+  6. **Answered, no change:** a Next.js `lib/` file the nextjs adapter
+     records holds its own data access, so no separate Data Access box is
+     drawn for it (decision 0037). The README says so.
+
+  **What moves on the bump**:
+  - every pin ZDD owns names `@rich-rees/zdd@0.12.0`;
+  - `render --check` moves `blessing-index.md` (the header line, and every
+    extend blessing's users), `agent-index.md` and its area files (the
+    header and footer wording), `adr-index.md` (the header), and
+    `human-index.html` (each extend blessing's users);
+  - "upgrade ZDD" rewrites `zdd/instructions.md` and the `AGENTS.md` block
+    (one phrase) and, in a managed `zdd.yml`, a comment naming
+    `@rich-rees/zdd-engine`;
+  - no graph or metadata byte changes, and nothing to answer.
+
+  An old-line repo crosses by the route under Upgrading.
 - **`0.11.0` — blessings carry an importance.** A blessing file's header
   may say `importance: high` for a blessing that is often needed **and**
   costly to reinvent (the side peek every details page uses, so nobody
@@ -636,7 +700,7 @@ still change; 1.0.0 freezes it.
   - *Background tasks* (decision 0038): `job` is `background-task`, one
     reader per platform file (`background-vercel`, `-railway`,
     `-cloudflare`, `-procfile`, `-compose` and the queue readers).
-  - *Detection in each adapter* (decision 0039): `zdd-engine detect`,
+  - *Detection in each adapter* (decision 0039): the engine's `detect`,
     `coverage` and `preview`; bootstrap names what is covered and what is
     not, and the first map check is done together.
   - *The adapter contract and the suite* (decision 0040): `CONTRACT = 1`

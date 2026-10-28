@@ -69,11 +69,13 @@ are the ones `load` used.
    - A **`copy`** blessing shows a method: you write new code shaped like
      the exemplar, and the exemplar is not touched.
    - An **`extend`** blessing names shared code to reuse, and to extend if
-     you must. Its index line names **who uses it** ("used by 3: …"),
-     worked out from the metadata. Extending it means **retesting every
-     one of them**: put them on the plan's *Retest* line. "Users unknown to
-     ZDD" means the metadata cannot see them — grep for the callers before
-     you plan the change, and list what you find.
+     you must. Its index line names **who uses it** ("used by 3: …"): the
+     files that import it, read from the source on every render (decision
+     0046). Extending it means **retesting every one of them**: put them on
+     the plan's *Retest* line. "Users unknown to ZDD (…)" says why ZDD
+     cannot tell — a kind of file no adapter reads, or a read cut short;
+     "used by 3 or more" is a read cut short too. Then grep for the callers
+     before you plan the change, and list what you find.
 4. **Look for logic that already exists.** Blessings say *how to build X*;
    "this already exists, reuse it" is the inventory's job. For each piece,
    check the agent index's feature sections and their pointers, and the
@@ -148,7 +150,7 @@ Apps touched: <app>, <app> (house rules read in full)
 ## Retest
 
 - **<piece>** — extends `<blessing>`'s `<where>`: retest <user>, <user> (from
-  the index; or "users unknown to ZDD — found by grep: …")
+  the index; or, where it says "users unknown to ZDD (…)", found by grep: …)
 
 ## Reuse
 

@@ -171,14 +171,14 @@ test is skipped on Windows and runs in Linux CI. Two of the scaffold's tests
 guard the checklist below: one fails if the module's own files import `fs`,
 `child_process` or a network module, or read `process.env`; the other derives
 under a second timezone, locale and environment and requires the same bytes.
-The last runs **ZDD's standard suite** (`zdd-engine suite`, decision 0040)
+The last runs **ZDD's standard suite** (the engine's `suite`, decision 0040)
 — the checks every adapter passes, the catalogue's and this one: the same
 bytes on any machine, a gitignored path never read, a missing root nothing
 to inventory, commented-out code never a record, every read through `io`.
 It runs on a copy of `fixture/` outside the repo, read with the module's
 `SUITE.options`; keep those equal to the fixture's layout. A failing check
 names what to fix. Keep `export const CONTRACT = 1` — the adapter contract
-the module was written for (`zdd-engine contract` prints the table).
+the module was written for (the engine's `contract` prints the table).
 
 ### Hardening checklist
 
@@ -212,9 +212,9 @@ Done when the tests are green and every checklist item holds.
 ## Step 6 — the real repo
 
 ```
-npx -y @rich-rees/zdd@0.11.0 derive --verbose
-npx -y @rich-rees/zdd@0.11.0 render
-npx -y @rich-rees/zdd@0.11.0 lint
+npx -y @rich-rees/zdd@0.12.0 derive --verbose
+npx -y @rich-rees/zdd@0.12.0 render
+npx -y @rich-rees/zdd@0.12.0 lint
 ```
 
 Read every `[<name>]` diagnostic and account for each: a real gap goes back
@@ -226,7 +226,7 @@ metadata together, and link the new records from the map in the next
 
 Offer the one CI line the script printed (`node --test <test path>`); adding
 it is the user's choice. ZDD's own workflow already runs the standard suite
-on every adapter of the repo's own (`zdd-engine suite`); it blocks on the
+on every adapter of the repo's own (the engine's `suite`); it blocks on the
 checks up to `suiteChecks` in `zdd/config.json`, and the newer ones warn. If
 the repo's `suiteChecks` is below the suite's count, say "upgrade ZDD" once
 this adapter passes: `bootstrap.mjs adapters --raise` makes every check

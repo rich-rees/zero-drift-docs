@@ -343,14 +343,14 @@ is written into the host's settings.
 
 ## Step 5 — the engine, then the one mapping session
 
-1. **Derive** — `npx -y @rich-rees/zdd@0.11.0 derive`. "This reads the
+1. **Derive** — `npx -y @rich-rees/zdd@0.12.0 derive`. "This reads the
    code and writes the inventory." On a greenfield repo it writes nothing and
    passes; that is correct.
-2. **Render** — `npx -y @rich-rees/zdd@0.11.0 render`. "This writes the
+2. **Render** — `npx -y @rich-rees/zdd@0.12.0 render`. "This writes the
    indexes from the inventory and the map." Commit the generated artifacts
    (`zdd/graph.json`, the agent, ADR and blessing indexes, the human index);
    never edit them.
-3. **Lint** — `npx -y @rich-rees/zdd@0.11.0 lint`. The same blocking
+3. **Lint** — `npx -y @rich-rees/zdd@0.12.0 lint`. The same blocking
    check CI runs: ADR numbering, supersession symmetry, and every blessing's
    citation and trigger question. A failure here is fixed now, not discovered
    on the first PR. It also prints the **unclaimed records** — on day one
@@ -398,7 +398,7 @@ The config holds `suiteChecks`: how many checks of ZDD's standard suite
 block in CI for the repo's own adapters (decision 0040). A fresh install
 writes all of them. When an uncovered part is built through the extractor
 skill, its last test runs the suite; the CI workflow runs it again on every
-pull request (`zdd-engine suite`). With no adapter of the repo's own, the
+pull request (the engine's `suite`). With no adapter of the repo's own, the
 step says so and passes.
 
 ## Step 6 — the backfill, offered once (never default)

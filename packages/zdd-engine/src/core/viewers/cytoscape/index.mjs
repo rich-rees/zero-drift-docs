@@ -94,7 +94,7 @@ function unclaimedHeader(graph) {
   const claimable = graph.nodes.filter((n) => n.layer === "metadata" && CLAIMABLE_TYPES.includes(n.type));
   if (!claimable.length) return "";
   const unclaimed = claimable.filter((n) => !claimed.has(n.id)).length;
-  return `    <span id="unclaimed" class="muted" title="Routes, tables, functions and surfaces no feature slice links — zdd-engine lint lists them">${unclaimed} of ${claimable.length} unclaimed</span>`;
+  return `    <span id="unclaimed" class="muted" title="Routes, tables, functions and surfaces no feature slice links — the engine&#39;s lint lists them">${unclaimed} of ${claimable.length} unclaimed</span>`;
 }
 
 export function render({ graph, docs, changed, options, bundleName, repoBase }) {

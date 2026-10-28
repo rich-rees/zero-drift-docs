@@ -63,7 +63,7 @@ test("the machine has an older zdd installed for this project: one line, expecte
   const out = run();
   assert.equal(out.trimEnd().split("\n").length, 1, out);
   assert.match(out, /^ZDD release mismatch: zdd@zero-drift-docs expected 2\.1\.0, found 2\.0\.0\./, out);
-  assert.match(out, /Fix, from this repo's folder: claude plugin update zdd@zero-drift-docs; then restart Claude Code\./, out);
+  assert.match(out, /Fix, from this repo's folder: claude plugin update zdd@zero-drift-docs --scope project; then restart Claude Code\./, out);
   assert.doesNotMatch(out, /marketplace|plugin install|restart Claude Code \(/, "the catalogue is right: no catalogue step, no first restart");
   assert.match(out, /Installed is not loaded/, "names the known limit");
 });
@@ -74,7 +74,7 @@ test("the catalogue is at another tag: the pin-move route — restart (the catal
   installed("1.3.1", "1.3.1");
   const out = run();
   assert.match(out, /the catalogue on this machine is at v1\.3\.1, this repo locks v2\.1\.0/, out);
-  assert.match(out, /Fix, from this repo's folder: restart Claude Code \(the catalogue follows this repo's lock on restart\); claude plugin update zdd@zero-drift-docs; claude plugin update mattpocock-skills@zero-drift-docs; then restart Claude Code again\./, out);
+  assert.match(out, /Fix, from this repo's folder: restart Claude Code \(the catalogue follows this repo's lock on restart\); claude plugin update zdd@zero-drift-docs --scope project; claude plugin update mattpocock-skills@zero-drift-docs --scope project; then restart Claude Code again\./, out);
   assert.doesNotMatch(out, /marketplace|plugin install/, out);
   // The Pocock expectation falls back to the running plugin's pin when the catalogue is not at the lock.
   const j = JSON.parse(run(CHECK, "--json"));
@@ -86,7 +86,7 @@ test("only the catalogue is behind: restart, then update every installed plugin,
   catalogue("v1.3.1", POCOCK.version);
   installed("2.1.0", POCOCK.version);
   const out = run();
-  assert.match(out, /Fix, from this repo's folder: restart Claude Code \(the catalogue follows this repo's lock on restart\); claude plugin update zdd@zero-drift-docs; claude plugin update mattpocock-skills@zero-drift-docs; then restart Claude Code again\./, out);
+  assert.match(out, /Fix, from this repo's folder: restart Claude Code \(the catalogue follows this repo's lock on restart\); claude plugin update zdd@zero-drift-docs --scope project; claude plugin update mattpocock-skills@zero-drift-docs --scope project; then restart Claude Code again\./, out);
   assert.doesNotMatch(out, /plugin install|marketplace/, out);
 });
 
@@ -107,7 +107,7 @@ test("the Pocock expectation comes from the catalogue's marketplace.json when th
   const out = run();
   assert.match(out, /mattpocock-skills@zero-drift-docs expected 1\.4\.0, found 1\.3\.1/, out);
   assert.doesNotMatch(out, /zdd@zero-drift-docs expected/, out);
-  assert.match(out, /Fix, from this repo's folder: claude plugin update mattpocock-skills@zero-drift-docs; then restart Claude Code\./, out);
+  assert.match(out, /Fix, from this repo's folder: claude plugin update mattpocock-skills@zero-drift-docs --scope project; then restart Claude Code\./, out);
 });
 
 test("silent when the repo locks nothing, when the lock is not a tag, when the home files are missing or malformed", () => {
@@ -163,7 +163,7 @@ test("a user-level declaration with the catalogue behind: remove it by scope fir
     const out = run();
     assert.equal(out.trimEnd().split("\n").length, 1, out);
     assert.match(out, /your user settings \(~\/\.claude\/settings\.json\) also declare zero-drift-docs at v1\.3\.1, which holds the catalogue there/, out);
-    assert.match(out, /Fix, from this repo's folder: claude plugin marketplace remove zero-drift-docs --scope user; restart Claude Code \(the catalogue follows this repo's lock on restart\); claude plugin update zdd@zero-drift-docs; claude plugin update mattpocock-skills@zero-drift-docs; then restart Claude Code again\./, out);
+    assert.match(out, /Fix, from this repo's folder: claude plugin marketplace remove zero-drift-docs --scope user; restart Claude Code \(the catalogue follows this repo's lock on restart\); claude plugin update zdd@zero-drift-docs --scope project; claude plugin update mattpocock-skills@zero-drift-docs --scope project; then restart Claude Code again\./, out);
     assert.doesNotMatch(out, /marketplace add|marketplace update|--scope local/, out);
     const j = JSON.parse(run(CHECK, "--json"));
     assert.deepEqual(j.strayDeclarations, [{ scope: "user", ref: "v1.3.1", ours: true, source: "rich-rees/zero-drift-docs" }]);

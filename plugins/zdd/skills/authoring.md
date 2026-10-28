@@ -64,7 +64,7 @@ harness set's — numbered continuing the sequence across both):
 - <Alternative considered> — <why it lost>.
 ```
 
-**Supersession points both ways** and is linted (`zdd-engine lint`). When a new ADR
+**Supersession points both ways** and is linted (the engine's `lint`). When a new ADR
 replaces an old one: the new one says it supersedes ADR-NNNN, and you stamp the old
 one at the top — `**Superseded [in part] by ADR-MMMM**` — never edit a frozen ADR
 into a new truth. History doesn't lie; it accretes.
@@ -154,8 +154,8 @@ just tidy. The whole lifecycle, with examples, is in
 - **`kind:`** (required) — **`copy`** when the exemplar shows a method you
   imitate in new code, leaving it untouched; **`extend`** when it is shared
   code you reuse and, if you must, extend. An `extend` blessing's index
-  line names who uses the code, worked out from the metadata on every
-  render — extending it means retesting each of them, and "choose patterns"
+  line names who uses the code — the files that import it, read from the
+  source on every render (decision 0046) — and extending it means retesting each of them, and "choose patterns"
   puts them on the plan's *Retest* line.
 - **`applies-to:`** (optional) — an app or package page, by its path under
   the map (`apps/web`), for a **house rule**: auth, data access, styling,
@@ -184,7 +184,7 @@ just tidy. The whole lifecycle, with examples, is in
   blessing answers, ending in `?` — "Adding an endpoint here?", "A status that
   ends a record for good?". It is what the blessing index lists, so a
   blessing without one is invisible to a session choosing patterns, and
-  `zdd-engine lint` **fails** it. Phrase it as the moment someone would reach
+  the engine's `lint` **fails** it. Phrase it as the moment someone would reach
   for the pattern, not as the pattern's name.
 - **Give the reason.** Cite the ADR that blessed it (`adr:`, or "per
   ADR-0012" in the text), or say why inline ("because …"). Neither is a

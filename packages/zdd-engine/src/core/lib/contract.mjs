@@ -110,6 +110,13 @@ export const CONTRACT_TABLE = [
     what: "`DETECTION` and `detect({ scan, proposed })`, so bootstrap can propose the adapter (a catalogue adapter has it; a local one may)",
     ask: null,
   },
+  {
+    step: "import reader",
+    since: 1,
+    required: false,
+    what: "`IMPORTS` — `{ label (a name or a list), extensions, skipDirs, isTest(rel), resolver(io, files) }`, the files one file imports, so the blessing index names who uses an `extend` blessing's code (decision 0046)",
+    ask: null,
+  },
 ];
 
 // The rows an adapter declaring `declared` is behind on, against `contract`.
@@ -132,7 +139,7 @@ export function judgeContract(name, mod, { contract = CONTRACT, table = CONTRACT
     return {
       declared: null,
       fail: null,
-      warning: `adapter '${name}' declares no CONTRACT — add \`export const CONTRACT = ${contract}\` once it passes the standard suite (\`zdd-engine suite\`); "upgrade ZDD" walks you through it`,
+      warning: `adapter '${name}' declares no CONTRACT — add \`export const CONTRACT = ${contract}\` once it passes the standard suite (the engine's \`suite\`); "upgrade ZDD" walks you through it`,
       behind: [],
     };
   }

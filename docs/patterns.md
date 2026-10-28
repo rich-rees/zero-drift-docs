@@ -177,7 +177,7 @@ choose patterns ──► zdd/patterns-plan.md committed on the branch
   before that), one plain-sentence line per piece opening with its verb:
   `followed`, `departed … because`, `minted … pointing at <path>`,
   `dropped candidate … because`, `precedent … minted | declined`,
-  `no blessing applied`. `zdd-engine tally` counts them over history.
+  `no blessing applied`. the engine's `tally` counts them over history.
 - **The plan is deleted in the update commit, never at merge.** A merge runs
   no code. If the plan were left for the merge, it would land on the base
   branch.

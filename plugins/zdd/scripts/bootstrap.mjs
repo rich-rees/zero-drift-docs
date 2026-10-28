@@ -957,10 +957,19 @@ export function mergeGate(text) {
 // re-pins the file: before 2.2 they named `zdd:bootstrap --upgrade` as what
 // moves the pin (2.4.1, finding 1). That exact wording, wrapped as the
 // template wrapped it, becomes today's; anything else in the file is the
-// team's and is left.
+// team's and is left. The old line's package named in a comment line
+// (`calls the same @rich-rees/zdd-engine …`) is the package the pin moved
+// off, so it becomes the new one (ZDD-10): a step line is never touched, and
+// a versioned `@rich-rees/zdd-engine@2.4.1` is history the new package lacks.
 const OLD_WORKFLOW_HEADER = /^# Managed by Zero-Drift Docs \(zdd\): written by `zdd:bootstrap`; `zdd:bootstrap(\r?)\n# --upgrade` rewrites the engine pin below\. Remove this header line to take(\r?)\n# ownership of the file\.(\r?)$/m;
+const OLD_PACKAGE_IN_COMMENT = /^(\s*#.*?)@rich-rees\/zdd-engine(?![\w@-])/gm;
 export function refreshHeader(text) {
-  return text.replace(OLD_WORKFLOW_HEADER, (_m, a, b, c) => `# Managed by Zero-Drift Docs (zdd): written by \`zdd:bootstrap\`; "upgrade ZDD"${a}\n# rewrites the engine pin below. Remove this header line to take ownership${b}\n# of the file.${c}`);
+  let out = text.replace(OLD_WORKFLOW_HEADER, (_m, a, b, c) => `# Managed by Zero-Drift Docs (zdd): written by \`zdd:bootstrap\`; "upgrade ZDD"${a}\n# rewrites the engine pin below. Remove this header line to take ownership${b}\n# of the file.${c}`);
+  for (let prev = null; prev !== out; ) {
+    prev = out;
+    out = out.replace(OLD_PACKAGE_IN_COMMENT, "$1@rich-rees/zdd");
+  }
+  return out;
 }
 // The standard suite's step (0.9, decision 0040): an owned workflow from an
 // earlier release gains it, in the template's own words, before the
@@ -1342,7 +1351,7 @@ export function exampleFeature(config, paths, adapters = {}) {
     "A **feature slice** is one file here per user-facing capability. It says",
     "*where* the capability lives (`resource:`), *what connects* (links to the",
     "records `derive` inventoried - a feature CLAIMS a record by linking it, and",
-    "`zdd-engine lint` lists every route, table, function and surface no slice",
+    "the engine's `lint` lists every route, table, function and surface no slice",
     "claims). *What to copy* lives apart, in the blessing store",
     `(\`${paths.blessingsDir}/\`): one file per pattern, opening with the question it`,
     "answers - \"Adding an endpoint?\" - with `where:` (the code to copy or",
@@ -1730,8 +1739,12 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
       }
       const head = refreshHeader(next);
       if (head !== next) {
+        const said = [];
+        if (OLD_WORKFLOW_HEADER.test(next)) said.push(`its header comment now names "upgrade ZDD" (it named the retired \`zdd:bootstrap --upgrade\`)`);
+        OLD_PACKAGE_IN_COMMENT.lastIndex = 0;
+        if (OLD_PACKAGE_IN_COMMENT.test(next)) said.push("its comments now name the engine's package from 0.9, `@rich-rees/zdd` (they named the old line's `@rich-rees/zdd-engine`)");
         next = head;
-        headerNote = `${rel}: its header comment now names "upgrade ZDD" (it named the retired \`zdd:bootstrap --upgrade\`)`;
+        headerNote = `${rel}: ${said.join("; ")}`;
       }
       suite = addSuiteStep(next);
       next = suite.text;
@@ -1801,6 +1814,7 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
     oldLock: lockBefore && lockBefore !== `v${version}` ? lockBefore : null,
     metadataRel: artifactPaths(config, { lenient: true }).metadataDir,
     generated: generatedArtifacts(artifactPaths(config, { lenient: true })),
+    adrDirs: [artifactPaths(config, { lenient: true }).adrDir, artifactPaths(config, { lenient: true }).harnessAdrDir].filter((d) => typeof d === "string" && d),
   });
   for (const r of retired) ledger.notes.push(r);
   if (stopUnset) ledger.notes.push('hooks.stop is not set (new in 1.1: the Stop hook prompts for the curated half once per session) — it stays OFF until answered: run bootstrap apply with {"optIns":{"stop":true}} (repair mode, keeps every other choice), or add "stop": true inside the existing "hooks" object by hand');
@@ -2421,7 +2435,7 @@ export const UPGRADE_NOTES = {
   },
   [oldLine("2.4.0")]: ({ paths }) => [
     `2.4 adds the ZDD record (decisions 0027–0029): the instructions file (${paths.bundleDir === "." ? "instructions.md" : `${paths.bundleDir}/instructions.md`}, rewritten by this run) now asks the agent to say one \`ZDD: …\` line, at the moment and without stopping, whenever an artifact turned or confirmed a decision or showed code to reuse — and "update ZDD" writes those lines into the update commit's message as a \`ZDD record:\` with five sections (glossary, adrs, blessings, map, comments) in plain sentences. The \`Pattern record:\` it replaces is still read as the blessings section`,
-    "2.4 adds `zdd-engine tally [--since <ref|date>] [--json]`: per section, how often an artifact turned, confirmed, was reused or stored, over the branch's history, then the ADRs, glossary terms and blessings in the stores that no record ever named — the evidence of what ZDD buys this repo. A squash merge loses the record unless the merger keeps the message; a merge commit keeps it",
+    "2.4 adds the engine's `tally [--since <ref|date>] [--json]`: per section, how often an artifact turned, confirmed, was reused or stored, over the branch's history, then the ADRs, glossary terms and blessings in the stores that no record ever named — the evidence of what ZDD buys this repo. A squash merge loses the record unless the merger keeps the message; a merge commit keeps it",
     "2.4 makes `lint --merge` (the CI step) WARN, never fail, on a record the tally cannot fully read — a missing section, an unknown verb, a `turned` or `confirmed` that does not say what would otherwise have happened; a branch with no update commit is never warned. No config-schema or metadata-contract change; derive and render bytes do not move on the bump",
   ],
   // 2.4.1: the findings from both adopters' moves to 2.4.0.
@@ -2445,7 +2459,7 @@ export const UPGRADE_NOTES = {
     `0.9 starts a new line (decision 0042): the engine is ${ENGINE_PACKAGE}, numbered from 0.9.0 — zdd/config.json's "engine" pin becomes "release", every pin ZDD owns names the new package, and ${OLD_ENGINE_PACKAGE} anywhere else in the repo is listed below. The engine's files can no longer be imported (an exports map): the command line, \`npx -y ${ENGINE_PACKAGE}@${version}\`, is the contract`,
     "0.9 splits the engine into a core that knows no stack and a catalogue of adapters (decision 0036). Route and screen adapters no longer read the Supabase client: supabase-js, supabase-py and sqlalchemy read data access, and a route reaches a table through a data-access record (decision 0037) — the upgrade adds the ones detection proposes (named above), and the human index gains data-access boxes between routes and tables: check it after the regenerate",
     "0.9 renames the record `job` to `background-task`, read by one background-* reader per platform file (decision 0038); the upgrade moved the config, the strict kinds and the map's links where they named the old ones (named above)",
-    "0.9 moves detection into each adapter, and adds `zdd-engine coverage` and the map check you do together (`bootstrap.mjs check`, decision 0039)",
+    "0.9 moves detection into each adapter, and adds the engine's `coverage` and the map check you do together (`bootstrap.mjs check`, decision 0039)",
     `0.9 gives every adapter a contract number and one standard suite (decision 0040): CI runs \`suite\` after lint, and zdd/config.json's suiteChecks says how many checks block (now ${config.suiteChecks ?? "unset — every check warns"})`,
     "0.9 sends a ZDD defect to the developer in plain words and to ZDD's Discussions, under Bug reports — the repo has no Issues (decision 0041)",
     ...(Array.isArray(config.nonAreaTags) || isPlainObject(config.viewer)
@@ -2460,6 +2474,10 @@ export const UPGRADE_NOTES = {
   ],
   "0.11.0": () => [
     "0.11 lets a blessing say `importance: high` (decision 0045): often needed and costly to reinvent — the index lists it first in its section with a bold **high**, the reference human index pins it with a chip, and a plan that departs from it says why. Optional, and never set by the upgrade: a session proposes it at \"choose patterns\" and \"update ZDD\" writes it on the developer's yes. With the reference viewer human-index.html moves, and ZDD's instructions gain one clause; blessing-index.md moves only once a blessing is marked high",
+  ],
+  "0.12.0": () => [
+    "0.12 reads an `extend` blessing's users from the source's imports (decision 0046): the files that import its exemplar, through tsconfig `paths` and workspace packages, and Python imports, one per file; a file ZDD cannot read says why. Expect the blessing index's extend lines to name users where they said \"unknown\" or \"used by nothing\" — the Retest line of the next plan comes from them",
+    "0.12 fixes ZDD's own text and checks: generated headers and footers say `npx -y @rich-rees/zdd@<release> render|derive`, not `zdd-engine`; this run's retired-names list now names code reading zdd/config.json's old `engine` key (fix those by hand: read `.release`) and no longer lists a lock test asserting the old marker is absent, or your accepted ADRs; the fence passes a PowerShell write whose text only mentions a generated file. The regenerate moves blessing-index.md, agent-index.md, adr-index.md and human-index.html; no graph or metadata byte",
   ],
 };
 // border: end
@@ -2705,11 +2723,19 @@ export const RETIRED_NAMES = [
   { since: "2.2.0", find: /\bzdd:bootstrap --upgrade\b|\bbootstrap --upgrade\b/g, now: '"upgrade ZDD" (the upgrade skill)' },
   { since: "2.3.0", find: /\bextractorOptions\.services\b|\bmetadata\/service\/|"services"(?=\s*[,\]])/g, now: "the `external-services` extractor and `metadata/external-service/` (the 2.3 rename)" },
   { since: "2.3.0", find: /\bstrictKinds\b[^\n\]]*"service"|(?<![-\w])service:[a-z0-9][a-z0-9-]*\b/g, now: "the strict kind `external-service` and `external-service:<id>` ids (the 2.3 rename)" },
-  { since: "2.3.0", find: /<!-- zdd:begin -->/g, now: "one import line, `@zdd/instructions.md`, in CLAUDE.md (AGENTS.md keeps the block for Codex)", skip: ["AGENTS.md"] },
+  // A line asserting the marker is absent (on that line, or inside an
+  // assertion opened on one of the three lines above), or one reading AGENTS.md (which keeps the
+  // block), is the new rule already (ZDD-10: a lock test's own lines).
+  { since: "2.3.0", find: /<!-- zdd:begin -->/g, now: "one import line, `@zdd/instructions.md`, in CLAUDE.md (AGENTS.md keeps the block for Codex)", skip: ["AGENTS.md"], unless: /!\s*[\w$.]*\.(?:includes|some|test|match|startsWith)\(|doesNotMatch|\.not\.to|notEqual|notStrictEqual|\bassertNotIn\b|\bnot in\b|AGENTS\.md|\bagents\s*[.[]/i, unlessAbove: /(?:doesNotMatch|notEqual|notStrictEqual|assertNotIn|\.not\.to\w*)\s*\([^)]*$/ },
+  // The config's old pin read by property (ZDD-10): only in a file that
+  // names zdd/config.json, since `engine` is an ordinary word elsewhere
+  // (an ORM's `db.engine`). A comparison and a destructuring are reads;
+  // an assignment, and writing the key in a fixture, are not.
+  { since: "0.9.0", find: /\.engine\b(?!\s*\()(?!\s*=(?!=))|\[\s*["']engine["']\s*\](?!\s*=(?!=))|\bget\(\s*["']engine["']|\{[^}]*\bengine\b[^}]*\}\s*=(?!=)/g, now: "the config's `release` (zdd/config.json's `engine` pin is `release` from 0.9, decision 0042) — read `.release`, else the check reads nothing and passes or fails silently", fileMust: /zdd[\\/]config\.json|["']zdd["']\s*,\s*["']config\.json["']/ },
   { since: "0.9.0", find: /@rich-rees\/zdd-engine\b/g, now: "the engine's package from 0.9, `@rich-rees/zdd` (decision 0042: a new line, numbered from 0.9.0)", skip: [".github/workflows/zdd.yml", ".githooks/pre-push"] },
   { since: "0.9.0", find: /\bextractorOptions\.jobs\b|\bmetadata\/job\//g, now: "the background-* readers and `metadata/background-task/` (0.9, decision 0038)" },
 ];
-const RETIRED_SCAN_EXT = /\.(md|ya?ml|json|mjs|cjs|js|ts|sh|ps1|toml|txt)$/i;
+const RETIRED_SCAN_EXT = /\.(md|ya?ml|json|mjs|cjs|js|ts|sh|ps1|toml|txt|py)$/i;
 const RETIRED_SKIP_FILES = /(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|CHANGELOG\.md)$/i;
 const MAX_RETIRED_FILES = 3000;
 const MAX_RETIRED_NOTES = 20;
@@ -2786,7 +2812,10 @@ function sweepList(ledger, metadataRel) {
 // Files match exactly; only the area folder is a folder (CR-161: a generated
 // path naming a folder must not hide that folder from the sweep).
 const generatedArtifacts = (paths) => ({ files: GENERATED_KEYS.filter((k) => k !== "metadataDir").map((k) => paths[k]).filter((p) => typeof p === "string" && p), dirs: [agentIndexAreaDir(paths.agentIndex)].filter((p) => typeof p === "string" && p) });
-export function findRetiredNames(ledger, { oldEngine = null, oldLock = null, metadataRel = "zdd/metadata", generated = generatedArtifacts(artifactPaths({})) } = {}) {
+// An accepted ADR is history, never edited into a new truth, so a retired
+// name in one is never the team's to fix (ZDD-10: on both adopters most of
+// the sweep's lines were ADRs, burying the code that broke).
+export function findRetiredNames(ledger, { oldEngine = null, oldLock = null, metadataRel = "zdd/metadata", generated = generatedArtifacts(artifactPaths({})), adrDirs = ["zdd/adr"] } = {}) {
   const rules = [...RETIRED_NAMES];
   if (oldLock && /^v\d+\.\d+\.\d+$/.test(oldLock) && oldLock !== `v${oldEngine}`) {
     rules.push({ since: "this upgrade", find: new RegExp(`\\b${oldLock.replace(/\./g, "\\.")}\\b`, "g"), now: `the new release's tag (v${pluginVersion()}) — the lock moved; your repo may hold the old tag somewhere ZDD does not write (a lock test, a setup guide)`, skip: [".claude/settings.json", "zdd/config.json", ".github/workflows/zdd.yml", ".githooks/pre-push"] });
@@ -2801,6 +2830,7 @@ export function findRetiredNames(ledger, { oldEngine = null, oldLock = null, met
     if (hits.length > MAX_RETIRED_NOTES) break;
     if (written.has(rel) || rel.endsWith(`/${INSTRUCTIONS_NAME}`) || rel === INSTRUCTIONS_NAME) continue;
     if (generated.files.includes(rel) || generated.dirs.some((g) => rel.startsWith(`${g}/`))) continue;
+    if (adrDirs.some((d) => rel.startsWith(`${d}/`))) continue;
     let st;
     try {
       st = lstatSync(ledger.abs(rel));
@@ -2816,11 +2846,11 @@ export function findRetiredNames(ledger, { oldEngine = null, oldLock = null, met
     }
     const lines = text.split(/\r?\n/);
     for (const r of rules) {
-      if (r.skip?.includes(rel)) continue;
+      if (r.skip?.includes(rel) || (r.fileMust && !r.fileMust.test(text))) continue;
       lines.forEach((line, i) => {
         r.find.lastIndex = 0;
         const m = r.find.exec(line);
-        if (m) hits.push(`${rel}:${i + 1} still says \`${m[0]}\` — since ${r.since} that is ${r.now}`);
+        if (m && !r.unless?.test(line) && !(i > 0 && r.unlessAbove?.test(lines.slice(Math.max(0, i - 3), i).join(" ")))) hits.push(`${rel}:${i + 1} still says \`${m[0]}\` — since ${r.since} that is ${r.now}`);
       });
     }
   }
