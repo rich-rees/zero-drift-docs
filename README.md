@@ -418,13 +418,6 @@ merge gate.
   `subscribes` edge (0.9), not the Next.js page that uses the hook: Next.js
   pages are read by folder, not by import. Name the hook in
   `supabase-js.subscribeCalls` and the page's call to it carries the edge.
-- **Still on 2.2.1? The `services` extractor's default roots read gitignored
-  folders**, including the `.claude/worktrees/` folder the Claude desktop app
-  creates (a second checkout of the repo): the committed records can name
-  worktree files, so local `derive --check` passes and CI fails. Until you
-  move, set `extractorOptions.services.roots` to the folders that hold your
-  source (for example `["apps", "scripts"]`). Fixed in 2.3.0: what git
-  ignores is never source.
 - Something ZDD got wrong, as opposed to something wrong in your repo, goes
   to the repo's [Discussions](https://github.com/rich-rees/zero-drift-docs/discussions),
   in "Bug reports"; your agent explains it and offers a ready-written report
