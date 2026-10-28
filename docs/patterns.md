@@ -224,6 +224,7 @@ Apps touched: api, web (house rules read in full)
 | An `applies-to:` that names no app or package page | `lint` | **fails** (2.5) |
 | A Blessings section left on a semantic-map page | `lint` | **fails** (2.5: "upgrade ZDD" moves them) |
 | An `importance:` other than `high` (case-exact) | `lint` | **fails** (0.11) |
+| A blessing or map-page header that writes a key twice, or opens a value with a quote and does not close it with the same one | `lint` | **fails** (0.13, decision 0047: ZDD would read the last key, or strip the odd pair) |
 | More `importance: high` blessings than a fifth of the store (at least one allowed) | `lint` | warning (0.11) |
 | A `first-built-in:` that names no map page, or a header line ZDD does not read | `lint` | warning |
 | A blessing with no reason (no ADR, no "because …") | `lint` | warning |

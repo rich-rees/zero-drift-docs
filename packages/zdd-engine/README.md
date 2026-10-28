@@ -49,7 +49,8 @@ npx @rich-rees/zdd contract [--json]
   fails, and so does one that does not open with its trigger question, one
   whose `where:` is missing or names no file, one with no `kind:` or neither
   `copy` nor `extend`, one whose `applies-to:` names no app or package
-  page, and one whose `importance:` is anything but `high`; a Blessings
+  page, and one whose `importance:` is anything but `high`; a blessing or
+  semantic-map page whose header writes a key twice, or opens a value with a quote and does not close it with the same one (0.13, decision 0047); a Blessings
   heading left on a semantic-map page fails too; one with
   no reason — neither an ADR nor "because …" — or over 300 visible
   characters, or citing a partially superseded ADR, or an unknown

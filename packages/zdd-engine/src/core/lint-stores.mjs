@@ -31,6 +31,11 @@
 //    than a fifth of the store (always at least one allowed) is a WARNING:
 //    high means often needed and costly to reinvent, and a pin on half the
 //    store pins nothing.
+//    Store headers (0.13.0, decision 0047): a blessing or a semantic-map
+//    page whose header writes a key twice, or opens a value with a quote
+//    and does not close it with the same one (or not at all), FAILS, naming
+//    the line — the parser would keep the last key, or strip the odd pair,
+//    and read something the author did not write.
 // 3. TEMPSTATE lint (--tempstate, PRs only — tautological on the base
 //    branch): the branch working file must be deleted before merge.
 //    Enforced by construction, not ritual.
@@ -57,7 +62,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync, existsSync, lstatSync, realpathSync } from "node:fs";
 import { join, resolve, relative } from "node:path";
 import { loadConfig, absentStoreNotes } from "./lib/config.mjs";
-import { parseFrontmatter } from "./lib/frontmatter.mjs";
+import { parseFrontmatter, headerProblems } from "./lib/frontmatter.mjs";
 import { extractBlessings, blessingHeadings, forwardStamps, BLESSING_LENGTH_BUDGET } from "./lib/map-links.mjs";
 import { loadBlessings, BLESSING_KINDS, HEADER_KEYS, IMPORTANCE_VALUES, isHigh, highBudget } from "./lib/blessings.mjs";
 import { adrSets, listAdrFiles } from "./lib/adr-sets.mjs";
@@ -227,6 +232,20 @@ const stampsOf = (num) => {
   if (!stampsByNum.has(num)) stampsByNum.set(num, forwardStamps(readFileSync(byNum.get(num).abs, "utf8")));
   return stampsByNum.get(num);
 };
+// A header that says one thing twice, or opens a value with a quote and
+// does not close it with the same one (decision 0047): the parser reads it
+// silently, so lint fails it. A key or value is cut short in the message,
+// so a hostile header cannot flood the log.
+const brief = (t, n = 60) => {
+  const p = printable(String(t));
+  return p.length > n ? `${p.slice(0, n - 1)}…` : p;
+};
+const headerLint = (rel, found) => {
+  for (const h of found) {
+    if (h.problem === "repeated") problems.push(`${printable(rel)}:${h.line}: '${brief(h.key)}' is written twice (first on line ${h.first}) — ZDD reads only the last one; keep one line`);
+    else problems.push(`${printable(rel)}:${h.line}: '${brief(h.key)}' opens with one quote and does not close with the same one — ZDD would read it as '${brief(h.read)}'; close it with the same quote, or drop both`);
+  }
+};
 const BLESSINGS_DIR = resolve(REPO, paths.blessingsDir);
 const blessingsRel = paths.blessingsDir.split("\\").join("/").replace(/\/+$/, "");
 const mapPages = new Map(); // path under the map folder, no .md -> its type
@@ -237,6 +256,7 @@ for (const path of walkMarkdown(MAP_DIR)) {
     problems.push(`${rel}: over ${MAX_STORE_FILE_BYTES / 1024} KiB — a semantic-map concept is a short document; split it or move the bulk out of the map`);
     continue;
   }
+  headerLint(rel, headerProblems(text));
   const parsed = parseFrontmatter(text);
   mapPages.set(relative(MAP_DIR, path).split(/[\\/]/).join("/").replace(/\.md$/, ""), parsed ? String(parsed.frontmatter.type ?? "") : "");
   const left = extractBlessings(parsed ? parsed.body : text);
@@ -262,6 +282,7 @@ const REPO_REAL = (() => {
   }
 })();
 for (const b of store.blessings) {
+  headerLint(b.file, b.headerProblems ?? []);
   const excerpt = printable(b.text.length > 60 ? b.text.slice(0, 59) + "…" : b.text);
   const where = `${printable(b.file)} (blessing: "${excerpt}")`;
   const shape = b.shape;
@@ -300,7 +321,11 @@ for (const b of store.blessings) {
   if (b.firstBuiltIn !== null && !mapPages.has(b.firstBuiltIn)) {
     console.error(`WARNING: ${where} 'first-built-in: ${printable(b.firstBuiltIn)}' names no semantic-map page — give its path under ${paths.mapDir}/, without .md ("features/jobs")`);
   }
-  if (b.unknownKeys.length) console.error(`WARNING: ${where} has header line${b.unknownKeys.length === 1 ? "" : "s"} ZDD does not read (${b.unknownKeys.map(printable).join(", ")}) — the header is ${HEADER_KEYS.join(", ")}`);
+  // At most ten keys, each cut short: a hostile header cannot flood the log.
+  if (b.unknownKeys.length) {
+    const named = b.unknownKeys.slice(0, 10).map((k) => brief(k, 40)).join(", ") + (b.unknownKeys.length > 10 ? `, +${b.unknownKeys.length - 10} more` : "");
+    console.error(`WARNING: ${where} has header line${b.unknownKeys.length === 1 ? "" : "s"} ZDD does not read (${named}) — the header is ${HEADER_KEYS.join(", ")}`);
+  }
   if (shape.length > BLESSING_LENGTH_BUDGET) {
     console.error(`WARNING: ${where} is ${shape.length} characters (budget ${BLESSING_LENGTH_BUDGET}) — keep the question, the exemplar, the refusal and the reason; the detail belongs in the ADR`);
   }

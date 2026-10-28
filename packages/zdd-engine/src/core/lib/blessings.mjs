@@ -22,7 +22,7 @@
 // normal. The file name (without `.md`) is the blessing's stable id.
 
 import { relative } from "node:path";
-import { parseFrontmatter } from "./frontmatter.mjs";
+import { parseFrontmatter, headerProblems } from "./frontmatter.mjs";
 import { blessingShape } from "./map-links.mjs";
 import { walkMarkdown, readBounded, MAX_STORE_FILE_BYTES } from "./walk-markdown.mjs";
 
@@ -99,7 +99,9 @@ export function loadBlessings(dir, repoRoot) {
       continue;
     }
     const id = relative(dir, path).split(/[\\/]/).join("/").replace(/\.md$/, "");
-    blessings.push({ ...readBlessing(text, id), file: rel });
+    // The header's faults ride along from this one read (decision 0047):
+    // lint reports them without reading the store twice.
+    blessings.push({ ...readBlessing(text, id), file: rel, headerProblems: headerProblems(text) });
   }
   blessings.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   return { blessings, unreadable, skipped: state.skipped };

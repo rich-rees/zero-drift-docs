@@ -47,16 +47,18 @@ Run this as the definition of done for every unit of work — the spoken form is
    for a new pattern or a copied precedent worth a blessing.
 3. **Run the deriver.** Regenerates the codebase metadata from source:
    ```
-   npx -y @rich-rees/zdd@0.12.0 derive
+   npx -y @rich-rees/zdd@0.13.0 derive
    ```
 4. **Run the renderer.** Rebuilds the graph artifact (`zdd/graph.json`), the
    agent index, the ADR index (and the harness ADR index, when the repo has
    one), the blessing index, and the human index:
    ```
-   npx -y @rich-rees/zdd@0.12.0 render
+   npx -y @rich-rees/zdd@0.13.0 render
    ```
-5. **Lint the stores.** Supersession symmetry, blessing citations and every
-   blessing's trigger question (blocking); a blessing with no reason or over
+5. **Lint the stores.** Supersession symmetry, blessing citations, every
+   blessing's trigger question, and every blessing and map-page header (a
+   key written twice, or a quote that does not close the same way)
+   (blocking); a blessing with no reason or over
    the length budget (warnings — shorten it, the detail belongs in the ADR);
    and the **claims**: every route, table, function and surface no feature
    slice links, and any record two slices claim. Read the list against the
@@ -97,7 +99,7 @@ Run this as the definition of done for every unit of work — the spoken form is
      its kind; otherwise it is a warning, so that
      switching an extractor on never turns a green lint red by itself.
    ```
-   npx -y @rich-rees/zdd@0.12.0 lint
+   npx -y @rich-rees/zdd@0.13.0 lint
    ```
 6. **Write the ZDD record and commit all of it in the PR.** Code and docs
    merge atomically; the doc delta is reviewed alongside the code delta.
