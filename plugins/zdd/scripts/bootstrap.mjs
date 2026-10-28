@@ -1814,6 +1814,7 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
     oldLock: lockBefore && lockBefore !== `v${version}` ? lockBefore : null,
     metadataRel: artifactPaths(config, { lenient: true }).metadataDir,
     generated: generatedArtifacts(artifactPaths(config, { lenient: true })),
+    adrDirs: [artifactPaths(config, { lenient: true }).adrDir, artifactPaths(config, { lenient: true }).harnessAdrDir].filter((d) => typeof d === "string" && d),
   });
   for (const r of retired) ledger.notes.push(r);
   if (stopUnset) ledger.notes.push('hooks.stop is not set (new in 1.1: the Stop hook prompts for the curated half once per session) — it stays OFF until answered: run bootstrap apply with {"optIns":{"stop":true}} (repair mode, keeps every other choice), or add "stop": true inside the existing "hooks" object by hand');
@@ -2718,11 +2719,17 @@ export const RETIRED_NAMES = [
   { since: "2.2.0", find: /\bzdd:bootstrap --upgrade\b|\bbootstrap --upgrade\b/g, now: '"upgrade ZDD" (the upgrade skill)' },
   { since: "2.3.0", find: /\bextractorOptions\.services\b|\bmetadata\/service\/|"services"(?=\s*[,\]])/g, now: "the `external-services` extractor and `metadata/external-service/` (the 2.3 rename)" },
   { since: "2.3.0", find: /\bstrictKinds\b[^\n\]]*"service"|(?<![-\w])service:[a-z0-9][a-z0-9-]*\b/g, now: "the strict kind `external-service` and `external-service:<id>` ids (the 2.3 rename)" },
-  { since: "2.3.0", find: /<!-- zdd:begin -->/g, now: "one import line, `@zdd/instructions.md`, in CLAUDE.md (AGENTS.md keeps the block for Codex)", skip: ["AGENTS.md"] },
+  // A line asserting the marker is absent, or about AGENTS.md (which keeps
+  // the block), is the new rule already (ZDD-10: a lock test's own lines).
+  { since: "2.3.0", find: /<!-- zdd:begin -->/g, now: "one import line, `@zdd/instructions.md`, in CLAUDE.md (AGENTS.md keeps the block for Codex)", skip: ["AGENTS.md"], unless: /!\s*[\w$.]*\.(?:includes|some|test|match|startsWith)\(|doesNotMatch|\.not\.to|notEqual|notStrictEqual|\bassertNotIn\b|\bnot in\b|\bagents\b/i },
+  // The config's old pin read by property (ZDD-10): only in a file that
+  // names zdd/config.json, since `engine` is an ordinary word elsewhere
+  // (an ORM's `db.engine`). Writing the key in a fixture is not a read.
+  { since: "0.9.0", find: /\.engine\b(?!\s*[(=])|\[\s*["']engine["']\s*\]|\bget\(\s*["']engine["']/g, now: "the config's `release` (zdd/config.json's `engine` pin is `release` from 0.9, decision 0042) — read `.release`, else the check reads nothing and passes or fails silently", fileMust: /zdd[\\/]config\.json|["']zdd["']\s*,\s*["']config\.json["']/ },
   { since: "0.9.0", find: /@rich-rees\/zdd-engine\b/g, now: "the engine's package from 0.9, `@rich-rees/zdd` (decision 0042: a new line, numbered from 0.9.0)", skip: [".github/workflows/zdd.yml", ".githooks/pre-push"] },
   { since: "0.9.0", find: /\bextractorOptions\.jobs\b|\bmetadata\/job\//g, now: "the background-* readers and `metadata/background-task/` (0.9, decision 0038)" },
 ];
-const RETIRED_SCAN_EXT = /\.(md|ya?ml|json|mjs|cjs|js|ts|sh|ps1|toml|txt)$/i;
+const RETIRED_SCAN_EXT = /\.(md|ya?ml|json|mjs|cjs|js|ts|sh|ps1|toml|txt|py)$/i;
 const RETIRED_SKIP_FILES = /(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|CHANGELOG\.md)$/i;
 const MAX_RETIRED_FILES = 3000;
 const MAX_RETIRED_NOTES = 20;
@@ -2799,7 +2806,10 @@ function sweepList(ledger, metadataRel) {
 // Files match exactly; only the area folder is a folder (CR-161: a generated
 // path naming a folder must not hide that folder from the sweep).
 const generatedArtifacts = (paths) => ({ files: GENERATED_KEYS.filter((k) => k !== "metadataDir").map((k) => paths[k]).filter((p) => typeof p === "string" && p), dirs: [agentIndexAreaDir(paths.agentIndex)].filter((p) => typeof p === "string" && p) });
-export function findRetiredNames(ledger, { oldEngine = null, oldLock = null, metadataRel = "zdd/metadata", generated = generatedArtifacts(artifactPaths({})) } = {}) {
+// An accepted ADR is history, never edited into a new truth, so a retired
+// name in one is never the team's to fix (ZDD-10: on both adopters most of
+// the sweep's lines were ADRs, burying the code that broke).
+export function findRetiredNames(ledger, { oldEngine = null, oldLock = null, metadataRel = "zdd/metadata", generated = generatedArtifacts(artifactPaths({})), adrDirs = ["zdd/adr"] } = {}) {
   const rules = [...RETIRED_NAMES];
   if (oldLock && /^v\d+\.\d+\.\d+$/.test(oldLock) && oldLock !== `v${oldEngine}`) {
     rules.push({ since: "this upgrade", find: new RegExp(`\\b${oldLock.replace(/\./g, "\\.")}\\b`, "g"), now: `the new release's tag (v${pluginVersion()}) — the lock moved; your repo may hold the old tag somewhere ZDD does not write (a lock test, a setup guide)`, skip: [".claude/settings.json", "zdd/config.json", ".github/workflows/zdd.yml", ".githooks/pre-push"] });
@@ -2814,6 +2824,7 @@ export function findRetiredNames(ledger, { oldEngine = null, oldLock = null, met
     if (hits.length > MAX_RETIRED_NOTES) break;
     if (written.has(rel) || rel.endsWith(`/${INSTRUCTIONS_NAME}`) || rel === INSTRUCTIONS_NAME) continue;
     if (generated.files.includes(rel) || generated.dirs.some((g) => rel.startsWith(`${g}/`))) continue;
+    if (adrDirs.some((d) => rel.startsWith(`${d}/`))) continue;
     let st;
     try {
       st = lstatSync(ledger.abs(rel));
@@ -2829,11 +2840,11 @@ export function findRetiredNames(ledger, { oldEngine = null, oldLock = null, met
     }
     const lines = text.split(/\r?\n/);
     for (const r of rules) {
-      if (r.skip?.includes(rel)) continue;
+      if (r.skip?.includes(rel) || (r.fileMust && !r.fileMust.test(text))) continue;
       lines.forEach((line, i) => {
         r.find.lastIndex = 0;
         const m = r.find.exec(line);
-        if (m) hits.push(`${rel}:${i + 1} still says \`${m[0]}\` — since ${r.since} that is ${r.now}`);
+        if (m && !r.unless?.test(line)) hits.push(`${rel}:${i + 1} still says \`${m[0]}\` — since ${r.since} that is ${r.now}`);
       });
     }
   }
