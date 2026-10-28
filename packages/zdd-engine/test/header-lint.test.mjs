@@ -71,6 +71,11 @@ test("campaign CR-221, 222, 224: a quote fault reports its own line's reading ev
   assert.ok(Date.now() - started < 20_000, `lint took ${Date.now() - started} ms`);
   assert.equal(r.status, 1);
   assert.match(r.stderr, /a-own\.md:4: 'title' opens with one quote and does not close with the same one — ZDD would read it as 'Broken'/, r.stderr);
+  // Bounded output (a POSIX pipe loses what a process prints just before it
+  // exits once a buffer's worth is waiting): no line carries the hostile
+  // header whole.
+  assert.ok(r.stderr.length < 64 * 1024, `lint printed ${r.stderr.length} bytes`);
+  assert.match(r.stderr, /hostile\.md \(blessing: [^)]*\) has header lines ZDD does not read \([^)]*, \+\d+ more\)/);
   const line = r.stderr.split("\n").find((l) => l.includes("hostile.md:4:")) ?? "";
   assert.ok(line.length > 0 && line.length < 400, `the long key's line is cut short (${line.length} chars)`);
 });

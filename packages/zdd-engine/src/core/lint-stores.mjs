@@ -321,7 +321,11 @@ for (const b of store.blessings) {
   if (b.firstBuiltIn !== null && !mapPages.has(b.firstBuiltIn)) {
     console.error(`WARNING: ${where} 'first-built-in: ${printable(b.firstBuiltIn)}' names no semantic-map page — give its path under ${paths.mapDir}/, without .md ("features/jobs")`);
   }
-  if (b.unknownKeys.length) console.error(`WARNING: ${where} has header line${b.unknownKeys.length === 1 ? "" : "s"} ZDD does not read (${b.unknownKeys.map(printable).join(", ")}) — the header is ${HEADER_KEYS.join(", ")}`);
+  // At most ten keys, each cut short: a hostile header cannot flood the log.
+  if (b.unknownKeys.length) {
+    const named = b.unknownKeys.slice(0, 10).map((k) => brief(k, 40)).join(", ") + (b.unknownKeys.length > 10 ? `, +${b.unknownKeys.length - 10} more` : "");
+    console.error(`WARNING: ${where} has header line${b.unknownKeys.length === 1 ? "" : "s"} ZDD does not read (${named}) — the header is ${HEADER_KEYS.join(", ")}`);
+  }
   if (shape.length > BLESSING_LENGTH_BUDGET) {
     console.error(`WARNING: ${where} is ${shape.length} characters (budget ${BLESSING_LENGTH_BUDGET}) — keep the question, the exemplar, the refusal and the reason; the detail belongs in the ADR`);
   }
