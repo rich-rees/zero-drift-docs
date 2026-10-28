@@ -277,9 +277,9 @@ node "$PLUGIN/scripts/bootstrap.mjs" preflight
 Then, with the engine this plugin pins:
 
 ```
-npx -y @rich-rees/zdd@0.10.0 derive
-npx -y @rich-rees/zdd@0.10.0 render
-npx -y @rich-rees/zdd@0.10.0 lint
+npx -y @rich-rees/zdd@0.11.0 derive
+npx -y @rich-rees/zdd@0.11.0 render
+npx -y @rich-rees/zdd@0.11.0 lint
 ```
 
 Show what moved in the generated artifacts and say why, from the notes (a
@@ -496,3 +496,25 @@ category: https://github.com/rich-rees/zero-drift-docs/discussions (decision 004
   `render --check` moves `human-index.html` only (with another viewer,
   possibly nothing); `derive --check`, `graph.json`, the agent index and the blessing
   index keep their bytes. Commit it in the same PR.
+
+## Upgrading to 0.11 (blessings carry an importance)
+
+- **A blessing may say `importance: high`** (decision 0045): often needed
+  **and** costly to reinvent — the side peek every details page uses, so
+  nobody builds a modal of their own. The blessing index lists it first in
+  its section with a bold **high**; the reference human index pins it to
+  the top of the Blessings peek with a chip; a plan that departs from it
+  says why.
+- **The upgrade never sets it.** In step 5, with the blessing index open,
+  ask the person whether any blessing earns it, naming the test; add the
+  line only on their yes, one blessing at a time. Keep it scarce: lint
+  warns when more than a fifth of the store (at least one) is high, and
+  fails any value but `high`, case-exact.
+- Nothing else to answer; no config-schema or metadata-contract change.
+  The pins move to 0.11.0.
+- **What moves on the bump**: with the reference viewer, `render --check`
+  moves `human-index.html` (each blessing entry gains `importance`); the
+  rewritten `zdd/instructions.md` and Codex's `AGENTS.md` block gain one
+  clause on the high marker. `blessing-index.md` moves only once a blessing
+  is marked high; `derive --check`, `graph.json` and the agent index keep
+  their bytes. Commit them in the same PR.

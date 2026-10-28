@@ -2458,6 +2458,9 @@ export const UPGRADE_NOTES = {
   "0.10.0": () => [
     "0.10 adds a Blessings peek to the human index, beside Glossary and ADRs (decision 0043): every blessing by trigger question, with its exemplar, app, users and cited ADRs; every peek gains a filter box and a back history. with the reference (cytoscape) viewer, only human-index.html moves on the regenerate — open it and try the Blessings button; the minimal viewer or one of your own may show no change",
   ],
+  "0.11.0": () => [
+    "0.11 lets a blessing say `importance: high` (decision 0045): often needed and costly to reinvent — the index lists it first in its section with a bold **high**, the Blessings peek pins it with a chip, and a plan that departs from it says why. Optional and never set by the upgrade: ask the person whether one or two blessings earn it, and add the line only on their yes. human-index.html and ZDD's instructions move; blessing-index.md moves only once a blessing is marked high",
+  ],
 };
 // border: end
 
