@@ -81,7 +81,7 @@ test("the 2.4 upgrade note names the record, the tally and the lint warning; the
   const notes = UPGRADE_NOTES[oldLine("2.4.0")]({ paths: { bundleDir: "zdd" }, config: {} }).join("\n");
   assert.match(notes, /zdd\/instructions\.md/);
   assert.match(notes, /ZDD record:/);
-  assert.match(notes, /the engine's `tally/);
+  assert.match(notes, /the engine's `tally \[--since/);
   assert.match(notes, /lint --merge.*WARN/);
   assert.match(read("skills", "upgrade", "SKILL.md"), /^## Upgrading to 2\.4 \(the ZDD record\)/m);
 });

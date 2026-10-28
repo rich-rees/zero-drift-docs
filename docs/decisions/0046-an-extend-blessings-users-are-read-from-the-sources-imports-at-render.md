@@ -47,14 +47,21 @@ records (a component and its module) was also counted twice.
 4. **One user per file.** A file is shown by the record that holds it (a
    route, a surface or a component before a plain module), else as its
    path. Users found through record references (0031) still count, merged
-   by file.
+   by file. A record that holds several importing files (an iOS and an
+   Android file of one screen) is one user: it is one thing to retest.
 5. **Test code is a user only of test code.** A module's own tests are not
    what a change to it asks to retest. A test fixture's users are tests.
 6. **Unknown says why.** When no configured reader claims the file's ending
    and no record holds it, the line says `users unknown to ZDD (it reads the
    imports of JavaScript and TypeScript files only)`, from the readers'
-   labels. A file a reader claims is always known: no importer is "used by
-   nothing ZDD sees".
+   labels. A file a reader claims is known, so no importer is "used by
+   nothing ZDD sees" — unless the scan was cut short (a budget ran out, a
+   file was too large or unreadable): then none found is `users unknown to
+   ZDD (<why>)`, some found is `used by N or more: … (<why>)`, and render
+   warns. A confident zero is never printed from a partial read.
+7. **Every reader for an ending reads it.** Two readers claiming `.ts` (a
+   catalogue one and a repo's own) both read each file, their answers
+   joined; a reader shared by several adapters runs once.
 
 ## Consequences
 
@@ -87,3 +94,6 @@ records (a component and its module) was also counted twice.
   turn `derive --check` stale.
 - **One import graph in the core.** It names languages in the core
   (decision 0036).
+- **Counting each importing file of one record separately** (the
+  campaign's CR-206). An iOS and an Android file of one screen would read
+  as two users for one thing to retest.

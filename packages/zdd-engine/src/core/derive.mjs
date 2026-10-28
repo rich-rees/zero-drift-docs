@@ -416,7 +416,7 @@ export async function run(args) {
       fail(
         `${metadataRel} is out of sync with the source (${problems.length} file(s)):\n` +
           problems.map((p) => `  ${p}`).join("\n") +
-          "\nRun `npx -y @rich-rees/zdd derive` and commit the result.",
+          `\nRun \`npx -y @rich-rees/zdd@${typeof config.release === "string" ? config.release : "<release>"} derive\` and commit the result.`,
       );
     }
     console.log(`codebase metadata in sync (${records.length} records)`);

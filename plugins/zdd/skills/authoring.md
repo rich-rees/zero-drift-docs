@@ -154,8 +154,8 @@ just tidy. The whole lifecycle, with examples, is in
 - **`kind:`** (required) — **`copy`** when the exemplar shows a method you
   imitate in new code, leaving it untouched; **`extend`** when it is shared
   code you reuse and, if you must, extend. An `extend` blessing's index
-  line names who uses the code, worked out from the metadata on every
-  render — extending it means retesting each of them, and "choose patterns"
+  line names who uses the code — the files that import it, read from the
+  source on every render (decision 0046) — and extending it means retesting each of them, and "choose patterns"
   puts them on the plan's *Retest* line.
 - **`applies-to:`** (optional) — an app or package page, by its path under
   the map (`apps/web`), for a **house rule**: auth, data access, styling,

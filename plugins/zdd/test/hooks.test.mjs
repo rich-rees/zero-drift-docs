@@ -256,7 +256,23 @@ test("ZDD-10, finding 5: a PowerShell writer is judged by its target — the tex
     "New-Item -ItemType File -Path zdd/graph.json -Force",
     "New-Item zdd/graph.json",
     "New-Item -Path zdd -Name graph.json -ItemType File",
+    // Campaign CR-208: a list with spaces after its commas.
+    `Set-Content -Path "${note}", zdd/graph.json -Value x`,
+    `Set-Content "${note}", zdd/graph.json x`,
+    // CR-209: PowerShell's abbreviated parameter names.
+    "Set-Content -Pa zdd/graph.json -Value x",
+    "Set-Content -LiteralP zdd/graph.json -Value x",
+    "Out-File -Fi zdd/adr-index.md",
+    "Out-File -FileP zdd/adr-index.md",
+    "Add-Content -Va x -Pat zdd/graph.json",
+    "Set-Content -Fo zdd/graph.json x",
+    "Set-Content -Unknown zdd/graph.json -Value x",
   ]) blocked(fence("PowerShell", { command }), command);
+  for (const command of [
+    `Set-Content -Pa "${note}" -Va "zdd/graph.json"`,
+    `Add-Content -LiteralP "${note}" -Val zdd/blessing-index.md -Enc utf8`,
+    `Out-File -Fi "${note}" -In "zdd/graph.json" -Ap`,
+  ]) silent(fence("PowerShell", { command }), command);
 });
 
 test("2.4.1: taking a side of a conflicted generated file is still refused, and the reason gives the regenerate-mid-merge route; any other refusal does not", () => {

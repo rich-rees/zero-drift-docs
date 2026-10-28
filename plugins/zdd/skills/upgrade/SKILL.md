@@ -502,7 +502,7 @@ category: https://github.com/rich-rees/zero-drift-docs/discussions (decision 004
 - **An `extend` blessing names its users** (decision 0046): render reads
   which files import the exemplar's file, from the source. The blessing
   index's extend lines change, mostly from "users unknown to ZDD" or "used
-  by nothing ZDD sees" to a list; one ZDD still cannot read says why. In
+  by nothing ZDD sees" to a list; any file ZDD cannot read says why. In
   step 5, say so in one line: the next plan's Retest line comes from them.
 - **Code that reads the old config key is listed.** The retired-names list
   now names a property read of `zdd/config.json`'s `engine` key (a lock

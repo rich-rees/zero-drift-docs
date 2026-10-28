@@ -44,7 +44,7 @@ test("agent index: feature sections, generic regen pointer, linkified ADRs", () 
   const index = readFileSync(join(repo, "zdd", "agent-index.md"), "utf8");
   assert.match(index, /^# Fixture App/m);
   assert.match(index, /^## Things/m);
-  assert.match(index, /npx -y @rich-rees\/zdd derive/);
+  assert.match(index, /npx -y @rich-rees\/zdd@<release> derive/);
   assert.ok(!index.includes("zdd/scripts/"), "no in-tree script paths in output");
   // Bare ADR citations in descriptions become links relative to the bundle.
   assert.ok(index.includes("[ADR-0002](adr/0002-things-replace-widgets.md)"), index);
@@ -82,7 +82,7 @@ test("check fails on stale, missing and orphaned files, and derive repairs", () 
     assert.match(out, /stale: route\/things\.json/);
     assert.match(out, /orphaned .*: route\/ghost\.json/);
     assert.match(out, /missing: table\/db--things\.json/);
-    assert.match(out, /npx -y @rich-rees\/zdd derive/);
+    assert.match(out, /npx -y @rich-rees\/zdd@<release> derive/);
   }
   assert.ok(failed, "--check should exit non-zero");
 

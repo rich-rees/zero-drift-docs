@@ -57,9 +57,25 @@ const WRITE_VERB = /^(mv|move-item|mi|move|rename-item|rni|ren|rename|tee|trunca
 // parameter is content or a setting, so a `-Value` that mentions a
 // generated path is text, not a target (ZDD-10, finding 5).
 const PS_WRITER = /^(set-content|sc|out-file|add-content|ac|clear-content|clc|new-item|ni)$/i;
-const PS_TARGET_PARAM = /^(path|literalpath|lp|pspath|filepath)$/i;
-// Parameters that take no value: the next word is not theirs.
-const PS_SWITCH = /^(force|nonewline|passthru|whatif|confirm|append|noclobber|asbytestream|verbose|debug)$/i;
+// PowerShell takes any unambiguous prefix of a parameter's name (`-Pa`
+// for -Path), so a word is matched against every name it could shorten.
+// One that could name a path parameter is a target; one that could name
+// only switches takes no value; one that could name only content or a
+// setting takes a value that is not a target; an unknown one's value is
+// judged as a target (fail closed).
+const PS_PATH_PARAMS = ["path", "literalpath", "pspath", "filepath"];
+const PS_CONTENT_PARAMS = ["value", "inputobject", "encoding", "itemtype", "type", "width", "stream", "delimiter", "filter", "include", "exclude", "credential"];
+const PS_SWITCHES = ["force", "nonewline", "passthru", "whatif", "confirm", "append", "noclobber", "asbytestream", "verbose", "debug"];
+function psParam(word) {
+  const n = word.toLowerCase();
+  if (n === "lp") return "path";
+  const could = (names) => names.some((x) => x.startsWith(n));
+  if (could(PS_PATH_PARAMS)) return "path";
+  if (n.length && "name".startsWith(n) && !could(PS_SWITCHES) && !could(PS_CONTENT_PARAMS)) return "name";
+  if (could(PS_SWITCHES) && !could(PS_CONTENT_PARAMS) && !"name".startsWith(n)) return "switch";
+  if (could(PS_CONTENT_PARAMS) || "name".startsWith(n)) return "content";
+  return "unknown";
+}
 const GIT_WRITE_SUBVERB = /^(checkout|restore|clean|rm|mv)$/i;
 // git's global options that take a separate value (`-C <dir>`, `-c k=v` …).
 const GIT_GLOBAL_WITH_VALUE = /^(-C|-c|--git-dir|--work-tree|--namespace|--super-prefix|--config-env|--exec-path|--list-cmds|--attr-source)$/;
@@ -265,32 +281,42 @@ function shellTarget(command, cwd, hit) {
   return null;
 }
 
-// A PowerShell writer's targets: the values of its path parameters, else
-// its first positional word; a list (`-Path a,b`) is every item, and New-Item's
-// `-Name` sits under its `-Path` (or the cwd). `-Name:value` is one word.
+// A PowerShell writer's targets: the values of its path parameters (and
+// of any parameter it does not know), else its first positional word; a
+// list (`-Path a,b`, `-Path a, b`) is every item, and New-Item's `-Name`
+// sits under its `-Path` (or the cwd). `-Name:value` is one word.
 function psWriterTargets(words) {
   const paths = [];
-  const positional = []; // groups: a word and the `,item` words after it
+  const positional = []; // groups: a word and the list items after it
   let name = null;
+  let named = false;
   const unquote = (v) => v.replace(/^["']|["']$/g, "");
   const list = (v) => v.split(",").map(unquote).filter(Boolean);
+  // A list goes on while a word ends with a comma or the next starts with one.
+  const more = (prev, i) => prev.trimEnd().endsWith(",") || words[i + 1]?.startsWith(",");
   for (let i = 1; i < words.length; i++) {
     const w = words[i];
     const p = /^-([A-Za-z]+)(?::(.*))?$/.exec(w);
     if (!p) {
-      if (w.startsWith(",") && positional.length) positional[positional.length - 1].push(...list(w));
-      else positional.push(list(w));
+      const items = list(w);
+      let last = w;
+      while (more(last, i) && words[i + 1] !== undefined && !/^-[A-Za-z]/.test(words[i + 1])) items.push(...list((last = words[++i])));
+      positional.push(items);
       continue;
     }
-    if (PS_SWITCH.test(p[1])) continue;
+    const kind = psParam(p[1]);
+    if (kind === "switch") continue;
     let value = p[2];
     if (value === undefined) value = words[++i] ?? "";
     const items = list(value);
-    while (words[i + 1]?.startsWith(",")) items.push(...list(words[++i]));
-    if (PS_TARGET_PARAM.test(p[1])) paths.push(...items);
-    else if (/^name$/i.test(p[1])) name = items[0] ?? null;
+    let last = value;
+    while (more(last, i) && words[i + 1] !== undefined && !/^-[A-Za-z]/.test(words[i + 1])) items.push(...list((last = words[++i])));
+    if (kind === "path") named = true;
+    if (kind === "path" || kind === "unknown") paths.push(...items);
+    else if (kind === "name") name = items[0] ?? null;
   }
-  if (!paths.length && positional.length) paths.push(...positional[0]);
+  // With no path parameter, the first positional word is the path.
+  if (!named && positional.length) paths.push(...positional[0]);
   if (name !== null) return (paths.length ? paths : ["."]).map((d) => join(d, name));
   return paths;
 }

@@ -144,7 +144,7 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
   `export const CONTRACT = 1`, a number of its own that moves only when the
   table below does, and `export const COMMENT`, the line-comment mark for
   each kind of file it reads (`null` for one that takes none, like JSON; the
-  suite fails a file the adapter read that COMMENT does not classify). The suite (`zdd-engine suite`, run on a copy
+  suite fails a file the adapter read that COMMENT does not classify). The suite (the engine's `suite`, run on a copy
   of the adapter's fixture outside any repo) holds every adapter to five
   checks: byte-identical records on another machine and on a second run, a
   gitignored path never read, a missing root nothing to inventory,
@@ -200,7 +200,7 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
   ("`APIRouter` under `api/routes`"). The `scan` is one walk of the repo
   shared by every adapter (six folders deep, gitignored paths never seen,
   under one io's caps): `files`, `read(rel)`, `json(rel)` and `memo(key,
-  fn)`. `zdd-engine detect` prints what they all answer.
+  fn)`. The engine's `detect` prints what they all answer.
 
 A stack without statically derivable structure keeps thinner metadata and a
 larger semantic map — the *contract* is fixed, not the coverage. When in doubt,

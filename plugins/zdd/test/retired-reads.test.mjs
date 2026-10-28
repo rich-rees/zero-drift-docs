@@ -76,3 +76,28 @@ test("ZDD-10: an accepted ADR is history — a retired name in the ADR folders i
   assert.match(notes, /docs\/setup\.md:1 still says `@rich-rees\/zdd-engine`/, notes);
   assert.match(notes, /docs\/setup\.md:1 still says `bootstrap --upgrade`/, notes);
 });
+
+test("ZDD-10 campaign CR-210: a comparison, an optional chain and a destructuring read the old key; an assignment does not", (t) => {
+  const notes = sweep(t, {
+    "hooks/lock.mjs": [
+      'const config = JSON.parse(readFileSync("zdd/config.json", "utf8"));',
+      "if (config.engine === expected) ok();",
+      "if (config?.engine !== pin) fail();",
+      'const { engine, extractors } = JSON.parse(readFileSync("zdd/config.json", "utf8"));',
+      "if (config['engine'] == pin) ok();",
+      'config.engine = "2.5.0"; // a fixture writing the old key',
+      "",
+    ].join("\n"),
+  });
+  for (const n of [2, 3, 4, 5]) assert.match(notes, new RegExp(`hooks/lock\\.mjs:${n} still says`), notes);
+  assert.doesNotMatch(notes, /hooks\/lock\.mjs:6 /, notes);
+});
+
+test("ZDD-10 campaign CR-207: an absence assertion split over two lines is not a hit; prose that says `agents` is", (t) => {
+  const notes = sweep(t, {
+    "hooks/claude.test.mjs": ["assert.doesNotMatch(", "  claudeMd,", "  /<!-- zdd:begin -->/,", ");", "assert.doesNotMatch(claudeMd,", "  /<!-- zdd:begin -->/);", "expect(text).not.toContain(", '  "<!-- zdd:begin -->");', ""].join("\n"),
+    "docs/agents.md": "Agents should add the `<!-- zdd:begin -->` block to CLAUDE.md.\n",
+  });
+  assert.doesNotMatch(notes, /claude\.test\.mjs:(3|6|8) /, notes);
+  assert.match(notes, /docs\/agents\.md:1 still says `<!-- zdd:begin -->`/, notes);
+});

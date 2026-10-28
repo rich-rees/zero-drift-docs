@@ -2477,7 +2477,7 @@ export const UPGRADE_NOTES = {
   ],
   "0.12.0": () => [
     "0.12 reads an `extend` blessing's users from the source's imports (decision 0046): the files that import its exemplar, through tsconfig `paths` and workspace packages, and Python imports, one per file; a file ZDD cannot read says why. Expect the blessing index's extend lines to name users where they said \"unknown\" or \"used by nothing\" — the Retest line of the next plan comes from them",
-    "0.12 fixes ZDD's own text and checks: generated headers and footers say `npx -y @rich-rees/zdd render|derive`, not `zdd-engine`; this run's retired-names list now names code reading zdd/config.json's old `engine` key (fix those by hand: read `.release`) and no longer lists a lock test asserting the old marker is absent, or your accepted ADRs; the fence passes a PowerShell write whose text only mentions a generated file. The regenerate moves blessing-index.md, agent-index.md, adr-index.md and human-index.html; no graph or metadata byte",
+    "0.12 fixes ZDD's own text and checks: generated headers and footers say `npx -y @rich-rees/zdd@<release> render|derive`, not `zdd-engine`; this run's retired-names list now names code reading zdd/config.json's old `engine` key (fix those by hand: read `.release`) and no longer lists a lock test asserting the old marker is absent, or your accepted ADRs; the fence passes a PowerShell write whose text only mentions a generated file. The regenerate moves blessing-index.md, agent-index.md, adr-index.md and human-index.html; no graph or metadata byte",
   ],
 };
 // border: end
@@ -2723,13 +2723,15 @@ export const RETIRED_NAMES = [
   { since: "2.2.0", find: /\bzdd:bootstrap --upgrade\b|\bbootstrap --upgrade\b/g, now: '"upgrade ZDD" (the upgrade skill)' },
   { since: "2.3.0", find: /\bextractorOptions\.services\b|\bmetadata\/service\/|"services"(?=\s*[,\]])/g, now: "the `external-services` extractor and `metadata/external-service/` (the 2.3 rename)" },
   { since: "2.3.0", find: /\bstrictKinds\b[^\n\]]*"service"|(?<![-\w])service:[a-z0-9][a-z0-9-]*\b/g, now: "the strict kind `external-service` and `external-service:<id>` ids (the 2.3 rename)" },
-  // A line asserting the marker is absent, or about AGENTS.md (which keeps
-  // the block), is the new rule already (ZDD-10: a lock test's own lines).
-  { since: "2.3.0", find: /<!-- zdd:begin -->/g, now: "one import line, `@zdd/instructions.md`, in CLAUDE.md (AGENTS.md keeps the block for Codex)", skip: ["AGENTS.md"], unless: /!\s*[\w$.]*\.(?:includes|some|test|match|startsWith)\(|doesNotMatch|\.not\.to|notEqual|notStrictEqual|\bassertNotIn\b|\bnot in\b|\bagents\b/i },
+  // A line asserting the marker is absent (on that line, or inside an
+  // assertion opened on one of the three lines above), or one reading AGENTS.md (which keeps the
+  // block), is the new rule already (ZDD-10: a lock test's own lines).
+  { since: "2.3.0", find: /<!-- zdd:begin -->/g, now: "one import line, `@zdd/instructions.md`, in CLAUDE.md (AGENTS.md keeps the block for Codex)", skip: ["AGENTS.md"], unless: /!\s*[\w$.]*\.(?:includes|some|test|match|startsWith)\(|doesNotMatch|\.not\.to|notEqual|notStrictEqual|\bassertNotIn\b|\bnot in\b|AGENTS\.md|\bagents\s*[.[]/i, unlessAbove: /(?:doesNotMatch|notEqual|notStrictEqual|assertNotIn|\.not\.to\w*)\s*\([^)]*$/ },
   // The config's old pin read by property (ZDD-10): only in a file that
   // names zdd/config.json, since `engine` is an ordinary word elsewhere
-  // (an ORM's `db.engine`). Writing the key in a fixture is not a read.
-  { since: "0.9.0", find: /\.engine\b(?!\s*[(=])|\[\s*["']engine["']\s*\]|\bget\(\s*["']engine["']/g, now: "the config's `release` (zdd/config.json's `engine` pin is `release` from 0.9, decision 0042) — read `.release`, else the check reads nothing and passes or fails silently", fileMust: /zdd[\\/]config\.json|["']zdd["']\s*,\s*["']config\.json["']/ },
+  // (an ORM's `db.engine`). A comparison and a destructuring are reads;
+  // an assignment, and writing the key in a fixture, are not.
+  { since: "0.9.0", find: /\.engine\b(?!\s*\()(?!\s*=(?!=))|\[\s*["']engine["']\s*\](?!\s*=(?!=))|\bget\(\s*["']engine["']|\{[^}]*\bengine\b[^}]*\}\s*=(?!=)/g, now: "the config's `release` (zdd/config.json's `engine` pin is `release` from 0.9, decision 0042) — read `.release`, else the check reads nothing and passes or fails silently", fileMust: /zdd[\\/]config\.json|["']zdd["']\s*,\s*["']config\.json["']/ },
   { since: "0.9.0", find: /@rich-rees\/zdd-engine\b/g, now: "the engine's package from 0.9, `@rich-rees/zdd` (decision 0042: a new line, numbered from 0.9.0)", skip: [".github/workflows/zdd.yml", ".githooks/pre-push"] },
   { since: "0.9.0", find: /\bextractorOptions\.jobs\b|\bmetadata\/job\//g, now: "the background-* readers and `metadata/background-task/` (0.9, decision 0038)" },
 ];
@@ -2848,7 +2850,7 @@ export function findRetiredNames(ledger, { oldEngine = null, oldLock = null, met
       lines.forEach((line, i) => {
         r.find.lastIndex = 0;
         const m = r.find.exec(line);
-        if (m && !r.unless?.test(line)) hits.push(`${rel}:${i + 1} still says \`${m[0]}\` — since ${r.since} that is ${r.now}`);
+        if (m && !r.unless?.test(line) && !(i > 0 && r.unlessAbove?.test(lines.slice(Math.max(0, i - 3), i).join(" ")))) hits.push(`${rel}:${i + 1} still says \`${m[0]}\` — since ${r.since} that is ${r.now}`);
       });
     }
   }

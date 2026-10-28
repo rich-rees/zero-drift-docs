@@ -83,8 +83,9 @@ has since been superseded, or whose `where:` names a file that no longer
 exists, so a stale blessing cannot sit quietly (the format is in
 [`skills/authoring.md`](plugins/zdd/skills/authoring.md)). A blessing is
 **`copy`** (imitate this method) or **`extend`** (reuse this shared code); for
-an `extend` blessing the index names who uses the code, worked out from the
-metadata, because extending it means retesting them.
+an `extend` blessing the index names who uses the code (the files that import
+it, read from the source: decision 0046), because extending it means
+retesting them.
 
 The ADRs can come in **two sets** (decisions 0033, 0034), when a team opts in:
 the **application** set says what the product does, and can be handed to a
@@ -609,7 +610,7 @@ still change; 1.0.0 freezes it.
      that asserts `<!-- zdd:begin -->` is absent, a line about AGENTS.md's
      block, and accepted ADRs.
   3. **No `zdd-engine` in ZDD's own text.** Generated headers and the
-     agent index's footer say `npx -y @rich-rees/zdd render|derive`, and the
+     agent index's footer say `npx -y @rich-rees/zdd@<release> render|derive` (the release zdd/config.json pins), and the
      skills and instructions say "the engine's `tally`". The upgrade
      rewrites the old package's name in a managed `zdd.yml`'s comments.
   4. **The crossing route from the old line is written down.** It is
@@ -699,7 +700,7 @@ still change; 1.0.0 freezes it.
   - *Background tasks* (decision 0038): `job` is `background-task`, one
     reader per platform file (`background-vercel`, `-railway`,
     `-cloudflare`, `-procfile`, `-compose` and the queue readers).
-  - *Detection in each adapter* (decision 0039): `zdd-engine detect`,
+  - *Detection in each adapter* (decision 0039): the engine's `detect`,
     `coverage` and `preview`; bootstrap names what is covered and what is
     not, and the first map check is done together.
   - *The adapter contract and the suite* (decision 0040): `CONTRACT = 1`

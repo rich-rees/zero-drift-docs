@@ -114,7 +114,7 @@ export const CONTRACT_TABLE = [
     step: "import reader",
     since: 1,
     required: false,
-    what: "`IMPORTS` — `{ label, extensions, skipDirs, isTest(rel), resolver(io, files) }`, the files one file imports, so the blessing index names who uses an `extend` blessing's code (decision 0046)",
+    what: "`IMPORTS` — `{ label (a name or a list), extensions, skipDirs, isTest(rel), resolver(io, files) }`, the files one file imports, so the blessing index names who uses an `extend` blessing's code (decision 0046)",
     ask: null,
   },
 ];
@@ -139,7 +139,7 @@ export function judgeContract(name, mod, { contract = CONTRACT, table = CONTRACT
     return {
       declared: null,
       fail: null,
-      warning: `adapter '${name}' declares no CONTRACT — add \`export const CONTRACT = ${contract}\` once it passes the standard suite (\`zdd-engine suite\`); "upgrade ZDD" walks you through it`,
+      warning: `adapter '${name}' declares no CONTRACT — add \`export const CONTRACT = ${contract}\` once it passes the standard suite (the engine's \`suite\`); "upgrade ZDD" walks you through it`,
       behind: [],
     };
   }
