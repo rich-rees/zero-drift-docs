@@ -25,7 +25,10 @@ Supersession points both ways; never edit an accepted decision into a new truth.
   merged with a merge commit.
 - **Tests are the contract.** Engine: `cd packages/zdd-engine && node --test "test/*.test.mjs"`.
   Plugin (the runbook and hooks at the file/process seam):
-  `node --test "plugins/zdd/test/*.test.mjs"`. Same source bytes in ⇒ byte-identical artifacts out — no timestamps, no
+  `node --test "plugins/zdd/test/*.test.mjs"`. The human index, clicked
+  (`test/browser/`, its own Playwright, outside the published package —
+  decision 0044): `cd test/browser && npm ci && npx playwright install
+  chromium && node --test "*.test.mjs"`; CI runs it on ubuntu. Same source bytes in ⇒ byte-identical artifacts out — no timestamps, no
   environment-dependent values, no LLM anywhere in the engine. A change that
   alters bytes shows up as a golden diff (`test/golden/`); regenerate a golden
   only as a deliberate, narrated step, never to make a red test pass.
