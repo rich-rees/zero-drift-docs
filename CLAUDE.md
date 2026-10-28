@@ -47,7 +47,7 @@ Supersession points both ways; never edit an accepted decision into a new truth.
 - **Two version lines** (decision 0042). 0.9.0 starts the new one
   (`@rich-rees/zdd`, the config's `release` pin); every release of the old
   one (`@rich-rees/zdd-engine`, the config's `engine` pin, 0.2.0 to 2.5.0)
-  comes before it. Through 0.9.x the adapter contract stays at 1 and may
+  comes before it. Before 1.0 the adapter contract stays at 1 and may
   change without an upgrade interview; 1.0.0, with the video, freezes it
   and must retire `OLD_LINE_TAGS` in `bootstrap.mjs` — the numbers collide
   from there, and a test fails a 1.x plugin that still lists them.

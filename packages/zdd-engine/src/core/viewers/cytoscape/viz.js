@@ -586,25 +586,42 @@
   const SAFE_BASE = /^(https?:\/\/[^\s]*)?$/i;
   // Whitespace/control anywhere is refused outright: a browser strips them
   // from a URL, so " javascript:x" would parse as a scheme (CR-002).
-  const safeResource = (r) => !/[\s\x00-\x1f\x7f]/.test(r) && !/^[a-z][a-z0-9+.-]*:/i.test(r) && !r.startsWith("//") && !r.startsWith("/");
-  function githubHref(resource) {
+  // A dot segment, raw or percent-encoded, is refused too: the browser
+  // resolves it against repoBase, so `../../other/repo` or `%2e%2e/…` would
+  // leave the repo (CR-170). A backslash counts as a slash in an http URL.
+  const dotSegment = (s) => {
+    let d;
+    try { d = decodeURIComponent(s); } catch { return true; }
+    return d === "." || d === "..";
+  };
+  const safeResource = (r) => !/[\s\x00-\x1f\x7f]/.test(r) && !/^[a-z][a-z0-9+.-]*:/i.test(r) && !r.startsWith("//") && !r.startsWith("/") && !r.split(/[\/\\]/).some(dotSegment);
+  // `file`: the caller knows it is a file (a blessing's exemplar), so an
+  // extensionless one (`Makefile`) still gets /blob/ (CR-169).
+  function githubHref(resource, file) {
     const base = bundle.repoBase || "";
     if (!SAFE_BASE.test(base) || !safeResource(resource)) return null;
-    const isFile = /\.[A-Za-z0-9]+$/.test(resource.split("/").pop());
+    const isFile = file || /\.[A-Za-z0-9]+$/.test(resource.split("/").pop());
     const path = resource.replace(/\[/g, "%5B").replace(/\]/g, "%5D");
     return (isFile ? base.replace("/tree/", "/blob/") : base) + path;
   }
 
   // ---------- slide-out panels ----------
-  // One panel open at a time: node detail or the docs panel (glossary / ADRs).
+  // One panel open at a time: node detail or the docs peek (glossary / ADRs /
+  // blessings).
   const detailEl = document.getElementById("detail");
   const docsEl = document.getElementById("docs");
+  const detailBack = document.getElementById("detail-back");
+  // The peek page a node was opened from (decision 0043): the detail panel
+  // offers a way back to it until the panels close.
+  let peekReturn = null;
   const openPanel = (el) => {
     for (const p of [detailEl, docsEl]) p.classList.toggle("open", p === el);
   };
   const closePanels = () => {
     detailEl.classList.remove("open");
     docsEl.classList.remove("open");
+    peekReturn = null;
+    detailBack.hidden = true;
   };
   document.getElementById("detail-close").addEventListener("click", () => {
     closePanels();
@@ -613,11 +630,36 @@
   document.getElementById("docs-close").addEventListener("click", closePanels);
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") closePanels(); });
 
-  // ---------- docs panel (glossary + ADR corpus, ADR-0021) ----------
-  // bundle.docs is a read-only render projection of the glossary (zdd/glossary.md) + zdd/adr/ —
-  // single-sourced by render.mjs, proven in sync by `render --check`.
+  // ---------- docs peek (glossary + ADR corpus, ADR-0021; blessings, 0043) ----------
+  // bundle.docs is a read-only render projection of the glossary (zdd/glossary.md), zdd/adr/
+  // and the blessing store — single-sourced by render.mjs, proven in sync by `render --check`.
   const ADR_BY_NUM = dict();
   for (const a of (bundle.docs && bundle.docs.adrs) || []) ADR_BY_NUM[a.num] = a;
+  const ADR_BY_PATH = dict(); // repo-relative file -> number
+  for (const a of (bundle.docs && bundle.docs.adrs) || []) ADR_BY_PATH[`${a.dir || "zdd/adr"}/${a.file}`] = a.num;
+  // A relative link in a store body, normalized against the doc's own
+  // directory (../ resolved), as a repo path.
+  function resolveLink(href, baseDir) {
+    const parts = (baseDir + "/" + href).split("/").filter((s) => s !== ".");
+    const stack = [];
+    for (const p of parts) p === ".." ? stack.pop() : stack.push(p);
+    return stack.join("/");
+  }
+  // The embedded ADR a body link opens in the peek, or null: a bare
+  // NNNN-*.md read from an ADR folder (an ADR citing another) or from the
+  // glossary (as it always was), or a link that resolves to an ADR's own
+  // file (a blessing's ../adr/0002-x.md). A numbered file anywhere else is
+  // not an ADR — from a blessing, `0002-x.md` is a file beside it (CR-168,
+  // CR-180).
+  const ADR_DIRS = new Set(((bundle.docs && bundle.docs.adrs) || []).map((a) => a.dir || "zdd/adr"));
+  function adrForLink(href, baseDir) {
+    const sibling = /^(\d{4})-[\w.-]+\.md$/.exec(href);
+    if (sibling && ADR_BY_NUM[sibling[1]] && (baseDir === "" || ADR_DIRS.has(baseDir))) return sibling[1];
+    return ADR_BY_PATH[resolveLink(href, baseDir).split("/").filter(Boolean).join("/")] || null;
+  }
+  const BLESSINGS = (bundle.docs && bundle.docs.blessings) || [];
+  const BLESSING_BY_ID = dict();
+  for (const b of BLESSINGS) BLESSING_BY_ID[b.id] = b;
   // Latest store change: which entries the most recent
   // store-touching push changed — highlighted so a reader sees "what just
   // changed"; the moment someone else merges store-touching commits, the
@@ -637,15 +679,16 @@
   const docsSource = document.getElementById("docs-source");
   const docsBody = document.getElementById("docs-body");
   const docsBack = document.getElementById("docs-back");
+  const docsFilter = document.getElementById("docs-filter");
 
-  function renderDocMarkdown(md, baseDir, opts = {}) {
+  function renderDocMarkdown(md, baseDir, opts = {}, target = docsBody) {
     // safeMarked, never marked.parse: store text is source-derived (CR-007).
-    docsBody.innerHTML = safeMarked.parse(md || "");
+    target.innerHTML = safeMarked.parse(md || "");
     // Glossary entries are `**Term**: description` paragraphs — promote the
     // defined term to a block title (underlined via .term) so it reads apart
     // from bold cross-references inside descriptions.
     if (opts.terms) {
-      docsBody.querySelectorAll("p").forEach((p) => {
+      target.querySelectorAll("p").forEach((p) => {
         const first = p.firstChild;
         if (!first || first.nodeType !== 1 || first.tagName !== "STRONG") return;
         const next = first.nextSibling;
@@ -659,45 +702,156 @@
       });
     }
     // Relative links inside store bodies: sibling NNNN-*.md ADRs resolve
-    // in-page; everything else repo-relative goes to GitHub.
-    docsBody.querySelectorAll("a[href]").forEach((a) => {
+    // in-page, and so does a link that resolves to an embedded ADR's own
+    // file (a blessing's `../adr/0002-x.md`) — a numbered file anywhere else
+    // is not an ADR (CR-168); everything else repo-relative goes to GitHub.
+    target.querySelectorAll("a[href]").forEach((a) => {
       const href = a.getAttribute("href");
       if (!href || /^[a-z]+:/i.test(href) || href.startsWith("#")) {
         if (/^https?:/i.test(href || "")) { a.target = "_blank"; a.rel = "noopener"; }
         return;
       }
-      const adrFile = /^(\d{4})-[\w.-]+\.md$/.exec(href);
-      if (adrFile && ADR_BY_NUM[adrFile[1]]) {
+      const num = adrForLink(href, baseDir);
+      if (num) {
         a.setAttribute("href", "javascript:void(0)");
-        a.addEventListener("click", (e) => { e.preventDefault(); openAdr(adrFile[1]); });
+        a.addEventListener("click", (e) => { e.preventDefault(); openAdr(num); });
         return;
       }
-      // Normalize ../ against the doc's own directory, then link to GitHub.
-      const parts = (baseDir + "/" + href).split("/").filter((s) => s !== ".");
-      const stack = [];
-      for (const p of parts) p === ".." ? stack.pop() : stack.push(p);
-      const target = githubHref(stack.join("/"));
-      if (target === null) { a.removeAttribute("href"); return; }
-      a.setAttribute("href", target);
+      const out = githubHref(resolveLink(href, baseDir));
+      if (out === null) { a.removeAttribute("href"); return; }
+      a.setAttribute("href", out);
       a.target = "_blank";
       a.rel = "noopener";
     });
-    linkifyAdrMentions(docsBody);
+    linkifyAdrMentions(target);
     docsEl.scrollTop = 0;
   }
 
-  function openGlossary() {
-    docsBack.hidden = true;
+  // Peek history (decision 0043): every page the peek shows is an entry;
+  // drilling in pushes one, back pops one and names where it goes. A list
+  // entry keeps its filter text, so back returns to the list as it was.
+  let peekHistory = [];
+  const peekLabel = (entry) => {
+    if (entry.kind === "glossary") return "Glossary";
+    if (entry.kind === "adrs") return "All ADRs";
+    if (entry.kind === "blessings") return "All blessings";
+    if (entry.kind === "adr") return `ADR-${entry.num}`;
+    const b = BLESSING_BY_ID[entry.id];
+    return (b && b.question) || entry.id;
+  };
+  const LIST_KINDS = new Set(["glossary", "adrs", "blessings"]);
+  // A header button starts a fresh history; a link followed inside the open
+  // peek pushes onto it; a page opened from outside the peek (an ADR cited in
+  // a node's body) gets its list behind it, as the ADR back always had.
+  function peekGo(entry, fresh) {
+    if (fresh) peekHistory = [entry];
+    else if (docsEl.classList.contains("open") && peekHistory.length) peekHistory.push(entry);
+    else if (entry.kind === "adr") peekHistory = [{ kind: "adrs", filter: "" }, entry];
+    else if (entry.kind === "blessing") peekHistory = [{ kind: "blessings", filter: "" }, entry];
+    else peekHistory = [entry];
+    showPeek();
+  }
+  function showPeek() {
+    const entry = peekHistory[peekHistory.length - 1];
+    if (!entry) return;
+    const prev = peekHistory[peekHistory.length - 2];
+    docsBack.hidden = !prev;
+    docsBack.textContent = prev ? `← ${peekLabel(prev)}` : "";
+    const isList = LIST_KINDS.has(entry.kind);
+    docsFilter.hidden = !isList;
+    if (isList) docsFilter.value = entry.filter || "";
+    if (entry.kind === "glossary") renderGlossary();
+    else if (entry.kind === "adrs") renderAdrIndex();
+    else if (entry.kind === "adr") renderAdr(entry.num);
+    else if (entry.kind === "blessings") renderBlessingIndex();
+    else renderBlessing(entry.id);
+    if (isList) applyFilter();
+    docsEl.scrollTop = 0;
+    openPanel(docsEl);
+    peekReturn = null;
+    detailBack.hidden = true;
+  }
+  docsBack.addEventListener("click", () => {
+    if (peekHistory.length < 2) return;
+    peekHistory.pop();
+    showPeek();
+  });
+
+  // The filter (decision 0043): one box for every list. An entry is a
+  // glossary term (its paragraph and what follows it up to the next term or
+  // heading), an ADR row or a blessing row; a heading stays while any entry
+  // under it matches.
+  let filterEntries = [];
+  const norm = (s) => String(s || "").toLowerCase();
+  function applyFilter() {
+    const entry = peekHistory[peekHistory.length - 1];
+    if (!entry || !LIST_KINDS.has(entry.kind)) return;
+    entry.filter = docsFilter.value;
+    const q = norm(docsFilter.value.trim());
+    let shown = 0;
+    for (const f of filterEntries) {
+      const hit = !q || f.text.includes(q);
+      for (const el of f.els) el.hidden = !hit;
+      if (hit && f.els.length) shown++;
+    }
+    for (const h of docsBody.querySelectorAll(":scope > h1, :scope > h2, :scope > h3, :scope > h4, :scope > h5, :scope > h6")) {
+      if (!q) { h.hidden = false; continue; }
+      // Its section runs to the next heading of the same or a higher rank,
+      // so a match under a sub-heading keeps every heading above it (CR-174).
+      const rank = Number(h.tagName[1]);
+      let el = h.nextElementSibling;
+      let any = false;
+      while (el && !(/^H[1-6]$/.test(el.tagName) && Number(el.tagName[1]) <= rank)) {
+        if (!/^H[1-6]$/.test(el.tagName) && !el.hidden && !el.classList.contains("filter-empty")) any = true;
+        el = el.nextElementSibling;
+      }
+      h.hidden = !any;
+    }
+    let empty = docsBody.querySelector(":scope > .filter-empty");
+    if (q && !shown) {
+      if (!empty) {
+        empty = document.createElement("p");
+        empty.className = "muted filter-empty";
+        docsBody.appendChild(empty);
+      }
+      empty.textContent = `Nothing matches “${docsFilter.value.trim()}”.`;
+    } else if (empty) empty.remove();
+  }
+  docsFilter.addEventListener("input", applyFilter);
+  // Glossary entries for the filter: the term paragraphs and what follows
+  // each, or, in a glossary written without `**Term**:` paragraphs, every
+  // top-level block on its own. Text before the first term is preamble and
+  // hides while a filter is set.
+  function glossaryEntries() {
+    const blocks = [...docsBody.children];
+    const hasTerms = blocks.some((el) => el.querySelector(":scope > strong.term"));
+    const out = [];
+    let cur = null;
+    for (const el of blocks) {
+      if (/^H[1-6]$/.test(el.tagName)) { cur = null; continue; }
+      if (!hasTerms) { out.push({ els: [el], text: norm(el.textContent) }); continue; }
+      if (el.querySelector(":scope > strong.term")) {
+        cur = { els: [el], text: norm(el.textContent) };
+        out.push(cur);
+      } else if (cur) {
+        cur.els.push(el);
+        cur.text += " " + norm(el.textContent);
+      } else out.push({ els: [el], text: "" }); // preamble: hidden by any filter
+    }
+    return out;
+  }
+
+  function renderGlossary() {
     docsTitle.textContent = "Glossary";
     docsSource.textContent = "zdd/glossary.md — the ubiquitous language; rendered from the repo, never edited here";
     renderDocMarkdown(bundle.docs && bundle.docs.glossary, "", { terms: true });
-    openPanel(docsEl);
+    filterEntries = glossaryEntries();
   }
-  function openAdrIndex() {
-    docsBack.hidden = true;
+  function renderAdrIndex() {
     docsTitle.textContent = "Architecture Decision Records";
     docsSource.textContent = "zdd/adr/ — full decision record; rendered from the repo, never edited here";
     docsBody.innerHTML = "";
+    filterEntries = [];
     for (const a of (bundle.docs && bundle.docs.adrs) || []) {
       const btn = document.createElement("button");
       btn.className = "adr-item";
@@ -714,23 +868,159 @@
       btn.appendChild(span);
       btn.addEventListener("click", () => openAdr(a.num));
       docsBody.appendChild(btn);
+      filterEntries.push({ els: [btn], text: norm(`ADR-${a.num} ${a.title}`) });
     }
-    docsEl.scrollTop = 0;
-    openPanel(docsEl);
   }
-  function openAdr(num) {
+  function renderAdr(num) {
     const a = ADR_BY_NUM[num];
     if (!a) return;
-    docsBack.hidden = false;
     docsTitle.textContent = `ADR-${a.num}`;
     const dir = a.dir || "zdd/adr"; // a harness ADR says where it lives (decision 0033)
     docsSource.textContent = `${dir}/${a.file}`;
     renderDocMarkdown(a.body, dir);
-    openPanel(docsEl);
   }
-  docsBack.addEventListener("click", openAdrIndex);
+  function openAdr(num) {
+    if (!ADR_BY_NUM[num]) return;
+    peekGo({ kind: "adr", num });
+  }
+  const openGlossary = () => peekGo({ kind: "glossary", filter: "" }, true);
+  const openAdrIndex = () => peekGo({ kind: "adrs", filter: "" }, true);
+  const openBlessingIndex = () => peekGo({ kind: "blessings", filter: "" }, true);
+
+  // ---------- blessings (decision 0043) ----------
+  // A blessing names the code to start from for a kind of work, asked as a
+  // trigger question. The list is the store in the index's order (by
+  // question); kind and app are chips, never headings.
+  function chip(text, cls, title) {
+    const s = document.createElement("span");
+    s.className = `tag ${cls}`;
+    s.textContent = text;
+    if (title) s.title = title;
+    return s;
+  }
+  const pageName = (p) => (p ? p.title || p.path : "");
+  const whereText = (w) => (w ? w.path + (w.symbol ? ` (${w.symbol})` : "") : "");
+  function renderBlessingIndex() {
+    docsTitle.textContent = "Blessings";
+    docsSource.textContent = "The blessing store (paths.blessingsDir, zdd/blessings/ by default) — the code to copy or extend, by trigger question; rendered from the repo, never edited here";
+    docsBody.innerHTML = "";
+    filterEntries = [];
+    if (!BLESSINGS.length) {
+      const p = document.createElement("p");
+      p.className = "muted";
+      p.textContent = "No blessings yet. A blessing names the code to copy or extend for a kind of work, and the pattern to refuse — one file per blessing in the blessing store.";
+      docsBody.appendChild(p);
+      return;
+    }
+    for (const b of BLESSINGS) {
+      const btn = document.createElement("button");
+      btn.className = "adr-item blessing-item";
+      const head = document.createElement("b");
+      if (b.question) head.textContent = b.question;
+      else {
+        head.append(Object.assign(document.createElement("em"), { textContent: "(no trigger question)" }), " ", b.opening || "");
+      }
+      btn.appendChild(head);
+      const meta = document.createElement("span");
+      meta.className = "muted blessing-meta";
+      if (b.where) meta.append(Object.assign(document.createElement("code"), { textContent: whereText(b.where) }));
+      if (b.kind) meta.append(chip(b.kind, "kind-chip", "How to use the exemplar"));
+      if (b.appliesTo) meta.append(chip(pageName(b.appliesTo), "app-chip", "A house rule for this app"));
+      btn.appendChild(meta);
+      btn.addEventListener("click", () => peekGo({ kind: "blessing", id: b.id }));
+      docsBody.appendChild(btn);
+      filterEntries.push({ els: [btn], text: norm([b.question, b.opening, b.id, whereText(b.where), b.kind, b.appliesTo && b.appliesTo.path, pageName(b.appliesTo)].join(" ")) });
+    }
+  }
+  // A map page or record a blessing names: a link that opens its node, with
+  // the way back to this blessing; plain text when no node has it.
+  function nodeLink(node, text, entry) {
+    if (!node || !nodeIndex[node]) return document.createTextNode(text);
+    const a = document.createElement("a");
+    a.className = "internal";
+    a.href = "javascript:void(0)";
+    a.textContent = text;
+    a.addEventListener("click", (e) => { e.preventDefault(); revealFromPeek(node, entry); });
+    return a;
+  }
+  function renderBlessing(id) {
+    const b = BLESSING_BY_ID[id];
+    if (!b) return;
+    const entry = peekHistory[peekHistory.length - 1];
+    docsTitle.textContent = b.question || b.id;
+    docsSource.textContent = b.file || "";
+    docsBody.innerHTML = "";
+    const chips = document.createElement("div");
+    chips.className = "blessing-chips";
+    if (b.kind) chips.append(chip(b.kind, "kind-chip", "How to use the exemplar"));
+    if (b.appliesTo) chips.append(chip(pageName(b.appliesTo), "app-chip", "A house rule for this app"));
+    if (chips.childNodes.length) docsBody.appendChild(chips);
+    const dl = document.createElement("dl");
+    dl.className = "frontmatter";
+    const row = (label, ...content) => {
+      dl.append(Object.assign(document.createElement("dt"), { textContent: label }));
+      const dd = document.createElement("dd");
+      dd.append(...content);
+      dl.append(dd);
+    };
+    if (b.where) {
+      const href = githubHref(b.where.path, true);
+      let link;
+      if (href !== null) {
+        link = Object.assign(document.createElement("a"), { href, textContent: b.where.path, title: "Open the exemplar on GitHub", target: "_blank", rel: "noopener", className: "external" });
+      } else link = document.createTextNode(b.where.path);
+      row("Exemplar", link, ...(b.where.symbol ? [" (", Object.assign(document.createElement("code"), { textContent: b.where.symbol }), ")"] : []));
+    } else row("Exemplar", "— none given");
+    if (b.appliesTo) row("Applies to", nodeLink(b.appliesTo.node, pageName(b.appliesTo), entry));
+    if (b.firstBuiltIn) row("First built in", nodeLink(b.firstBuiltIn.node, pageName(b.firstBuiltIn), entry));
+    if (b.usedBy !== undefined) {
+      if (b.usedBy === null) row("Used by", "unknown to ZDD");
+      else if (!b.usedBy.count) row("Used by", "nothing ZDD sees");
+      else {
+        const parts = [];
+        b.usedBy.shown.forEach((u, i) => {
+          if (i) parts.push(", ");
+          parts.push(nodeLink(u.node, u.title, entry));
+        });
+        if (b.usedBy.count > b.usedBy.shown.length) parts.push(`, +${b.usedBy.count - b.usedBy.shown.length} more`);
+        parts.push(" — extending it means retesting them");
+        row(`Used by ${b.usedBy.count}`, ...parts);
+      }
+    }
+    if (b.adrs.length) {
+      const parts = [];
+      b.adrs.forEach((num, i) => {
+        if (i) parts.push(", ");
+        parts.push(document.createTextNode(`ADR-${num}`));
+      });
+      row("Cites", ...parts);
+    }
+    docsBody.appendChild(dl);
+    docsBody.appendChild(document.createElement("hr"));
+    const md = document.createElement("div");
+    docsBody.appendChild(md);
+    const dir = (b.file || "").split("/").slice(0, -1).join("/");
+    renderDocMarkdown(b.body, dir, {}, md);
+    linkifyAdrMentions(dl);
+  }
+  // Open a node from a blessing (decision 0043): the detail panel slides in
+  // as it does from the graph, and its back button returns to the blessing.
+  function revealFromPeek(node, entry) {
+    reveal(node);
+    peekReturn = entry;
+    detailBack.textContent = `← ${peekLabel(entry)}`;
+    detailBack.hidden = false;
+  }
+  detailBack.addEventListener("click", () => {
+    if (!peekReturn) return;
+    const i = peekHistory.lastIndexOf(peekReturn);
+    if (i >= 0) peekHistory = peekHistory.slice(0, i + 1);
+    else peekHistory = [peekReturn];
+    showPeek();
+  });
   document.getElementById("btn-glossary").addEventListener("click", openGlossary);
   document.getElementById("btn-adrs").addEventListener("click", openAdrIndex);
+  document.getElementById("btn-blessings").addEventListener("click", openBlessingIndex);
 
   // Bare ADR-NNNN citations in any rendered markdown become in-page links —
   // the 15 formerly-dead references this panel exists to resurrect. Text-node
@@ -895,13 +1185,16 @@
   // Bring a concept into view in whatever the current view is.
   function reveal(id) {
     if (currentView === "explorer") { focusNode(id); return; }
-    renderDetail(id);
+    // Selection first: unselecting the old node closes the detail panel
+    // (the graph's unselect handler), so rendering before it opened the
+    // panel only to close it again (CR-167).
     const n = cy.$id(id);
     if (n.length) {
       cy.$("node:selected").unselect();
       n.select();
-      cy.animate({ center: { eles: n }, zoom: Math.max(cy.zoom(), 0.8) }, { duration: 200 });
     }
+    renderDetail(id);
+    if (n.length) cy.animate({ center: { eles: n }, zoom: Math.max(cy.zoom(), 0.8) }, { duration: 200 });
   }
 
   // ---------- header controls & view routing ----------

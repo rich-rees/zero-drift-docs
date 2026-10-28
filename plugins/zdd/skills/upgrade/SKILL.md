@@ -277,9 +277,9 @@ node "$PLUGIN/scripts/bootstrap.mjs" preflight
 Then, with the engine this plugin pins:
 
 ```
-npx -y @rich-rees/zdd@0.9.0 derive
-npx -y @rich-rees/zdd@0.9.0 render
-npx -y @rich-rees/zdd@0.9.0 lint
+npx -y @rich-rees/zdd@0.10.0 derive
+npx -y @rich-rees/zdd@0.10.0 render
+npx -y @rich-rees/zdd@0.10.0 lint
 ```
 
 Show what moved in the generated artifacts and say why, from the notes (a
@@ -478,3 +478,21 @@ category: https://github.com/rich-rees/zero-drift-docs/discussions (decision 004
   `metadata/job/` record moves to `metadata/background-task/`;
   `render --check` then moves `graph.json`, the agent index and the human
   index. Commit them in the same PR.
+
+## Upgrading to 0.10 (a Blessings peek in the human index)
+
+- **The reference human index gains a Blessings button** (decision 0043;
+  the default `cytoscape` viewer — `minimal` or a repo's own viewer may
+  ignore the new data and show no change), beside
+  Glossary and ADRs: every blessing in the store by trigger question, with
+  its exemplar on GitHub, the app it applies to, who uses an `extend`
+  exemplar, and the ADRs it cites. Every peek gains a filter box and a back
+  history. In step 5, open the human index with the person and click
+  Blessings: a blessing with no trigger question, or with a kind lint
+  fails, shows here as it is — that is the store to fix, not the page.
+- Nothing to answer, no config-schema or metadata-contract change. The pins
+  move to 0.10.0.
+- **What moves on the bump**: with the reference viewer,
+  `render --check` moves `human-index.html` only (with another viewer,
+  possibly nothing); `derive --check`, `graph.json`, the agent index and the blessing
+  index keep their bytes. Commit it in the same PR.

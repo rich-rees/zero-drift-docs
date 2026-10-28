@@ -78,7 +78,7 @@ function toBundle(graph, docs, changed, options, repoBase) {
     viewer: options,
     // Glossary + ADR corpus embedded whole: the hosted wiki's audience has no
     // checkout, so the stores ride along as read-only projections.
-    docs: { glossary: docs.glossary, adrs: docs.adrs, changed },
+    docs: { glossary: docs.glossary, adrs: docs.adrs, blessings: docs.blessings ?? [], changed },
   };
 }
 

@@ -497,3 +497,139 @@ test("CR-007: source-derived markdown cannot execute script in the Cytoscape vie
   // Source-keyed dictionaries are prototype-free (CR-010).
   assert.ok(!/const (nodeIndex|byType|backlinks|authMode|ADR_BY_NUM) = \{\}/.test(viz));
 });
+
+// ZDD-2 (decision 0043): the Blessings peek. The embed carries the store
+// ready-read, its names linked to graph nodes; the page has the button, the
+// one filter box and the two back buttons; the peek's source keeps the
+// viewer's rules. Behaviour (drill-in, back history, the filter) is proved in
+// a browser pass, as the rest of the page's script is.
+test("ZDD-2: the human index embeds the blessing store ready-read, linked to graph nodes, in the index's order", () => {
+  const repo = mkRepo(FIXTURE);
+  run(repo, ["derive"]);
+  run(repo, ["render"]);
+  const bundle = readBundle(repo);
+  const nodes = new Set(bundle.nodes.map((n) => n.data.id));
+  const blessings = bundle.docs.blessings;
+  assert.deepEqual(blessings.map((b) => [b.id, b.question, b.kind, b.file]), [
+    ["adding-a-page", "Adding a page?", "copy", "zdd/blessings/adding-a-page.md"],
+    ["adding-an-endpoint-for-things", "Adding an endpoint for things?", "copy", "zdd/blessings/adding-an-endpoint-for-things.md"],
+    ["saving-a-thing", "Saving a thing?", "extend", "zdd/blessings/saving-a-thing.md"],
+  ]);
+  const [page, endpoint, saving] = blessings;
+  assert.deepEqual(page.appliesTo, { path: "apps/fixture-app", node: "map/apps/fixture-app", title: "Fixture App" });
+  assert.deepEqual(endpoint.adrs, ["0002"]);
+  assert.deepEqual(saving.where, { path: "migrations/00002_things.sql", symbol: "save_thing" });
+  assert.equal(saving.usedBy.count, 1);
+  for (const n of [page.appliesTo.node, saving.firstBuiltIn.node, ...saving.usedBy.shown.map((u) => u.node)]) assert.ok(nodes.has(n), `${n} is a graph node`);
+  assert.match(saving.body, /^Saving a thing\? Call `save_thing\(\)`/);
+  rmSync(repo, { recursive: true, force: true });
+});
+
+test("ZDD-2: the page has a Blessings button, one filter box for the peek and a way back from a node to the blessing", () => {
+  const repo = mkRepo(FIXTURE);
+  run(repo, ["derive"]);
+  run(repo, ["render"]);
+  const html = readFileSync(join(repo, "zdd", "human-index.html"), "utf8");
+  for (const id of ["btn-glossary", "btn-adrs", "btn-blessings", "docs-filter", "docs-back", "detail-back"]) assert.match(html, new RegExp(`id="${id}"`), id);
+  const viz = readFileSync(join(PKG, "src", "core", "viewers", "cytoscape", "viz.js"), "utf8");
+  // Source-keyed dictionaries are prototype-free (CR-010).
+  assert.match(viz, /const BLESSING_BY_ID = dict\(\);/);
+  // The exemplar goes through the same guarded GitHub link as a node's resource.
+  assert.match(viz, /githubHref\(b\.where\.path, true\)/);
+  // A blessing body renders through the sanitiser, like every store body.
+  assert.match(viz, /renderDocMarkdown\(b\.body,/);
+  rmSync(repo, { recursive: true, force: true });
+});
+
+test("ZDD-2: an empty blessing store embeds an empty list, never a missing key", () => {
+  const repo = mkRepo(FIXTURE);
+  rmSync(join(repo, "zdd", "blessings"), { recursive: true, force: true });
+  run(repo, ["derive"]);
+  run(repo, ["render"]);
+  assert.deepEqual(readBundle(repo).docs.blessings, []);
+  rmSync(repo, { recursive: true, force: true });
+});
+
+// Campaign CR-167 to CR-179 (ZDD-2). The viewer's link guard, lifted out of
+// viz.js and run on its own: no DOM needed for a URL.
+const linkGuard = (repoBase) => {
+  const viz = readFileSync(join(PKG, "src", "core", "viewers", "cytoscape", "viz.js"), "utf8");
+  const from = viz.indexOf("  const SAFE_BASE");
+  const to = viz.indexOf("\n  }\n", viz.indexOf("  function githubHref(")) + 4;
+  assert.ok(from > 0 && to > from, "the guard is where the test expects it");
+  const ctx = vm.createContext({ bundle: { repoBase } });
+  vm.runInContext(viz.slice(from, to) + "\nthis.githubHref = githubHref;", ctx);
+  return ctx.githubHref;
+};
+
+test("CR-170: an exemplar path with a dot segment — raw, percent-encoded or behind a backslash — never becomes a link out of the repo", () => {
+  const href = linkGuard("https://github.com/example/fixture/tree/main/");
+  for (const bad of ["../other/repo/x.ts", "a/../../x.ts", "%2e%2e/%2e%2e/attacker/repo/blob/main/x.ts", "%2E%2e/x.ts", "a/%2e/b.ts", String.raw`..\..\x.ts`, String.raw`a\..\..\x.ts`,"./x.ts", "%zz/x.ts"]) {
+    assert.equal(href(bad, true), null, bad);
+  }
+  // A dot inside a name is not a dot segment.
+  assert.equal(href("src/.env.example", true), "https://github.com/example/fixture/blob/main/src/.env.example");
+  assert.equal(href("src/a..b.ts"), "https://github.com/example/fixture/blob/main/src/a..b.ts");
+});
+
+test("CR-169: an exemplar is a file, so an extensionless one gets /blob/; an extensionless node resource keeps the folder form", () => {
+  const href = linkGuard("https://github.com/example/fixture/tree/main/");
+  assert.equal(href("Makefile", true), "https://github.com/example/fixture/blob/main/Makefile");
+  assert.equal(href("docker/Dockerfile", true), "https://github.com/example/fixture/blob/main/docker/Dockerfile");
+  assert.equal(href("apps/web"), "https://github.com/example/fixture/tree/main/apps/web");
+  const viz = readFileSync(join(PKG, "src", "core", "viewers", "cytoscape", "viz.js"), "utf8");
+  assert.match(viz, /githubHref\(b\.where\.path, true\)/);
+});
+
+test("CR-167 / CR-168: reveal selects before it renders; a body link opens an ADR only when it resolves to that ADR's own file", () => {
+  const viz = readFileSync(join(PKG, "src", "core", "viewers", "cytoscape", "viz.js"), "utf8");
+  // The graph's unselect handler closes the detail panel, so a render
+  // before the unselect was undone at once (CR-167).
+  const reveal = viz.slice(viz.indexOf("  function reveal(id)"), viz.indexOf("\n  }\n", viz.indexOf("  function reveal(id)")));
+  assert.ok(reveal.indexOf(".unselect()") < reveal.indexOf("renderDetail(id)"), reveal);
+  // CR-168: body links go through the one resolver.
+  assert.match(viz, /const num = adrForLink\(href, baseDir\);/);
+  assert.ok(!/anyAdrPath/.test(viz));
+});
+
+test("CR-168: a body link opens an ADR in the peek only when it is a sibling ADR or resolves to an ADR's own file", () => {
+  const viz = readFileSync(join(PKG, "src", "core", "viewers", "cytoscape", "viz.js"), "utf8");
+  const from = viz.indexOf("  const ADR_BY_NUM = dict();");
+  const to = viz.indexOf("\n  }\n", viz.indexOf("  function adrForLink(")) + 4;
+  assert.ok(from > 0 && to > from, "the resolver is where the test expects it");
+  const adrs = [{ num: "0002", file: "0002-things.md" }, { num: "0007", file: "0007-hooks.md", dir: "docs/harness-adr" }];
+  const ctx = vm.createContext({ bundle: { docs: { adrs } }, dict: () => Object.create(null) });
+  vm.runInContext(viz.slice(from, to) + "\nthis.adrForLink = adrForLink;", ctx);
+  const at = ctx.adrForLink;
+  // A blessing's links, from zdd/blessings/.
+  assert.equal(at("../adr/0002-things.md", "zdd/blessings"), "0002");
+  assert.equal(at("../../docs/harness-adr/0007-hooks.md", "zdd/blessings"), "0007");
+  assert.equal(at("../../docs/0002-setup.md", "zdd/blessings"), null, "a numbered doc is not ADR-0002");
+  assert.equal(at("../adr/0002-other-name.md", "zdd/blessings"), null, "the file must be the ADR's own");
+  assert.equal(at("../adr/0009-missing.md", "zdd/blessings"), null);
+  // An ADR's sibling link, from its own folder (either set), as before; and
+  // the glossary's, as before.
+  assert.equal(at("0002-anything.md", "zdd/adr"), "0002");
+  assert.equal(at("0002-anything.md", "docs/harness-adr"), "0002");
+  assert.equal(at("0002-anything.md", ""), "0002");
+  assert.equal(at("0009-anything.md", "zdd/adr"), null);
+  // CR-180: from a blessing, a bare numbered file is a file beside it.
+  assert.equal(at("0002-example.md", "zdd/blessings"), null);
+  assert.equal(at("0002-things.md", "zdd/blessings"), null);
+});
+
+test("CR-178: a hostile blessing is embedded inert — no tag closes the script, and the body round-trips as text", () => {
+  const repo = mkRepo(FIXTURE);
+  const body = "Hostile? </script><script>alert(1)</script> <img src=x onerror=alert(2)> [x](javascript:alert(3))";
+  writeFileSync(join(repo, "zdd", "blessings", "hostile.md"), `---\nwhere: src/app/page.tsx (</script>)\nkind: copy\n---\n\n${body}\n`);
+  run(repo, ["derive"]);
+  run(repo, ["render"]);
+  const html = readFileSync(join(repo, "zdd", "human-index.html"), "utf8");
+  const embed = /window\.BUNDLE = (.*);\n/.exec(html)[1];
+  assert.ok(!embed.includes("<"), "every < in the embed is escaped");
+  const hostile = JSON.parse(embed).docs.blessings.find((b) => b.id === "hostile");
+  assert.equal(hostile.body, body);
+  assert.equal(hostile.where.symbol, "</script>");
+  assert.equal(html.split("<script>alert(1)").length, 1, "the payload never appears as markup");
+  rmSync(repo, { recursive: true, force: true });
+});

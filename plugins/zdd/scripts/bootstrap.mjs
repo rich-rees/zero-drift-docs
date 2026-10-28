@@ -2455,6 +2455,9 @@ export const UPGRADE_NOTES = {
       ? ["0.9: a local extractor's test scaffolded before 0.9 runs `npx -y @rich-rees/zdd-engine@<engine pin>` — point it at `release` and @rich-rees/zdd, as a fresh scaffold does (the retired-name list below names the line)"]
       : []),
   ],
+  "0.10.0": () => [
+    "0.10 adds a Blessings peek to the human index, beside Glossary and ADRs (decision 0043): every blessing by trigger question, with its exemplar, app, users and cited ADRs; every peek gains a filter box and a back history. with the reference (cytoscape) viewer, only human-index.html moves on the regenerate — open it and try the Blessings button; the minimal viewer or one of your own may show no change",
+  ],
 };
 // border: end
 
