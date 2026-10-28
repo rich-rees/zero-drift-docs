@@ -1,7 +1,8 @@
 # The plugin repo's own CI: the engine and plugin test suites on every PR.
 # Determinism is the contract (same source bytes in ⇒ byte-identical artifacts
 # out), and the golden diffs that prove it only mean something if they run on
-# every change. No LLM, no secrets, no network beyond checkout and Node.
+# every change. No LLM, no secrets; no network beyond checkout and Node, save
+# the browser smoke job's npm install and Chromium download.
 name: tests
 
 on:
@@ -34,3 +35,44 @@ jobs:
       - name: Plugin tests (runbook, hooks, skew, manifests)
         shell: bash
         run: node --test plugins/zdd/test/*.test.mjs
+
+  # The human index clicked in headless Chromium (decision 0044): the engine
+  # job proves the page's data and structure, this one its behaviour. Its
+  # Playwright lives in test/browser, outside the published package, so the
+  # engine stays dependency-free; the only network beyond the jobs above is
+  # npm and Playwright's Chromium download (cached). Ubuntu, Node 22 only:
+  # what is under test runs in the browser, not in Node.
+  browser-smoke:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: test/browser
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: test/browser/package-lock.json
+      - run: npm ci
+      - name: Cache Playwright's Chromium
+        id: browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('test/browser/package-lock.json') }}
+      - name: Install Chromium
+        if: steps.browsers.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+      - name: Install Chromium's system libraries
+        if: steps.browsers.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+      - name: Human index smoke test (peeks, back history, blessing → node, hostile and empty stores)
+        run: node --test *.test.mjs
+      - name: Screenshots of failing flows
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-smoke-screenshots
+          path: test/browser/artifacts/
+          if-no-files-found: ignore
