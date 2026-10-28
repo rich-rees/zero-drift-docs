@@ -82,15 +82,19 @@ test("upgrade --plan writes nothing and names exactly what the real upgrade then
   assert.deepEqual(real.kept, plan.kept);
 });
 
-test("every release from 1.1 on (the README's Versioning list) has an upgrade note, and this minor an Upgrading section — a release without one fails here (the checklist, backed)", () => {
+test("every release from 1.1 on (the README's Versioning list, and the old line's tags) has an upgrade note, and this minor an Upgrading section — a release without one fails here (the checklist, backed)", () => {
   assert.ok(UPGRADE_NOTES[`${MINOR}.0`], `no upgrade note for ${MINOR}: add one to UPGRADE_NOTES in scripts/bootstrap.mjs and an "Upgrading to ${MINOR}" section to skills/upgrade/SKILL.md`);
-  // Every release the README's Versioning lists from 1.1 on — patches too — has a note (CR-017):
-  // the list comes from the README, so a release cannot be added there and forgotten here.
+  // Every release the README's Versioning lists — patches too — has a note (CR-017): the list
+  // comes from the README, so a release cannot be added there and forgotten here.
   const readme = readFileSync(join(PLUGIN, "..", "..", "README.md"), "utf8");
-  const released = [...readme.matchAll(/^- \*\*`(\d+\.\d+\.\d+)` —/gm)].map((m) => m[1]).filter((v) => v !== "1.0.0");
-  assert.ok(released.includes("1.2.0") && released.includes("1.3.1") && released.includes(VERSION), released.join(", "));
-  // A release the old line tagged is keyed as the old line's (decision 0042).
-  for (const v of released) assert.ok(UPGRADE_NOTES[OLD_LINE_TAGS.includes(`v${v}`) ? oldLine(v) : v], `UPGRADE_NOTES has no entry for ${v}`);
+  const released = [...readme.matchAll(/^- \*\*`(\d+\.\d+\.\d+)` —/gm)].map((m) => m[1]);
+  assert.ok(released.includes(VERSION), released.join(", "));
+  for (const v of released) assert.ok(UPGRADE_NOTES[v], `UPGRADE_NOTES has no entry for ${v}`);
+  // The README folds the old line into one paragraph, so its releases from 1.1 on come from the
+  // tags it carried, each keyed as the old line's (decision 0042).
+  const oldReleases = OLD_LINE_TAGS.map((tag) => tag.slice(1)).filter((v) => !v.startsWith("0.") && v !== "1.0.0");
+  assert.ok(oldReleases.includes("1.2.0") && oldReleases.includes("1.3.1"), oldReleases.join(", "));
+  for (const v of oldReleases) assert.ok(UPGRADE_NOTES[oldLine(v)], `UPGRADE_NOTES has no entry for the old line's ${v}`);
   const skill = readFileSync(join(PLUGIN, "skills", "upgrade", "SKILL.md"), "utf8");
   assert.match(skill, new RegExp(`^#+ Upgrading to ${MINOR.replace(".", "\\.")}\\b`, "m"), `skills/upgrade/SKILL.md needs an "Upgrading to ${MINOR}" section`);
 });
