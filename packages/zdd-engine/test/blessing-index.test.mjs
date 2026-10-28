@@ -164,3 +164,10 @@ test("viewerBlessings: the index's order and facts, a page that is not on the ma
   assert.equal("usedBy" in styling, false, "a copy blessing has no users");
   assert.deepEqual(viewerBlessings([], { mapPage: () => null, usersOf: () => null }), []);
 });
+
+test("CR-179: viewerBlessings breaks a tie on the question by id, whatever order the store came in", () => {
+  const twins = [b("saving-b", "where: b.ts\nkind: copy", "Saving a thing? Copy b."), b("saving-a", "where: a.ts\nkind: copy", "Saving a thing? Copy a.")];
+  const ids = (list) => viewerBlessings(list, { mapPage: () => null, usersOf: () => null }).map((x) => x.id);
+  assert.deepEqual(ids(twins), ["saving-a", "saving-b"]);
+  assert.deepEqual(ids([...twins].reverse()), ["saving-a", "saving-b"]);
+});

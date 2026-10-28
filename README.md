@@ -567,7 +567,7 @@ history. From `0.9.0` the engine is `@rich-rees/zdd` and the pin is
 the numbers say
 ([decision 0042](docs/decisions/0042-the-engine-is-a-new-package-on-a-new-version-line.md)).
 A repo still on the old line moves its lock by hand once, then says "upgrade
-ZDD" (see Upgrading). Through 0.9.x the adapter contract stays at 1 and may
+ZDD" (see Upgrading). Before 1.0 the adapter contract stays at 1 and may
 still change; 1.0.0 freezes it.
 
 - **`0.10.0` — a Blessings peek in the human index.** A Blessings button
@@ -580,8 +580,10 @@ still change; 1.0.0 freezes it.
   that names where back goes. The viewer contract's `docs` gains
   `blessings`, ready-read by the engine (decision 0043). **What moves on the
   bump**: every pin ZDD owns names `@rich-rees/zdd@0.10.0`, and
-  `render --check` moves `human-index.html` only — no graph, metadata,
-  agent-index or blessing-index byte changes. "upgrade ZDD" rewrites the
+  `render --check` moves `human-index.html` only, and only with the
+  reference (`cytoscape`) viewer — `minimal` or a viewer of your own may
+  ignore the new key and show no change — no graph, metadata, agent-index
+  or blessing-index byte changes. "upgrade ZDD" rewrites the
   pins and re-renders; nothing to answer.
 - **`0.9.0` — a stack-free core and a catalogue of adapters, on a new line.**
   The engine is a new package, `@rich-rees/zdd`, numbered from 0.9.0

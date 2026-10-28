@@ -39,9 +39,10 @@ list, even from an ADR reached through the glossary.
 
 ## Consequences
 
-- Every adopter's `human-index.html` changes on the bump to 0.10.0 —
-  `render --check` is red until they re-render. No graph, metadata or index
-  byte moves.
+- With the reference (`cytoscape`) viewer, every adopter's
+  `human-index.html` changes on the bump to 0.10.0 — `render --check` is red
+  until they re-render; with `minimal` or a viewer that ignores the key,
+  nothing may move. No graph, metadata or index byte moves.
 - A third-party viewer can show blessings without knowing the store's file
   format, and is free to ignore the key.
 - The entry's shape is part of the viewer contract: renaming or dropping a

@@ -9,7 +9,8 @@
 // Contract — each viewer module exports:
 //   render({ graph, docs, changed, options, bundleName, repoBase }) -> string
 // where `graph` is exactly what render wrote to graph.json, `docs` is
-// { glossary, adrs } (embedded store copies), `changed` is the latest-store-
+// { glossary, adrs, blessings } (embedded store copies; blessings ready-read,
+// decision 0043), `changed` is the latest-store-
 // change highlight ({ adrs, glossaryTerms }), and `options` is the adopter's
 // viewer object minus `name`, plus `nonAreaTags` (the resolved top-level list)
 // whenever it is non-empty — a viewer's area model must exclude the same tags
