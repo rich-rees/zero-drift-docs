@@ -42,7 +42,10 @@ ZDD-2 (0.10.0, decision 0043) regenerated both human-index goldens for the
 Blessings peek: the BUNDLE literal gains `docs.blessings` (the fixture's
 three blessings, ready-read) and nothing else; the full page also carries
 the viewer's new button, filter box, back buttons and peek script. No graph,
-metadata, agent-index or blessing-index byte moved.
+metadata, agent-index or blessing-index byte moved. The ZDD-2 campaign's
+fixes (CR-167 to CR-179) regenerated the full-page golden once more: every
+changed line is a changed line of viz.js or viz.html; the BUNDLE literal did
+not move.
 
 ## Regenerating
 

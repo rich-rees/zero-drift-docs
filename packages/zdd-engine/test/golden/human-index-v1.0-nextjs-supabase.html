@@ -604,7 +604,7 @@ button:focus-visible, .item:focus-visible { outline: 2px solid #c98500; outline-
     </label>
     <button id="btn-glossary" title="zdd/glossary.md — the ubiquitous-language glossary">Glossary</button>
     <button id="btn-adrs" title="zdd/adr/ — the decision record">ADRs</button>
-    <button id="btn-blessings" title="zdd/blessings/ — the code to copy or extend, by trigger question">Blessings</button>
+    <button id="btn-blessings" title="The blessing store (paths.blessingsDir) — the code to copy or extend, by trigger question">Blessings</button>
     <button id="theme-toggle" title="Toggle dark mode">◐</button>
     <button id="reset">Reset view</button>
   </div>
@@ -1258,11 +1258,21 @@ document.getElementById("bundle-name").textContent = window.BUNDLE_NAME;
   const SAFE_BASE = /^(https?:\/\/[^\s]*)?$/i;
   // Whitespace/control anywhere is refused outright: a browser strips them
   // from a URL, so " javascript:x" would parse as a scheme (CR-002).
-  const safeResource = (r) => !/[\s\x00-\x1f\x7f]/.test(r) && !/^[a-z][a-z0-9+.-]*:/i.test(r) && !r.startsWith("//") && !r.startsWith("/");
-  function githubHref(resource) {
+  // A dot segment, raw or percent-encoded, is refused too: the browser
+  // resolves it against repoBase, so `../../other/repo` or `%2e%2e/…` would
+  // leave the repo (CR-170). A backslash counts as a slash in an http URL.
+  const dotSegment = (s) => {
+    let d;
+    try { d = decodeURIComponent(s); } catch { return true; }
+    return d === "." || d === "..";
+  };
+  const safeResource = (r) => !/[\s\x00-\x1f\x7f]/.test(r) && !/^[a-z][a-z0-9+.-]*:/i.test(r) && !r.startsWith("//") && !r.startsWith("/") && !r.split(/[\/\\]/).some(dotSegment);
+  // `file`: the caller knows it is a file (a blessing's exemplar), so an
+  // extensionless one (`Makefile`) still gets /blob/ (CR-169).
+  function githubHref(resource, file) {
     const base = bundle.repoBase || "";
     if (!SAFE_BASE.test(base) || !safeResource(resource)) return null;
-    const isFile = /\.[A-Za-z0-9]+$/.test(resource.split("/").pop());
+    const isFile = file || /\.[A-Za-z0-9]+$/.test(resource.split("/").pop());
     const path = resource.replace(/\[/g, "%5B").replace(/\]/g, "%5D");
     return (isFile ? base.replace("/tree/", "/blob/") : base) + path;
   }
@@ -1297,6 +1307,25 @@ document.getElementById("bundle-name").textContent = window.BUNDLE_NAME;
   // and the blessing store — single-sourced by render.mjs, proven in sync by `render --check`.
   const ADR_BY_NUM = dict();
   for (const a of (bundle.docs && bundle.docs.adrs) || []) ADR_BY_NUM[a.num] = a;
+  const ADR_BY_PATH = dict(); // repo-relative file -> number
+  for (const a of (bundle.docs && bundle.docs.adrs) || []) ADR_BY_PATH[`${a.dir || "zdd/adr"}/${a.file}`] = a.num;
+  // A relative link in a store body, normalized against the doc's own
+  // directory (../ resolved), as a repo path.
+  function resolveLink(href, baseDir) {
+    const parts = (baseDir + "/" + href).split("/").filter((s) => s !== ".");
+    const stack = [];
+    for (const p of parts) p === ".." ? stack.pop() : stack.push(p);
+    return stack.join("/");
+  }
+  // The embedded ADR a body link opens in the peek, or null: a sibling
+  // NNNN-*.md (an ADR citing another), or a link that resolves to an ADR's
+  // own file (a blessing's ../adr/0002-x.md). A numbered file anywhere else
+  // is not an ADR (CR-168).
+  function adrForLink(href, baseDir) {
+    const sibling = /^(\d{4})-[\w.-]+\.md$/.exec(href);
+    if (sibling && ADR_BY_NUM[sibling[1]]) return sibling[1];
+    return ADR_BY_PATH[resolveLink(href, baseDir).split("/").filter(Boolean).join("/")] || null;
+  }
   const BLESSINGS = (bundle.docs && bundle.docs.blessings) || [];
   const BLESSING_BY_ID = dict();
   for (const b of BLESSINGS) BLESSING_BY_ID[b.id] = b;
@@ -1342,24 +1371,22 @@ document.getElementById("bundle-name").textContent = window.BUNDLE_NAME;
       });
     }
     // Relative links inside store bodies: sibling NNNN-*.md ADRs resolve
-    // in-page; everything else repo-relative goes to GitHub.
+    // in-page, and so does a link that resolves to an embedded ADR's own
+    // file (a blessing's `../adr/0002-x.md`) — a numbered file anywhere else
+    // is not an ADR (CR-168); everything else repo-relative goes to GitHub.
     target.querySelectorAll("a[href]").forEach((a) => {
       const href = a.getAttribute("href");
       if (!href || /^[a-z]+:/i.test(href) || href.startsWith("#")) {
         if (/^https?:/i.test(href || "")) { a.target = "_blank"; a.rel = "noopener"; }
         return;
       }
-      const adrFile = /^(?:.*\/)?(\d{4})-[\w.-]+\.md$/.exec(href);
-      if (adrFile && ADR_BY_NUM[adrFile[1]] && (opts.anyAdrPath || !href.includes("/"))) {
+      const num = adrForLink(href, baseDir);
+      if (num) {
         a.setAttribute("href", "javascript:void(0)");
-        a.addEventListener("click", (e) => { e.preventDefault(); openAdr(adrFile[1]); });
+        a.addEventListener("click", (e) => { e.preventDefault(); openAdr(num); });
         return;
       }
-      // Normalize ../ against the doc's own directory, then link to GitHub.
-      const parts = (baseDir + "/" + href).split("/").filter((s) => s !== ".");
-      const stack = [];
-      for (const p of parts) p === ".." ? stack.pop() : stack.push(p);
-      const out = githubHref(stack.join("/"));
+      const out = githubHref(resolveLink(href, baseDir));
       if (out === null) { a.removeAttribute("href"); return; }
       a.setAttribute("href", out);
       a.target = "_blank";
@@ -1438,10 +1465,13 @@ document.getElementById("bundle-name").textContent = window.BUNDLE_NAME;
     }
     for (const h of docsBody.querySelectorAll(":scope > h1, :scope > h2, :scope > h3, :scope > h4, :scope > h5, :scope > h6")) {
       if (!q) { h.hidden = false; continue; }
+      // Its section runs to the next heading of the same or a higher rank,
+      // so a match under a sub-heading keeps every heading above it (CR-174).
+      const rank = Number(h.tagName[1]);
       let el = h.nextElementSibling;
       let any = false;
-      while (el && !/^H[1-6]$/.test(el.tagName)) {
-        if (!el.hidden && !el.classList.contains("filter-empty")) any = true;
+      while (el && !(/^H[1-6]$/.test(el.tagName) && Number(el.tagName[1]) <= rank)) {
+        if (!/^H[1-6]$/.test(el.tagName) && !el.hidden && !el.classList.contains("filter-empty")) any = true;
         el = el.nextElementSibling;
       }
       h.hidden = !any;
@@ -1541,7 +1571,7 @@ document.getElementById("bundle-name").textContent = window.BUNDLE_NAME;
   const whereText = (w) => (w ? w.path + (w.symbol ? ` (${w.symbol})` : "") : "");
   function renderBlessingIndex() {
     docsTitle.textContent = "Blessings";
-    docsSource.textContent = "zdd/blessings/ — the code to copy or extend, by trigger question; rendered from the repo, never edited here";
+    docsSource.textContent = "The blessing store (paths.blessingsDir, zdd/blessings/ by default) — the code to copy or extend, by trigger question; rendered from the repo, never edited here";
     docsBody.innerHTML = "";
     filterEntries = [];
     if (!BLESSINGS.length) {
@@ -1603,7 +1633,7 @@ document.getElementById("bundle-name").textContent = window.BUNDLE_NAME;
       dl.append(dd);
     };
     if (b.where) {
-      const href = githubHref(b.where.path);
+      const href = githubHref(b.where.path, true);
       let link;
       if (href !== null) {
         link = Object.assign(document.createElement("a"), { href, textContent: b.where.path, title: "Open the exemplar on GitHub", target: "_blank", rel: "noopener", className: "external" });
@@ -1639,7 +1669,7 @@ document.getElementById("bundle-name").textContent = window.BUNDLE_NAME;
     const md = document.createElement("div");
     docsBody.appendChild(md);
     const dir = (b.file || "").split("/").slice(0, -1).join("/");
-    renderDocMarkdown(b.body, dir, { anyAdrPath: true }, md);
+    renderDocMarkdown(b.body, dir, {}, md);
     linkifyAdrMentions(dl);
   }
   // Open a node from a blessing (decision 0043): the detail panel slides in
@@ -1824,13 +1854,16 @@ document.getElementById("bundle-name").textContent = window.BUNDLE_NAME;
   // Bring a concept into view in whatever the current view is.
   function reveal(id) {
     if (currentView === "explorer") { focusNode(id); return; }
-    renderDetail(id);
+    // Selection first: unselecting the old node closes the detail panel
+    // (the graph's unselect handler), so rendering before it opened the
+    // panel only to close it again (CR-167).
     const n = cy.$id(id);
     if (n.length) {
       cy.$("node:selected").unselect();
       n.select();
-      cy.animate({ center: { eles: n }, zoom: Math.max(cy.zoom(), 0.8) }, { duration: 200 });
     }
+    renderDetail(id);
+    if (n.length) cy.animate({ center: { eles: n }, zoom: Math.max(cy.zoom(), 0.8) }, { duration: 200 });
   }
 
   // ---------- header controls & view routing ----------
