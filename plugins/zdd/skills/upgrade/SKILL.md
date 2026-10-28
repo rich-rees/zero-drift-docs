@@ -277,9 +277,9 @@ node "$PLUGIN/scripts/bootstrap.mjs" preflight
 Then, with the engine this plugin pins:
 
 ```
-npx -y @rich-rees/zdd@0.12.0 derive
-npx -y @rich-rees/zdd@0.12.0 render
-npx -y @rich-rees/zdd@0.12.0 lint
+npx -y @rich-rees/zdd@0.13.0 derive
+npx -y @rich-rees/zdd@0.13.0 render
+npx -y @rich-rees/zdd@0.13.0 lint
 ```
 
 Show what moved in the generated artifacts and say why, from the notes (a
@@ -377,7 +377,7 @@ category: https://github.com/rich-rees/zero-drift-docs/discussions (decision 004
   record:` it replaces is still read, as the blessings section. A squash
   merge loses the record unless the merger keeps the message; a merge
   commit keeps it.
-- **The tally.** `npx -y @rich-rees/zdd@0.12.0 tally [--since <ref|date>] [--json]` counts,
+- **The tally.** `npx -y @rich-rees/zdd@0.13.0 tally [--since <ref|date>] [--json]` counts,
   per section, how often an artifact turned, confirmed, was reused or
   stored, then names the ADRs, glossary terms and blessings in the stores
   that no record ever named.
@@ -496,6 +496,19 @@ category: https://github.com/rich-rees/zero-drift-docs/discussions (decision 004
   `render --check` moves `human-index.html` only (with another viewer,
   possibly nothing); `derive --check`, `graph.json`, the agent index and the blessing
   index keep their bytes. Commit it in the same PR.
+
+## Upgrading to 0.13 (a store header says each key once)
+
+- **Lint now fails a header that repeats a key or mismatches a value's
+  quotes** (decision 0047), in a blessing or a semantic-map page: before,
+  ZDD silently read the last key, or stripped an odd pair of quotes. The
+  regenerate's lint names each line and what ZDD read. Show each one to
+  the developer and fix it on their word (which reading they meant is
+  theirs); never pick for them.
+- Nothing to answer; no config-schema or metadata-contract change. The
+  pins move to 0.13.0.
+- **What moves on the bump**: only the pins. `derive --check` and
+  `render --check` keep their bytes.
 
 ## Upgrading to 0.12 (the first adopter's 0.11 findings)
 
