@@ -3,7 +3,8 @@
 // Chromium: every header button, the peek's filter and back history, a
 // blessing to its cited ADR and back, a blessing to a node and back WITH A NODE
 // ALREADY SELECTED (CR-167: the detail panel opened and closed at once, and no
-// test or hand pass saw it), a hostile blessing and the empty store. Every
+// test or hand pass saw it), high blessings pinned first with their chip
+// (decision 0045), a hostile blessing and the empty store. Every
 // flow also fails on an uncaught page error, a dialog, or a request that
 // leaves the page (the viewer contract promises none).
 // Run: cd test/browser && npm ci && npx playwright install chromium && node --test "*.test.mjs"
@@ -68,6 +69,10 @@ before(() => {
   urls = {
     fixture: renderFixture(),
     hostile: renderFixture((repo) => writeFileSync(join(repo, "zdd", "blessings", "hostile.md"), HOSTILE)),
+    // A second high blessing whose question sorts before the fixture's high
+    // one and after none of the normal ones' — so only the pin puts it first.
+    twoHigh: renderFixture((repo) => writeFileSync(join(repo, "zdd", "blessings", "showing-a-thing.md"),
+      "---\nwhere: src/app/page.tsx\nkind: copy\nimportance: high\n---\n\nShowing a thing? Copy the page because x.\n")),
     empty: renderFixture((repo) => {
       const dir = join(repo, "zdd", "blessings");
       for (const f of readdirSync(dir)) rmSync(join(dir, f));
@@ -178,7 +183,7 @@ smoke("each header button does its job", async () => {
   await expectDocs("Blessings", null);
   assert.equal(await isHidden("#docs-filter"), false);
   assert.deepEqual(await page.$$eval("#docs-body .blessing-item > b", (els) => els.map((e) => e.textContent)),
-    ["Adding a page?", "Adding an endpoint for things?", "Saving a thing?"]);
+    ["Saving a thing?", "Adding a page?", "Adding an endpoint for things?"], "the high blessing is pinned first (decision 0045)");
 
   await page.keyboard.press("Escape");
   await settle();
@@ -280,6 +285,35 @@ smoke("blessing → node → back to the blessing, with a node already selected 
   await expectDocs("Saving a thing?", "All blessings");
   await page.click("#docs-back");
   await expectDocs("Blessings", null);
+});
+
+// Decision 0045: the high blessings come first, by question, each with a
+// "high" chip and the rest with none; a filter keeps them on top; the chip is
+// on the blessing's page too, and the filter finds "high".
+const rows = () => page.$$eval("#docs-body .blessing-item", (els) => els.filter((el) => !el.hidden).map((el) => [el.querySelector(":scope > b").textContent, el.querySelectorAll(".high-chip").length]));
+smoke("high blessings are pinned first with a chip, under the filter and on their page", async () => {
+  await open(urls.twoHigh);
+  await page.click("#btn-blessings");
+  await expectDocs("Blessings", null);
+  assert.deepEqual(await rows(), [["Saving a thing?", 1], ["Showing a thing?", 1], ["Adding a page?", 0], ["Adding an endpoint for things?", 0]]);
+  assert.equal(await page.$eval("#docs-body .high-chip", (el) => el.textContent), "high");
+  await page.fill("#docs-filter", "thing");
+  assert.deepEqual(await rows(), [["Saving a thing?", 1], ["Showing a thing?", 1], ["Adding an endpoint for things?", 0]], "the filter keeps the pin");
+  await page.fill("#docs-filter", "high");
+  assert.deepEqual(await rows(), [["Saving a thing?", 1], ["Showing a thing?", 1]], "the filter finds the high ones");
+  await clickDocs(".blessing-item", "Showing a thing?");
+  await expectDocs("Showing a thing?", "All blessings");
+  assert.equal(await page.$$eval("#docs-body .blessing-chips .high-chip", (els) => els.length), 1, "the chip on the blessing's page");
+  await page.click("#docs-back");
+  await expectDocs("Blessings", null);
+  assert.equal(await page.inputValue("#docs-filter"), "high");
+  await clickDocs(".blessing-item", "Saving a thing?");
+  await expectDocs("Saving a thing?", "All blessings");
+  await page.click("#docs-back");
+  await page.fill("#docs-filter", "");
+  await clickDocs(".blessing-item", "Adding a page?");
+  await expectDocs("Adding a page?", "All blessings");
+  assert.equal(await page.$$eval("#docs-body .high-chip", (els) => els.length), 0, "a normal blessing has no chip");
 });
 
 smoke("a hostile blessing shows no executable markup", async () => {
