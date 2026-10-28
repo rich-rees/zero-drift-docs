@@ -33,7 +33,7 @@ import { changedTerms, parseNameStatus } from "./lib/store-changes.mjs";
 import { refreshOriginBase } from "./lib/fetch-freshness.mjs";
 import { buildAdrIndex } from "./lib/adr-index.mjs";
 import { adrSets } from "./lib/adr-sets.mjs";
-import { buildBlessingIndex } from "./lib/blessing-index.mjs";
+import { buildBlessingIndex, viewerBlessings } from "./lib/blessing-index.mjs";
 import { loadBlessings, usersOf } from "./lib/blessings.mjs";
 import { MAX_STORE_FILE_BYTES } from "./lib/walk-markdown.mjs";
 import { slugify } from "./lib/slug.mjs";
@@ -755,11 +755,29 @@ async function render() {
   // the top-level key is otherwise invisible to it (verification CR-026).
   // Only added when set, so a config without it keeps the v0.3.1 bytes.
   const options = NON_AREA_TAGS.length ? { ...VIEWER.options, nonAreaTags: NON_AREA_TAGS } : VIEWER.options;
+  // Blessing index (2.0.0, decision 0031): read whole when choosing
+  // patterns. Hrefs are relative to the bundle folder, like the agent
+  // index's. A blessing names map pages by their path under the map folder.
+  const adrOf = new Map();
+  for (const a of docs.adrs) if (!adrOf.has(a.num)) adrOf.set(a.num, a);
+  const mapRel = posixify(relative(BUNDLE, SEMANTIC));
+  const blessingsRel = posixify(relative(BUNDLE, BLESSINGS));
+  const pages = new Map(concepts.filter((c) => c.layer === "map").map((c) => [c.id.startsWith(`${mapRel}/`) ? c.id.slice(mapRel.length + 1) : c.id, c]));
+  const records = [...RECORDS_BY_NODE.values()];
+  const store = loadBlessings(BLESSINGS, REPO);
+  for (const f of store.unreadable) console.error(`WARNING: ${f}: over ${MAX_STORE_FILE_BYTES / 1024} KiB or unreadable — not in the blessing index`);
+  for (const s of store.skipped) console.error(`WARNING: ${posixify(relative(REPO, s.path)) || "."}: ${s.reason} — not in the blessing index`);
+  // The blessing store, read once above, rides along ready-read (decision
+  // 0043): the viewer never parses it, and its names link to graph nodes.
+  const nodeOfRecord = new Map([...RECORDS_BY_NODE].map(([node, record]) => [record, node]));
+  const blessingsForViewer = viewerBlessings(store.blessings, {
+    mapPage: (id) => (pages.has(id) ? { node: pages.get(id).id, title: pages.get(id).title } : null),
+    usersOf: (b) => usersOf(b.where, records)?.map((r) => ({ node: nodeOfRecord.get(r) ?? null, title: r.title ?? r.id })) ?? null,
+  });
   // An ADR outside zdd/adr — a harness ADR, or a custom adrDir's — carries
   // its folder (`dir`), so the viewer names its source and resolves its links
-  // from there (CR-033); one in zdd/adr carries nothing new, so a default
-  // repo embeds the 2.4 projection byte for byte.
-  const viewerDocs = { ...docs, adrs: docs.adrs.map(({ num, file, title, body, dir }) => (dir !== "zdd/adr" ? { num, file, title, body, dir } : { num, file, title, body })) };
+  // from there (CR-033); one in zdd/adr carries nothing new.
+  const viewerDocs = { ...docs, adrs: docs.adrs.map(({ num, file, title, body, dir }) => (dir !== "zdd/adr" ? { num, file, title, body, dir } : { num, file, title, body })), blessings: blessingsForViewer };
   const html = viewer.render({ graph, docs: viewerDocs, changed, options, bundleName: BUNDLE_NAME, repoBase: REPO_BASE });
   if (typeof html !== "string") {
     console.error(`Viewer '${VIEWER.name}' must return the human index as a string`);
@@ -798,18 +816,6 @@ async function render() {
   };
   const adrIndex = indexFor(sets[0]);
   const harnessAdrIndex = sets.length > 1 ? indexFor(sets[1]) : null;
-  // Blessing index (2.0.0, decision 0031): read whole when choosing
-  // patterns. Hrefs are relative to the bundle folder, like the agent
-  // index's. A blessing names map pages by their path under the map folder.
-  const adrOf = new Map();
-  for (const a of docs.adrs) if (!adrOf.has(a.num)) adrOf.set(a.num, a);
-  const mapRel = posixify(relative(BUNDLE, SEMANTIC));
-  const blessingsRel = posixify(relative(BUNDLE, BLESSINGS));
-  const pages = new Map(concepts.filter((c) => c.layer === "map").map((c) => [c.id.startsWith(`${mapRel}/`) ? c.id.slice(mapRel.length + 1) : c.id, c]));
-  const records = [...RECORDS_BY_NODE.values()];
-  const store = loadBlessings(BLESSINGS, REPO);
-  for (const f of store.unreadable) console.error(`WARNING: ${f}: over ${MAX_STORE_FILE_BYTES / 1024} KiB or unreadable — not in the blessing index`);
-  for (const s of store.skipped) console.error(`WARNING: ${posixify(relative(REPO, s.path)) || "."}: ${s.reason} — not in the blessing index`);
   const { text: blessingIndex, count: blessings } = buildBlessingIndex(store.blessings, {
     adrHref: (num) => (adrOf.has(num) ? adrHrefFromBundle(adrOf.get(num)) : null),
     blessingHref: (id) => `${blessingsRel}/${id}.md`,

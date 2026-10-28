@@ -497,3 +497,55 @@ test("CR-007: source-derived markdown cannot execute script in the Cytoscape vie
   // Source-keyed dictionaries are prototype-free (CR-010).
   assert.ok(!/const (nodeIndex|byType|backlinks|authMode|ADR_BY_NUM) = \{\}/.test(viz));
 });
+
+// ZDD-2 (decision 0043): the Blessings peek. The embed carries the store
+// ready-read, its names linked to graph nodes; the page has the button, the
+// one filter box and the two back buttons; the peek's source keeps the
+// viewer's rules. Behaviour (drill-in, back history, the filter) is proved in
+// a browser pass, as the rest of the page's script is.
+test("ZDD-2: the human index embeds the blessing store ready-read, linked to graph nodes, in the index's order", () => {
+  const repo = mkRepo(FIXTURE);
+  run(repo, ["derive"]);
+  run(repo, ["render"]);
+  const bundle = readBundle(repo);
+  const nodes = new Set(bundle.nodes.map((n) => n.data.id));
+  const blessings = bundle.docs.blessings;
+  assert.deepEqual(blessings.map((b) => [b.id, b.question, b.kind, b.file]), [
+    ["adding-a-page", "Adding a page?", "copy", "zdd/blessings/adding-a-page.md"],
+    ["adding-an-endpoint-for-things", "Adding an endpoint for things?", "copy", "zdd/blessings/adding-an-endpoint-for-things.md"],
+    ["saving-a-thing", "Saving a thing?", "extend", "zdd/blessings/saving-a-thing.md"],
+  ]);
+  const [page, endpoint, saving] = blessings;
+  assert.deepEqual(page.appliesTo, { path: "apps/fixture-app", node: "map/apps/fixture-app", title: "Fixture App" });
+  assert.deepEqual(endpoint.adrs, ["0002"]);
+  assert.deepEqual(saving.where, { path: "migrations/00002_things.sql", symbol: "save_thing" });
+  assert.equal(saving.usedBy.count, 1);
+  for (const n of [page.appliesTo.node, saving.firstBuiltIn.node, ...saving.usedBy.shown.map((u) => u.node)]) assert.ok(nodes.has(n), `${n} is a graph node`);
+  assert.match(saving.body, /^Saving a thing\? Call `save_thing\(\)`/);
+  rmSync(repo, { recursive: true, force: true });
+});
+
+test("ZDD-2: the page has a Blessings button, one filter box for the peek and a way back from a node to the blessing", () => {
+  const repo = mkRepo(FIXTURE);
+  run(repo, ["derive"]);
+  run(repo, ["render"]);
+  const html = readFileSync(join(repo, "zdd", "human-index.html"), "utf8");
+  for (const id of ["btn-glossary", "btn-adrs", "btn-blessings", "docs-filter", "docs-back", "detail-back"]) assert.match(html, new RegExp(`id="${id}"`), id);
+  const viz = readFileSync(join(PKG, "src", "core", "viewers", "cytoscape", "viz.js"), "utf8");
+  // Source-keyed dictionaries are prototype-free (CR-010).
+  assert.match(viz, /const BLESSING_BY_ID = dict\(\);/);
+  // The exemplar goes through the same guarded GitHub link as a node's resource.
+  assert.match(viz, /githubHref\(b\.where\.path\)/);
+  // A blessing body renders through the sanitiser, like every store body.
+  assert.match(viz, /renderDocMarkdown\(b\.body,/);
+  rmSync(repo, { recursive: true, force: true });
+});
+
+test("ZDD-2: an empty blessing store embeds an empty list, never a missing key", () => {
+  const repo = mkRepo(FIXTURE);
+  rmSync(join(repo, "zdd", "blessings"), { recursive: true, force: true });
+  run(repo, ["derive"]);
+  run(repo, ["render"]);
+  assert.deepEqual(readBundle(repo).docs.blessings, []);
+  rmSync(repo, { recursive: true, force: true });
+});

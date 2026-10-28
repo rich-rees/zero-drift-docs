@@ -11,7 +11,7 @@ import { readFileSync, writeFileSync, rmSync, mkdtempSync, cpSync } from "node:f
 import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { buildBlessingIndex } from "../src/core/lib/blessing-index.mjs";
+import { buildBlessingIndex, viewerBlessings } from "../src/core/lib/blessing-index.mjs";
 import { readBlessing } from "../src/core/lib/blessings.mjs";
 
 const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -119,4 +119,48 @@ test("render --check: a stale, hand-edited or missing blessing index fails, nami
   assert.equal(r.status, 1);
   assert.match(r.stderr, /blessing-index\.md/);
   rmSync(repo, { recursive: true, force: true });
+});
+
+// ZDD-2 (decision 0043): the store as a viewer embeds it — the index's
+// facts and order, read once in the engine so no viewer parses the store.
+test("viewerBlessings: the index's order and facts, a page that is not on the map kept by path, users capped with a count, null never guessed", () => {
+  const nodePages = { "apps/web": { node: "map/apps/web", title: "Web" }, "features/things": { node: "map/features/things", title: "Things" } };
+  const many = Array.from({ length: 7 }, (_, i) => ({ node: `metadata/route/r${i}`, title: `/r${i}` }));
+  const users = (bl) => (bl.id === "extending-many" ? many : bl.id === "extending-unknown" ? null : bl.id === "extending-unused" ? [] : (() => { throw new Error("usersOf is only asked of an extend blessing with a where"); })());
+  const out = viewerBlessings(
+    [
+      { ...b("styling", "where: web/tokens.css (tokens)\nkind: copy\napplies-to: apps/web\nfirst-built-in: features/gone\nadr: ADR-0001", "Styling anything? Use tokens, per ADR-0002."), file: "zdd/blessings/styling.md" },
+      b("extending-many", "where: lib/client.ts\nkind: extend\nfirst-built-in: features/things", "Calling the API? Extend the client."),
+      b("extending-unknown", "where: lib/py.py\nkind: extend", "Parsing a file? Extend the parser."),
+      b("extending-unused", "where: lib/u.ts\nkind: extend", "Using u? Extend it."),
+      b("no-where", "kind: extend", "Adding an alpha? Extend a."),
+      b("no-question", "kind: kopy\nwhere: src/b.ts", "Copy b, which is a long opening that runs well past the eighty characters an index line keeps."),
+    ],
+    { mapPage: (id) => nodePages[id] ?? null, usersOf: users },
+  );
+  assert.deepEqual(out.map((x) => x.id), ["no-question", "no-where", "extending-many", "extending-unknown", "styling", "extending-unused"]);
+  const [noQ, noWhere, many5, unknown, styling, unused] = out;
+  assert.deepEqual(styling, {
+    id: "styling",
+    file: "zdd/blessings/styling.md",
+    question: "Styling anything?",
+    opening: null,
+    kind: "copy",
+    where: { path: "web/tokens.css", symbol: "tokens" },
+    appliesTo: { path: "apps/web", node: "map/apps/web", title: "Web" },
+    firstBuiltIn: { path: "features/gone", node: null, title: null },
+    adrs: ["0001", "0002"],
+    body: "Styling anything? Use tokens, per ADR-0002.",
+  });
+  assert.equal(noQ.question, null);
+  assert.equal(noQ.opening, "Copy b, which is a long opening that runs well past the eighty characters an in…");
+  assert.equal(noQ.kind, "kopy", "a bad kind is passed as written; lint fails it, the viewer shows it");
+  assert.equal(noQ.file, null);
+  assert.equal("usedBy" in noWhere, false, "no where, no users asked");
+  assert.deepEqual(many5.usedBy, { count: 7, shown: many.slice(0, 5) });
+  assert.deepEqual(many5.firstBuiltIn, { path: "features/things", node: "map/features/things", title: "Things" });
+  assert.equal(unknown.usedBy, null);
+  assert.deepEqual(unused.usedBy, { count: 0, shown: [] });
+  assert.equal("usedBy" in styling, false, "a copy blessing has no users");
+  assert.deepEqual(viewerBlessings([], { mapPage: () => null, usersOf: () => null }), []);
 });

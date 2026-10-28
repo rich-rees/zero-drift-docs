@@ -105,3 +105,44 @@ function line(b, opts) {
   else why = "_no reason given_";
   return `${head} — ${kind}: ${where} · why: ${why}`;
 }
+
+// The blessing store as a viewer embeds it (ZDD-2, decision 0043): the
+// same facts as an index line, read once here so the viewer never parses
+// the store, in the index's order (by question, then id) and with its cap on
+// users. A missing fact is null, never guessed; `usedBy` is only on an
+// `extend` blessing with a `where` (null: unknown to ZDD).
+// `blessings`: the store as lib/blessings.mjs reads it (with `file`).
+// `opts.mapPage(id)`: { node, title } for a semantic-map page by its path
+//   under the map folder, or null.
+// `opts.usersOf(blessing)`: [{ node, title }] (node: a graph node id, or
+//   null) using an `extend` blessing's exemplar, or null.
+export function viewerBlessings(blessings, opts) {
+  const question = (b) => b.shape.question ?? "";
+  const page = (id) => {
+    if (!id) return null;
+    const p = opts.mapPage(id);
+    return { path: id, node: p ? p.node : null, title: p ? p.title : null };
+  };
+  return [...blessings]
+    .sort((a, b) => byText(question(a), question(b)) || byText(a.id, b.id))
+    .map((b) => {
+      const visible = b.shape.visible;
+      const out = {
+        id: b.id,
+        file: b.file ?? null,
+        question: b.shape.question,
+        opening: b.shape.question ? null : visible.length > OPENING_MAX ? visible.slice(0, OPENING_MAX - 1).trimEnd() + "…" : visible,
+        kind: b.kind,
+        where: b.where,
+        appliesTo: page(b.appliesTo),
+        firstBuiltIn: page(b.firstBuiltIn),
+        adrs: b.adrs,
+        body: b.body ?? "",
+      };
+      if (b.kind === "extend" && b.where) {
+        const users = opts.usersOf(b);
+        out.usedBy = users === null ? null : { count: users.length, shown: users.slice(0, USERS_SHOWN).map((u) => ({ node: u.node ?? null, title: u.title })) };
+      }
+      return out;
+    });
+}

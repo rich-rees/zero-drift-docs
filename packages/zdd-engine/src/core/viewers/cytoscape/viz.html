@@ -45,6 +45,7 @@ __UNCLAIMED__
     </label>
     <button id="btn-glossary" title="zdd/glossary.md — the ubiquitous-language glossary">Glossary</button>
     <button id="btn-adrs" title="zdd/adr/ — the decision record">ADRs</button>
+    <button id="btn-blessings" title="zdd/blessings/ — the code to copy or extend, by trigger question">Blessings</button>
     <button id="theme-toggle" title="Toggle dark mode">◐</button>
     <button id="reset">Reset view</button>
   </div>
@@ -65,11 +66,12 @@ __UNCLAIMED__
     <div id="tooltip" hidden></div>
   </section>
   <!-- Slide-out panels: hidden by default so the graph gets the full
-       viewport; node click / Glossary / ADRs slide one in from the right. -->
+       viewport; node click / Glossary / ADRs / Blessings slide one in from the right. -->
   <section id="detail" class="slideout">
     <button class="panel-close" id="detail-close" title="Close" aria-label="Close">✕</button>
     <article id="detail-content" hidden>
       <header class="detail-header">
+        <button id="detail-back" class="docs-back" hidden></button>
         <span class="type-chip" id="detail-type"></span>
         <h1 id="detail-title"></h1>
         <div class="muted" id="detail-id"></div>
@@ -93,9 +95,10 @@ __UNCLAIMED__
     <button class="panel-close" id="docs-close" title="Close" aria-label="Close">✕</button>
     <article>
       <header class="detail-header">
-        <button id="docs-back" class="docs-back" hidden>← All ADRs</button>
+        <button id="docs-back" class="docs-back" hidden></button>
         <h1 id="docs-title"></h1>
         <div class="muted" id="docs-source"></div>
+        <input id="docs-filter" type="search" placeholder="Filter" aria-label="Filter this list" hidden>
       </header>
       <div id="docs-body" class="doc-md"></div>
     </article>

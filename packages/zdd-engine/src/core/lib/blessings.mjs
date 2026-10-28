@@ -61,6 +61,8 @@ export function readBlessing(text, id) {
     appliesTo: header["applies-to"] ? String(header["applies-to"]).trim().replace(/\.md$/, "") : null,
     firstBuiltIn: header["first-built-in"] ? String(header["first-built-in"]).trim().replace(/\.md$/, "") : null,
     text: blessingText,
+    // The text as written, for a viewer that renders it (decision 0043).
+    body,
     adrs,
     shape: blessingShape(blessingText),
     unknownKeys: Object.keys(header).filter((k) => !HEADER_KEYS.includes(k)).sort(),

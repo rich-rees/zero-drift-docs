@@ -596,15 +596,22 @@
   }
 
   // ---------- slide-out panels ----------
-  // One panel open at a time: node detail or the docs panel (glossary / ADRs).
+  // One panel open at a time: node detail or the docs peek (glossary / ADRs /
+  // blessings).
   const detailEl = document.getElementById("detail");
   const docsEl = document.getElementById("docs");
+  const detailBack = document.getElementById("detail-back");
+  // The peek page a node was opened from (decision 0043): the detail panel
+  // offers a way back to it until the panels close.
+  let peekReturn = null;
   const openPanel = (el) => {
     for (const p of [detailEl, docsEl]) p.classList.toggle("open", p === el);
   };
   const closePanels = () => {
     detailEl.classList.remove("open");
     docsEl.classList.remove("open");
+    peekReturn = null;
+    detailBack.hidden = true;
   };
   document.getElementById("detail-close").addEventListener("click", () => {
     closePanels();
@@ -613,11 +620,14 @@
   document.getElementById("docs-close").addEventListener("click", closePanels);
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") closePanels(); });
 
-  // ---------- docs panel (glossary + ADR corpus, ADR-0021) ----------
-  // bundle.docs is a read-only render projection of the glossary (zdd/glossary.md) + zdd/adr/ —
-  // single-sourced by render.mjs, proven in sync by `render --check`.
+  // ---------- docs peek (glossary + ADR corpus, ADR-0021; blessings, 0043) ----------
+  // bundle.docs is a read-only render projection of the glossary (zdd/glossary.md), zdd/adr/
+  // and the blessing store — single-sourced by render.mjs, proven in sync by `render --check`.
   const ADR_BY_NUM = dict();
   for (const a of (bundle.docs && bundle.docs.adrs) || []) ADR_BY_NUM[a.num] = a;
+  const BLESSINGS = (bundle.docs && bundle.docs.blessings) || [];
+  const BLESSING_BY_ID = dict();
+  for (const b of BLESSINGS) BLESSING_BY_ID[b.id] = b;
   // Latest store change: which entries the most recent
   // store-touching push changed — highlighted so a reader sees "what just
   // changed"; the moment someone else merges store-touching commits, the
@@ -637,15 +647,16 @@
   const docsSource = document.getElementById("docs-source");
   const docsBody = document.getElementById("docs-body");
   const docsBack = document.getElementById("docs-back");
+  const docsFilter = document.getElementById("docs-filter");
 
-  function renderDocMarkdown(md, baseDir, opts = {}) {
+  function renderDocMarkdown(md, baseDir, opts = {}, target = docsBody) {
     // safeMarked, never marked.parse: store text is source-derived (CR-007).
-    docsBody.innerHTML = safeMarked.parse(md || "");
+    target.innerHTML = safeMarked.parse(md || "");
     // Glossary entries are `**Term**: description` paragraphs — promote the
     // defined term to a block title (underlined via .term) so it reads apart
     // from bold cross-references inside descriptions.
     if (opts.terms) {
-      docsBody.querySelectorAll("p").forEach((p) => {
+      target.querySelectorAll("p").forEach((p) => {
         const first = p.firstChild;
         if (!first || first.nodeType !== 1 || first.tagName !== "STRONG") return;
         const next = first.nextSibling;
@@ -660,14 +671,14 @@
     }
     // Relative links inside store bodies: sibling NNNN-*.md ADRs resolve
     // in-page; everything else repo-relative goes to GitHub.
-    docsBody.querySelectorAll("a[href]").forEach((a) => {
+    target.querySelectorAll("a[href]").forEach((a) => {
       const href = a.getAttribute("href");
       if (!href || /^[a-z]+:/i.test(href) || href.startsWith("#")) {
         if (/^https?:/i.test(href || "")) { a.target = "_blank"; a.rel = "noopener"; }
         return;
       }
-      const adrFile = /^(\d{4})-[\w.-]+\.md$/.exec(href);
-      if (adrFile && ADR_BY_NUM[adrFile[1]]) {
+      const adrFile = /^(?:.*\/)?(\d{4})-[\w.-]+\.md$/.exec(href);
+      if (adrFile && ADR_BY_NUM[adrFile[1]] && (opts.anyAdrPath || !href.includes("/"))) {
         a.setAttribute("href", "javascript:void(0)");
         a.addEventListener("click", (e) => { e.preventDefault(); openAdr(adrFile[1]); });
         return;
@@ -676,28 +687,138 @@
       const parts = (baseDir + "/" + href).split("/").filter((s) => s !== ".");
       const stack = [];
       for (const p of parts) p === ".." ? stack.pop() : stack.push(p);
-      const target = githubHref(stack.join("/"));
-      if (target === null) { a.removeAttribute("href"); return; }
-      a.setAttribute("href", target);
+      const out = githubHref(stack.join("/"));
+      if (out === null) { a.removeAttribute("href"); return; }
+      a.setAttribute("href", out);
       a.target = "_blank";
       a.rel = "noopener";
     });
-    linkifyAdrMentions(docsBody);
+    linkifyAdrMentions(target);
     docsEl.scrollTop = 0;
   }
 
-  function openGlossary() {
-    docsBack.hidden = true;
+  // Peek history (decision 0043): every page the peek shows is an entry;
+  // drilling in pushes one, back pops one and names where it goes. A list
+  // entry keeps its filter text, so back returns to the list as it was.
+  let peekHistory = [];
+  const peekLabel = (entry) => {
+    if (entry.kind === "glossary") return "Glossary";
+    if (entry.kind === "adrs") return "All ADRs";
+    if (entry.kind === "blessings") return "All blessings";
+    if (entry.kind === "adr") return `ADR-${entry.num}`;
+    const b = BLESSING_BY_ID[entry.id];
+    return (b && b.question) || entry.id;
+  };
+  const LIST_KINDS = new Set(["glossary", "adrs", "blessings"]);
+  // A header button starts a fresh history; a link followed inside the open
+  // peek pushes onto it; a page opened from outside the peek (an ADR cited in
+  // a node's body) gets its list behind it, as the ADR back always had.
+  function peekGo(entry, fresh) {
+    if (fresh) peekHistory = [entry];
+    else if (docsEl.classList.contains("open") && peekHistory.length) peekHistory.push(entry);
+    else if (entry.kind === "adr") peekHistory = [{ kind: "adrs", filter: "" }, entry];
+    else if (entry.kind === "blessing") peekHistory = [{ kind: "blessings", filter: "" }, entry];
+    else peekHistory = [entry];
+    showPeek();
+  }
+  function showPeek() {
+    const entry = peekHistory[peekHistory.length - 1];
+    if (!entry) return;
+    const prev = peekHistory[peekHistory.length - 2];
+    docsBack.hidden = !prev;
+    docsBack.textContent = prev ? `← ${peekLabel(prev)}` : "";
+    const isList = LIST_KINDS.has(entry.kind);
+    docsFilter.hidden = !isList;
+    if (isList) docsFilter.value = entry.filter || "";
+    if (entry.kind === "glossary") renderGlossary();
+    else if (entry.kind === "adrs") renderAdrIndex();
+    else if (entry.kind === "adr") renderAdr(entry.num);
+    else if (entry.kind === "blessings") renderBlessingIndex();
+    else renderBlessing(entry.id);
+    if (isList) applyFilter();
+    docsEl.scrollTop = 0;
+    openPanel(docsEl);
+    peekReturn = null;
+    detailBack.hidden = true;
+  }
+  docsBack.addEventListener("click", () => {
+    if (peekHistory.length < 2) return;
+    peekHistory.pop();
+    showPeek();
+  });
+
+  // The filter (decision 0043): one box for every list. An entry is a
+  // glossary term (its paragraph and what follows it up to the next term or
+  // heading), an ADR row or a blessing row; a heading stays while any entry
+  // under it matches.
+  let filterEntries = [];
+  const norm = (s) => String(s || "").toLowerCase();
+  function applyFilter() {
+    const entry = peekHistory[peekHistory.length - 1];
+    if (!entry || !LIST_KINDS.has(entry.kind)) return;
+    entry.filter = docsFilter.value;
+    const q = norm(docsFilter.value.trim());
+    let shown = 0;
+    for (const f of filterEntries) {
+      const hit = !q || f.text.includes(q);
+      for (const el of f.els) el.hidden = !hit;
+      if (hit && f.els.length) shown++;
+    }
+    for (const h of docsBody.querySelectorAll(":scope > h1, :scope > h2, :scope > h3, :scope > h4, :scope > h5, :scope > h6")) {
+      if (!q) { h.hidden = false; continue; }
+      let el = h.nextElementSibling;
+      let any = false;
+      while (el && !/^H[1-6]$/.test(el.tagName)) {
+        if (!el.hidden && !el.classList.contains("filter-empty")) any = true;
+        el = el.nextElementSibling;
+      }
+      h.hidden = !any;
+    }
+    let empty = docsBody.querySelector(":scope > .filter-empty");
+    if (q && !shown) {
+      if (!empty) {
+        empty = document.createElement("p");
+        empty.className = "muted filter-empty";
+        docsBody.appendChild(empty);
+      }
+      empty.textContent = `Nothing matches “${docsFilter.value.trim()}”.`;
+    } else if (empty) empty.remove();
+  }
+  docsFilter.addEventListener("input", applyFilter);
+  // Glossary entries for the filter: the term paragraphs and what follows
+  // each, or, in a glossary written without `**Term**:` paragraphs, every
+  // top-level block on its own. Text before the first term is preamble and
+  // hides while a filter is set.
+  function glossaryEntries() {
+    const blocks = [...docsBody.children];
+    const hasTerms = blocks.some((el) => el.querySelector(":scope > strong.term"));
+    const out = [];
+    let cur = null;
+    for (const el of blocks) {
+      if (/^H[1-6]$/.test(el.tagName)) { cur = null; continue; }
+      if (!hasTerms) { out.push({ els: [el], text: norm(el.textContent) }); continue; }
+      if (el.querySelector(":scope > strong.term")) {
+        cur = { els: [el], text: norm(el.textContent) };
+        out.push(cur);
+      } else if (cur) {
+        cur.els.push(el);
+        cur.text += " " + norm(el.textContent);
+      } else out.push({ els: [el], text: "" }); // preamble: hidden by any filter
+    }
+    return out;
+  }
+
+  function renderGlossary() {
     docsTitle.textContent = "Glossary";
     docsSource.textContent = "zdd/glossary.md — the ubiquitous language; rendered from the repo, never edited here";
     renderDocMarkdown(bundle.docs && bundle.docs.glossary, "", { terms: true });
-    openPanel(docsEl);
+    filterEntries = glossaryEntries();
   }
-  function openAdrIndex() {
-    docsBack.hidden = true;
+  function renderAdrIndex() {
     docsTitle.textContent = "Architecture Decision Records";
     docsSource.textContent = "zdd/adr/ — full decision record; rendered from the repo, never edited here";
     docsBody.innerHTML = "";
+    filterEntries = [];
     for (const a of (bundle.docs && bundle.docs.adrs) || []) {
       const btn = document.createElement("button");
       btn.className = "adr-item";
@@ -714,23 +835,159 @@
       btn.appendChild(span);
       btn.addEventListener("click", () => openAdr(a.num));
       docsBody.appendChild(btn);
+      filterEntries.push({ els: [btn], text: norm(`ADR-${a.num} ${a.title}`) });
     }
-    docsEl.scrollTop = 0;
-    openPanel(docsEl);
   }
-  function openAdr(num) {
+  function renderAdr(num) {
     const a = ADR_BY_NUM[num];
     if (!a) return;
-    docsBack.hidden = false;
     docsTitle.textContent = `ADR-${a.num}`;
     const dir = a.dir || "zdd/adr"; // a harness ADR says where it lives (decision 0033)
     docsSource.textContent = `${dir}/${a.file}`;
     renderDocMarkdown(a.body, dir);
-    openPanel(docsEl);
   }
-  docsBack.addEventListener("click", openAdrIndex);
+  function openAdr(num) {
+    if (!ADR_BY_NUM[num]) return;
+    peekGo({ kind: "adr", num });
+  }
+  const openGlossary = () => peekGo({ kind: "glossary", filter: "" }, true);
+  const openAdrIndex = () => peekGo({ kind: "adrs", filter: "" }, true);
+  const openBlessingIndex = () => peekGo({ kind: "blessings", filter: "" }, true);
+
+  // ---------- blessings (decision 0043) ----------
+  // A blessing names the code to start from for a kind of work, asked as a
+  // trigger question. The list is the store in the index's order (by
+  // question); kind and app are chips, never headings.
+  function chip(text, cls, title) {
+    const s = document.createElement("span");
+    s.className = `tag ${cls}`;
+    s.textContent = text;
+    if (title) s.title = title;
+    return s;
+  }
+  const pageName = (p) => (p ? p.title || p.path : "");
+  const whereText = (w) => (w ? w.path + (w.symbol ? ` (${w.symbol})` : "") : "");
+  function renderBlessingIndex() {
+    docsTitle.textContent = "Blessings";
+    docsSource.textContent = "zdd/blessings/ — the code to copy or extend, by trigger question; rendered from the repo, never edited here";
+    docsBody.innerHTML = "";
+    filterEntries = [];
+    if (!BLESSINGS.length) {
+      const p = document.createElement("p");
+      p.className = "muted";
+      p.textContent = "No blessings yet. A blessing names the code to copy or extend for a kind of work, and the pattern to refuse — one file per blessing in the blessing store.";
+      docsBody.appendChild(p);
+      return;
+    }
+    for (const b of BLESSINGS) {
+      const btn = document.createElement("button");
+      btn.className = "adr-item blessing-item";
+      const head = document.createElement("b");
+      if (b.question) head.textContent = b.question;
+      else {
+        head.append(Object.assign(document.createElement("em"), { textContent: "(no trigger question)" }), " ", b.opening || "");
+      }
+      btn.appendChild(head);
+      const meta = document.createElement("span");
+      meta.className = "muted blessing-meta";
+      if (b.where) meta.append(Object.assign(document.createElement("code"), { textContent: whereText(b.where) }));
+      if (b.kind) meta.append(chip(b.kind, "kind-chip", "How to use the exemplar"));
+      if (b.appliesTo) meta.append(chip(pageName(b.appliesTo), "app-chip", "A house rule for this app"));
+      btn.appendChild(meta);
+      btn.addEventListener("click", () => peekGo({ kind: "blessing", id: b.id }));
+      docsBody.appendChild(btn);
+      filterEntries.push({ els: [btn], text: norm([b.question, b.opening, b.id, whereText(b.where), b.kind, b.appliesTo && b.appliesTo.path, pageName(b.appliesTo)].join(" ")) });
+    }
+  }
+  // A map page or record a blessing names: a link that opens its node, with
+  // the way back to this blessing; plain text when no node has it.
+  function nodeLink(node, text, entry) {
+    if (!node || !nodeIndex[node]) return document.createTextNode(text);
+    const a = document.createElement("a");
+    a.className = "internal";
+    a.href = "javascript:void(0)";
+    a.textContent = text;
+    a.addEventListener("click", (e) => { e.preventDefault(); revealFromPeek(node, entry); });
+    return a;
+  }
+  function renderBlessing(id) {
+    const b = BLESSING_BY_ID[id];
+    if (!b) return;
+    const entry = peekHistory[peekHistory.length - 1];
+    docsTitle.textContent = b.question || b.id;
+    docsSource.textContent = b.file || "";
+    docsBody.innerHTML = "";
+    const chips = document.createElement("div");
+    chips.className = "blessing-chips";
+    if (b.kind) chips.append(chip(b.kind, "kind-chip", "How to use the exemplar"));
+    if (b.appliesTo) chips.append(chip(pageName(b.appliesTo), "app-chip", "A house rule for this app"));
+    if (chips.childNodes.length) docsBody.appendChild(chips);
+    const dl = document.createElement("dl");
+    dl.className = "frontmatter";
+    const row = (label, ...content) => {
+      dl.append(Object.assign(document.createElement("dt"), { textContent: label }));
+      const dd = document.createElement("dd");
+      dd.append(...content);
+      dl.append(dd);
+    };
+    if (b.where) {
+      const href = githubHref(b.where.path);
+      let link;
+      if (href !== null) {
+        link = Object.assign(document.createElement("a"), { href, textContent: b.where.path, title: "Open the exemplar on GitHub", target: "_blank", rel: "noopener", className: "external" });
+      } else link = document.createTextNode(b.where.path);
+      row("Exemplar", link, ...(b.where.symbol ? [" (", Object.assign(document.createElement("code"), { textContent: b.where.symbol }), ")"] : []));
+    } else row("Exemplar", "— none given");
+    if (b.appliesTo) row("Applies to", nodeLink(b.appliesTo.node, pageName(b.appliesTo), entry));
+    if (b.firstBuiltIn) row("First built in", nodeLink(b.firstBuiltIn.node, pageName(b.firstBuiltIn), entry));
+    if (b.usedBy !== undefined) {
+      if (b.usedBy === null) row("Used by", "unknown to ZDD");
+      else if (!b.usedBy.count) row("Used by", "nothing ZDD sees");
+      else {
+        const parts = [];
+        b.usedBy.shown.forEach((u, i) => {
+          if (i) parts.push(", ");
+          parts.push(nodeLink(u.node, u.title, entry));
+        });
+        if (b.usedBy.count > b.usedBy.shown.length) parts.push(`, +${b.usedBy.count - b.usedBy.shown.length} more`);
+        parts.push(" — extending it means retesting them");
+        row(`Used by ${b.usedBy.count}`, ...parts);
+      }
+    }
+    if (b.adrs.length) {
+      const parts = [];
+      b.adrs.forEach((num, i) => {
+        if (i) parts.push(", ");
+        parts.push(document.createTextNode(`ADR-${num}`));
+      });
+      row("Cites", ...parts);
+    }
+    docsBody.appendChild(dl);
+    docsBody.appendChild(document.createElement("hr"));
+    const md = document.createElement("div");
+    docsBody.appendChild(md);
+    const dir = (b.file || "").split("/").slice(0, -1).join("/");
+    renderDocMarkdown(b.body, dir, { anyAdrPath: true }, md);
+    linkifyAdrMentions(dl);
+  }
+  // Open a node from a blessing (decision 0043): the detail panel slides in
+  // as it does from the graph, and its back button returns to the blessing.
+  function revealFromPeek(node, entry) {
+    reveal(node);
+    peekReturn = entry;
+    detailBack.textContent = `← ${peekLabel(entry)}`;
+    detailBack.hidden = false;
+  }
+  detailBack.addEventListener("click", () => {
+    if (!peekReturn) return;
+    const i = peekHistory.lastIndexOf(peekReturn);
+    if (i >= 0) peekHistory = peekHistory.slice(0, i + 1);
+    else peekHistory = [peekReturn];
+    showPeek();
+  });
   document.getElementById("btn-glossary").addEventListener("click", openGlossary);
   document.getElementById("btn-adrs").addEventListener("click", openAdrIndex);
+  document.getElementById("btn-blessings").addEventListener("click", openBlessingIndex);
 
   // Bare ADR-NNNN citations in any rendered markdown become in-page links —
   // the 15 formerly-dead references this panel exists to resurrect. Text-node

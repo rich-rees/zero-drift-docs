@@ -229,6 +229,40 @@ main {
 .adr-item:hover { background: var(--wash); }
 .adr-item .muted { display: block; }
 
+/* The peek's filter (decision 0043): one box for every list. */
+#docs-filter {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 8px;
+  padding: 5px 8px;
+  border: 1px solid var(--ctrl-border);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+}
+/* Blessings: kind and app are chips beside the exemplar, never headings. */
+.blessing-meta { margin-top: 2px; }
+.blessing-meta code {
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  font-size: 11.5px;
+  margin-right: 6px;
+  word-break: break-all;
+}
+.blessing-meta .tag, .blessing-chips .tag { font-size: 11px; }
+.tag.app-chip { background: var(--sel-wash); color: var(--link); }
+.blessing-chips { margin: 4px 0 6px; }
+#docs dl.frontmatter { grid-template-columns: 110px 1fr; }
+#docs dl.frontmatter code {
+  background: var(--wash);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 12px;
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+}
+
 /* Latest store change: entries touched by the most recent
    store-touching push get a tint + badge; everything older stays plain. */
 .changed-entry { background: var(--changed-wash); border-radius: 6px; }
