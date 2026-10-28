@@ -494,7 +494,7 @@ plugins/zdd/
     extractor/                      # the scaffold: module, test file, one comment/string mask per syntax
     adr-0001-adopt-zero-drift-docs.md   # seeded as the adopter's first ADR
   test/                             # seam 2: the runbook and hooks observed as files + processes
-packages/zdd-engine/                # deriver / renderer / checks + extractors + viewers
+packages/zdd-engine/                # the engine, published as @rich-rees/zdd: deriver / renderer / checks + extractors + viewers
   bin/zdd-engine.mjs                # the CLI (derive / render / lint / freshness / tally / detect / coverage / preview)
   src/core/                         # the stack-free core: derive, render, lint, the stores, the viewers
   src/core/viewers/{cytoscape,minimal}/  # output end: human-index viewers over graph.json
