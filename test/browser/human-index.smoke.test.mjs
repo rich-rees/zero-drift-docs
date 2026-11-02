@@ -84,7 +84,7 @@ before(() => {
       writeFileSync(join(repo, "migrations", "20990101000000_unread.sql"), `DROP SCHEMA "<img src=x onerror=window.__pwned=1>" ON things;\nDROP SCHEMA some_schema;\n`);
       const hash = (what) => createHash("sha256").update(`supabase\0migrations/20990101000000_unread.sql\0${what}`).digest("hex").slice(0, 16);
       const config = join(repo, "zdd", "config.json");
-      writeFileSync(config, JSON.stringify({ ...JSON.parse(readFileSync(config, "utf8")), unread: { fine: [{ id: `unread:supabase/${hash("DROP SCHEMA some_schema")}`, why: "an index is not schema we map" }] } }));
+      writeFileSync(config, JSON.stringify({ ...JSON.parse(readFileSync(config, "utf8")), unread: { fine: [{ id: `unread:supabase/${hash("DROP SCHEMA some_schema")}`, why: "a schema nothing uses" }] } }));
     }),
   };
 });
@@ -183,10 +183,10 @@ smoke("unread: the button counts what is open, the peek lists it unanswered firs
   await expectDocs("Unread", null);
   assert.equal(await visibleCount("#docs-body .unread-item"), 2);
   assert.match(await text("#docs-body .unread-item:first-child"), /not answered/);
-  assert.match(await text("#docs-body .unread-item:last-child"), /marked fine.*an index is not schema we map/);
+  assert.match(await text("#docs-body .unread-item:last-child"), /marked fine.*a schema nothing uses/);
   assert.equal(await page.evaluate(() => window.__pwned), undefined);
   assert.equal(await page.$$eval("#docs-body img", (els) => els.length), 0, "the statement's markup is text");
-  await page.fill("#docs-filter", "some_index");
+  await page.fill("#docs-filter", "some_schema");
   assert.equal(await visibleCount("#docs-body .unread-item"), 1);
   await page.fill("#docs-filter", "nothing like this");
   assert.equal(await visibleCount("#docs-body .unread-item"), 0);
