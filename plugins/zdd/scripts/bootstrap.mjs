@@ -3299,6 +3299,9 @@ export function narrateDetect(d, pocock) {
       out.push("Coverage, part by part:");
       for (const c of d.coverage) if (c.adapters.length) out.push(`  ${c.part}: ${c.adapters.join(", ")}`);
       const gaps = d.coverage.filter((c) => !c.adapters.length).map((c) => c.part);
+      // A trial read that did not make sense (decision 0048 point 6): the part
+      // stays not covered, and the reason is what the build starts from.
+      for (const x of d.declined ?? []) out.push(`  ${x.parts.join(", ")}: the \`${x.name}\` adapter tried this repo and declined — ${x.reasons.join("; ")}`);
       if (gaps.length) out.push(`  not covered: ${gaps.join(", ")} — no adapter recognises any here. Ask whether the app has them; one in a stack ZDD has no adapter for is built together with the \`extractor\` skill (it takes longer, and is tested with fixtures)`);
     }
     if (d.limits?.walkTruncated) out.push(`  (detection reads ${d.limits.depth} folders deep, within one walk budget: code deeper than that was not seen)`);

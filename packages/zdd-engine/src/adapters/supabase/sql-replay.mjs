@@ -9,7 +9,9 @@
 // Deliberately NOT modeled (their truth is one grep away in the latest
 // migration, and modeling them buys parser surface, not orientation):
 // constraints (the node_type CHECK churns across 7 migrations), indexes,
-// RLS, grants, policies, seed/backfill DML, DO blocks.
+// RLS, grants, policies, seed/backfill DML. A DO block is never applied: what
+// is in one is judged (judgeDo below). What LOOKS like a change to the model
+// and was not applied is reported, never dropped (decision 0048 point 5).
 // Triggers ARE modeled: trigger functions' bodies never name their
 // tables (`NEW.updated_at = now()`), so without CREATE TRIGGER the function
 // records float with no edges — the relationship lives only in the trigger
@@ -733,5 +735,5 @@ export function sortMigrations(names) {
 }
 
 // The files a forward replay applies, in order: an undo step in a file of its
-// own (`x.down.sql`, `U2__x.sql`) is never one.
-export const appliedMigrations = (names) => sortMigrations(names.filter((n) => !/\.down\.sql$/i.test(n) && !/^U\d[\d._]*__/.test(n)));
+// own (`x.down.sql`, `down.sql`, `U2__x.sql`) is never one.
+export const appliedMigrations = (names) => sortMigrations(names.filter((n) => !/(^|\.)down\.sql$/i.test(n) && !/^U\d[\d._]*__/.test(n)));

@@ -165,7 +165,10 @@ catalogue says whether it fits, with its evidence, and the engine runs them
   services), which adapter covers each, and the ones **not covered**. Schema
   (the tables, read from migrations or models) and queries (the code that
   reaches them) are two parts: a repo with one covered is told about the
-  other. For
+  other. An adapter may have tried the repo and **declined**: the block says
+  which and why, in its own words (a replay of the migrations that did not
+  make sense). Read that out: the part is not covered, and what declined it
+  is where the build starts. For
   each part not covered, ask whether the app has it, and say plainly what
   happens: "Your routes are FastAPI, and I have an adapter for that. Your
   database layer is Prisma, and I don't yet, so I'll build a `prisma`

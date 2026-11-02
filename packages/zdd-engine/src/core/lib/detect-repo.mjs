@@ -35,6 +35,8 @@
 //     proposal:  { evidence: [plain words], options }   (absent: not proposed)
 //     apps:      [{ name, evidence, extractor }]         Application concepts
 //     questions: [{ topic, ask, records }]               what evidence cannot answer
+//     declined:  [plain words]                           looked, tried, and turned it
+//                down (decision 0048 point 6): why its parts stay uncovered
 //   }
 //
 // The scan: `files` (every regular file, sorted, at most DETECT_DEPTH folders
@@ -144,6 +146,7 @@ export function detectRepo(repoRoot, modules, caps = {}) {
   const proposals = found.filter((f) => f.proposal).map((f) => ({ name: f.name, parts: f.parts, evidence: f.proposal.evidence, options: f.proposal.options ?? {} }));
   const apps = found.flatMap((f) => f.apps ?? []).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   const questions = found.flatMap((f) => f.questions ?? []);
+  const declined = found.filter((f) => f.declined?.length).map((f) => ({ name: f.name, parts: f.parts, reasons: f.declined }));
   const coverage = PARTS.map((part) => ({ part, adapters: proposals.filter((p) => p.parts.includes(part)).map((p) => p.name) }));
 
   // What a greenfield answer can select, and the neutral list of stacks the
@@ -171,6 +174,7 @@ export function detectRepo(repoRoot, modules, caps = {}) {
     proposals,
     apps,
     questions,
+    declined,
     coverage,
     uncovered: coverage.filter((c) => !c.adapters.length).map((c) => c.part),
     stacks,

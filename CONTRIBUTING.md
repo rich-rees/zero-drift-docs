@@ -206,8 +206,10 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
   adapter where detection proposes it and its `companion`s run — for a part
   an older release's adapters read themselves; decision 0037) —
   and `detect({ scan, proposed })`, returning `null` or `{ proposal:
-  { evidence, options }, apps, questions }`. Evidence is plain words
-  ("`APIRouter` under `api/routes`"). The `scan` is one walk of the repo
+  { evidence, options }, apps, questions, declined }`. Evidence is plain
+  words ("`APIRouter` under `api/routes`"). `declined` is the other answer
+  to a trial read: plain words saying what did not make sense, no proposal,
+  and the parts stay uncovered (decision 0048 point 6). The `scan` is one walk of the repo
   shared by every adapter (six folders deep, gitignored paths never seen,
   under one io's caps): `files`, `read(rel)`, `json(rel)` and `memo(key,
   fn)`. The engine's `detect` prints what they all answer.
