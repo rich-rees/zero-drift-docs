@@ -155,6 +155,66 @@ export. A hand-written local adapter is the only route that works today.
   statements it could ignore safely (slice 2 owns the reader): on the adopters
   measured that is 13 and 1 `DROP INDEX` statements, and nothing else.
 
+## As built (ZDD-11 slice 2)
+
+- **The reader.** `supabase` now follows `ALTER FUNCTION`, `PROCEDURE` and
+  `ROUTINE … RENAME TO` and `SET SCHEMA`, `ALTER TABLE … SET SCHEMA`, `IF
+  EXISTS ONLY`, a `DROP` with no `COLUMN` word, and a column rename into the
+  foreign keys that name it. A procedure is a record like a function. A
+  routine record gains `renamedFrom`, as a table has. A rename stays in its
+  schema, except that a `public` table still loses `public.` (below).
+- **What a name is.** Quoted, with spaces, `"public"."User"`, `$` and letters
+  past ASCII all read. A quoted name holding a dot does not: a name is held as
+  one string with its schema before the first dot, so the statement reports.
+  A record's file name encodes what the store refuses as `~<hex>`, and a plain
+  name stays as it is.
+- **The tripwire** (the slice's call on where it stops). It reports what could
+  change the model and was not applied: `ALTER`, `RENAME` or `DROP` on a table
+  the history never made, an `ALTER TABLE` action outside the list, a change to
+  a column that is not there, a rename onto something that is, `DROP SCHEMA`,
+  `DROP TYPE … CASCADE`. It stays quiet on what the model does not hold, which
+  goes past the `DROP INDEX` this slice was asked for: `DROP POLICY`, `DROP
+  VIEW` and their like, because a normal repo writes `DROP POLICY IF EXISTS`
+  and the trial read turns on the same list. A guarded `DROP` of a table never
+  made is a no-op the replay gets right.
+- **Tables an app does not own** are a named list of the schemas Postgres and
+  the platform own, in the adapter. A schema the list misses raises an item,
+  answered once, which is the safer way to be wrong.
+- **A `DO` block is judged, never applied.** Strings are blanked first. What
+  the model does not hold is quiet; `CREATE TABLE` and `CREATE TRIGGER` are
+  answered when a plain statement makes the same thing by the end of the
+  replay; anything else, and any `EXECUTE`, reports the whole block.
+- **The trial read.** `detect` replays each folder as `derive` would, and
+  returns `{ declined: [reasons] }` in place of a proposal. The core passes it
+  on as `declined` and bootstrap reads it out; the part stays uncovered. It
+  declines on a change to a table or function the files never make, any other
+  statement it cannot read, files that undo themselves, files that create
+  tables and end with none, a table two folders make, two names that would be
+  one record file, and migrations that yield no table, function or bucket
+  at all. It names no tool.
+- **All or nothing** (the slice's call). One folder's bad read declines the
+  whole claim, and one unread statement declines it. `schema` is a claim on the
+  repo, so a half-read repo must not read as covered. The cost: one odd
+  statement in a good history turns a usable starter down. The reasons say
+  exactly which statement, so the developer can see it.
+- **Undo steps, by behaviour.** The trial never looks for a tool's markers. A
+  file that makes something and takes it away again, or changes a name or a
+  type back, holds undo steps replayed as forward ones. A forward migration
+  that makes a scratch table or helper function and drops it declines too;
+  the reason says so, and that is the known false decline.
+- **Read or declined, by format.** `.down.sql`, `down.sql` and `U<n>__` files
+  are never replayed, so golang-migrate is read. `V<version>__` sorts by
+  version, so Flyway is read, in a `migrations` folder; in `db/migration` it is
+  not looked at. Plain Postgres, a SQLite rename and plain MySQL are read.
+  Prisma is declined: a lone file under a versioned folder name is one
+  migration, and the replay reads the files of one folder. Goose and dbmate,
+  MySQL backticks and its own statements, and SQL Server are declined.
+- **What this slice leaves alone,** because each would move adopters' records:
+  a renamed `public` table loses `public.`; foreign keys added by `ALTER` are
+  not read; `UNIQUE(a, b)` with no space reads as a column; a type changed
+  `USING` something keeps a garbled type; `f` and `public.f` are two function
+  records; `UPDATE storage.buckets` is not followed.
+
 ## Rejected
 
 - **Built in until it needs changing, then ejected.** Quicker to install and
