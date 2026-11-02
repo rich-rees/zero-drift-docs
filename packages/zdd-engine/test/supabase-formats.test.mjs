@@ -257,7 +257,13 @@ test("CR-241: an odd quoted name reaches the record store: the filename is encod
 });
 
 test("CR-241: names that differ only by case would be one file on some disks, so they decline", (t) => {
-  declined(t, { "migrations/001.sql": 'create table "User" (id int);\ncreate table "user" (id int);\n' }, /only by case/);
+  declined(t, { "migrations/001.sql": 'create table "User" (id int);\ncreate table "user" (id int);\n' }, /one record file/);
+});
+
+test("CR-258: two names that encode to one file decline; a table and a function may share a name", (t) => {
+  declined(t, { "migrations/001.sql": 'create table "a b" (id int);\ncreate table "a~20b" (id int);\n' }, /^`migrations`: `a b` and `a~20b` would be one record file, differing at most by case$/);
+  declined(t, { "migrations/001.sql": 'create function "F"() returns void language sql as $$ select 1 $$;\ncreate function f() returns void language sql as $$ select 1 $$;\n' }, /one record file/);
+  assert.deepEqual(read(t, { "migrations/001.sql": 'create table "User" (id int);\ncreate function "user"() returns void language sql as $$ select 1 $$;\n' }), { User: ["id"] });
 });
 
 test("CR-250: lone files in plainly named folders are databases; a version in the folder's name is what says a migration", (t) => {

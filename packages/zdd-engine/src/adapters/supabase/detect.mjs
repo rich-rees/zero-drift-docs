@@ -4,7 +4,7 @@
 // declines when it does not make sense. The judging looks at the read, never
 // at which tool wrote the files.
 
-import { appliedMigrations, replayMigrations } from "./sql-replay.mjs";
+import { appliedMigrations, fileNamed, replayMigrations } from "./sql-replay.mjs";
 
 export const DETECTION = {
   parts: ["schema"],
@@ -61,11 +61,14 @@ function judge(dir, names, scan) {
   if (unreadable.length) reasons.push(`\`${dir}\`: statements it cannot read (${quote(unreadable)})`);
   if (replay.undone.length) reasons.push(`\`${dir}\`: files undo themselves, so they hold undo steps a replay would apply (${quote(replay.undone)})`);
   if (replay.created && !replay.tables.size) reasons.push(`\`${dir}\`: files create tables and end with none`);
-  const folds = new Map();
-  for (const name of [...replay.tables.keys(), ...replay.functions.keys()]) {
-    const fold = name.toLowerCase();
-    if (folds.has(fold) && folds.get(fold) !== name) reasons.push("`" + dir + "`: `" + folds.get(fold) + "` and `" + name + "` differ only by case, and a record's file name cannot");
-    folds.set(fold, name);
+  // Each kind has a folder of its own, so a table and a function may share a name.
+  for (const names of [replay.tables.keys(), replay.functions.keys()]) {
+    const files = new Map();
+    for (const name of names) {
+      const file = fileNamed("", name).toLowerCase();
+      if (files.has(file)) reasons.push(`\`${dir}\`: \`${files.get(file)}\` and \`${name}\` would be one record file, differing at most by case`);
+      files.set(file, name);
+    }
   }
   return { reasons, tables: [...replay.tables.keys()], held: replay.tables.size + replay.functions.size + replay.buckets.size };
 }

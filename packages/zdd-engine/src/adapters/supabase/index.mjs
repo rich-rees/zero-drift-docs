@@ -11,13 +11,10 @@
 // so they are emitted resolved. A namespace whose directory does not exist is
 // "nothing to inventory" (greenfield), never an error.
 
-import { replayMigrations, appliedMigrations, tableKey } from "./sql-replay.mjs";
+import { replayMigrations, appliedMigrations, tableKey, fileNamed } from "./sql-replay.mjs";
 import { repoRelative } from "../../core/lib/paths.mjs";
 
 const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-// A record's file name, from a name a quoted identifier may have put anything
-// in: what the store refuses goes as ~<hex>, and a plain name stays as it is.
-export const fileNamed = (ns, name) => `${ns}--${name}.json`.replace(/[^A-Za-z0-9._~()[\]-]/g, (c) => `~${c.codePointAt(0).toString(16)}`);
 
 export const FACTS_KEY_ORDER = {
   table: ["namespace", "columns", "createdIn", "renamedFrom"],

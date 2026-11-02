@@ -448,6 +448,9 @@ export function replayMigrations(files) {
       const selfUndone = () => undone.push({ file: file.name, statement: head });
       // A thing this file changed and now changes back. By the thing itself,
       // so a table is the same table under whatever name it went through.
+      const follow = (set, from, to) => {
+        if (set.has(from)) set.add(to);
+      };
       const changed = (thing, field, before, after) => {
         if (!here.was.has(thing)) here.was.set(thing, new Map());
         const was = here.was.get(thing);
@@ -517,6 +520,8 @@ export function replayMigrations(files) {
               continue;
             }
             changed(table, "name", at, tableKey(to));
+            follow(here.tables, at, tableKey(to));
+            for (const c of table.columns) follow(here.columns, `${at} ${c.name}`, `${tableKey(to)} ${c.name}`);
             moveTable(table, to);
             touched = true;
           } else if (a.kind === "set-schema") {
@@ -527,6 +532,8 @@ export function replayMigrations(files) {
               continue;
             }
             changed(table, "name", at, tableKey(to));
+            follow(here.tables, at, tableKey(to));
+            for (const c of table.columns) follow(here.columns, `${at} ${c.name}`, `${tableKey(to)} ${c.name}`);
             moveTable(table, to);
             touched = true;
           } else if (a.kind === "rename-column") {
@@ -535,6 +542,7 @@ export function replayMigrations(files) {
               missed = true;
             } else if (col) {
               changed(col, "name", a.from, a.to);
+              follow(here.columns, `${at} ${a.from}`, `${at} ${a.to}`);
               col.name = a.to;
               // A foreign key names its target column: it follows too.
               for (const other of tables.values()) {
@@ -647,6 +655,7 @@ export function replayMigrations(files) {
         const bare = renamed ? bareName(foldIdent(renamed[1])) : bareName(key);
         const to = schema ? `${schema}.${bare}` : bare;
         changed(functions.get(key), "name", tableKey(key), tableKey(to));
+        follow(here.functions, key, to);
         moveFunction(key, to, file.name);
         continue;
       }
@@ -757,6 +766,11 @@ export function replayMigrations(files) {
 
   return { tables, functions, buckets, triggers, skipped, created, undone };
 }
+
+// A record's file name, from a name a quoted identifier may have put anything
+// in: what the store refuses goes as ~<hex>, and a plain name stays as it is.
+// Two names can meet here, or differ only by case: detect declines those.
+export const fileNamed = (ns, name) => `${ns}--${name}.json`.replace(/[^A-Za-z0-9._~()[\]-]/g, (c) => `~${c.codePointAt(0).toString(16)}`);
 
 // Apply-order sort: numeric value of the leading digit run first, filename as
 // tiebreak. Agrees with the Supabase CLI's lexicographic version ordering for
