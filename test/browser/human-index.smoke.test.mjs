@@ -81,10 +81,10 @@ before(() => {
     // Two statements the schema adapter cannot read (decision 0048): one
     // answered in the config, one not, and one carrying markup.
     unread: renderFixture((repo) => {
-      writeFileSync(join(repo, "migrations", "20990101000000_unread.sql"), `DROP POLICY "<img src=x onerror=window.__pwned=1>" ON things;\nDROP INDEX some_index;\n`);
+      writeFileSync(join(repo, "migrations", "20990101000000_unread.sql"), `DROP SCHEMA "<img src=x onerror=window.__pwned=1>" ON things;\nDROP SCHEMA some_schema;\n`);
       const hash = (what) => createHash("sha256").update(`supabase\0migrations/20990101000000_unread.sql\0${what}`).digest("hex").slice(0, 16);
       const config = join(repo, "zdd", "config.json");
-      writeFileSync(config, JSON.stringify({ ...JSON.parse(readFileSync(config, "utf8")), unread: { fine: [{ id: `unread:supabase/${hash("DROP INDEX some_index")}`, why: "an index is not schema we map" }] } }));
+      writeFileSync(config, JSON.stringify({ ...JSON.parse(readFileSync(config, "utf8")), unread: { fine: [{ id: `unread:supabase/${hash("DROP SCHEMA some_schema")}`, why: "an index is not schema we map" }] } }));
     }),
   };
 });

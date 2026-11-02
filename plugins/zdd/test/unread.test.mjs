@@ -30,7 +30,7 @@ const writeConfig = (repo, c) => writeFileSync(join(repo, "zdd", "config.json"),
 
 // The fastapi fixture adopted by a real install, with one statement its
 // schema adapter cannot read.
-function adopted(t, { statement = "DROP POLICY mine ON things;" } = {}) {
+function adopted(t, { statement = "DROP SCHEMA mine ON things;" } = {}) {
   const repo = tmp(t, "zdd-unread-plugin-");
   cpSync(join(ENGINE, "test", "fixture-fastapi"), repo, { recursive: true });
   rmSync(join(repo, "zdd"), { recursive: true });
@@ -56,17 +56,17 @@ test("writer to reader: a fresh install writes unread.strict, and lint holds the
 test("writer to reader: --mark writes the mark lint accepts and the human index shows, with its reason and the item's text", (t) => {
   const repo = adopted(t);
   const [id] = openIds(repo);
-  const r = run(repo, ["unread", `--mark=${id}`, "--why=the policy is  not schema", "--json"]);
+  const r = run(repo, ["unread", `--mark=${id}`, "--why=a schema  nothing uses", "--json"]);
   assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(config(repo).unread.fine, [{ id, what: "DROP POLICY mine ON things", why: "the policy is not schema" }]);
+  assert.deepEqual(config(repo).unread.fine, [{ id, what: "DROP SCHEMA mine ON things", why: "a schema nothing uses" }]);
   assert.ok(JSON.parse(r.stdout).notes.some((n) => /run `derive`, then `render`/.test(n)), "render reads what derive last wrote (CR-234)");
   assert.equal(engine(repo, "lint").status, 0);
   assert.equal(engine(repo, "render").status, 0);
   const html = readFileSync(join(repo, "zdd", "human-index.html"), "utf8");
-  assert.equal(JSON.parse(/window\.BUNDLE = (.*);\n/.exec(html)[1]).docs.unread[0].why, "the policy is not schema");
+  assert.equal(JSON.parse(/window\.BUNDLE = (.*);\n/.exec(html)[1]).docs.unread[0].why, "a schema nothing uses");
   const again = run(repo, ["unread"]);
   assert.match(again.stdout, /1 marked fine:/);
-  assert.match(again.stdout, /why: the policy is not schema/);
+  assert.match(again.stdout, /why: a schema nothing uses/);
   // The config it wrote is one the plugin's own reader still accepts.
   assert.equal(run(repo, ["adapters"]).status, 0);
 });
@@ -74,7 +74,7 @@ test("writer to reader: --mark writes the mark lint accepts and the human index 
 test("--mark takes several ids, and keeps the list sorted, so two branches' marks merge", (t) => {
   const repo = adopted(t);
   const dir = config(repo).extractorOptions.supabase.migrationNamespaces[0].dir;
-  writeFileSync(join(repo, dir, "20990102000000_more.sql"), "DROP INDEX some_index;\n");
+  writeFileSync(join(repo, dir, "20990102000000_more.sql"), "DROP SCHEMA some_schema;\n");
   assert.equal(engine(repo, "derive").status, 0);
   const ids = openIds(repo);
   assert.equal(ids.length, 2);
@@ -140,7 +140,7 @@ test("--raise waits for every answer, then writes what lint reads", (t) => {
   assert.equal(engine(repo, "lint").status, 0);
   // Held from now on: the next item fails.
   const dir = config(repo).extractorOptions.supabase.migrationNamespaces[0].dir;
-  writeFileSync(join(repo, dir, "20990102000000_more.sql"), "DROP INDEX some_index;\n");
+  writeFileSync(join(repo, dir, "20990102000000_more.sql"), "DROP SCHEMA some_schema;\n");
   assert.equal(engine(repo, "derive").status, 0);
   assert.equal(engine(repo, "lint").status, 1);
 });
@@ -179,7 +179,7 @@ test("a repo already strict hears nothing about it at upgrade", (t) => {
 test("a mark on an item derive has not written yet: the note's derive, then render, leaves --check green (CR-234)", (t) => {
   const repo = adopted(t);
   const dir = config(repo).extractorOptions.supabase.migrationNamespaces[0].dir;
-  writeFileSync(join(repo, dir, "20990102000000_more.sql"), "DROP INDEX some_index;\n");
+  writeFileSync(join(repo, dir, "20990102000000_more.sql"), "DROP SCHEMA some_schema;\n");
   const ids = openIds(repo);
   assert.equal(ids.length, 2, "the list is the source as it is now");
   assert.equal(run(repo, ["unread", `--mark=${ids.join(",")}`, "--why=x"]).status, 0);

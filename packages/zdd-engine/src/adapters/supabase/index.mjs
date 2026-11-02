@@ -11,14 +11,14 @@
 // so they are emitted resolved. A namespace whose directory does not exist is
 // "nothing to inventory" (greenfield), never an error.
 
-import { replayMigrations, sortMigrations, tableKey } from "./sql-replay.mjs";
+import { replayMigrations, appliedMigrations, tableKey } from "./sql-replay.mjs";
 import { repoRelative } from "../../core/lib/paths.mjs";
 
 const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 export const FACTS_KEY_ORDER = {
   table: ["namespace", "columns", "createdIn", "renamedFrom"],
-  function: ["namespace", "signature", "returns", "language", "triggers"],
+  function: ["namespace", "signature", "returns", "language", "triggers", "renamedFrom"],
   bucket: ["namespace", "origin", "public", "fileSizeLimit", "allowedMimeTypes"],
 };
 
@@ -72,7 +72,7 @@ export function derive({ repoRoot, options, io }) {
     if (lost) throw new Error(`supabase: ${ns}: ${lost.path}: ${lost.reason} — derive stops rather than replay a history that may be missing it`);
     for (const k of walked.skipped) diagnostics.push(`${ns}: ${k.path}: ${k.reason} — skipped`);
     const files = [];
-    for (const f of sortMigrations(names)) {
+    for (const f of appliedMigrations(names)) {
       const got = io.read(`${dir}/${f}`);
       if (!got.ok) throw new Error(`supabase: ${ns}: ${got.reason} — a migration it cannot read would replay an incomplete schema, so derive stops`);
       files.push({ name: `${dir}/${f}`, text: got.text });
@@ -152,6 +152,7 @@ export function derive({ repoRoot, options, io }) {
           .map((t) => `${(t.timing + " " + t.events.join(" or ")).toUpperCase()} ON ${t.table}`)
           .sort();
       }
+      if (f.renamedFrom?.length) facts.renamedFrom = f.renamedFrom;
       records.push({
         kind: "function",
         id: `function:${ns}/${name}`,

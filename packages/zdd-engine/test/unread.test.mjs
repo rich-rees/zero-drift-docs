@@ -30,7 +30,7 @@ const unreadDir = (repo) => join(repo, "zdd", "metadata", "unread");
 const report = (repo) => JSON.parse(run(repo, "unread", "--json").stdout);
 
 const MIGRATION = "migrations/20990101000000_unread.sql";
-const STATEMENT = "DROP POLICY mine ON things;";
+const STATEMENT = "DROP SCHEMA mine ON things;";
 
 function repoOf(t, { statement = STATEMENT } = {}) {
   const repo = mkdtempSync(join(tmpdir(), "zdd-unread-"));
@@ -69,7 +69,7 @@ test("supabase reports what its replay skipped: on every derive without --verbos
   const repo = repoOf(t);
   const r = run(repo, "derive");
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stderr, /^UNREAD unread:supabase\/[0-9a-f]{16} {2}migrations\/20990101000000_unread\.sql: DROP POLICY mine ON things$/m);
+  assert.match(r.stderr, /^UNREAD unread:supabase\/[0-9a-f]{16} {2}migrations\/20990101000000_unread\.sql: DROP SCHEMA mine ON things$/m);
   assert.match(r.stderr, /1 item an adapter saw and could not read, with no answer yet/);
   assert.match(r.stdout, / and 1 unread -> zdd\/metadata/);
   const files = readdirSync(unreadDir(repo));
@@ -94,7 +94,7 @@ test("--verbose says each item once, not twice", (t) => {
   const repo = repoOf(t);
   const r = run(repo, "derive", "--verbose");
   assert.equal(r.status, 0, r.stderr);
-  assert.equal((r.stderr.match(/DROP POLICY mine ON things/g) ?? []).length, 1, r.stderr);
+  assert.equal((r.stderr.match(/DROP SCHEMA mine ON things/g) ?? []).length, 1, r.stderr);
 });
 
 test("an item's id survives the code around it moving, and changes with its text; one statement twice is one item", (t) => {
@@ -103,7 +103,7 @@ test("an item's id survives the code around it moving, and changes with its text
   const [id] = report(repo).open.map((i) => i.id);
   writeFileSync(join(repo, MIGRATION), `-- a note above it\n\n\n${STATEMENT}\n\n${STATEMENT}\n`);
   assert.deepEqual(report(repo).open.map((i) => i.id), [id]);
-  writeFileSync(join(repo, MIGRATION), "DROP POLICY yours ON things;\n");
+  writeFileSync(join(repo, MIGRATION), "DROP SCHEMA yours ON things;\n");
   const moved = report(repo).open.map((i) => i.id);
   assert.equal(moved.length, 1);
   assert.notEqual(moved[0], id);
@@ -177,7 +177,7 @@ test("lint: an open item WARNS until unread.strict, then FAILS; a mark answers i
   assert.ok(failed.stderr.includes(`${id} (${MIGRATION}): ${what}`), failed.stderr);
   assert.match(failed.stderr, /supabase saw this and could not read it; fix the adapter, or mark it fine once \(the plugin's `bootstrap\.mjs unread --mark=<id>/);
 
-  setUnread(repo, { strict: true, fine: [{ id, what, why: "the policy is not schema" }] });
+  setUnread(repo, { strict: true, fine: [{ id, what, why: "a schema nothing uses" }] });
   const passed = run(repo, "lint");
   assert.equal(passed.status, 0, passed.stderr);
   assert.doesNotMatch(passed.stderr, /could not read/);
@@ -187,7 +187,7 @@ test("lint: an open item WARNS until unread.strict, then FAILS; a mark answers i
   assert.equal(run(repo, "lint").status, 0, "a move needs no second answer");
 
   const noted = run(repo, "derive");
-  assert.match(noted.stderr, /\(marked fine: the policy is not schema\)$/m, "an answered item still shows, with its reason");
+  assert.match(noted.stderr, /\(marked fine: a schema nothing uses\)$/m, "an answered item still shows, with its reason");
   assert.doesNotMatch(noted.stderr, /with no answer yet/);
 });
 
@@ -289,7 +289,7 @@ test("CR-230: a mark lapses when the item changes, whitespace included, and neve
 
 test("CR-231: supabase hands over the whole statement: a change past the excerpt is a new item, so its mark lapses", (t) => {
   const repo = repoOf(t);
-  const long = (tail) => `DROP POLICY ${"p".repeat(260)} ON things USING (${tail});\n`;
+  const long = (tail) => `DROP SCHEMA ${"p".repeat(260)} ON things USING (${tail});\n`;
   writeFileSync(join(repo, MIGRATION), long("a"));
   const [first] = report(repo).open;
   writeFileSync(join(repo, MIGRATION), long("b"));
@@ -368,7 +368,7 @@ test("derive and lint are bounded: thousands of items cannot flood the log, and 
 
 test("the human index shows each item with its answer, unanswered first, and `render --check` moves with a mark", (t) => {
   const repo = repoOf(t);
-  writeFileSync(join(repo, "migrations", "20990102000000_more.sql"), "DROP INDEX some_index;\n");
+  writeFileSync(join(repo, "migrations", "20990102000000_more.sql"), "DROP SCHEMA some_schema;\n");
   run(repo, "derive");
   const [first] = report(repo).open;
   setUnread(repo, { fine: [{ id: first.id, what: first.what, why: "fine by us" }] });
@@ -399,7 +399,7 @@ test("the human index: a repo with nothing unread has no button and no bundle ke
 });
 
 test("the minimal viewer lists them too, escaped: every viewer shows an item", (t) => {
-  const repo = repoOf(t, { statement: `DROP POLICY "<img src=x onerror=alert(1)>" ON things;` });
+  const repo = repoOf(t, { statement: `DROP SCHEMA "<img src=x onerror=alert(1)>" ON things;` });
   setConfig(repo, { ...config(repo), viewer: "minimal" });
   run(repo, "derive");
   const [{ id, what }] = report(repo).open;

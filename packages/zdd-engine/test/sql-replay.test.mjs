@@ -2,7 +2,9 @@
 // Run: node --test "test/*.test.mjs"
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { tokenizeSql, replayMigrations, sortMigrations, commentsToDescription } from "../src/adapters/supabase/sql-replay.mjs";
+import * as sqlReplay from "../src/adapters/supabase/sql-replay.mjs";
+
+const { tokenizeSql, replayMigrations, sortMigrations, commentsToDescription } = sqlReplay;
 
 test("tokenizer: semicolons inside dollar-quoted bodies do not split", () => {
   const sql = `create function f() returns void language plpgsql as $$\nbegin\n delete from x; update y set z=1;\nend;\n$$;\nselect 1;`;
@@ -189,13 +191,13 @@ test("replay: re-running the same CREATE TRIGGER replaces, not duplicates", () =
   assert.deepEqual(triggers[0].events, ["insert"]);
 });
 
-test("replay tripwire: unrecognized schema-like statements are reported", () => {
+test("replay tripwire: a change to a table the history never made is reported, and says so; DROP INDEX changes no table", () => {
   const { skipped } = replayMigrations([
-    { name: "x.sql", text: "alter table nosuch add column a int; drop index idx_x;" },
+    { name: "x.sql", text: "alter table nosuch add column a int; drop index idx_x; drop index if exists public.idx_y;" },
   ]);
-  // alter on unknown table is silently ignored (not ours); drop index trips.
   assert.equal(skipped.length, 1);
-  assert.match(skipped[0].statement, /drop index/i);
+  assert.match(skipped[0].statement, /alter table nosuch/i);
+  assert.equal(skipped[0].unseen, true);
 });
 
 test("replay: `things` and `public.things` are one table — an ALTER, RENAME, DROP or trigger in the other spelling still lands; the name stays as first written (2.1.1, the first adopter's member_topics / test_runs)", () => {
@@ -249,4 +251,189 @@ test("replay: CREATE OR REPLACE TRIGGER replaces across `x` / `public.x` (2.1.1 
   const { triggers } = replayMigrations([{ name: "1.sql", text: "create table things (id uuid);\ncreate or replace function f() returns trigger language plpgsql as $$ begin return new; end; $$;\ncreate trigger trg after insert on things for each row execute function f();\ncreate or replace trigger trg before update on public.things for each row execute function f();" }]);
   assert.equal(triggers.length, 1);
   assert.equal(triggers[0].timing, "before");
+});
+
+// ---- ZDD-11 slice 2 (decision 0048): each of these changed nothing and said nothing on 0.13.0 ----
+
+const FN = (name) => `create or replace function ${name}() returns trigger language plpgsql as $$ begin return new; end; $$;`;
+
+test("replay: ALTER FUNCTION … RENAME TO moves the record and its triggers, keeps where it came from", () => {
+  const { functions, triggers, skipped } = replayMigrations([
+    { name: "1.sql", text: `create table t (id int);\n${FN("touch")}\ncreate trigger tr before update on t for each row execute function touch();` },
+    { name: "2.sql", text: "alter function touch() rename to stamp;" },
+  ]);
+  assert.deepEqual([...functions.keys()], ["stamp"]);
+  const f = functions.get("stamp");
+  assert.equal(f.name, "stamp");
+  assert.deepEqual(f.renamedFrom, ["touch"]);
+  assert.deepEqual(f.resources, ["1.sql", "2.sql"]);
+  assert.deepEqual(triggers.map((x) => x.fn), ["stamp"]);
+  assert.deepEqual(skipped, []);
+});
+
+test("replay: ALTER PROCEDURE … RENAME TO, a procedure being a record like a function; signature or no signature, either spelling", () => {
+  const { functions } = replayMigrations([
+    { name: "1.sql", text: "create procedure public.tidy(a int, b text) language sql as $$ select 1 $$;\ncreate function bare() returns void language sql as $$ select 1 $$;" },
+    { name: "2.sql", text: "alter procedure tidy(int, text) rename to sweep;\nalter function public.bare rename to plain;" },
+  ]);
+  assert.deepEqual([...functions.keys()].sort(), ["plain", "public.sweep"], "a rename stays in the record's schema, spelled as the record spells it");
+});
+
+test("replay: a later CREATE OR REPLACE of a renamed function keeps its history", () => {
+  const { functions } = replayMigrations([
+    { name: "1.sql", text: "create function f() returns void language sql as $$ select 1 $$;\nalter function f() rename to g;" },
+    { name: "2.sql", text: "create or replace function g() returns int language sql as $$ select 2 $$;" },
+  ]);
+  assert.deepEqual(functions.get("g").renamedFrom, ["f"]);
+  assert.equal(functions.get("g").returns, "int");
+});
+
+test("replay: ALTER … SET SCHEMA moves a table and a function, and what points at them follows", () => {
+  const { tables, functions, triggers } = replayMigrations([
+    { name: "1.sql", text: `create table things (id uuid primary key);\ncreate table kids (id uuid, thing uuid references things(id));\n${FN("touch")}\ncreate trigger tr before update on things for each row execute function touch();` },
+    { name: "2.sql", text: "alter table things set schema archive;\nalter function touch() set schema archive;" },
+  ]);
+  assert.deepEqual([...tables.keys()].sort(), ["archive.things", "kids"]);
+  assert.equal(tables.get("archive.things").name, "archive.things");
+  assert.deepEqual(tables.get("archive.things").renamedFrom, ["things"]);
+  assert.equal(tables.get("kids").columns[1].references, "archive.things(id)");
+  assert.deepEqual(triggers.map((x) => [x.table, x.fn]), [["archive.things", "archive.touch"]]);
+  assert.deepEqual([...functions.keys()], ["archive.touch"]);
+});
+
+test("replay: a rename stays in a schema other than public", () => {
+  const { tables } = replayMigrations([{ name: "1.sql", text: "create table archive.things (id int);\nalter table archive.things rename to stuff;" }]);
+  assert.deepEqual([...tables.keys()], ["archive.stuff"]);
+});
+
+test("replay: ALTER TABLE takes IF EXISTS and ONLY in either order, and the `*` Postgres allows", () => {
+  for (const head of ["if exists only", "only if exists", "only", "if exists", ""]) {
+    const { tables } = replayMigrations([{ name: "1.sql", text: `create table a (x int);\nalter table ${head} a rename to b;` }]);
+    assert.deepEqual([...tables.keys()], ["b"], `alter table ${head}`);
+  }
+  assert.deepEqual([...replayMigrations([{ name: "1.sql", text: "create table a (x int);\nalter table only a * add column y int;" }]).tables.get("a").columns.map((c) => c.name)], ["x", "y"]);
+});
+
+test("replay: a column rename follows into the foreign keys that reference it, in either spelling, and no further", () => {
+  const { tables } = replayMigrations([
+    { name: "1.sql", text: "create table parents (id uuid primary key, code text);\ncreate table kids (id uuid, parent uuid references public.parents(id), other uuid references parents(code));\ncreate table strangers (id uuid, x uuid references kids(id));" },
+    { name: "2.sql", text: "alter table parents rename column id to parent_id;" },
+  ]);
+  const refs = (t) => tables.get(t).columns.filter((c) => c.references).map((c) => c.references);
+  assert.deepEqual(refs("kids"), ["public.parents(parent_id)", "parents(code)"]);
+  assert.deepEqual(refs("strangers"), ["kids(id)"]);
+});
+
+test("replay: ALTER TABLE … DROP with no COLUMN word drops the column; a constraint or key stays out of it", () => {
+  const { tables } = replayMigrations([{ name: "1.sql", text: "create table t (a int, b int, c int);\nalter table t drop b, drop constraint c, drop if exists a;" }]);
+  assert.deepEqual(tables.get("t").columns.map((x) => x.name), ["c"]);
+});
+
+test("replay: a table name with a space, and qualified quoted names, are the names Postgres would see", () => {
+  const { tables } = replayMigrations([{ name: "1.sql", text: 'create table "public"."User" ("id" text not null, "First Name" text);\ncreate table "My Table" (id int);\ncreate table kids (u text references "public"."User"("id"));\nalter table "public"."User" add column "Age" int;\nalter table public."My Table" rename to "Your Table";' }]);
+  assert.deepEqual([...tables.keys()].sort(), ["User", "Your Table", "kids"]);
+  assert.deepEqual(tables.get("User").columns.map((c) => c.name), ["id", "First Name", "Age"]);
+  assert.equal(tables.get("kids").columns[0].references, "public.User(id)");
+});
+
+// ---- The tripwire (decision 0048 point 6): what the replay did not apply says so ----
+
+const SKIPPED = (text, first = "") => replayMigrations([{ name: "1.sql", text: first }, { name: "2.sql", text }]).skipped.map((s) => s.text);
+
+test("tripwire: ALTER, RENAME or DROP on a table the history never made", () => {
+  for (const sql of ["alter table ghost rename to spirit", "alter table if exists ghost add column a int", "alter table ghost enable row level security", "alter table public.ghost set schema archive", "drop table ghost", "drop table t, ghost", "drop trigger tr on ghost", "alter function ghost() rename to spirit", "alter procedure ghost set schema archive"]) {
+    assert.deepEqual(SKIPPED(sql, "create table t (id int);"), [sql], sql);
+  }
+});
+
+test("tripwire: a table an app touches and does not own raises nothing, nor does a guarded drop of what never was", () => {
+  const owned = ["alter table storage.objects enable row level security", "alter table auth.users add column a int", "drop trigger on_signup on auth.users", "drop trigger if exists tr on ghost", "drop table if exists ghost", "drop table storage.old", "alter function auth.uid() rename to whoami", "alter table realtime.messages enable row level security", "alter function ghost() owner to admin", "alter function ghost() set search_path = public"];
+  for (const sql of owned) assert.deepEqual(SKIPPED(sql), [], sql);
+});
+
+test("tripwire: an ALTER TABLE action outside the list is reported once, what was read of the statement still applies", () => {
+  const { tables, skipped } = replayMigrations([{ name: "1.sql", text: "create table t (a int);\nalter table t add column b int, modify c int, change d e int;" }]);
+  assert.deepEqual(tables.get("t").columns.map((c) => c.name), ["a", "b"]);
+  assert.equal(skipped.length, 1);
+});
+
+test("tripwire: a change the model cannot place — a column that is not there, or one added twice", () => {
+  const first = "create table t (a int);";
+  for (const sql of ["alter table t rename column nope to x", "alter table t alter column nope type text", "alter table t drop column nope", "alter table t add column a int"]) {
+    assert.deepEqual(SKIPPED(sql, first), [sql], sql);
+  }
+  for (const sql of ["alter table t drop column if exists nope", "alter table t add column if not exists a int"]) assert.deepEqual(SKIPPED(sql, first), [], sql);
+});
+
+test("tripwire: everything ALTER TABLE does that the model holds nothing of stays quiet, on Postgres's list", () => {
+  const first = "create table t (a int, b int);";
+  for (const action of ["add constraint c unique (a)", "add primary key (a)", "add unique (a)", "add check (a > 0)", "add foreign key (a) references t (a)", "drop constraint c", "drop constraint if exists c cascade", "rename constraint c to d", "validate constraint c", "enable row level security", "disable row level security", "force row level security", "no force row level security", "enable trigger all", "owner to admin", "replica identity full", "alter column a set default 1", "alter column a drop default", "alter a set not null", "alter column a drop not null", "alter column a add generated always as identity", "set (fillfactor = 70)", "attach partition t2 for values from (1) to (2)"]) {
+    assert.deepEqual(SKIPPED(`alter table t ${action}`, first), [], action);
+  }
+});
+
+test("tripwire: statements of other shapes that change what the model holds", () => {
+  for (const sql of ["alter schema billing rename to money", "drop schema billing cascade", "drop owned by someone", "rename table a to b", "exec sp_rename 'a', 'b'", "sp_rename 'a', 'b'", "create unlogged table u (a int)", "create foreign table u (a int) server s", "drop type mood cascade", "create trigger t before insert on x for each row set new.a = 1", "alter foreign table f add column a int", "create table `t` (`a` int)", "create table [t] ([a] int)", "create table t ([a] int)", "create table t (`a` int)"]) {
+    assert.deepEqual(SKIPPED(sql), [sql], sql);
+  }
+});
+
+test("tripwire: what the model deliberately leaves out stays quiet", () => {
+  for (const sql of ["drop index concurrently if exists i", "drop policy if exists \"p\" on t", "drop view v", "drop materialized view v", "drop type mood", "drop extension if exists x", "drop sequence s", "create temp table u (a int)", "create temporary table u (a int)", "create index i on t (a)", "alter index i rename to j", "alter type mood add value 'x'", "alter default privileges grant select on tables to r", "alter publication p add table t"]) {
+    assert.deepEqual(SKIPPED(sql), [], sql);
+  }
+});
+
+test("tripwire: a table made some other way is in the replay, and what the read lacks is said", () => {
+  const { tables, skipped } = replayMigrations([{ name: "1.sql", text: "create table base (a int);\ncreate table copy as select * from base;\ncreate table part partition of base for values from (1) to (2);\ncreate table kin (like base including all, b int);\ncreate table heir (b int) inherits (base);" }]);
+  assert.deepEqual([...tables.keys()], ["base", "copy", "part", "kin", "heir"]);
+  assert.equal(skipped.length, 4);
+});
+
+test("tripwire: statements a batch separator holds together are not read as one", () => {
+  const { tables, skipped } = replayMigrations([{ name: "1.sql", text: "create table a (id int)\nGO\ncreate table b (id int)\nGO\n" }]);
+  assert.equal(tables.size, 0);
+  assert.equal(skipped.length, 1);
+});
+
+test("a DO block: a rename, an add, a drop or dynamic SQL in one is reported, never followed", () => {
+  const first = "create table t (a int);";
+  const block = (body) => `do $$ begin if true then ${body}; end if; end $$`;
+  for (const body of ["alter table t rename to u", "alter table t rename column a to b", "alter table t add column b int", "alter table t set schema archive", "alter table t modify a text", "alter function f() rename to g", "alter procedure f() rename to g", "drop table t", "drop function f()", "create function f() returns void as 'x'", "execute 'alter table t rename to u'", "execute format('alter table %I rename to u', 't')", "execute cmd", "perform 1; execute 'select 1'"]) {
+    assert.deepEqual(SKIPPED(block(body), first), [block(body)], body);
+  }
+  const { tables } = replayMigrations([{ name: "1.sql", text: first + block("alter table t rename to u") }]);
+  assert.deepEqual([...tables.keys()], ["t"]);
+});
+
+test("a DO block: what the model holds nothing of stays quiet, comments and strings in it included", () => {
+  const first = "create table t (a int);";
+  for (const sql of ["do $$ begin if not exists (select 1 from pg_constraint where conname = 'c') then alter table t add constraint c unique (a); end if; end $$", "do $body$ begin alter table ghost add constraint c check (a > 0); end $body$", "do $$ begin -- alter table t rename to u\n raise notice 'rename'; end $$", "do language plpgsql $$ begin grant execute on function f() to r; revoke execute on function f() from r; grant all privileges on function f() to r; end $$", "do $$ begin create index i on t (a); drop index j; end $$", "do $$ begin perform 1; end $$"]) {
+    assert.deepEqual(SKIPPED(sql, first), [], sql);
+  }
+});
+
+test("a DO block: a guarded CREATE TABLE is answered when a plain statement makes the table, and reported when none does", () => {
+  const block = "do $$ begin if not exists (select 1) then create table public.vocab (id int); alter table public.vocab disable row level security; end if; end $$;";
+  assert.deepEqual(replayMigrations([{ name: "1.sql", text: block }, { name: "2.sql", text: "create table if not exists vocab (id int, code text);" }]).skipped, []);
+  const alone = replayMigrations([{ name: "1.sql", text: block }]);
+  assert.equal(alone.skipped.length, 1);
+  assert.match(alone.skipped[0].text, /create table public\.vocab/);
+});
+
+test("appliedMigrations: undo steps in files of their own are never replayed; versions sort as versions", () => {
+  const { appliedMigrations: applied } = sqlReplay;
+  assert.deepEqual(applied(["2_b.up.sql", "1_a.down.sql", "1_a.up.sql", "2_b.down.sql", "10_c.up.sql", "10_c.down.sql"]), ["1_a.up.sql", "2_b.up.sql", "10_c.up.sql"]);
+  assert.deepEqual(applied(["V10__j.sql", "V9__i.sql", "V1.2__b.sql", "V1.1__a.sql", "V1_10__c.sql", "U9__i.sql", "R__views.sql"]), ["V1.1__a.sql", "V1.2__b.sql", "V1_10__c.sql", "V9__i.sql", "V10__j.sql", "R__views.sql"]);
+});
+
+test("the replay marks what a file made and took away again in itself, and nothing else", () => {
+  const undone = (...texts) => replayMigrations(texts.map((text, i) => ({ name: `${i}.sql`, text }))).undone.length;
+  assert.equal(undone("create table t (a int); drop table t;"), 1);
+  assert.equal(undone("create table t (a int);", "alter table t add column b int; alter table t drop column b;"), 1);
+  assert.equal(undone("create table t (a int);", "alter table t rename to u; alter table u rename to t;"), 1);
+  assert.equal(undone("create table t (a int);", "alter table t rename column a to b; alter table t rename column b to a;"), 1);
+  assert.equal(undone("drop table if exists t; create table t (a int);"), 0, "drop then create is a forward step");
+  assert.equal(undone("create table t (a int);", "alter table t rename to u;", "alter table u rename to t;"), 0, "two migrations are two steps");
+  assert.equal(undone("create table t (a int);", "drop table t;"), 0);
 });
