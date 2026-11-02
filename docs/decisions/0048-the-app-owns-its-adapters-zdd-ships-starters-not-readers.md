@@ -45,10 +45,14 @@ export. A hand-written local adapter is the only route that works today.
    nothing against the contract, and a repo can do that for every adapter it
    has. One library, one folder per adapter; separate packages, ours or anyone's,
    stay open for later.
-4. **A copied adapter is fully self-contained.** It carries its own helpers.
-   Its one link to ZDD is the contract: the `io` it is handed and the records
-   it returns. The `extractor` skill and bootstrap know that contract and build
-   to it.
+4. **A copied adapter is fully self-contained within the app.** What it needs
+   comes with it, and code several starters share (`js`, `python`,
+   `background`, the small helpers) is kept once, in one shared folder beside
+   the adapters, the app's own. It arrives only with a starter that needs it,
+   and an adapter built from nothing may use it or ignore it. An adapter's one
+   link to ZDD is the contract: the `io` it is handed and the records it
+   returns. The `extractor` skill and bootstrap know that contract and build to
+   it.
 5. **An adapter reports what it saw and could not read.** The report is part of
    the contract. Every item shows in every run and in the human index, and fails
    CI until the adapter is fixed or the item is marked fine, once, with the mark
@@ -101,6 +105,9 @@ export. A hand-written local adapter is the only route that works today.
   packages whether they fit means fetching them all, or a list of stacks in the core.
 - **Helpers made public, or a helper package.** Smaller adapters, but a helper
   defect waits on someone else's release.
+- **A full copy of the shared code in every adapter.** Deleting one adapter
+  touches nothing else, but one repo with both front end and back end came to
+  about 11,000 lines against 6,000, and one defect to fix in up to five places.
 - **Applying a starter's fixes automatically.** The adapter would change with
   no one choosing it, which ends ownership.
 - **Reporting unread items as a warning, or in a log.** A warning is what went
