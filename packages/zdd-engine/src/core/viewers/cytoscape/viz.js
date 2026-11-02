@@ -607,7 +607,7 @@
 
   // ---------- slide-out panels ----------
   // One panel open at a time: node detail or the docs peek (glossary / ADRs /
-  // blessings).
+  // blessings / unread).
   const detailEl = document.getElementById("detail");
   const docsEl = document.getElementById("docs");
   const detailBack = document.getElementById("detail-back");
@@ -658,6 +658,7 @@
     return ADR_BY_PATH[resolveLink(href, baseDir).split("/").filter(Boolean).join("/")] || null;
   }
   const BLESSINGS = (bundle.docs && bundle.docs.blessings) || [];
+  const UNREAD = (bundle.docs && bundle.docs.unread) || [];
   const BLESSING_BY_ID = dict();
   for (const b of BLESSINGS) BLESSING_BY_ID[b.id] = b;
   // Latest store change: which entries the most recent
@@ -735,11 +736,12 @@
     if (entry.kind === "glossary") return "Glossary";
     if (entry.kind === "adrs") return "All ADRs";
     if (entry.kind === "blessings") return "All blessings";
+    if (entry.kind === "unread") return "Unread";
     if (entry.kind === "adr") return `ADR-${entry.num}`;
     const b = BLESSING_BY_ID[entry.id];
     return (b && b.question) || entry.id;
   };
-  const LIST_KINDS = new Set(["glossary", "adrs", "blessings"]);
+  const LIST_KINDS = new Set(["glossary", "adrs", "blessings", "unread"]);
   // A header button starts a fresh history; a link followed inside the open
   // peek pushes onto it; a page opened from outside the peek (an ADR cited in
   // a node's body) gets its list behind it, as the ADR back always had.
@@ -764,6 +766,7 @@
     else if (entry.kind === "adrs") renderAdrIndex();
     else if (entry.kind === "adr") renderAdr(entry.num);
     else if (entry.kind === "blessings") renderBlessingIndex();
+    else if (entry.kind === "unread") renderUnread();
     else renderBlessing(entry.id);
     if (isList) applyFilter();
     docsEl.scrollTop = 0;
@@ -937,6 +940,35 @@
       filterEntries.push({ els: [btn], text: norm([b.question, b.opening, b.id, whereText(b.where), b.kind, b.importance, b.appliesTo && b.appliesTo.path, pageName(b.appliesTo)].join(" ")) });
     }
   }
+  // ---------- unread (decision 0048) ----------
+  // What the adapters saw and could not read, unanswered first (the engine's
+  // order). Source-derived text, so textContent only (CR-007).
+  function renderUnread() {
+    docsTitle.textContent = "Unread";
+    docsSource.textContent = "What the adapters saw and could not read — each is fixed in the adapter or marked fine once in zdd/config.json; rendered from the repo, never edited here";
+    docsBody.innerHTML = "";
+    filterEntries = [];
+    for (const i of UNREAD) {
+      const row = document.createElement("div");
+      row.className = "unread-item";
+      row.append(Object.assign(document.createElement("b"), { textContent: i.what }));
+      const meta = document.createElement("span");
+      meta.className = "muted blessing-meta";
+      meta.append(i.why === null ? chip("not answered", "high-chip", "Lint holds this until the adapter is fixed or the item is marked fine") : chip("marked fine", "kind-chip", "Marked fine in zdd/config.json"));
+      const file = Object.assign(document.createElement("code"), { textContent: i.file });
+      const href = githubHref(i.file, true);
+      if (href === null) meta.append(file);
+      else {
+        const link = Object.assign(document.createElement("a"), { href, title: "Open the file on GitHub", target: "_blank", rel: "noopener", className: "external" });
+        link.append(file);
+        meta.append(link);
+      }
+      row.append(meta);
+      if (i.why !== null) row.append(Object.assign(document.createElement("span"), { className: "muted unread-why", textContent: i.why }));
+      docsBody.appendChild(row);
+      filterEntries.push({ els: [row], text: norm([i.what, i.file, i.adapter, i.id, i.why].join(" ")) });
+    }
+  }
   // A map page or record a blessing names: a link that opens its node, with
   // the way back to this blessing; plain text when no node has it.
   function nodeLink(node, text, entry) {
@@ -1027,6 +1059,9 @@
   document.getElementById("btn-glossary").addEventListener("click", openGlossary);
   document.getElementById("btn-adrs").addEventListener("click", openAdrIndex);
   document.getElementById("btn-blessings").addEventListener("click", openBlessingIndex);
+  // Only there when an adapter reported something (the viewer's index.mjs).
+  const btnUnread = document.getElementById("btn-unread");
+  if (btnUnread) btnUnread.addEventListener("click", () => peekGo({ kind: "unread", filter: "" }, true));
 
   // Bare ADR-NNNN citations in any rendered markdown become in-page links —
   // the 15 formerly-dead references this panel exists to resurrect. Text-node

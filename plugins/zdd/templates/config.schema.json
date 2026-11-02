@@ -22,6 +22,33 @@
       "maximum": 5,
       "description": "How many of the standard suite's checks block for this repo's own adapters (decision 0040): the engine's `suite` fails on a failing check numbered at or below it and warns on a newer one. Written by bootstrap at a fresh install (every check), raised by \"upgrade ZDD\" where the repo has no adapter of its own, and by `bootstrap.mjs adapters --raise` once its own adapters pass. Absent: every check warns."
     },
+    "unread": {
+      "type": "object",
+      "description": "What the adapters saw and could not read (decision 0048). Written by bootstrap: `unread.strict` at a fresh install or by `bootstrap.mjs unread --raise`, the marks by `bootstrap.mjs unread --mark`. Unknown keys are refused, so a misspelt 'strict' never leaves enforcement silently off.",
+      "additionalProperties": false,
+      "properties": {
+        "strict": {
+          "type": "boolean",
+          "default": false,
+          "description": "true: `lint` fails on an item with no answer. Absent or false: it warns. Written true at a fresh install; an upgraded repo turns it on once every item has an answer."
+        },
+        "fine": {
+          "type": "array",
+          "maxItems": 10000,
+          "description": "Items marked fine, once. A mark keeps its item answered while the code around it moves, and lapses when the item itself changes.",
+          "items": {
+            "type": "object",
+            "required": ["id", "why"],
+            "additionalProperties": false,
+            "properties": {
+              "id": { "type": "string", "pattern": "^unread:", "maxLength": 512, "description": "The item's id, as `derive` and `unread` print it." },
+              "what": { "type": "string", "description": "The item's text when it was marked, for whoever reviews the mark. Not compared." },
+              "why": { "type": "string", "minLength": 1, "maxLength": 500, "description": "Why the item is fine." }
+            }
+          }
+        }
+      }
+    },
     "extractors": {
       "type": "array",
       "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },

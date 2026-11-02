@@ -90,6 +90,65 @@ export. A hand-written local adapter is the only route that works today.
 - The engine's suites and goldens are rebuilt around the test-only adapters, and
   every adopter takes one large PR, once.
 
+## As built (ZDD-11 slice 1)
+
+- **The step.** `unread` is an optional row of the contract table:
+  `derive` may return `unread: [{ file, what }]` beside `records`. `CONTRACT`
+  stays 1 (0040 point 2, and an optional step asks nothing of an adapter). An
+  adapter without the list keeps working and says nothing. `file` is
+  repo-relative; `what` is one line of plain text, with control characters
+  removed, shown up to 300 characters. Extra keys on an item are ignored, so
+  the step can grow by optional fields (point 9). An adapter may not mint a
+  record of kind `unread`: that kind is the core's.
+- **An item is a record.** The core turns each item into a record of kind
+  `unread` under `paths.metadataDir`, named `<adapter>--<hash>.json`, with no
+  new path or mandatory file: a repo with nothing unread gets no folder. So
+  `derive --check` keeps the list true, the prune removes what an adapter
+  stops reporting, and `lint` and `render` read one list without running an
+  adapter. Unread records are neither graph nodes nor claimable, and the
+  coverage report does not count them: `graph.json`, the agent index and
+  every other record are unchanged. Viewers get them ready-read, as blessings
+  (0043).
+- **An id** is `unread:<adapter>/<16 hex>`, a SHA-256 of the adapter, the file
+  and the text. No line number, so a mark survives the code around the item
+  moving and lapses when the item changes. One statement written twice in a
+  file is one item with one answer.
+- **Where the marks live** (the slice's call): `zdd/config.json`, beside
+  `claims` and `suiteChecks`, as `"unread": { "strict": true, "fine": [{ "id",
+  "what", "why" }] }`. The repo's config is already where a repo's standing
+  answers to a check live (`claims.allowUnclaimed`), and a mark then reviews
+  as one reviewed line. `why` is required: a mark is read by the next person,
+  and "fine" with no reason is how a gap goes unread again. `what` is a copy of
+  the item's text for the reviewer, never compared.
+  `bootstrap.mjs unread --mark=<id> --why=…` is the writer; it refuses an id no
+  adapter reports now, so a typed id cannot excuse nothing. `--forget` takes
+  a mark away. A misspelt key in the block is an error, never enforcement
+  silently off.
+- **Which command fails** (the slice's call): `lint`, plain, so the pre-push
+  hook and CI agree. `unread.strict` is what makes an open item a failure, as
+  `claims.strict` does; off or absent, `lint` warns (0040 point 7, 0035). A
+  fresh install writes `strict: true`. An upgrade never does: its plan names
+  the step, and `bootstrap.mjs unread --raise` writes it once every item has
+  an answer, and refuses before (the upgrade skill's step 4c, for point 8).
+  Under strict, an unreadable unread record fails too. A mark no item answers
+  warns and never fails: it excuses nothing, and fixing an adapter must not
+  turn CI red.
+- **Visible by default.** `derive`, with or without `--check` or `--verbose`,
+  prints an `UNREAD` line per item, unanswered first, then those marked fine
+  with their reason, at most 500 lines and then a count, so a repo with
+  thousands cannot lose the end of a piped log. The engine's `unread` (derived in
+  memory, writes nothing) lists them all. The cytoscape viewer gains a header
+  button with the open count, only when there is an item, and a filterable
+  Unread peek; `minimal` lists them above the rest. A mark moves the human
+  index, so `render --check` holds the two together.
+- **The part split.** `PARTS` has `schema` and `queries` where it had
+  `database access`. `supabase` is schema; `sqlalchemy`, `supabase-js` and
+  `supabase-py` are queries. Nothing an adopter holds names a part, so
+  nothing migrates.
+- **First reporter.** `supabase` reports the statements its replay skips,
+  which were diagnostics. What it skips is unchanged, including statements
+  it could ignore safely (slice 2 owns the reader).
+
 ## Rejected
 
 - **Built in until it needs changing, then ejected.** Quicker to install and

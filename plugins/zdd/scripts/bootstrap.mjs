@@ -39,6 +39,13 @@
 //       reads this. `--raise` writes `suiteChecks` up to the engine's count
 //       once every check passes — from then on the newer checks block in CI.
 //
+//   bootstrap.mjs unread [--mark=<id,id> --why=<reason>] [--forget=<id,id>] [--raise] [--root=<dir>] [--json]
+//       What the adapters saw and could not read (decision 0048 point 5), from
+//       the engine's `unread`. `--mark` keeps "this one is fine" in
+//       zdd/config.json's `unread.fine`, once, with the reason; `--forget`
+//       takes a mark away; `--raise` writes `unread.strict` once every item
+//       has an answer — from then on an unanswered item fails lint.
+//
 //   bootstrap.mjs upgrade [--plan] [--lock] [--drop=<ids>]
 //                         [--move-blessings=<token> [--kinds=<name>:<copy|extend>,…]]
 //                         [--to=vX.Y.Z] [--root=<dir>] [--json]
@@ -1171,6 +1178,10 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
       // Every check of the standard suite blocks from day one (decision
       // 0040): a fresh install has no adapter of its own that predates one.
       suiteChecks: SUITE_CHECK_COUNT,
+      // What an adapter could not read fails lint from day one (decision
+      // 0048): a fresh install has nothing a new check could turn red by
+      // surprise. An upgraded repo gets this from `unread --raise`.
+      unread: { strict: true, fine: [] },
     };
     if (!hasGit(root)) config.render = { storeChanges: false };
     // A fresh install never writes a retired name (the alias is for configs
@@ -1831,6 +1842,9 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
   }
   ledger.notes.push(...offerOptIns(root, config));
   if (own.length) ledger.notes.push(`this repo's own adapters (${own.join(", ")}): run \`bootstrap.mjs adapters\` — the standard suite on each one's fixture, and the steps of the adapter contract each is behind on (decision 0040); fix what it names through the extractor skill, then \`bootstrap.mjs adapters --raise\` (suiteChecks stays at ${config.suiteChecks ?? "0, every check warning,"} until then)`);
+  // New checks start as warnings (decision 0040 point 7): `strict` waits for
+  // every item to be answered, and the upgrade never writes it itself.
+  if (config.unread?.strict !== true) ledger.notes.push("what the adapters could not read (decision 0048): after `derive`, run `bootstrap.mjs unread` — each item is fixed in the adapter or marked fine once (`--mark=<id> --why=…`); then `bootstrap.mjs unread --raise`. lint only warns until then");
   ledger.notes.push("curated artifacts (glossary, ADRs, map pages, metadata) untouched — upgrade never writes them, save two mechanical moves named above: a map link to a record whose kind a release renamed, and blessings moved out of the map on --move-blessings");
   ledger.notes.push("if the engine pin moved: run `derive` and `render`, then `lint`, and commit the regenerated artifacts in the same PR");
   return { version, plan, ...ledgerOut(ledger), duplicates, blessingMoves };
@@ -3069,6 +3083,90 @@ export function narrateAdapters(r) {
   return out.map(printable).join("\n");
 }
 
+// What the adapters saw and could not read (decision 0048 point 5): the
+// engine's report, and the one writer of the marks and of `unread.strict`.
+// A mark is taken only for an item the adapters report right now, so a typed
+// id cannot excuse nothing, and it carries the item's text, so whoever reviews
+// the commit reads what was accepted.
+const MARK_ID = /^unread:[a-z][a-z0-9-]*\/[0-9a-f]{16}$/;
+const idList = (v, flag) => {
+  const ids = (typeof v === "string" ? v : "").split(",").map((s) => s.trim()).filter(Boolean);
+  if (!ids.length) throw new Error(`${flag} needs at least one item id`);
+  return [...new Set(ids)];
+};
+export function unreadItems(root, { mark = null, why = null, forget = null, raise = false } = {}) {
+  const cfg = readConfig(root);
+  if (cfg.state !== "valid") throw new Error(cfg.state === "invalid" ? `${cfg.error} — fix it first` : "no zdd/config.json here — bootstrap first");
+  let r;
+  try {
+    r = JSON.parse(runEngine(["unread", "--json", `--root=${root}`]));
+  } catch (e) {
+    throw new Error(`the unread report could not run — the engine said: ${String(e.stderr || e.message).trim().split(/\r?\n/).slice(-3).join(" ")}`);
+  }
+  const block = { ...(cfg.config.unread ?? {}) };
+  const marks = new Map((Array.isArray(block.fine) ? block.fine : []).map((m) => [m.id, m]));
+  const notes = [];
+  if (mark !== null) {
+    const reason = typeof why === "string" ? why.replace(/\s+/g, " ").trim() : "";
+    if (!reason) throw new Error('--mark needs --why="<reason>": a mark says why the item is fine, for whoever reads it next');
+    if (reason.length > 500) throw new Error("--why is over 500 characters");
+    const open = new Map([...r.open, ...r.fine].map((i) => [i.id, i]));
+    for (const id of idList(mark, "--mark")) {
+      if (!MARK_ID.test(id)) throw new Error(`'${printable(id).slice(0, 80)}' is not an unread item's id`);
+      const item = open.get(id);
+      if (!item) throw new Error(`no adapter reports ${id} now — run \`bootstrap.mjs unread\` for the list`);
+      marks.set(id, { id, what: item.what, why: reason });
+      notes.push(`zdd/config.json: ${id} marked fine — ${item.file}`);
+    }
+  }
+  if (forget !== null) {
+    for (const id of idList(forget, "--forget")) {
+      if (!marks.delete(id)) throw new Error(`zdd/config.json has no mark for '${printable(id).slice(0, 80)}'`);
+      notes.push(`zdd/config.json: the mark on ${id} removed`);
+    }
+  }
+  if (mark !== null || forget !== null) block.fine = [...marks.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const answered = (i) => marks.has(i.id);
+  const open = [...r.open, ...r.fine].filter((i) => !answered(i));
+  const stale = [...marks.keys()].filter((id) => ![...r.open, ...r.fine].some((i) => i.id === id));
+  let raised = false;
+  if (raise) {
+    if (open.length) throw new Error(`unread.strict stays off: ${open.length} item${open.length === 1 ? " has" : "s have"} no answer yet (${open.slice(0, 5).map((i) => i.id).join(", ")}${open.length > 5 ? ", …" : ""}) — fix the adapter or mark each one fine, then --raise again`);
+    if (block.strict !== true) {
+      block.strict = true;
+      if (block.fine === undefined) block.fine = [];
+      raised = true;
+      notes.push("zdd/config.json: unread.strict on — lint now fails on anything an adapter could not read that has no answer");
+    }
+  }
+  const ledger = new Ledger(root);
+  if (notes.length) {
+    ledger.overwrite("zdd/config.json", JSON.stringify({ ...cfg.config, unread: block }, null, 2) + "\n");
+    ledger.notes.push(...notes);
+    // The human index shows each item's answer, so it moves with a mark.
+    if (mark !== null || forget !== null) ledger.notes.push("run `render` and commit it with zdd/config.json: the human index shows each item's answer");
+  } else if (raise) ledger.kept.push("zdd/config.json");
+  const fine = [...r.open, ...r.fine].filter(answered).map((i) => ({ ...i, why: marks.get(i.id).why }));
+  return { strict: block.strict === true, open, fine, stale, raised, ...ledgerOut(ledger) };
+}
+
+export function narrateUnread(r) {
+  const out = [];
+  if (!r.open.length && !r.fine.length && !r.stale.length) out.push("No adapter reported anything it could not read.");
+  if (r.open.length) {
+    out.push(`${r.open.length} item${r.open.length === 1 ? "" : "s"} an adapter saw and could not read, with no answer yet. Ask about them one at a time: the fix is in the adapter (through the extractor skill, its tests red then green), or the item is marked fine, once, with why (\`--mark=<id> --why="…"\`):`);
+    for (const i of r.open) out.push(`  ${i.id}`, `    ${i.file}: ${i.what}`);
+  }
+  if (r.fine.length) {
+    out.push(`${r.fine.length} marked fine:`);
+    for (const i of r.fine) out.push(`  ${i.id}`, `    ${i.file}: ${i.what}`, `    why: ${i.why}`);
+  }
+  if (r.stale.length) out.push(`${r.stale.length} mark${r.stale.length === 1 ? "" : "s"} no item answers any more — remove with --forget=<id>: ${r.stale.join(", ")}`);
+  out.push(r.strict ? "unread.strict is on: lint fails on an item with no answer." : r.open.length ? "unread.strict is off: lint only warns. Once every item has an answer, --raise turns it on." : "Every item has an answer: run `bootstrap.mjs unread --raise` so that lint fails on the next one.");
+  if (r.notes?.length) out.push(...r.notes);
+  return out.map(printable).join("\n");
+}
+
 // Check it together (decision 0039 points 3 and 4). After the adapters are
 // attached and derive has run, the engine's coverage report names, per record
 // kind, what the records link to and which link to nothing; the developer
@@ -3565,6 +3663,9 @@ if (process.argv[1] && posixify(process.argv[1]).endsWith("/scripts/bootstrap.mj
     } else if (cmd === "adapters") {
       const r = adapters(root, { raise: flags.raise === true });
       process.stdout.write(flags.json ? JSON.stringify(r, null, 2) + "\n" : narrateAdapters(r) + "\n");
+    } else if (cmd === "unread") {
+      const r = unreadItems(root, { mark: flags.mark === undefined ? null : flags.mark, why: flags.why ?? null, forget: flags.forget === undefined ? null : flags.forget, raise: flags.raise === true });
+      process.stdout.write(flags.json ? JSON.stringify(r, null, 2) + "\n" : narrateUnread(r) + "\n");
     } else if (cmd === "preview") {
       const r = preview(root, String(flags.extractors ?? "").split(",").map((s) => s.trim()).filter(Boolean));
       process.stdout.write(flags.json ? JSON.stringify(r, null, 2) + "\n" : narratePreview(r) + "\n");
@@ -3575,7 +3676,7 @@ if (process.argv[1] && posixify(process.argv[1]).endsWith("/scripts/bootstrap.mj
       const s = releaseStatus(root, typeof flags.remote === "string" ? flags.remote : undefined, flags.home);
       process.stdout.write(flags.json ? JSON.stringify(s) + "\n" : printable(narrateReleaseStatus(s)) + "\n");
     } else {
-      process.stderr.write("Usage: bootstrap.mjs <preflight [--registry=<url>] [--github=<url>]|detect|estimate|apply --answers=<file>|check [--status|--done]|adapters [--raise]|preview --extractors=<a,b>|upgrade [--plan] [--lock] [--drop=<ids>] [--move-blessings=<token> [--kinds=<name>:<copy|extend>,…]] [--to=vX.Y.Z]|split-adrs [--plan] [--token=<token> --harness=<nums> --application=<nums>] [--dir=<rel> --index=<rel>]|release-status [--remote=<url>]> [--root=<dir>] [--date=YYYY-MM-DD] [--home=<dir>] [--json]\n");
+      process.stderr.write("Usage: bootstrap.mjs <preflight [--registry=<url>] [--github=<url>]|detect|estimate|apply --answers=<file>|check [--status|--done]|adapters [--raise]|unread [--mark=<ids> --why=<reason>] [--forget=<ids>] [--raise]|preview --extractors=<a,b>|upgrade [--plan] [--lock] [--drop=<ids>] [--move-blessings=<token> [--kinds=<name>:<copy|extend>,…]] [--to=vX.Y.Z]|split-adrs [--plan] [--token=<token> --harness=<nums> --application=<nums>] [--dir=<rel> --index=<rel>]|release-status [--remote=<url>]> [--root=<dir>] [--date=YYYY-MM-DD] [--home=<dir>] [--json]\n");
       process.exit(2);
     }
   } catch (e) {

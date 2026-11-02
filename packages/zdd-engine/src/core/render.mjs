@@ -38,6 +38,7 @@ import { loadBlessings, usersOf } from "./lib/blessings.mjs";
 import { importReaders, importersOf } from "./lib/importers.mjs";
 import { selectedModules } from "./derive.mjs";
 import { MAX_STORE_FILE_BYTES } from "./lib/walk-markdown.mjs";
+import { UNREAD_KIND, itemOf, unreadConfig, unreadReport } from "./lib/unread.mjs";
 import { slugify } from "./lib/slug.mjs";
 import { loadConfig, resolveViewer, resolveNonAreaTags, validateRepoBase, absentStoreNotes } from "./lib/config.mjs";
 import { loadViewer, DEFAULT_VIEWER } from "./viewers/index.mjs";
@@ -46,7 +47,7 @@ import { loadViewer, DEFAULT_VIEWER } from "./viewers/index.mjs";
 // paths, the bundle folder node ids are relative to (the zdd/ folder), the
 // display name, the GitHub base URL for source links, and the base branch.
 let REPO, CONFIG, PATHS, BUNDLE, SEMANTIC, BLESSINGS, DERIVED, OUT_HTML, OUT_INDEX, OUT_ADR_INDEX, OUT_BLESSING_INDEX, OUT_GRAPH;
-let BUNDLE_NAME, REPO_BASE, BASE_BRANCH, VIEWER, NON_AREA_TAGS, AGENT_INDEX;
+let BUNDLE_NAME, REPO_BASE, BASE_BRANCH, VIEWER, NON_AREA_TAGS, AGENT_INDEX, UNREAD;
 const RECORDS_BY_NODE = new Map(); // node id -> the derived record behind a metadata concept
 
 // Record kind -> the graph's display type. These names are the graph
@@ -345,9 +346,14 @@ function buildConcepts() {
 
   // Derived layer: node id = bundle-relative path minus .json.
   const derivedRecords = [];
+  const unread = []; // what an adapter could not read (decision 0048): for the viewer, never a graph node
   const idOfRef = new Map(); // record id ("table:env/journeys") -> node id
   for (const path of walk(DERIVED, ".json")) {
     const record = JSON.parse(readFileSync(path, "utf8"));
+    if (record.kind === UNREAD_KIND) {
+      unread.push(itemOf(record));
+      continue;
+    }
     const nodeId = posixify(relative(BUNDLE, path)).replace(/\.json$/, "");
     derivedRecords.push({ record, nodeId });
     idOfRef.set(record.id, nodeId);
@@ -527,7 +533,7 @@ function buildConcepts() {
     process.exit(1);
   }
 
-  return { concepts, features, appWarnings };
+  return { concepts, features, appWarnings, unread };
 }
 
 // ---------------------------------------------------------------------------
@@ -751,7 +757,7 @@ export function resolveAgentIndexOptions(config) {
 
 // ---------------------------------------------------------------------------
 async function render() {
-  const { concepts, features, appWarnings } = buildConcepts();
+  const { concepts, features, appWarnings, unread } = buildConcepts();
   for (const w of appWarnings) console.error(`WARNING: ${w}`);
   const docs = loadDocs();
   const changed = computeStoreChanges(docs.glossary);
@@ -801,7 +807,12 @@ async function render() {
   // An ADR outside zdd/adr — a harness ADR, or a custom adrDir's — carries
   // its folder (`dir`), so the viewer names its source and resolves its links
   // from there (CR-033); one in zdd/adr carries nothing new.
-  const viewerDocs = { ...docs, adrs: docs.adrs.map(({ num, file, title, body, dir }) => (dir !== "zdd/adr" ? { num, file, title, body, dir } : { num, file, title, body })), blessings: blessingsForViewer };
+  // Unread items ride along ready-read too (decision 0048), each with its
+  // answer: unanswered first. Set only when there are some, so a repo with
+  // none keeps its bytes.
+  const unreadView = unreadReport(unread, UNREAD);
+  const unreadForViewer = [...unreadView.open.map((i) => ({ ...i, why: null })), ...unreadView.fine];
+  const viewerDocs = { ...docs, adrs: docs.adrs.map(({ num, file, title, body, dir }) => (dir !== "zdd/adr" ? { num, file, title, body, dir } : { num, file, title, body })), blessings: blessingsForViewer, ...(unreadForViewer.length ? { unread: unreadForViewer } : {}) };
   const html = viewer.render({ graph, docs: viewerDocs, changed, options, bundleName: BUNDLE_NAME, repoBase: REPO_BASE });
   if (typeof html !== "string") {
     console.error(`Viewer '${VIEWER.name}' must return the human index as a string`);
@@ -895,6 +906,11 @@ export async function run(args) {
   AGENT_INDEX = resolveAgentIndexOptions(CONFIG);
   if (AGENT_INDEX.error) {
     console.error(AGENT_INDEX.error);
+    process.exit(1);
+  }
+  UNREAD = unreadConfig(CONFIG);
+  if (UNREAD.error) {
+    console.error(UNREAD.error);
     process.exit(1);
   }
   // A missing store dir renders as empty; name it when the bundle is

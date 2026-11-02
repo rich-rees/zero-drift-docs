@@ -53,6 +53,12 @@
 //    too (1.3.0). With `claims.strict` (decision 0012) all three FAIL: an
 //    unclaimed record not in `claims.allowUnclaimed`, an allow-list id that
 //    names no claimable record, and a record claimed by more than one slice.
+// 4d. Unread items (decision 0048 point 5): what an adapter saw and could not
+//    read, from the `unread` records derive wrote. An item with no answer is
+//    a WARNING until `unread.strict`, then a FAILURE: the adapter is fixed, or
+//    the item is marked fine once in `unread.fine`. A mark nothing answers any
+//    more is a WARNING. New in a release, so it starts as a warning (0035,
+//    0040 point 7).
 // 5. Stray root glossary (1.3.1): a root GLOSSARY.md or CONTEXT.md beside
 //    paths.glossary — the file Matt Pocock's skills read and create when
 //    docs/agents/domain.md does not redirect them — is a WARNING, never a
@@ -69,6 +75,7 @@ import { adrSets, listAdrFiles } from "./lib/adr-sets.mjs";
 import { walkMarkdown, readBounded, MAX_STORE_FILE_BYTES } from "./lib/walk-markdown.mjs";
 import { unclaimedRecords, CLAIMABLE_KINDS, OPT_IN_CLAIMABLE_KINDS } from "./lib/claims.mjs";
 import { recordsInLog, LOG_FORMAT, printable as printableAll } from "./lib/zdd-record.mjs";
+import { unreadConfig, unreadReport, MARK_ROUTE, MAX_PRINTED } from "./lib/unread.mjs";
 
 // The commits this branch adds over the base (origin/<baseBranch>, then
 // <baseBranch>), each with its ZDD record parsed: { commits } or { note }.
@@ -131,6 +138,11 @@ export function run(args) {
       : null;
   if (claimsError) {
     console.error(`zdd/config.json: ${claimsError}`);
+    process.exit(1);
+  }
+  const unreadCfg = unreadConfig(config);
+  if (unreadCfg.error) {
+    console.error(unreadCfg.error);
     process.exit(1);
   }
   const STRICT = claimsCfg.strict === true;
@@ -416,7 +428,7 @@ if (args.includes("--merge")) {
 // Read after the blocking lints so a failure above is not buried under the
 // list. Absent metadata (greenfield, or derive not yet run) is an empty
 // inventory: nothing to claim, no line printed.
-const { total, records, unclaimed, doubleClaimed, skipped, unplaced, unknownTasks } = unclaimedRecords({ metadataDir: METADATA_DIR, mapDir: MAP_DIR, bundleDir });
+const { total, records, unclaimed, doubleClaimed, skipped, unplaced, unknownTasks, unread } = unclaimedRecords({ metadataDir: METADATA_DIR, mapDir: MAP_DIR, bundleDir });
 // Every adopter-controlled path is printable before it reaches the log — a
 // control character in a filename cannot forge a line (1.3.0 CR-032).
 const files = (list) => list.map(printable).join(", ");
@@ -480,6 +492,25 @@ if (unknownTasks.length) {
   for (const j of unknownTasks) {
     const where = j.reader ? `extractorOptions[${JSON.stringify(j.reader)}].modes[${JSON.stringify(j.title)}]` : "the reading adapter's modes option";
     console.error(`  ${printable(j.id)}  (from ${printable(j.manifest)}; ${printable(j.file)}) — set ${printable(where)}`);
+  }
+}
+
+// ---- 4d. What an adapter saw and could not read (decision 0048) ----
+// Read from the records derive wrote; `derive --check` keeps them true.
+{
+  const report = unreadReport(unread, unreadCfg);
+  const said = (i) => `${printable(i.id)} (${printable(i.file)}): ${printable(i.what)}`;
+  if (unreadCfg.strict) {
+    // A strict pass means every item was read (as claims.strict does).
+    for (const s of skipped.filter((f) => f.record && /\/unread(\/|$)/.test(f.file))) problems.push(`unread.strict: ${printable(s.file)} could not be read (${s.reason}) — an unread item there has no known answer`);
+    for (const i of report.open) problems.push(`${said(i)} — ${printable(i.adapter)} saw this and could not read it; fix the adapter, or mark it fine once (${MARK_ROUTE})`);
+  } else if (report.open.length) {
+    console.error(`WARNING: ${report.open.length} item${report.open.length === 1 ? "" : "s"} an adapter saw and could not read, with no answer yet — fix the adapter, or mark each one fine once (${MARK_ROUTE}); a failure once unread.strict is on:`);
+    for (const i of report.open.slice(0, MAX_PRINTED)) console.error(`  ${said(i)}`);
+    if (report.open.length > MAX_PRINTED) console.error(`  … and ${report.open.length - MAX_PRINTED} more`);
+  }
+  if (report.stale.length) {
+    console.error(`WARNING: ${report.stale.length} unread.fine mark${report.stale.length === 1 ? "" : "s"} no item answers any more — the adapter was fixed or the item changed; remove with \`bootstrap.mjs unread --forget=<id>\`: ${report.stale.slice(0, 10).map(printable).join(", ")}${report.stale.length > 10 ? `, +${report.stale.length - 10} more` : ""}`);
   }
 }
 

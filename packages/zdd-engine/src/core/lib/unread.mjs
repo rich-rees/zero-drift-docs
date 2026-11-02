@@ -1,0 +1,141 @@
+// What an adapter saw and could not read (decision 0048 point 5). The adapter
+// returns `unread: [{ file, what }]`; the core turns each item into a record
+// of kind `unread` under metadataDir, so `derive --check` keeps the list
+// honest, lint and render read it from the same place, and a repo with
+// nothing unread gets no new file. The records are not adapters' records:
+// they are neither nodes in the graph nor claimable.
+//
+// An item is answered by fixing the adapter (it stops reporting it) or by a
+// mark in zdd/config.json, kept once and read by its id:
+//
+//   "unread": { "strict": true, "fine": [{ "id": "unread:<adapter>/<hash>", "what": "…", "why": "…" }] }
+//
+// `strict` is what makes an open item fail lint. A release adds the check as
+// a warning (decisions 0035 and 0040 point 7): a fresh install writes
+// `strict: true`, and an upgraded repo gets it from `bootstrap.mjs unread
+// --raise` once every item is answered. Only an ABSENT block defaults; a
+// misspelt key is an error, so enforcement is never silently off.
+//
+// An id is the adapter, the file and the text, hashed: no line number, so a
+// mark survives the code around the item moving and lapses when the item
+// itself changes. Stack-free like everything under core/.
+
+import { createHash } from "node:crypto";
+
+export const UNREAD_KIND = "unread";
+export const MAX_WHAT = 300; // an item's text, as shown; the id hashes it whole
+export const MAX_WHY = 500;
+export const MAX_MARKS = 10_000;
+export const MAX_ID = 512;
+// Lines one run prints: `unread` lists the rest, and so does the human index.
+export const MAX_PRINTED = 500;
+
+const UNREAD_KEYS = ["strict", "fine"];
+const MARK_KEYS = ["id", "what", "why"];
+
+// One line of plain text, whatever the source held. C0, DEL and C1 controls
+// go, so a statement cannot forge a line in a CI log.
+const oneLine = (s) => s.replace(/[\x00-\x1f\x7f-\x9f]+/g, " ").replace(/\s+/g, " ").trim();
+const cut = (s, n) => {
+  const chars = Array.from(s); // never through a surrogate pair
+  return chars.length > n ? `${chars.slice(0, n - 1).join("")}…` : s;
+};
+const brief = (v) => cut(oneLine(String(v)), 60);
+
+// The items one adapter returned, as records. An item's own extra keys are
+// ignored, so the contract can grow by optional fields. Returns { records }
+// or { error }.
+export function unreadRecords(name, list) {
+  if (!Array.isArray(list)) return { error: `Extractor '${name}': unread must be an array of { file, what }` };
+  const seen = new Map();
+  for (const item of list) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return { error: `Extractor '${name}': every unread item must be an object { file, what }` };
+    const { file, what } = item;
+    if (typeof file !== "string" || !file || /[\\\x00-\x1f\x7f]/.test(file) || file.startsWith("/") || /^[A-Za-z]:/.test(file) || file.split("/").includes("..")) {
+      return { error: `Extractor '${name}': unread item file ${JSON.stringify(brief(file))} must be repo-relative POSIX (no '..')` };
+    }
+    const text = typeof what === "string" ? oneLine(what) : "";
+    if (!text) return { error: `Extractor '${name}': unread item in ${brief(file)} has no 'what' — say what was seen and not read` };
+    // One statement written twice in a file is one item, one answer.
+    const hash = createHash("sha256").update(`${name}\0${file}\0${text}`).digest("hex").slice(0, 16);
+    if (seen.has(hash)) continue;
+    seen.set(hash, {
+      kind: UNREAD_KIND,
+      id: `${UNREAD_KIND}:${name}/${hash}`,
+      title: cut(text, MAX_WHAT),
+      description: "",
+      resource: [file],
+      refs: [],
+      facts: { adapter: name },
+      filename: `${name}--${hash}.json`,
+    });
+  }
+  return { records: [...seen.values()] };
+}
+
+// A record as lint, render and the report read it. Metadata can be edited by
+// hand, so nothing about its shape is taken on trust.
+export function itemOf(record) {
+  const file = Array.isArray(record.resource) ? String(record.resource[0] ?? "") : "";
+  return { id: String(record.id), adapter: String(record.facts?.adapter ?? ""), file, what: String(record.title ?? "") };
+}
+
+// The `unread` block of the config: { strict, fine: Map(id -> { what, why }) }
+// or { error }. Every command that reads the block reads it through here.
+export function unreadConfig(config) {
+  const u = config.unread === undefined ? {} : config.unread;
+  const fail = (msg) => ({ error: `zdd/config.json: ${msg}` });
+  if (u === null || typeof u !== "object" || Array.isArray(u)) return fail("'unread' must be an object");
+  const unknown = Object.keys(u).find((k) => !UNREAD_KEYS.includes(k));
+  if (unknown !== undefined) return fail(`'unread' has an unknown key '${brief(unknown)}' (known: ${UNREAD_KEYS.join(", ")})`);
+  if (u.strict !== undefined && typeof u.strict !== "boolean") return fail("'unread.strict' must be true or false");
+  const list = u.fine === undefined ? [] : u.fine;
+  if (!Array.isArray(list)) return fail("'unread.fine' must be an array of { id, what, why }");
+  if (list.length > MAX_MARKS) return fail(`'unread.fine' lists more than ${MAX_MARKS} marks`);
+  const fine = new Map();
+  for (const m of list) {
+    if (!m || typeof m !== "object" || Array.isArray(m)) return fail("every 'unread.fine' entry must be an object { id, what, why }");
+    const extra = Object.keys(m).find((k) => !MARK_KEYS.includes(k));
+    if (extra !== undefined) return fail(`an 'unread.fine' entry has an unknown key '${brief(extra)}' (known: ${MARK_KEYS.join(", ")})`);
+    if (typeof m.id !== "string" || !m.id.startsWith(`${UNREAD_KIND}:`) || m.id.length > MAX_ID) return fail(`'unread.fine' id ${JSON.stringify(brief(m.id))} is not an unread item's id ("${UNREAD_KIND}:<adapter>/<hash>")`);
+    if (m.what !== undefined && typeof m.what !== "string") return fail(`'unread.fine' entry '${brief(m.id)}': 'what' must be a string`);
+    if (typeof m.why !== "string" || !m.why.trim()) return fail(`'unread.fine' entry '${brief(m.id)}' gives no 'why' — a mark says why the item is fine, for whoever reads it next`);
+    if (m.why.length > MAX_WHY) return fail(`'unread.fine' entry '${brief(m.id)}': 'why' is over ${MAX_WHY} characters`);
+    if (fine.has(m.id)) return fail(`'unread.fine' lists '${brief(m.id)}' twice`);
+    fine.set(m.id, { what: m.what ?? "", why: m.why });
+  }
+  return { strict: u.strict === true, fine };
+}
+
+const byPlace = (a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : a.what < b.what ? -1 : a.what > b.what ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+
+// Items against marks. `open` has no answer yet; `fine` carries each mark's
+// reason; `stale` is a mark no item answers any more (the adapter was fixed,
+// or the statement changed). A stale mark excuses nothing, so it warns and
+// never fails: fixing an adapter must not turn CI red.
+export function unreadReport(items, { strict, fine }) {
+  const sorted = [...items].sort(byPlace);
+  const ids = new Set(sorted.map((i) => i.id));
+  return {
+    strict,
+    open: sorted.filter((i) => !fine.has(i.id)),
+    fine: sorted.filter((i) => fine.has(i.id)).map((i) => ({ ...i, why: oneLine(fine.get(i.id).why) })),
+    stale: [...fine.keys()].filter((id) => !ids.has(id)).sort(),
+  };
+}
+
+// The lines every derive prints, unanswered first, and bounded: a repo with
+// thousands of items must not lose the rest of the log to a piped stderr.
+export function unreadLines(report) {
+  const open = report.open.map((i) => `UNREAD ${i.id}  ${i.file}: ${i.what}`);
+  const fine = report.fine.map((i) => `UNREAD ${i.id}  ${i.file}: ${i.what} (marked fine: ${cut(i.why, 120)})`);
+  const all = [...open, ...fine];
+  if (!all.length) return [];
+  const lines = all.slice(0, MAX_PRINTED);
+  if (all.length > lines.length) lines.push(`… and ${all.length - lines.length} more — the engine's \`unread\` lists them all, and so does the human index`);
+  if (report.open.length) lines.push(`${report.open.length} item${report.open.length === 1 ? "" : "s"} an adapter saw and could not read, with no answer yet — fix the adapter, or mark each one fine once (${MARK_ROUTE}). ${report.strict ? "lint fails until then." : "lint warns for now; `unread.strict` makes it fail."}`);
+  return lines;
+}
+
+// How a person answers, said wherever an open item is named.
+export const MARK_ROUTE = `the plugin's \`bootstrap.mjs unread --mark=<id> --why="…"\`, kept in zdd/config.json's unread.fine`;

@@ -6,6 +6,9 @@
 //   zdd-engine derive --check     # exit 1 if metadata/ is stale
 //   zdd-engine derive --verbose   # extractor diagnostics to stderr
 //
+// What an adapter saw and could not read prints on every run, --verbose or
+// not (decision 0048 point 5, lib/unread.mjs).
+//
 // Deterministic: same source bytes in, byte-identical metadata/*.json out (the
 // blocking CI check relies on this). No dependencies beyond Node stdlib, no
 // LLM anywhere. Nothing in this file may be stack- or project-specific — stack
@@ -30,6 +33,7 @@ import { makeExtractorIo } from "./lib/extractor-io.mjs";
 import { gitIgnoredPredicate } from "./lib/ignored.mjs";
 import { catalogue } from "./lib/catalogue.mjs";
 import { judgeContract } from "./lib/contract.mjs";
+import { UNREAD_KIND, unreadRecords, unreadConfig, unreadReport, unreadLines, itemOf } from "./lib/unread.mjs";
 
 const NAME_RE = /^[a-z][a-z0-9-]*$/;
 
@@ -296,6 +300,7 @@ export async function deriveRecords({ repoRoot, config, contract }) {
   const warnings = [];
   const configDiagnostics = selection.diagnostics;
   let records = [];
+  const unread = []; // the core's own records: kept apart from what adapters minted
   const factsOrder = {};
   // What git ignores is never source (pick 1): asked once, shared by every
   // extractor's io.
@@ -329,8 +334,17 @@ export async function deriveRecords({ repoRoot, config, contract }) {
       fail(`Extractor '${name}' failed: ${e.message}`);
     }
     if (!out || !Array.isArray(out.records) || !Array.isArray(out.diagnostics)) fail(`Extractor '${name}' must return { records: [], diagnostics: [] }`);
+    // `unread` is the core's kind: an adapter says it through its own list.
+    if (out.records.some((r) => r?.kind === UNREAD_KIND)) fail(`Extractor '${name}' minted a record of kind '${UNREAD_KIND}' — that kind is the core's; return the item in the \`unread\` list instead (decision 0048)`);
     records.push(...out.records);
     diagnostics.push(...out.diagnostics.map((d) => `[${name}] ${d}`));
+    // What it saw and could not read (decision 0048 point 5). Optional: an
+    // adapter without the list keeps working, with nothing said.
+    if (out.unread !== undefined) {
+      const minted = unreadRecords(name, out.unread);
+      if (minted.error) fail(minted.error);
+      unread.push(...minted.records);
+    }
     // An optional third channel (2.1.0): warnings print on EVERY derive,
     // not only under --verbose — for what the branch that caused it should
     // hear (an environment name no declared service covers). Still never
@@ -358,7 +372,8 @@ export async function deriveRecords({ repoRoot, config, contract }) {
   warnings.push(...resolved.warnings.map((w) => `WARNING [data-access]: ${w}`));
   validateRecords(records);
   records.sort((a, b) => (a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : a.id < b.id ? -1 : 1));
-  return { records, factsOrder, diagnostics, configDiagnostics, warnings };
+  unread.sort((a, b) => (a.id < b.id ? -1 : 1));
+  return { records, unread, factsOrder, diagnostics, configDiagnostics, warnings };
 }
 
 export async function run(args) {
@@ -373,16 +388,20 @@ export async function run(args) {
   if (!metadataDir.startsWith(REPO + sep)) fail(`metadataDir '${metadataRel}' resolves outside the repo`);
   assertMetadataDirContained(REPO, metadataDir, metadataRel);
 
-  const { records, factsOrder, diagnostics, configDiagnostics, warnings } = await deriveRecords({ repoRoot: REPO, config });
+  // Before an adapter runs: a malformed block is the one thing said.
+  const unreadCfg = unreadConfig(config);
+  if (unreadCfg.error) fail(unreadCfg.error);
+  const { records, unread, factsOrder, diagnostics, configDiagnostics, warnings } = await deriveRecords({ repoRoot: REPO, config });
   // Config-level notes (deprecations) and extractor warnings always print;
   // extractor diagnostics are opt-in noise.
   for (const d of configDiagnostics) console.error(d);
   for (const w of warnings) console.error(w);
+  for (const line of unreadLines(unreadReport(unread.map(itemOf), unreadCfg))) console.error(line);
   if (VERBOSE) for (const d of diagnostics) console.error(d);
 
   const expected = new Map(); // rel path under metadataDir -> content
   try {
-    for (const r of records) expected.set(`${r.kind}/${r.filename}`, stableStringify(r, factsOrder[r.kind] ?? []));
+    for (const r of [...records, ...unread]) expected.set(`${r.kind}/${r.filename}`, stableStringify(r, factsOrder[r.kind] ?? []));
   } catch (e) {
     fail(e.message);
   }
@@ -419,7 +438,7 @@ export async function run(args) {
           `\nRun \`npx -y @rich-rees/zdd@${typeof config.release === "string" ? config.release : "<release>"} derive\` and commit the result.`,
       );
     }
-    console.log(`codebase metadata in sync (${records.length} records)`);
+    console.log(`codebase metadata in sync (${records.length} records${unread.length ? `, ${unread.length} unread` : ""})`);
   } else {
     // A link AT a record path (or a linked kind dir above it) would be
     // followed by writeFileSync — scanMetadata skips links, but skipping is
@@ -449,6 +468,6 @@ export async function run(args) {
     for (const r of records) byKind[r.kind] = (byKind[r.kind] ?? 0) + 1;
     const plural = (k) => (k.endsWith("ss") ? `${k}es` : `${k}s`); // data-access -> data-accesses; any other kind as before
     const summary = Object.entries(byKind).map(([k, n]) => `${n} ${plural(k)}`).join(", ") || "nothing to inventory";
-    console.log(`Wrote ${records.length} records (${summary}) -> ${metadataRel}`);
+    console.log(`Wrote ${records.length} records (${summary})${unread.length ? ` and ${unread.length} unread` : ""} -> ${metadataRel}`);
   }
 }

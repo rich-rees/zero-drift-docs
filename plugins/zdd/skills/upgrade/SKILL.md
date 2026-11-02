@@ -265,6 +265,33 @@ Done when `adapters` says every adapter passes and `--raise` has run, or
 the developer has chosen to leave a warning-only check for later (say so in
 the commit's record).
 
+## Step 4c — what the adapters could not read (decision 0048)
+
+Skip this step when the plan has no note about it (`unread.strict` is
+already on). Otherwise, after `derive`:
+
+```
+node "$PLUGIN/scripts/bootstrap.mjs" unread
+```
+
+It lists what the adapters saw and could not read. Lint only warns about
+these for now, so nothing turns red by surprise. Take them **one at a time**,
+in plain words, with your recommendation: the adapter is fixed through the
+**extractor** skill (tests red, then green), or the item is marked fine,
+once, with the reason (`unread --mark=<id> --why="…"`; ids may be comma
+separated when one reason covers several). Then:
+
+```
+node "$PLUGIN/scripts/bootstrap.mjs" unread --raise
+```
+
+`--raise` writes `unread.strict`, so a new item fails lint from now on; it
+refuses while any item has no answer. Marks go in `zdd/config.json`, and the
+human index shows them: run `render` before the commit.
+
+Done when `--raise` has run, or the developer has chosen to leave items for
+later (say so in the commit's record).
+
 ## Step 5 — regenerate, check, and list the commit
 
 Run the preflight once more — the engine pin may have moved, and a new pin is

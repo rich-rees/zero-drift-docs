@@ -161,8 +161,11 @@ catalogue says whether it fits, with its evidence, and the engine runs them
   in the answer set under the key the line names (`subscribeCalls`).
 
   Then read the **coverage, part by part** block aloud: the parts of the app
-  (routes, screens, components, database access, background tasks, external
-  services), which adapter covers each, and the ones **not covered**. For
+  (routes, screens, components, schema, queries, background tasks, external
+  services), which adapter covers each, and the ones **not covered**. Schema
+  (the tables, read from migrations or models) and queries (the code that
+  reaches them) are two parts: a repo with one covered is told about the
+  other. For
   each part not covered, ask whether the app has it, and say plainly what
   happens: "Your routes are FastAPI, and I have an adapter for that. Your
   database layer is Prisma, and I don't yet, so I'll build a `prisma`
@@ -401,6 +404,26 @@ writes all of them. When an uncovered part is built through the extractor
 skill, its last test runs the suite; the CI workflow runs it again on every
 pull request (the engine's `suite`). With no adapter of the repo's own, the
 step says so and passes.
+
+### What the adapters could not read
+
+`derive` prints an `UNREAD` line for everything an adapter saw and could not
+read (decision 0048), on every run. A fresh install writes `unread.strict`,
+so lint fails on any item with no answer. Run:
+
+```
+node "$PLUGIN/scripts/bootstrap.mjs" unread
+```
+
+Take the items **one at a time**, in plain words, with your recommendation.
+Each is either fixed (the adapter learns to read it, through the extractor
+skill, its tests red then green) or marked fine, once, with the reason:
+
+```
+node "$PLUGIN/scripts/bootstrap.mjs" unread --mark=<id> --why="<why this is fine>"
+```
+
+The mark is kept in `zdd/config.json`; run `render` and commit both.
 
 ## Step 6 — the backfill, offered once (never default)
 

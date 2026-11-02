@@ -23,6 +23,7 @@ npx @rich-rees/zdd freshness [--base <ref>]
 npx @rich-rees/zdd tally [--since <ref|date>] [--json]
 npx @rich-rees/zdd detect [--root=<dir>]
 npx @rich-rees/zdd coverage [--json]
+npx @rich-rees/zdd unread [--json]
 npx @rich-rees/zdd preview --extractors=<a,b,…> [--out=<empty dir>] [--json]
 npx @rich-rees/zdd suite [--extractors=<a,b>] [--json]
 npx @rich-rees/zdd contract [--json]
@@ -101,6 +102,12 @@ npx @rich-rees/zdd contract [--json]
   memory (writes nothing) and prints, per record kind, the count, what its
   records link to, and by name the ones that link to nothing and the ones
   nothing links to.
+- **unread** — what the adapters saw and could not read (decision 0048): derives
+  in memory (writes nothing) and lists each item with its answer. `derive`
+  prints the same items on every run, and writes them as records of kind
+  `unread` under the metadata folder, which is what `lint` and the human index
+  read. An item with no answer warns in `lint`, and fails it under
+  `unread.strict`.
 - **preview** — for a repo with no code yet: copies the named adapters'
   `example/` folders into a new temporary folder outside the repo, derives
   and renders there, and prints where the human index landed.
@@ -138,6 +145,8 @@ version:
 | `claims.strictKinds` | `[]` | The opt-in kinds (`component`, `background-task`, `external-service`) that `claims.strict` also fails on; unlisted they warn (decision 0017) |
 | `localExtractorDir` | — | Repo-relative folder of repo-local extractors (`<name>.mjs` or `<name>/index.mjs`) — the one place config may point at code |
 | `suiteChecks` | absent (every check warns) | How many of the standard suite's checks block for the repo's own adapters, 0 to 5 (decision 0040). Bootstrap writes 5 at a fresh install; "upgrade ZDD" raises it at once only where the repo has no adapter of its own, and otherwise `bootstrap.mjs adapters --raise` does, once they pass |
+| `unread.strict` | `false` | `true`: `lint` fails on anything an adapter saw and could not read that has no answer; off, it warns (decision 0048). Bootstrap writes `true` at a fresh install; `bootstrap.mjs unread --raise` does on an upgraded repo, once every item has an answer |
+| `unread.fine` | `[]` | Items marked fine once, each `{ id, what, why }` (`bootstrap.mjs unread --mark` writes them). A mark survives the code around the item moving and lapses when the item changes; a mark no item answers warns |
 | `adapter` / `adapterOptions` | *(deprecated)* | The pre-1.0 single adapter; `nextjs-supabase` still expands to `[supabase, supabase-js, nextjs]` with a deprecation note |
 | `name` | `"Codebase"` | Display name for the indexes |
 | `repoBase` | `""` | GitHub `/tree/<branch>/` URL prefix for source links in the human index — http(s) only, refused otherwise |
@@ -161,7 +170,7 @@ git history only. `test/determinism.test.mjs` is the guard; the blocking
 ## Extractors
 
 An extractor is one module implementing `derive({ repoRoot, options, io })` →
-`{ records, diagnostics, warnings? }` plus a `FACTS_KEY_ORDER` map, keyed to **one
+`{ records, diagnostics, warnings?, unread? }` plus a `FACTS_KEY_ORDER` map, keyed to **one
 convention** (see `src/adapters/`). A record's `refs` may carry verbs
 through `facts.edges` (`uses`, `usedBy`, `calls`, `subscribes`, `reads`,
 `writes`, `dependsOn`, `belongsTo` — decision 0016), which the graph keeps as
@@ -206,6 +215,7 @@ own adapters are behind on.
 | data access | 1 | no | `?code:<file>#<function>` refs, and `data-access` records naming the tables a function reaches (decision 0037) |
 | typed edges | 1 | no | `facts.edges`, a verb for a ref (decision 0016) |
 | `warnings` | 1 | no | a list printed on every derive |
+| `unread` | 1 | no | a list of `{ file, what }`, what it saw and could not read (decision 0048) |
 | detection | 1 | no | `DETECTION` and `detect({ scan, proposed })` (decision 0039; every catalogue adapter has it) |
 
 ## Viewers

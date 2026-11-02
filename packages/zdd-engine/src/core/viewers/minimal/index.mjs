@@ -1,8 +1,8 @@
 // `minimal` viewer — the worked example for viewer authors and the proof that
 // the viewer seam holds: no libraries, no script, one static page listing the
-// graph's nodes (grouped by type) and edges, each node linking to its source.
-// Everything a viewer needs is in the `graph` argument; this file never reads
-// engine internals. Text is HTML-escaped on the way in — the graph carries
+// graph's nodes (grouped by type) and edges, each node linking to its source,
+// and whatever the adapters could not read. Everything a viewer needs is in
+// its arguments; this file never reads engine internals. Text is HTML-escaped on the way in — the graph carries
 // source-derived strings (comments, docstrings), and the viewer contract says
 // they may never reach the page unescaped (CR-007).
 
@@ -22,7 +22,7 @@ function href(repoBase, resource) {
   return (isFile ? repoBase.replace("/tree/", "/blob/") : repoBase) + path;
 }
 
-export function render({ graph, bundleName, repoBase }) {
+export function render({ graph, docs, bundleName, repoBase }) {
   const byType = new Map();
   for (const n of graph.nodes) {
     if (!byType.has(n.type)) byType.set(n.type, []);
@@ -44,6 +44,17 @@ export function render({ graph, bundleName, repoBase }) {
   lines.push(
     `<p class="muted">Minimal viewer — ${graph.nodes.length} nodes, ${graph.edges.length} edges${claimable.length ? `, ${unclaimed} of ${claimable.length} records unclaimed by any feature` : ""}. Generated from zdd/graph.json (schema ${esc(graph.schema)}); do not edit.</p>`,
   );
+  // What the adapters saw and could not read (decision 0048), above the rest.
+  const unread = docs?.unread ?? [];
+  if (unread.length) {
+    lines.push(`<h2>Unread <span class="muted">(${unread.filter((i) => i.why === null).length} open of ${unread.length})</span></h2>`, "<ul>");
+    for (const i of unread) {
+      const target = href(repoBase, i.file);
+      const link = target === null ? esc(i.file) : `<a href="${esc(target)}">${esc(i.file)}</a>`;
+      lines.push(`<li><code>${esc(i.what)}</code> — ${link} <span class="muted">${i.why === null ? "not answered" : `marked fine: ${esc(i.why)}`}</span></li>`);
+    }
+    lines.push("</ul>");
+  }
   for (const [type, nodes] of [...byType.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
     lines.push(`<h2>${esc(type)} <span class="muted">(${nodes.length})</span></h2>`, "<ul>");
     for (const n of [...nodes].sort((a, b) => (a.title < b.title ? -1 : a.title > b.title ? 1 : 0))) {

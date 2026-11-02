@@ -78,7 +78,7 @@ function toBundle(graph, docs, changed, options, repoBase) {
     viewer: options,
     // Glossary + ADR corpus embedded whole: the hosted wiki's audience has no
     // checkout, so the stores ride along as read-only projections.
-    docs: { glossary: docs.glossary, adrs: docs.adrs, blessings: docs.blessings ?? [], changed },
+    docs: { glossary: docs.glossary, adrs: docs.adrs, blessings: docs.blessings ?? [], changed, ...(docs.unread?.length ? { unread: docs.unread } : {}) },
   };
 }
 
@@ -97,11 +97,21 @@ function unclaimedHeader(graph) {
   return `    <span id="unclaimed" class="muted" title="Routes, tables, functions and surfaces no feature slice links — the engine&#39;s lint lists them">${unclaimed} of ${claimable.length} unclaimed</span>`;
 }
 
+// What the adapters could not read (decision 0048): a header button only when
+// there is something to show, with the count of unanswered items on its face.
+function unreadButton(docs) {
+  const items = docs.unread ?? [];
+  if (!items.length) return "";
+  const open = items.filter((i) => i.why === null).length;
+  return `    <button id="btn-unread"${open ? ' class="unread-open"' : ""} title="What the adapters saw and could not read — each is fixed in the adapter or marked fine once">Unread: ${open} open</button>\n`;
+}
+
 export function render({ graph, docs, changed, options, bundleName, repoBase }) {
   const bundle = toBundle(graph, docs, changed, options, repoBase);
   const read = (...p) => readFileSync(join(HERE, ...p), "utf8");
   return read("viz.html")
     .replace("__UNCLAIMED__", () => unclaimedHeader(graph))
+    .replace("__UNREAD__\n", () => unreadButton(docs))
     .replace("/*__CYTOSCAPE_JS__*/", () => read("vendor", "cytoscape.min.js"))
     .replace("/*__MARKED_JS__*/", () => read("vendor", "marked.min.js"))
     .replace("/*__SAFE_MARKED_JS__*/", () => read("safe-marked.js"))

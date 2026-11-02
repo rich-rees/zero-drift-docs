@@ -98,6 +98,11 @@ Run this as the definition of done for every unit of work — the spoken form is
      or external service (kind `external-service`) is a failure only when `claims.strictKinds` names
      its kind; otherwise it is a warning, so that
      switching an extractor on never turns a green lint red by itself.
+   - An `unread:` line is something an adapter saw and could not read
+     (decision 0048). Under `unread.strict` it is a **failure**: fix the
+     adapter through the extractor skill, or mark the item fine once, with
+     the reason (`bootstrap.mjs unread --mark=<id> --why="…"`). Never mark
+     one without asking the developer.
    ```
    npx -y @rich-rees/zdd@0.13.0 lint
    ```

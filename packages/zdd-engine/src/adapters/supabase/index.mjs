@@ -24,6 +24,7 @@ export const FACTS_KEY_ORDER = {
 
 export function derive({ repoRoot, options, io }) {
   const diagnostics = [];
+  const unread = []; // decision 0048 point 5: said on every derive, never only under --verbose
   // A gitignored migration file (or folder) is not source (2.3.0, pick 1).
   const isIgnored = io.isIgnored;
   const { migrationNamespaces = [], externalBuckets = [] } = options;
@@ -77,9 +78,7 @@ export function derive({ repoRoot, options, io }) {
       files.push({ name: `${dir}/${f}`, text: got.text });
     }
     const replayed = replayMigrations(files);
-    for (const s of replayed.skipped) {
-      diagnostics.push(`${ns}: unrecognized schema-like statement in ${s.file}: ${s.statement}`);
-    }
+    for (const s of replayed.skipped) unread.push({ file: s.file, what: s.statement });
     schemas.set(ns, replayed);
   }
 
@@ -192,7 +191,7 @@ export function derive({ repoRoot, options, io }) {
     });
   }
 
-  return { records, diagnostics };
+  return { records, diagnostics, unread };
 }
 
 export { DETECTION, detect } from "./detect.mjs";

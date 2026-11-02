@@ -218,7 +218,11 @@ npx -y @rich-rees/zdd@0.13.0 lint
 ```
 
 Read every `[<name>]` diagnostic and account for each: a real gap goes back
-to Step 5 with a new fixture case; an intended skip stays. Open three
+to Step 5 with a new fixture case; an intended skip stays. What the adapter
+recognises and cannot read belongs in the `unread` list it returns
+(`[{ file, what }]`, decision 0048), never only in a diagnostic: each item
+prints on every derive as an `UNREAD` line and holds CI until the adapter is
+fixed or the item is marked fine. Open three
 records against their source lines and confirm them with the user. Then
 commit the extractor, its fixture, its tests, the config change and the
 metadata together, and link the new records from the map in the next

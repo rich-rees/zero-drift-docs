@@ -104,6 +104,13 @@ export const CONTRACT_TABLE = [
     ask: null,
   },
   {
+    step: "unread",
+    since: 1,
+    required: false,
+    what: "an optional `unread` list of `{ file, what }`: what the adapter saw and could not read. Each item prints on every derive and shows in the human index, and lint holds it until the adapter is fixed or the item is marked fine (decision 0048); `file` is repo-relative POSIX, and an item with no line number keeps its answer when the code around it moves",
+    ask: "What does this adapter's source hold that it recognises and cannot read? Return those as `unread`, so a gap is said rather than silent.",
+  },
+  {
     step: "detection",
     since: 1,
     required: false,
