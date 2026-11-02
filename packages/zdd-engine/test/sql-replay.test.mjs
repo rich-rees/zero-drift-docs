@@ -492,6 +492,8 @@ test("CR-248: what a file changes and changes back is undone, in every part of t
   assert.equal(undone(t + f + "create trigger tr before update on t for each row execute function f(); drop trigger tr on t;"), 1);
   assert.equal(undone(f + "alter function f() rename to g; drop function g();"), 1, "what a file made counts under its new name");
   assert.equal(undone("create table x (a int); alter table x rename to y; drop table y;"), 1);
+  assert.equal(undone("create table x (a int); alter table x rename to y; alter table y rename to z; drop table if exists y;"), 0, "the old name is gone: a drop of it undoes nothing");
+  assert.equal(undone(f + "alter function f() rename to g; alter function g() rename to h; drop function if exists g();"), 0);
   assert.equal(undone("create table x (a int); alter table x set schema archive; drop table archive.x;"), 1);
   assert.equal(undone(t, "alter table t add column b int; alter table t rename column b to c; alter table t drop column c;"), 1);
   assert.equal(undone(t, "alter table t add column b int; alter table t rename to u; alter table u drop column b;"), 1);

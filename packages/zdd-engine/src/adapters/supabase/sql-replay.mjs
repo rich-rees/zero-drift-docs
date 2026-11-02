@@ -449,7 +449,7 @@ export function replayMigrations(files) {
       // A thing this file changed and now changes back. By the thing itself,
       // so a table is the same table under whatever name it went through.
       const follow = (set, from, to) => {
-        if (set.has(from)) set.add(to);
+        if (set.delete(from)) set.add(to);
       };
       const changed = (thing, field, before, after) => {
         if (!here.was.has(thing)) here.was.set(thing, new Map());
