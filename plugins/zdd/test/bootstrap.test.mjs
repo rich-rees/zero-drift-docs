@@ -228,7 +228,7 @@ test("detect: several migration dirs get distinct namespace names; symlinked dir
   const repo = fresh("detect-multi");
   for (const d of ["apps/a/supabase/migrations", "apps/b/supabase/migrations"]) {
     mkdirSync(join(repo, d), { recursive: true });
-    writeFileSync(join(repo, d, "0001.sql"), "create table t(id int);");
+    writeFileSync(join(repo, d, "0001.sql"), `create table t_${d.slice(5, 6)}(id int);`);
   }
   const json = JSON.parse(bootstrap(repo, ["detect", "--json"]));
   assert.deepEqual(json.proposals[0].options.migrationNamespaces, [
