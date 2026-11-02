@@ -1,6 +1,6 @@
 # 0040 — Adapters declare a contract number of their own and pass one standard suite; upgrades interview the adopter about their own adapters
 
-**Date:** 2026-10-27 · **Status:** accepted · **Origin:** ZDD-3, questions 7 and 8 of the design session on 2026-10-27 (Rich's calls), and the follow-up "could a core update tell the outer layer what to do?". **Extends** [0035](0035-a-lint-failure-the-same-releases-upgrade-clears-or-names-is-a-minor.md): a new suite check is held to the same rule as a new lint failure.
+**Date:** 2026-10-27 · **Status:** accepted; points 3 and 6 superseded in part by [0048](0048-the-app-owns-its-adapters-zdd-ships-starters-not-readers.md) (2026-11-02: no adapter is updated by a release; every adapter is the adopter's own) · **Origin:** ZDD-3, questions 7 and 8 of the design session on 2026-10-27 (Rich's calls), and the follow-up "could a core update tell the outer layer what to do?". **Extends** [0035](0035-a-lint-failure-the-same-releases-upgrade-clears-or-names-is-a-minor.md): a new suite check is held to the same rule as a new lint failure.
 
 ## Context
 
