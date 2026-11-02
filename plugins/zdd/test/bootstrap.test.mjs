@@ -943,7 +943,7 @@ test("detect: supabase-js is proposed once beside Supabase and each JS reader on
 });
 
 test("an adapter that tried the repo and declined says why, and the part stays not covered (decision 0048 point 6)", async () => {
-  const { narrateDetect } = await import(`file://${SCRIPT.replace(/\/g, "/")}`);
+  const { narrateDetect } = await import(`file://${SCRIPT.replace(/\\/g, "/")}`);
   const d = { mode: "existing", sourceFiles: 1, proposals: [{ name: "a", evidence: ["e"], options: {} }], apps: [], coverage: [{ part: "schema", adapters: [] }], declined: [{ name: "reader", parts: ["schema"], reasons: ["`m`: files create tables and end with none"] }] };
   const out = narrateDetect(d, { installed: false, hits: [], searched: [] });
   assert.match(out, /schema: the `reader` adapter tried this repo and declined — `m`: files create tables and end with none/);
