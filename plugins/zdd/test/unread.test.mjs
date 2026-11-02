@@ -59,7 +59,7 @@ test("writer to reader: --mark writes the mark lint accepts and the human index 
   const r = run(repo, ["unread", `--mark=${id}`, "--why=the policy is  not schema", "--json"]);
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(config(repo).unread.fine, [{ id, what: "DROP POLICY mine ON things", why: "the policy is not schema" }]);
-  assert.ok(JSON.parse(r.stdout).notes.some((n) => /run `render`/.test(n)));
+  assert.ok(JSON.parse(r.stdout).notes.some((n) => /run `derive`, then `render`/.test(n)), "render reads what derive last wrote (CR-234)");
   assert.equal(engine(repo, "lint").status, 0);
   assert.equal(engine(repo, "render").status, 0);
   const html = readFileSync(join(repo, "zdd", "human-index.html"), "utf8");
@@ -176,6 +176,17 @@ test("a repo already strict hears nothing about it at upgrade", (t) => {
   assert.ok(!JSON.parse(up.stdout).notes.some((n) => /bootstrap\.mjs unread/.test(n)));
 });
 
+test("a mark on an item derive has not written yet: the note's derive, then render, leaves --check green (CR-234)", (t) => {
+  const repo = adopted(t);
+  const dir = config(repo).extractorOptions.supabase.migrationNamespaces[0].dir;
+  writeFileSync(join(repo, dir, "20990102000000_more.sql"), "DROP INDEX some_index;\n");
+  const ids = openIds(repo);
+  assert.equal(ids.length, 2, "the list is the source as it is now");
+  assert.equal(run(repo, ["unread", `--mark=${ids.join(",")}`, "--why=x"]).status, 0);
+  for (const cmd of ["derive", "render"]) assert.equal(engine(repo, cmd).status, 0, cmd);
+  for (const args of [["derive", "--check"], ["render", "--check"], ["lint"]]) assert.equal(engine(repo, ...args).status, 0, args.join(" "));
+});
+
 test("the skills that answer an item name the command, and the schema names the block", () => {
   const skill = (name) => readFileSync(resolve(HERE, "..", "skills", name, "SKILL.md"), "utf8");
   for (const name of ["bootstrap", "upgrade", "update"]) assert.match(skill(name), /unread --mark=<id>/, name);
@@ -183,5 +194,4 @@ test("the skills that answer an item name the command, and the schema names the 
   assert.match(skill("extractor"), /`unread` list/);
   const schema = JSON.parse(readFileSync(resolve(HERE, "..", "templates", "config.schema.json"), "utf8"));
   assert.deepEqual(Object.keys(schema.properties.unread.properties).sort(), ["fine", "strict"]);
-  assert.equal(schema.properties.unread.additionalProperties, false);
 });

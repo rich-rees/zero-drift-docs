@@ -287,7 +287,7 @@ node "$PLUGIN/scripts/bootstrap.mjs" unread --raise
 
 `--raise` writes `unread.strict`, so a new item fails lint from now on; it
 refuses while any item has no answer. Marks go in `zdd/config.json`, and the
-human index shows them: run `render` before the commit.
+human index shows them: run `derive`, then `render`, before the commit.
 
 Done when `--raise` has run, or the developer has chosen to leave items for
 later (say so in the commit's record).

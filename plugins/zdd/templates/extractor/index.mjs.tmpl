@@ -15,7 +15,8 @@
 // The contract (CONTRIBUTING.md, "The prize: writing an extractor"):
 //   - derive({ repoRoot, options, io }) returns { records, diagnostics },
 //     and `unread: [{ file, what }]` for what it saw and could not read:
-//     that shows on every run and holds CI until answered (decision 0048).
+//     that shows on every run and, under unread.strict, fails lint until
+//     answered (decision 0048).
 //   - Same source bytes in ⇒ byte-identical records out: no dates, no
 //     randomness, no absolute paths, nothing from the environment.
 //   - Every read goes through io.read and every listing through io.walk —

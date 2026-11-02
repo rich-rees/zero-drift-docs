@@ -78,7 +78,7 @@ export function derive({ repoRoot, options, io }) {
       files.push({ name: `${dir}/${f}`, text: got.text });
     }
     const replayed = replayMigrations(files);
-    for (const s of replayed.skipped) unread.push({ file: s.file, what: s.statement });
+    for (const s of replayed.skipped) unread.push({ file: s.file, what: s.text });
     schemas.set(ns, replayed);
   }
 

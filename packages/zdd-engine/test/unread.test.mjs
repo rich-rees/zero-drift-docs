@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { CONTRACT, CONTRACT_TABLE } from "../src/core/lib/contract.mjs";
 import { PARTS } from "../src/core/lib/parts.mjs";
-import { MAX_PRINTED, MAX_WHAT, unreadConfig, unreadRecords } from "../src/core/lib/unread.mjs";
+import { MAX_ITEMS, MAX_PRINTED, MAX_WHAT, itemOf, unreadConfig, unreadRecords } from "../src/core/lib/unread.mjs";
 import { catalogueModules } from "../src/core/derive.mjs";
 import { detectRepo } from "../src/core/lib/detect-repo.mjs";
 
@@ -225,6 +225,7 @@ test("a metadata record lint cannot read is a failure under strict, never a pass
 });
 
 test("the config block is checked by every command that reads it: a misspelt key is never enforcement silently off", (t) => {
+  const ID = `unread:a/${"0".repeat(16)}`;
   const bad = [
     [null, /'unread' must be an object/],
     [{ strcit: true }, /unknown key 'strcit' \(known: strict, fine\)/],
@@ -232,12 +233,14 @@ test("the config block is checked by every command that reads it: a misspelt key
     [{ fine: {} }, /'unread\.fine' must be an array/],
     [{ fine: ["x"] }, /must be an object/],
     [{ fine: [{ id: "route:/x", why: "y" }] }, /is not an unread item's id/],
-    [{ fine: [{ id: "unread:a/b", why: " " }] }, /gives no 'why'/],
-    [{ fine: [{ id: "unread:a/b" }] }, /gives no 'why'/],
-    [{ fine: [{ id: "unread:a/b", why: "y".repeat(501) }] }, /'why' is over 500/],
-    [{ fine: [{ id: "unread:a/b", why: "y", because: "z" }] }, /unknown key 'because'/],
-    [{ fine: [{ id: "unread:a/b", why: "y" }, { id: "unread:a/b", why: "z" }] }, /lists 'unread:a\/b' twice/],
-    [{ fine: Array.from({ length: 10_001 }, (_, i) => ({ id: `unread:a/${i}`, why: "y" })) }, /more than 10000 marks/],
+    [{ fine: [{ id: "unread:a/b", why: "y" }] }, /is not an unread item's id/],
+    [{ fine: [{ id: `${ID}\nFORGED`, why: "y" }] }, /is not an unread item's id/],
+    [{ fine: [{ id: ID, why: " " }] }, /gives no 'why'/],
+    [{ fine: [{ id: ID }] }, /gives no 'why'/],
+    [{ fine: [{ id: ID, why: "y".repeat(501) }] }, /'why' is over 500/],
+    [{ fine: [{ id: ID, why: "y", because: "z" }] }, /unknown key 'because'/],
+    [{ fine: [{ id: ID, why: "y" }, { id: ID, why: "z" }] }, /lists 'unread:a\/0+' twice/],
+    [{ fine: Array.from({ length: 10_001 }, () => ({ id: ID, why: "y" })) }, /more than 10000 marks/],
   ];
   for (const [block, re] of bad) assert.match(unreadConfig({ unread: block }).error, re, JSON.stringify(block)?.slice(0, 80));
   assert.deepEqual(unreadConfig({}).strict, false);
@@ -249,6 +252,101 @@ test("the config block is checked by every command that reads it: a misspelt key
     assert.equal(r.status, 1, cmd);
     assert.match(r.stderr, /unknown key 'strcit'/, cmd);
   }
+});
+
+test("CR-227: a hostile file or mark id cannot forge a log line, and a file is held to repo-relative", (t) => {
+  for (const file of ["a\u2028UNREAD forged.sql", "a\u2029b.sql", "a\x85b.sql", "a\u202eb.sql", "javascript:alert(1)", "C:/a.sql", "a\\b.sql"]) {
+    assert.match(unreadRecords("acme", [{ file, what: "x" }]).error, /must be repo-relative/, JSON.stringify(file));
+  }
+  assert.ok(unreadRecords("acme", [{ file: "db/a b (1).sql", what: "x" }]).records, "a space in a path is a path");
+  const repo = localRepo(t, `return { records: [], diagnostics: [], unread: [{ file: "a\\u2028FORGED.sql", what: "x" }] };`);
+  const r = run(repo, "derive");
+  assert.equal(r.status, 1);
+  assert.doesNotMatch(r.stderr, /\u2028/, "the refusal itself cannot forge one");
+  // A metadata record is read through one plain line, hand-edited or not.
+  const forged = itemOf({ id: "unread:a/b\nUNREAD forged", title: "x\u2028y", resource: ["a\u0085b.sql"], facts: { adapter: "a\nb" } });
+  assert.deepEqual(forged, { id: "unread:a/b UNREAD forged", adapter: "a b", file: "a b.sql", what: "x y" });
+});
+
+test("CR-229: one adapter's items are capped: a hostile source cannot choose how many files derive writes", (t) => {
+  const n = MAX_ITEMS + 1;
+  const repo = localRepo(t, `return { records: [], diagnostics: [], unread: Array.from({ length: ${n} }, (_, i) => ({ file: "a.sql", what: "x" + i })) };`);
+  const r = run(repo, "derive");
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, new RegExp(`reports more than ${MAX_ITEMS} unread items`));
+  assert.equal(existsSync(unreadDir(repo)), false, "nothing written first");
+  assert.ok(unreadRecords("acme", Array.from({ length: n }, () => ({ file: "a.sql", what: "same" }))).records, "a repeat is no new item");
+  assert.equal(unreadRecords("acme", Array.from({ length: MAX_ITEMS }, (_, i) => ({ file: "a.sql", what: `x${i}` }))).records.length, MAX_ITEMS);
+});
+
+test("CR-230: a mark lapses when the item changes, whitespace included, and never with a checkout's line endings", () => {
+  const id = (what) => unreadRecords("acme", [{ file: "a.sql", what }]).records[0].id;
+  assert.notEqual(id("SET x = 'a  b'"), id("SET x = 'a b'"));
+  assert.equal(id("line one\r\nline two"), id("line one\nline two"));
+  assert.equal(id("line one\rline two"), id("line one\nline two"));
+  assert.equal(unreadRecords("acme", [{ file: "a.sql", what: "SET x = 'a  b'" }]).records[0].title, "SET x = 'a b'", "the display stays one tidy line");
+});
+
+test("CR-231: supabase hands over the whole statement: a change past the excerpt is a new item, so its mark lapses", (t) => {
+  const repo = repoOf(t);
+  const long = (tail) => `DROP POLICY ${"p".repeat(260)} ON things USING (${tail});\n`;
+  writeFileSync(join(repo, MIGRATION), long("a"));
+  const [first] = report(repo).open;
+  writeFileSync(join(repo, MIGRATION), long("b"));
+  const [second] = report(repo).open;
+  assert.notEqual(first.id, second.id);
+});
+
+test("CR-233: an unreadable record fails strict under any metadataDir, a cut-short walk too, and a record of another kind does not", (t) => {
+  const repo = repoOf(t);
+  setConfig(repo, { ...config(repo), paths: { metadataDir: "unread" } });
+  assert.equal(run(repo, "derive").status, 0);
+  const dir = join(repo, "unread", "unread");
+  setUnread(repo, { strict: true, fine: report(repo).open.map(({ id, what }) => ({ id, what, why: "fine" })) });
+  assert.equal(run(repo, "lint").status, 0);
+  const [file] = readdirSync(dir);
+  writeFileSync(join(dir, file), "{ not json");
+  const r = run(repo, "lint");
+  assert.equal(r.status, 1, "metadataDir named `unread` must not hide it");
+  assert.match(r.stderr, /unread\.strict: unread\/unread\/[^ ]+ could not be read/);
+
+  const other = repoOf(t);
+  run(other, "derive");
+  setUnread(other, { strict: true, fine: report(other).open.map(({ id, what }) => ({ id, what, why: "fine" })) });
+  writeFileSync(join(other, "zdd", "metadata", "table", "broken.json"), "{ not json");
+  assert.equal(run(other, "lint").status, 0, "a broken table record is claims.strict's business");
+});
+
+test("the engine's own unread output: nothing, open, marked fine, stale and strict are each said", (t) => {
+  const repo = repoOf(t);
+  const say = () => run(repo, "unread").stdout;
+  assert.match(say(), /1 with no answer yet — fix the adapter, or mark each one fine once \(the plugin's `bootstrap\.mjs unread --mark=<id>/);
+  assert.match(say(), /unread\.strict is off: lint only warns\./);
+  const [{ id, what }] = report(repo).open;
+  assert.ok(say().includes(`  ${id}  ${MIGRATION}: ${what}`));
+  const stale = `unread:supabase/${"0".repeat(16)}`;
+  setUnread(repo, { strict: true, fine: [{ id, what, why: "fine by us" }, { id: stale, why: "gone" }] });
+  const out = say();
+  assert.match(out, /1 marked fine:/);
+  assert.ok(out.includes(`  ${id}  ${MIGRATION}: ${what} — fine by us`));
+  assert.match(out, /1 mark no item answers any more — remove with `bootstrap\.mjs unread --forget=<id>`:/);
+  assert.ok(out.includes(`  ${stale}`));
+  assert.match(out, /unread\.strict is on: lint fails on an item with no answer\./);
+  assert.doesNotMatch(out, /with no answer yet/);
+  const clean = repoOf(t, { statement: null });
+  assert.equal(run(clean, "unread").stdout, "No adapter reported anything it could not read.\n");
+});
+
+test("CR-228: the minimal viewer links no path out of the repo, raw or percent-encoded", (t) => {
+  const repo = localRepo(t, `return { records: [], diagnostics: [], unread: [{ file: "%2e%2e/%2E%2E/other/x.sql", what: "x" }, { file: "%zz/y.sql", what: "y" }, { file: "db/ok.sql", what: "z" }] };`);
+  setConfig(repo, { ...config(repo), viewer: "minimal", repoBase: "https://github.com/o/r/tree/main/" });
+  assert.equal(run(repo, "derive").status, 0);
+  assert.equal(run(repo, "render").status, 0);
+  const html = readFileSync(join(repo, "zdd", "human-index.html"), "utf8");
+  assert.ok(html.includes('<a href="https://github.com/o/r/blob/main/db/ok.sql">'), "a plain path is still a link");
+  assert.ok(!/href="[^"]*%2e/i.test(html), "an encoded dot segment is text");
+  assert.ok(!html.includes('href="https://github.com/o/r/blob/main/%zz'), "an undecodable path is text");
+  assert.ok(html.includes("%2e%2e/%2E%2E/other/x.sql"), "the path is still shown");
 });
 
 test("derive and lint are bounded: thousands of items cannot flood the log, and the count says what is not shown", (t) => {

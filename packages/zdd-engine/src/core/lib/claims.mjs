@@ -185,7 +185,12 @@ export function unclaimedRecords({ metadataDir, mapDir, bundleDir }) {
   const skipped = raw
     .map((s) => {
       const inMetadata = !relative(metadataDir, s.path).startsWith("..");
-      return { file: posixify(relative(dirname(bundleDir), s.path)), reason: s.reason, record: inMetadata };
+      // Could an unread record be behind this? Its own folder, the metadata
+      // folder itself, or a walk cut short; judged from metadataDir, which a
+      // config can name anything.
+      const under = relative(metadataDir, s.path).split(/[\\/]/)[0];
+      const unreadGap = inMetadata && (under === UNREAD_KIND || under === "" || /^the walk passed/.test(s.reason));
+      return { file: posixify(relative(dirname(bundleDir), s.path)), reason: s.reason, record: inMetadata, unreadGap };
     })
     .sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : 0));
   return {

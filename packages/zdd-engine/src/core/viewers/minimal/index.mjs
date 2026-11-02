@@ -11,9 +11,21 @@ const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").
 // The renderer refuses a non-http(s) repoBase and a scheme-shaped resource
 // before any viewer runs; this is the viewer's own belt (CR-002) — a link is
 // only emitted for a bare relative path under an http(s) or empty base.
+// A dot segment, raw or percent-encoded, is refused too: the browser resolves
+// it against repoBase, so `%2e%2e/other/repo` would leave the repo (as the
+// cytoscape viewer's CR-170). A backslash counts as a slash in an http URL.
+const dotSegment = (s) => {
+  try {
+    const d = decodeURIComponent(s);
+    return d === "." || d === "..";
+  } catch {
+    return true;
+  }
+};
 function href(repoBase, resource) {
   if (!resource) return null;
   if (!/^(https?:\/\/\S*)?$/i.test(repoBase)) return null;
+  if (resource.split(/[\/\\]/).some(dotSegment)) return null;
   // Whitespace/control anywhere is refused: browsers strip them from a URL,
   // so " javascript:x" would otherwise parse as a scheme (CR-002).
   if (/[\s\x00-\x1f\x7f]/.test(resource) || /^[a-z][a-z0-9+.-]*:/i.test(resource) || resource.startsWith("/")) return null;

@@ -265,7 +265,8 @@ const sameTable = (a, b) => tableKey(a) === tableKey(b);
 // buckets: Map, triggers: [], skipped: [] }.
 // `skipped` lists statements that LOOK like schema changes (CREATE TABLE /
 // ALTER TABLE / DROP ...) but matched no recognizer — the tripwire against
-// silently missing a schema mutation.
+// silently missing a schema mutation. `statement` is an excerpt; `text` is the
+// whole statement, so a change anywhere in it is a new unread item.
 export function replayMigrations(files) {
   const tables = new Map();
   const functions = new Map();
@@ -286,7 +287,7 @@ export function replayMigrations(files) {
         if (m[1] && tables.has(tableKey(name))) continue;
         const paren = parenBody(sql, m[0].length);
         if (!paren) {
-          skipped.push({ file: file.name, statement: head });
+          skipped.push({ file: file.name, statement: head, text: sql });
           continue;
         }
         const columns = [];
@@ -444,7 +445,7 @@ export function replayMigrations(files) {
         const cols = m[1].split(",").map((c) => foldIdent(c));
         const tuple = parenBody(sql, m.index + m[0].length - 1);
         if (!tuple) {
-          skipped.push({ file: file.name, statement: head });
+          skipped.push({ file: file.name, statement: head, text: sql });
           continue;
         }
         const values = splitTopLevel(tuple.body);
@@ -462,7 +463,7 @@ export function replayMigrations(files) {
         };
         const id = lit(raw.id) ?? lit(raw.name);
         if (!id) {
-          skipped.push({ file: file.name, statement: head });
+          skipped.push({ file: file.name, statement: head, text: sql });
           continue;
         }
         const bucket = { id, resource: [file.name], description: commentsToDescription(leadingComments), facts: {} };
@@ -478,7 +479,7 @@ export function replayMigrations(files) {
 
       // Tripwire: unmatched statements that smell like schema changes.
       if (/^(create\s+table|alter\s+table|drop\s+)/i.test(sql)) {
-        skipped.push({ file: file.name, statement: head });
+        skipped.push({ file: file.name, statement: head, text: sql });
       }
     }
   }

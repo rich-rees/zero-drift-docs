@@ -502,7 +502,7 @@ if (unknownTasks.length) {
   const said = (i) => `${printable(i.id)} (${printable(i.file)}): ${printable(i.what)}`;
   if (unreadCfg.strict) {
     // A strict pass means every item was read (as claims.strict does).
-    for (const s of skipped.filter((f) => f.record && /\/unread(\/|$)/.test(f.file))) problems.push(`unread.strict: ${printable(s.file)} could not be read (${s.reason}) — an unread item there has no known answer`);
+    for (const s of skipped.filter((f) => f.unreadGap)) problems.push(`unread.strict: ${printable(s.file)} could not be read (${s.reason}) — an unread item there has no known answer`);
     for (const i of report.open) problems.push(`${said(i)} — ${printable(i.adapter)} saw this and could not read it; fix the adapter, or mark it fine once (${MARK_ROUTE})`);
   } else if (report.open.length) {
     console.error(`WARNING: ${report.open.length} item${report.open.length === 1 ? "" : "s"} an adapter saw and could not read, with no answer yet — fix the adapter, or mark each one fine once (${MARK_ROUTE}); a failure once unread.strict is on:`);

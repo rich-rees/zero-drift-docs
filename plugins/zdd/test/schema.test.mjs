@@ -17,7 +17,7 @@ const PLUGIN = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const ENGINE_BIN = resolve(PLUGIN, "..", "..", "packages", "zdd-engine", "bin", "zdd-engine.mjs");
 const SCHEMA = JSON.parse(readFileSync(join(PLUGIN, "templates", "config.schema.json"), "utf8"));
 
-const KNOWN = new Set(["$schema", "$id", "$comment", "title", "description", "default", "examples", "deprecated", "type", "properties", "additionalProperties", "required", "items", "minItems", "uniqueItems", "pattern", "enum", "anyOf", "oneOf", "allOf", "not", "contains", "const", "minimum"]);
+const KNOWN = new Set(["$schema", "$id", "$comment", "title", "description", "default", "examples", "deprecated", "type", "properties", "additionalProperties", "required", "items", "minItems", "maxItems", "maxLength", "uniqueItems", "pattern", "enum", "anyOf", "oneOf", "allOf", "not", "contains", "const", "minimum"]);
 const typeOf = (v) => (v === null ? "null" : Array.isArray(v) ? "array" : typeof v);
 
 // Returns the list of violations (empty = valid).
@@ -34,6 +34,7 @@ function validate(schema, value, path = "$") {
   if (schema.minimum !== undefined && typeof value === "number" && value < schema.minimum) errs.push(`${path}: below ${schema.minimum}`);
   if (schema.enum && !schema.enum.some((e) => JSON.stringify(e) === JSON.stringify(value))) errs.push(`${path}: not one of ${JSON.stringify(schema.enum)}`);
   if (schema.pattern && typeof value === "string" && !new RegExp(schema.pattern).test(value)) errs.push(`${path}: does not match ${schema.pattern}`);
+  if (schema.maxLength !== undefined && typeof value === "string" && value.length > schema.maxLength) errs.push(`${path}: longer than ${schema.maxLength}`);
   if (typeOf(value) === "object") {
     for (const r of schema.required ?? []) if (!(r in value)) errs.push(`${path}: missing ${r}`);
     for (const [k, v] of Object.entries(value)) {
@@ -45,6 +46,7 @@ function validate(schema, value, path = "$") {
   if (Array.isArray(value)) {
     if (schema.items) value.forEach((v, i) => errs.push(...validate(schema.items, v, `${path}[${i}]`)));
     if (schema.minItems !== undefined && value.length < schema.minItems) errs.push(`${path}: fewer than ${schema.minItems} items`);
+    if (schema.maxItems !== undefined && value.length > schema.maxItems) errs.push(`${path}: more than ${schema.maxItems} items`);
     if (schema.uniqueItems && new Set(value.map((v) => JSON.stringify(v))).size !== value.length) errs.push(`${path}: duplicate items`);
   }
   if (schema.anyOf && !schema.anyOf.some((s) => validate(s, value, path).length === 0)) errs.push(`${path}: matches none of anyOf`);
@@ -98,6 +100,31 @@ test("a config with both `extractors` and `adapter` is invalid under the schema,
   // Neither tier is invalid for both.
   assert.notDeepEqual(validate(SCHEMA, { name: "x" }), []);
   assert.notEqual(engineRejects({ name: "x" }), null);
+});
+
+test("unread: the schema and the engine accept and refuse the same blocks (CR-236)", () => {
+  const id = `unread:acme/${"0".repeat(16)}`;
+  const cfg = (unread) => ({ extractors: ["generic"], unread });
+  for (const ok of [{}, { strict: true }, { strict: false, fine: [] }, { fine: [{ id, why: "x" }] }, { fine: [{ id, what: "y", why: "x" }] }]) {
+    assert.deepEqual(validate(SCHEMA, cfg(ok)), [], JSON.stringify(ok));
+    assert.equal(engineRejects(cfg(ok)), null, JSON.stringify(ok));
+  }
+  for (const bad of [
+    { strcit: true },
+    { strict: "yes" },
+    { fine: {} },
+    { fine: [{ id }] },
+    { fine: [{ id, why: "   " }] },
+    { fine: [{ id, why: "x".repeat(501) }] },
+    { fine: [{ id, why: "x", because: "y" }] },
+    { fine: [{ id: "unread:acme/nothex", why: "x" }] },
+    { fine: [{ id: `${id}\nFORGED`, why: "x" }] },
+    { fine: Array.from({ length: 10_001 }, () => ({ id, why: "x" })) },
+  ]) {
+    const shown = JSON.stringify(bad).slice(0, 60);
+    assert.notDeepEqual(validate(SCHEMA, cfg(bad)), [], `schema: ${shown}`);
+    assert.match(engineRejects(cfg(bad)) ?? "", /unread/, `engine: ${shown}`);
+  }
 });
 
 test("repoBase: the schema pattern refuses internal whitespace exactly as the engine does (CR-103)", () => {

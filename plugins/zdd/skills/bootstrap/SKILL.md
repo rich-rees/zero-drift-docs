@@ -423,7 +423,8 @@ skill, its tests red then green) or marked fine, once, with the reason:
 node "$PLUGIN/scripts/bootstrap.mjs" unread --mark=<id> --why="<why this is fine>"
 ```
 
-The mark is kept in `zdd/config.json`; run `render` and commit both.
+The mark is kept in `zdd/config.json`; run `derive`, then `render`, and
+commit it all.
 
 ## Step 6 — the backfill, offered once (never default)
 

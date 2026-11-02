@@ -96,10 +96,12 @@ export. A hand-written local adapter is the only route that works today.
   `derive` may return `unread: [{ file, what }]` beside `records`. `CONTRACT`
   stays 1 (0040 point 2, and an optional step asks nothing of an adapter). An
   adapter without the list keeps working and says nothing. `file` is
-  repo-relative; `what` is one line of plain text, with control characters
-  removed, shown up to 300 characters. Extra keys on an item are ignored, so
-  the step can grow by optional fields (point 9). An adapter may not mint a
-  record of kind `unread`: that kind is the core's.
+  repo-relative and holds no control, format or line-separator character; `what`
+  is shown as one line of plain text up to 300 characters. Extra keys on an
+  item are ignored, so the step can grow by optional fields (point 9). An
+  adapter may not mint a record of kind `unread`: that kind is the core's. An
+  adapter reporting over 5,000 items stops derive: each is a file, and a
+  hostile source must not choose how many.
 - **An item is a record.** The core turns each item into a record of kind
   `unread` under `paths.metadataDir`, named `<adapter>--<hash>.json`, with no
   new path or mandatory file: a repo with nothing unread gets no folder. So
@@ -110,9 +112,10 @@ export. A hand-written local adapter is the only route that works today.
   every other record are unchanged. Viewers get them ready-read, as blessings
   (0043).
 - **An id** is `unread:<adapter>/<16 hex>`, a SHA-256 of the adapter, the file
-  and the text. No line number, so a mark survives the code around the item
-  moving and lapses when the item changes. One statement written twice in a
-  file is one item with one answer.
+  and the whole text as the adapter wrote it, line endings aside. No line
+  number, so a mark survives the code around the item moving and lapses when
+  the item changes, whitespace included. One statement written twice in a file
+  is one item with one answer.
 - **Where the marks live** (the slice's call): `zdd/config.json`, beside
   `claims` and `suiteChecks`, as `"unread": { "strict": true, "fine": [{ "id",
   "what", "why" }] }`. The repo's config is already where a repo's standing
@@ -132,7 +135,9 @@ export. A hand-written local adapter is the only route that works today.
   an answer, and refuses before (the upgrade skill's step 4c, for point 8).
   Under strict, an unreadable unread record fails too. A mark no item answers
   warns and never fails: it excuses nothing, and fixing an adapter must not
-  turn CI red.
+  turn CI red. Lint reads the records as written, like every other lint over
+  metadata: `derive --check` runs before it in CI and the pre-push hook, and
+  it is what a deleted or edited record fails.
 - **Visible by default.** `derive`, with or without `--check` or `--verbose`,
   prints an `UNREAD` line per item, unanswered first, then those marked fine
   with their reason, at most 500 lines and then a count, so a repo with
@@ -145,9 +150,10 @@ export. A hand-written local adapter is the only route that works today.
   `database access`. `supabase` is schema; `sqlalchemy`, `supabase-js` and
   `supabase-py` are queries. Nothing an adopter holds names a part, so
   nothing migrates.
-- **First reporter.** `supabase` reports the statements its replay skips,
-  which were diagnostics. What it skips is unchanged, including statements
-  it could ignore safely (slice 2 owns the reader).
+- **First reporter.** `supabase` reports the whole of each statement its replay
+  skips, which were diagnostics. What it skips is unchanged, including
+  statements it could ignore safely (slice 2 owns the reader): on the adopters
+  measured that is 13 and 1 `DROP INDEX` statements, and nothing else.
 
 ## Rejected
 

@@ -3143,8 +3143,9 @@ export function unreadItems(root, { mark = null, why = null, forget = null, rais
   if (notes.length) {
     ledger.overwrite("zdd/config.json", JSON.stringify({ ...cfg.config, unread: block }, null, 2) + "\n");
     ledger.notes.push(...notes);
-    // The human index shows each item's answer, so it moves with a mark.
-    if (mark !== null || forget !== null) ledger.notes.push("run `render` and commit it with zdd/config.json: the human index shows each item's answer");
+    // The list came from the source as it is now, and render reads what
+    // derive last wrote: both run, and the human index shows each answer.
+    if (mark !== null || forget !== null) ledger.notes.push("run `derive`, then `render`, and commit them with zdd/config.json: the human index shows each item's answer");
   } else if (raise) ledger.kept.push("zdd/config.json");
   const fine = [...r.open, ...r.fine].filter(answered).map((i) => ({ ...i, why: marks.get(i.id).why }));
   return { strict: block.strict === true, open, fine, stale, raised, ...ledgerOut(ledger) };

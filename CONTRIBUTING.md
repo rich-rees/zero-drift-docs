@@ -125,8 +125,9 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
 - **An `unread` list says what the adapter saw and could not read**
   ([decision 0048](docs/decisions/0048-the-app-owns-its-adapters-zdd-ships-starters-not-readers.md)):
   `[{ file, what }]`, optional, and returned beside `records`. Each item
-  prints on every derive and shows in the human index, and lint holds it
-  until the adapter is fixed or the item is marked fine once. Say it here,
+  prints on every derive and shows in the human index, and under
+  `unread.strict` fails lint until the adapter is fixed or the item is
+  marked fine once. Say it here,
   not in a diagnostic: a diagnostic is what nobody reads. An adapter that
   cannot tell what it missed has nothing to report; `coverage` stays the
   second net.
@@ -242,10 +243,13 @@ purely on the visualization.
 A viewer is one module exporting
 `render({ graph, docs, changed, options, bundleName, repoBase })` and returning
 the page as a string. `graph` is exactly what was written to `graph.json`; `docs`
-is `{ glossary, adrs, blessings }` (the store text, for viewers that embed it;
+is `{ glossary, adrs, blessings, unread }` (the store text, for viewers that embed it;
 `blessings` comes ready-read — exemplar, app, users, cited ADRs, and
 `importance` (`"high"` or null, high entries first) — so no viewer
-parses the store, [decision 0043](docs/decisions/0043-viewers-get-the-blessing-store-ready-read.md), [0045](docs/decisions/0045-blessings-carry-an-importance-high-or-nothing-kept-scarce.md)); `changed` is
+parses the store, [decision 0043](docs/decisions/0043-viewers-get-the-blessing-store-ready-read.md), [0045](docs/decisions/0045-blessings-carry-an-importance-high-or-nothing-kept-scarce.md);
+`unread` is there only when an adapter reported something: a list of
+`{ id, adapter, file, what, why }`, unanswered first with `why` null, and
+**every viewer shows it**, [decision 0048](docs/decisions/0048-the-app-owns-its-adapters-zdd-ships-starters-not-readers.md)); `changed` is
 the latest-store-change highlight; `options` is whatever the adopter put in
 `viewer` besides `name`, plus the resolved top-level `nonAreaTags` whenever it
 is non-empty (your area model should exclude the same tags the graph did). A viewer is a good contribution when it honours the

@@ -16,9 +16,11 @@
 // --raise` once every item is answered. Only an ABSENT block defaults; a
 // misspelt key is an error, so enforcement is never silently off.
 //
-// An id is the adapter, the file and the text, hashed: no line number, so a
-// mark survives the code around the item moving and lapses when the item
-// itself changes. Stack-free like everything under core/.
+// An id is the adapter, the file and the text as the adapter wrote it, hashed:
+// no line number, so a mark survives the code around the item moving and
+// lapses when the item itself changes, a change of whitespace or one past the
+// cut of the display included. Line endings do not count, so a CRLF checkout
+// gets the id CI gets. Stack-free like everything under core/.
 
 import { createHash } from "node:crypto";
 
@@ -26,16 +28,21 @@ export const UNREAD_KIND = "unread";
 export const MAX_WHAT = 300; // an item's text, as shown; the id hashes it whole
 export const MAX_WHY = 500;
 export const MAX_MARKS = 10_000;
-export const MAX_ID = 512;
+// One adapter's items. Each is a file, so a hostile source must not choose how
+// many: past this, the reader is what needs fixing, and derive stops first.
+export const MAX_ITEMS = 5_000;
+// An item's id, exactly: what a mark may name, and nothing that can break a line.
+export const UNREAD_ID = /^unread:[a-z][a-z0-9-]*\/[0-9a-f]{16}$/;
 // Lines one run prints: `unread` lists the rest, and so does the human index.
 export const MAX_PRINTED = 500;
 
 const UNREAD_KEYS = ["strict", "fine"];
 const MARK_KEYS = ["id", "what", "why"];
 
-// One line of plain text, whatever the source held. C0, DEL and C1 controls
-// go, so a statement cannot forge a line in a CI log.
-const oneLine = (s) => s.replace(/[\x00-\x1f\x7f-\x9f]+/g, " ").replace(/\s+/g, " ").trim();
+// One line of plain text, whatever the source held. Every control, format and
+// line-separator character goes, so nothing can forge a line in a CI log or
+// reorder one with a bidi mark.
+const oneLine = (s) => s.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]+/gu, " ").replace(/\s+/g, " ").trim();
 const cut = (s, n) => {
   const chars = Array.from(s); // never through a surrogate pair
   return chars.length > n ? `${chars.slice(0, n - 1).join("")}…` : s;
@@ -51,14 +58,15 @@ export function unreadRecords(name, list) {
   for (const item of list) {
     if (!item || typeof item !== "object" || Array.isArray(item)) return { error: `Extractor '${name}': every unread item must be an object { file, what }` };
     const { file, what } = item;
-    if (typeof file !== "string" || !file || /[\\\x00-\x1f\x7f]/.test(file) || file.startsWith("/") || /^[A-Za-z]:/.test(file) || file.split("/").includes("..")) {
+    if (typeof file !== "string" || !file || /[\\\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(file) || file.startsWith("/") || /^[a-z][a-z0-9+.-]*:/i.test(file) || file.split("/").includes("..")) {
       return { error: `Extractor '${name}': unread item file ${JSON.stringify(brief(file))} must be repo-relative POSIX (no '..')` };
     }
     const text = typeof what === "string" ? oneLine(what) : "";
     if (!text) return { error: `Extractor '${name}': unread item in ${brief(file)} has no 'what' — say what was seen and not read` };
     // One statement written twice in a file is one item, one answer.
-    const hash = createHash("sha256").update(`${name}\0${file}\0${text}`).digest("hex").slice(0, 16);
+    const hash = createHash("sha256").update(`${name}\0${file}\0${what.replace(/\r\n?/g, "\n")}`).digest("hex").slice(0, 16);
     if (seen.has(hash)) continue;
+    if (seen.size >= MAX_ITEMS) return { error: `Extractor '${name}' reports more than ${MAX_ITEMS} unread items — fix what it cannot read before it says more; each item is a file in the metadata folder` };
     seen.set(hash, {
       kind: UNREAD_KIND,
       id: `${UNREAD_KIND}:${name}/${hash}`,
@@ -74,10 +82,11 @@ export function unreadRecords(name, list) {
 }
 
 // A record as lint, render and the report read it. Metadata can be edited by
-// hand, so nothing about its shape is taken on trust.
+// hand, so every field is cut to one plain line here, the one way in; a
+// record's truth is `derive --check`'s to hold.
 export function itemOf(record) {
   const file = Array.isArray(record.resource) ? String(record.resource[0] ?? "") : "";
-  return { id: String(record.id), adapter: String(record.facts?.adapter ?? ""), file, what: String(record.title ?? "") };
+  return { id: oneLine(String(record.id)), adapter: oneLine(String(record.facts?.adapter ?? "")), file: oneLine(file), what: oneLine(String(record.title ?? "")) };
 }
 
 // The `unread` block of the config: { strict, fine: Map(id -> { what, why }) }
@@ -97,7 +106,7 @@ export function unreadConfig(config) {
     if (!m || typeof m !== "object" || Array.isArray(m)) return fail("every 'unread.fine' entry must be an object { id, what, why }");
     const extra = Object.keys(m).find((k) => !MARK_KEYS.includes(k));
     if (extra !== undefined) return fail(`an 'unread.fine' entry has an unknown key '${brief(extra)}' (known: ${MARK_KEYS.join(", ")})`);
-    if (typeof m.id !== "string" || !m.id.startsWith(`${UNREAD_KIND}:`) || m.id.length > MAX_ID) return fail(`'unread.fine' id ${JSON.stringify(brief(m.id))} is not an unread item's id ("${UNREAD_KIND}:<adapter>/<hash>")`);
+    if (typeof m.id !== "string" || !UNREAD_ID.test(m.id)) return fail(`'unread.fine' id ${JSON.stringify(brief(m.id))} is not an unread item's id ("${UNREAD_KIND}:<adapter>/<hash>")`);
     if (m.what !== undefined && typeof m.what !== "string") return fail(`'unread.fine' entry '${brief(m.id)}': 'what' must be a string`);
     if (typeof m.why !== "string" || !m.why.trim()) return fail(`'unread.fine' entry '${brief(m.id)}' gives no 'why' — a mark says why the item is fine, for whoever reads it next`);
     if (m.why.length > MAX_WHY) return fail(`'unread.fine' entry '${brief(m.id)}': 'why' is over ${MAX_WHY} characters`);
