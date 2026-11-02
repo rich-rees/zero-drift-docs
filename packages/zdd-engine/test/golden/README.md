@@ -63,6 +63,10 @@ human-index golden moved by one line, the unclaimed tooltip's "the
 engine's lint". The extend blessings' users (decision
 0046) moved no golden: the fixture's one extend blessing names a SQL
 function, which no import reader claims, and its user is the same.
+ZDD-11 slice 1 (decision 0048) regenerated the full-page human-index golden
+alone: every changed line is a line of viz.js or viz.css (the Unread peek); the
+header button is written only when an adapter reported something, so the page
+carries no new markup. No graph, metadata, agent-index or BUNDLE byte moved.
 
 ## Regenerating
 
