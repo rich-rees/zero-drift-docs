@@ -12,7 +12,7 @@ import { dirname, join } from "node:path";
 import { detectRepo } from "../src/core/lib/detect-repo.mjs";
 import { catalogueModules } from "../src/core/derive.mjs";
 import { makeExtractorIo } from "../src/core/lib/extractor-io.mjs";
-import { derive } from "../src/adapters/supabase/index.mjs";
+import { derive, FACTS_KEY_ORDER } from "../src/adapters/supabase/index.mjs";
 
 const modules = await catalogueModules();
 
@@ -202,8 +202,8 @@ test("SQL Server is declined: brackets, batch separators, sp_rename", (t) => {
 });
 
 test("a change to a table the files never create is declined, and said so", (t) => {
-  declined(t, { "migrations/001_later.sql": "ALTER TABLE users ADD COLUMN email text;\n" }, /a table they never create/);
-  declined(t, { "migrations/001.sql": "CREATE TABLE a (id int);\nDROP TABLE users;\n" }, /a table they never create/);
+  declined(t, { "migrations/001_later.sql": "ALTER TABLE users ADD COLUMN email text;\n" }, /a table or function they never create/);
+  declined(t, { "migrations/001.sql": "CREATE TABLE a (id int);\nDROP TABLE users;\n" }, /a table or function they never create/);
 });
 
 test("files that create tables and end with none are declined", (t) => {
@@ -238,8 +238,47 @@ test("a folder holding only undo steps is no history: nothing claimed, nothing d
   assert.deepEqual(d.declined, []);
 });
 
-test("migrations that hold no table at all are no contradiction", (t) => {
-  assert.deepEqual(read(t, { "migrations/001_seed.sql": "insert into things (a) values (1);\n" }), {});
+test("CR-247: migrations that yield nothing a schema reader holds claim nothing", (t) => {
+  declined(t, { "migrations/001_seed.sql": "insert into things (a) values (1);\n" }, /nothing/);
+  declined(t, { "a/migrations/001.sql": "select 1;\n", "b/migrations/001.sql": "select 2;\n" }, /nothing/);
+  assert.deepEqual(read(t, { "migrations/001.sql": "create function f() returns void language sql as $$ select 1 $$;\n" }), {}, "a function is something");
+  assert.deepEqual(read(t, { "a/migrations/001.sql": "create table a (id int);\n", "b/migrations/001.sql": "select 2;\n" }), { a: ["id"] }, "a seed-only folder beside a history is no contradiction");
+});
+
+test("CR-241: an odd quoted name reaches the record store: the filename is encoded, the id and title stay as written, safe names do not move", (t) => {
+  const root = repo(t, { "migrations/001.sql": 'create table "My Table" ("First Name" text);\ncreate table plain (id int);\ncreate procedure "Do It"() language sql as $$ select 1 $$;\n' });
+  const proposal = detectRepo(root, modules).proposals.find((p) => p.name === "supabase");
+  const { records } = derive({ repoRoot: root, options: proposal.options, io: makeExtractorIo(root, "supabase") });
+  const by = Object.fromEntries(records.map((r) => [r.id, r.filename]));
+  assert.equal(by["table:db/plain"], "db--plain.json");
+  assert.equal(by["table:db/My Table"], "db--My~20Table.json");
+  assert.equal(by["function:db/Do It"], "db--Do~20It.json");
+  for (const name of Object.values(by)) assert.match(name, /^[A-Za-z0-9._~()\[\]-]+\.json$/);
+});
+
+test("CR-241: names that differ only by case would be one file on some disks, so they decline", (t) => {
+  declined(t, { "migrations/001.sql": 'create table "User" (id int);\ncreate table "user" (id int);\n' }, /only by case/);
+});
+
+test("CR-250: lone files in plainly named folders are databases; a version in the folder's name is what says a migration", (t) => {
+  const tables = read(t, { "migrations/alpha/001.sql": "create table a (id int);\n", "migrations/beta/001.sql": "create table b (id int);\n" });
+  assert.deepEqual(Object.keys(tables).sort(), ["a", "b"]);
+  declined(t, { "migrations/2024-01-01-000000_init/up.sql": "create table a (id int);\n" }, /a folder per migration/);
+});
+
+test("CR-252: a decline over a function says so, not a table", (t) => {
+  declined(t, { "migrations/001.sql": "create table a (id int);\nalter function ghost() rename to spirit;\n" }, /a table or function they never create/);
+});
+
+test("CR-253: a renamed function's record carries its new id and its history, after what was there", (t) => {
+  const root = repo(t, { "migrations/001.sql": "create table a (id int);\ncreate function f() returns trigger language plpgsql as $$ begin return new; end; $$;\ncreate trigger tr before update on a for each row execute function f();\n", "migrations/002.sql": "alter function f() rename to g;\n" });
+  const { records } = derive({ repoRoot: root, options: { migrationNamespaces: [{ name: "db", dir: "migrations" }] }, io: makeExtractorIo(root, "supabase") });
+  const g = records.find((r) => r.id === "function:db/g");
+  assert.deepEqual(g.facts.renamedFrom, ["f"]);
+  assert.deepEqual(g.resource, ["migrations/001.sql", "migrations/002.sql"]);
+  assert.deepEqual(g.refs, ["table:db/a"]);
+  assert.ok(FACTS_KEY_ORDER.function.indexOf("renamedFrom") > FACTS_KEY_ORDER.function.indexOf("triggers"));
+  assert.ok(!records.some((r) => r.id === "function:db/f"));
 });
 
 // ---- Other claimers ----

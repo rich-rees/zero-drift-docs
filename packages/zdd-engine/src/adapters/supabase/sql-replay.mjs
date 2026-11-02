@@ -37,6 +37,11 @@ export function tokenizeSql(text) {
   let state = "normal"; // normal | line-comment | block-comment | string | dollar
   let dollarTag = "";
 
+  // Postgres reads a comment as whitespace: two words it stood between stay two.
+  const endComment = (at) => {
+    if (/\w$/.test(stmt) && /\w/.test(text[at] ?? "")) stmt += " ";
+  };
+
   const flushStatement = () => {
     const sql = stmt.trim();
     if (sql) statements.push({ sql, leadingComments: comments });
@@ -55,6 +60,7 @@ export function tokenizeSql(text) {
         // still blank; a trailing comment inside a statement is ignored.
         if (!stmt.trim()) comments.push(pendingComment);
         pendingComment = "";
+        endComment(i + 1);
       } else {
         pendingComment += ch;
       }
@@ -65,6 +71,7 @@ export function tokenizeSql(text) {
       if (ch === "*" && next === "/") {
         state = "normal";
         i += 2;
+        endComment(i);
       } else i++;
       continue;
     }
@@ -201,10 +208,13 @@ function parenBody(text, from = 0) {
 }
 
 // An identifier and a qualified name, as regex source: quoted (spaces and
-// all) or plain.
-const IDENT = '(?:"(?:[^"]|"")+"|\\w+)';
+// all) or plain, where $ and any letter past ASCII are as good as \w. A name
+// with a dot inside its quotes is not one here: every name is held as one
+// string with its schema before the first dot, so that table could not be told
+// from a qualified one. Its statement matches nothing and reports.
+const IDENT = '(?:"(?:[^".]|"")+"|[\\w$\\u0080-\\uffff]+)';
 const QNAME = `${IDENT}(?:\\s*\\.\\s*${IDENT})*`;
-const LEADING_IDENT = new RegExp(`^${IDENT}`);
+const QUOTED_COLUMN = /^"(?:[^"]|"")+"/;
 const REFERENCES = new RegExp(`references\\s+(${QNAME})\\s*\\(\\s*(${IDENT})\\s*\\)`, "i");
 // Another engine's quoting at the start of a column definition.
 const QUOTED_ELSEWHERE = /^\s*[`[]/;
@@ -230,7 +240,7 @@ function parseColumnDef(def) {
   // The first word; only a quoted name may hold a space. (A table constraint
   // with no space, `UNIQUE(a, b)`, reads as a column: left so, for records
   // already committed to stay byte-identical.)
-  const written = (text.startsWith('"') ? LEADING_IDENT.exec(text)?.[0] : null) ?? text.split(/\s+/)[0];
+  const written = QUOTED_COLUMN.exec(text)?.[0] ?? text.split(/\s+/)[0];
   if (!written) return null;
   const first = written.toLowerCase();
   if (
@@ -296,13 +306,13 @@ const notOurs = (name) => PLATFORM_SCHEMAS.has(schemaOf(name));
 // table. Everything else a `drop` can name stays on the tripwire.
 const QUIET_DROP = /^drop\s+(index|policy|view|materialized\s+view|sequence|type|domain|extension|role|user|group|publication|subscription|event\s+trigger|aggregate|operator|cast|collation|rule|statistics|server|foreign\s+data\s+wrapper|text\s+search|language|tablespace|transform)\b/i;
 const DROPS_COLUMNS = /^drop\s+(type|domain)\b[\s\S]*\bcascade\b/i; // takes the columns of that type with it
-const TRIPWIRE = /^(create\s+(?:(?:global|local)\s+)?(?:unlogged\s+|foreign\s+)?table|alter\s+(?:foreign\s+)?table|alter\s+(?:function|procedure|routine|schema)|rename\s+table|create\s+(?:or\s+replace\s+)?(?:constraint\s+)?trigger|(?:exec(?:ute)?\s+)?\S*sp_rename\b|drop\s)/i;
+const TRIPWIRE = /^(create\s+(?:(?:global|local)\s+)?(?:unlogged\s+|foreign\s+)?table|alter\s+(?:foreign\s+)?table|alter\s+(?:function|procedure|routine|schema)|rename\s+table|create\s+(?:or\s+replace\s+)?(?:function|procedure)\s|create\s+(?:or\s+replace\s+)?(?:constraint\s+)?trigger|(?:exec(?:ute)?\s+)?\S*sp_rename\b|drop\s)/i;
 
 // One action of an ALTER TABLE: what it does to the model, or "ignored" when
 // the model holds nothing it changes, or "unknown". `unknown` is what the
 // tripwire is for: an action nobody listed may well be a schema change.
 const IGNORED_ACTION = /^(enable|disable|force|no\s+force|validate|owner\s+to|replica\s+identity|cluster\s+on|set\s+without|set\s*\(|reset\s*\(|set\s+tablespace|set\s+access|set\s+logged|set\s+unlogged|inherit|no\s+inherit|attach\s+partition|detach\s+partition|of\b|not\s+of\b|rename\s+constraint)/i;
-const ALTER_COLUMN_IGNORED = new RegExp(`^alter\\s+(?:column\\s+)?${IDENT}\\s+(?:set|drop|add|reset|restart)\\b`, "i");
+const ALTER_COLUMN_IGNORED = new RegExp(`^alter\\s+(?:column\\s+)?(${IDENT})\\s+(?:set|drop|add|reset|restart)\\b`, "i");
 const RENAME_TO = new RegExp(`^rename\\s+to\\s+(${QNAME})$`, "i");
 const RENAME_COLUMN = new RegExp(`^rename\\s+(?:column\\s+)?(${IDENT})\\s+to\\s+(${IDENT})$`, "i");
 const SET_SCHEMA = new RegExp(`^set\\s+schema\\s+(${IDENT})$`, "i");
@@ -323,7 +333,7 @@ function readAction(action) {
   if (/^drop\s+(constraint|index|key|primary\s+key|foreign\s+key|check)\b/i.test(action)) return { kind: "ignored" };
   if ((a = DROP_COLUMN.exec(action))) return { kind: "drop-column", name: foldIdent(a[2]), guarded: Boolean(a[1]) };
   if ((a = ALTER_TYPE.exec(action))) return { kind: "alter-type", name: foldIdent(a[1]), type: a[2].trim().toLowerCase() };
-  if (ALTER_COLUMN_IGNORED.test(action)) return { kind: "ignored" };
+  if ((a = ALTER_COLUMN_IGNORED.exec(action))) return { kind: "ignored", column: foldIdent(a[1]) };
   return { kind: "unknown" };
 }
 
@@ -340,16 +350,19 @@ const WHOLE_NAME = new RegExp(`^${QNAME}$`);
 
 // A DO block runs what it holds, conditionally: the replay applies nothing in
 // one, so each statement in it is judged, not read. Constraints and the like
-// change nothing the model holds. A CREATE TABLE is answered if the table is
-// in the replay at the end, by a plain statement elsewhere. Anything else that
-// would change the model (a rename above all) cannot be followed safely, and
-// an EXECUTE of text the reader cannot see is the same.
-const DO_DDL = /\b(?:alter\s+(?:foreign\s+)?table|alter\s+(?:function|procedure|routine|schema)|create\s+table|create\s+(?:(?:global|local)\s+)?(?:unlogged\s+|foreign\s+)table|create\s+(?:or\s+replace\s+)?(?:function|procedure)|drop\s+(?:foreign\s+)?table|drop\s+(?:function|procedure|routine|schema)|rename\s+table|sp_rename)\b[\s\S]*/i;
+// change nothing the model holds. A CREATE TABLE or CREATE TRIGGER is answered
+// if it is in the replay at the end, by a plain statement elsewhere. Anything
+// else that would change the model (a rename above all) cannot be followed
+// safely, and an EXECUTE of text the reader cannot see is the same. A string
+// is text, so it is blanked first: only an EXECUTE gives one effect.
+const DO_DDL = /\b(?:alter\s+(?:foreign\s+)?table|alter\s+(?:function|procedure|routine|schema)|create\s+table|create\s+(?:(?:global|local)\s+)?(?:unlogged\s+|foreign\s+)table|create\s+(?:or\s+replace\s+)?(?:function|procedure)|create\s+(?:or\s+replace\s+)?(?:constraint\s+)?trigger|drop\s+(?:foreign\s+)?table|drop\s+(?:function|procedure|routine|schema|trigger)|drop\s+(?:type|domain)\b(?=[\s\S]*\bcascade\b)|rename\s+table|sp_rename)\b[\s\S]*/i;
 const DO_EXECUTE = /(?<!\bgrant\s+)(?<!\brevoke\s+)(?<!\ball\s+)\bexecute\b(?!\s+(?:function|procedure)\b)/i;
 function judgeDo(sql) {
-  const body = /\$[A-Za-z_]*\$([\s\S]*)\$[A-Za-z_]*\$/.exec(sql)?.[1] ?? sql.replace(/^do\b/i, "");
+  const quoted = /\$[A-Za-z_]*\$([\s\S]*)\$[A-Za-z_]*\$/.exec(sql)?.[1] ?? /'((?:[^']|'')*)'/.exec(sql)?.[1].replace(/''/g, "'");
+  if (quoted === undefined) return { unread: true };
   const needs = [];
-  for (const { sql: inner } of tokenizeSql(body)) {
+  for (const { sql: written } of tokenizeSql(quoted)) {
+    const inner = written.replace(/'(?:[^']|'')*'/g, "''").replace(/\$([A-Za-z_]*)\$[\s\S]*?\$\1\$/g, "''");
     const ddl = DO_DDL.exec(inner)?.[0];
     if (!ddl) {
       if (DO_EXECUTE.test(inner)) return { unread: true };
@@ -357,7 +370,12 @@ function judgeDo(sql) {
     }
     const created = CREATE_TABLE.exec(ddl);
     if (created) {
-      needs.push(foldIdent(created[2]));
+      needs.push({ table: foldIdent(created[2]) });
+      continue;
+    }
+    const trigger = CREATE_TRIGGER.exec(ddl);
+    if (trigger) {
+      needs.push({ trigger: foldIdent(trigger[1]), table: foldIdent(trigger[4]) });
       continue;
     }
     const altered = ALTER_TABLE.exec(ddl);
@@ -421,12 +439,21 @@ export function replayMigrations(files) {
   };
 
   for (const file of files) {
-    // What this file made, to tell an undo step from a later migration's change.
-    const here = { tables: new Set(), columns: new Set(), renames: new Set() };
+    // What this file made, and what it changed from, to tell an undo step from
+    // a later migration's change.
+    const here = { tables: new Set(), columns: new Set(), functions: new Set(), triggers: new Set(), was: new Map() };
     for (const { sql, leadingComments } of tokenizeSql(file.text)) {
       const head = sql.replace(/\s+/g, " ").slice(0, 200);
       const unread = (extra = {}) => skipped.push({ file: file.name, statement: head, text: sql, ...extra });
       const selfUndone = () => undone.push({ file: file.name, statement: head });
+      // A thing this file changed and now changes back. By the thing itself,
+      // so a table is the same table under whatever name it went through.
+      const changed = (thing, field, before, after) => {
+        if (!here.was.has(thing)) here.was.set(thing, new Map());
+        const was = here.was.get(thing);
+        if (was.get(field) === after) selfUndone();
+        if (!was.has(field)) was.set(field, before);
+      };
 
       // A batch separator: the statements either side of it reach here as one.
       if (/^\s*go\s*$/im.test(sql)) {
@@ -483,19 +510,31 @@ export function replayMigrations(files) {
           const a = readAction(action);
           const at = tableKey(table.name);
           if (a.kind === "rename-table") {
-            if (here.renames.has(`table ${tableKey(a.to)}`)) selfUndone();
-            here.renames.add(`table ${at}`);
             const schema = schemaOf(table.name);
-            moveTable(table, schema && schema !== "public" && !schemaOf(a.to) ? `${schema}.${a.to}` : a.to);
+            const to = schema && schema !== "public" && !schemaOf(a.to) ? `${schema}.${a.to}` : a.to;
+            if (!sameTable(to, table.name) && tables.has(tableKey(to))) {
+              missed = true;
+              continue;
+            }
+            changed(table, "name", at, tableKey(to));
+            moveTable(table, to);
             touched = true;
           } else if (a.kind === "set-schema") {
-            moveTable(table, `${a.schema}.${bareName(table.name)}`);
+            const to = `${a.schema}.${bareName(table.name)}`;
+            if (sameTable(to, table.name)) continue;
+            if (tables.has(tableKey(to))) {
+              missed = true;
+              continue;
+            }
+            changed(table, "name", at, tableKey(to));
+            moveTable(table, to);
             touched = true;
           } else if (a.kind === "rename-column") {
             const col = table.columns.find((c) => c.name === a.from);
-            if (col) {
-              if (here.renames.has(`column ${at} ${a.to}`)) selfUndone();
-              here.renames.add(`column ${at} ${a.from}`);
+            if (col && table.columns.some((c) => c !== col && c.name === a.to)) {
+              missed = true;
+            } else if (col) {
+              changed(col, "name", a.from, a.to);
               col.name = a.to;
               // A foreign key names its target column: it follows too.
               for (const other of tables.values()) {
@@ -519,10 +558,12 @@ export function replayMigrations(files) {
             touched = true;
           } else if (a.kind === "alter-type") {
             const col = table.columns.find((c) => c.name === a.name);
-            if (col) col.type = a.type;
-            else missed = true;
+            if (col) {
+              changed(col, "type", col.type, a.type);
+              col.type = a.type;
+            } else missed = true;
             touched = true;
-          } else if (a.kind === "unknown") {
+          } else if (a.kind === "unknown" || (a.column !== undefined && !table.columns.some((c) => c.name === a.column))) {
             missed = true;
           }
           // ADD/DROP CONSTRAINT, SET DEFAULT, ENABLE/DISABLE ROW LEVEL
@@ -564,6 +605,7 @@ export function replayMigrations(files) {
         const args = paren ? paren.body.replace(/\s+/g, " ").trim() : "";
         const returns = /returns\s+((?:setof\s+)?[\w".\[\]]+)/i.exec(sql);
         const language = /language\s+([\w"]+)/i.exec(sql);
+        here.functions.add(name);
         const existing = functions.get(name);
         const resources = existing ? existing.resources : [];
         if (!resources.includes(file.name)) resources.push(file.name);
@@ -603,7 +645,9 @@ export function replayMigrations(files) {
         }
         const schema = moved ? foldIdent(moved[1]) : schemaOf(key);
         const bare = renamed ? bareName(foldIdent(renamed[1])) : bareName(key);
-        moveFunction(key, schema ? `${schema}.${bare}` : bare, file.name);
+        const to = schema ? `${schema}.${bare}` : bare;
+        changed(functions.get(key), "name", tableKey(key), tableKey(to));
+        moveFunction(key, to, file.name);
         continue;
       }
 
@@ -618,6 +662,7 @@ export function replayMigrations(files) {
             continue;
           }
           const name = foldIdent(written);
+          if (here.functions.has(name)) selfUndone();
           functions.delete(name);
           for (let i = triggers.length - 1; i >= 0; i--) if (triggers[i].fn === name) triggers.splice(i, 1);
         }
@@ -633,6 +678,7 @@ export function replayMigrations(files) {
         // CREATE OR REPLACE (PG14+) / re-run idempotency: same name+table replaces.
         const existingIdx = triggers.findIndex((t) => t.name === name && sameTable(t.table, table));
         if (existingIdx !== -1) triggers.splice(existingIdx, 1);
+        here.triggers.add(`${name} ${tableKey(table)}`);
         triggers.push({
           name,
           timing: m[2].replace(/\s+/g, " ").toLowerCase(),
@@ -648,6 +694,7 @@ export function replayMigrations(files) {
         const name = foldIdent(m[2]);
         const table = foldIdent(m[3]);
         if (!m[1] && !tables.has(tableKey(table)) && !notOurs(table)) unread({ unseen: true });
+        if (here.triggers.has(`${name} ${tableKey(table)}`)) selfUndone();
         for (let i = triggers.length - 1; i >= 0; i--) {
           if (triggers[i].name === name && sameTable(triggers[i].table, table)) triggers.splice(i, 1);
         }
@@ -705,7 +752,8 @@ export function replayMigrations(files) {
     }
   }
 
-  for (const { needs, item } of waiting) if (!needs.every((name) => tables.has(tableKey(name)))) skipped.push(item);
+  const answered = ({ table, trigger }) => (trigger ? triggers.some((t) => t.name === trigger && sameTable(t.table, table)) : tables.has(tableKey(table)));
+  for (const { needs, item } of waiting) if (!needs.every(answered)) skipped.push(item);
 
   return { tables, functions, buckets, triggers, skipped, created, undone };
 }

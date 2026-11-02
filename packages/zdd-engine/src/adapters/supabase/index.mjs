@@ -15,6 +15,9 @@ import { replayMigrations, appliedMigrations, tableKey } from "./sql-replay.mjs"
 import { repoRelative } from "../../core/lib/paths.mjs";
 
 const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+// A record's file name, from a name a quoted identifier may have put anything
+// in: what the store refuses goes as ~<hex>, and a plain name stays as it is.
+export const fileNamed = (ns, name) => `${ns}--${name}.json`.replace(/[^A-Za-z0-9._~()[\]-]/g, (c) => `~${c.codePointAt(0).toString(16)}`);
 
 export const FACTS_KEY_ORDER = {
   table: ["namespace", "columns", "createdIn", "renamedFrom"],
@@ -126,7 +129,7 @@ export function derive({ repoRoot, options, io }) {
         resource: t.resources,
         refs: [...refs].sort(),
         facts,
-        filename: `${ns}--${name}.json`,
+        filename: fileNamed(ns, name),
       });
     }
     for (const name of [...functions.keys()].sort()) {
@@ -161,7 +164,7 @@ export function derive({ repoRoot, options, io }) {
         resource: f.resources,
         refs: [...refs].sort(),
         facts,
-        filename: `${ns}--${name}.json`,
+        filename: fileNamed(ns, name),
       });
     }
     for (const name of [...buckets.keys()].sort()) {

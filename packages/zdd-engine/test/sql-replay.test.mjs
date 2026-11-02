@@ -437,3 +437,86 @@ test("the replay marks what a file made and took away again in itself, and nothi
   assert.equal(undone("create table t (a int);", "alter table t rename to u;", "alter table u rename to t;"), 0, "two migrations are two steps");
   assert.equal(undone("create table t (a int);", "drop table t;"), 0);
 });
+
+// ---- Campaign CR-241 on ----
+
+test("CR-242: an unquoted name may hold $ or a letter past ASCII, and is never cut short", () => {
+  const { tables, functions, triggers } = replayMigrations([{ name: "1.sql", text: "create table foo$bar (id int);\ncreate table café (id int, b int references foo$bar(id));\ncreate function fn$x() returns trigger language plpgsql as $$ begin return new; end; $$;\ncreate trigger t before update on foo$bar for each row execute function fn$x();" }]);
+  assert.deepEqual([...tables.keys()].sort(), ["café", "foo$bar"]);
+  assert.equal(tables.get("café").columns[1].references, "foo$bar(id)");
+  assert.deepEqual([...functions.keys()], ["fn$x"]);
+  assert.deepEqual(triggers.map((x) => [x.table, x.fn]), [["foo$bar", "fn$x"]]);
+});
+
+test("CR-243: a quoted name holding a dot is no qualified name: reported, never folded into one", () => {
+  for (const sql of ['create table "a.b" (x int)', 'create table "public.x" (x int)', 'alter table "a.b" rename to c', 'drop table "a.b"', 'create function "a.b"() returns void language sql as $$ select 1 $$', 'alter function "a.b"() rename to c', 'drop function "a.b"()', 'create trigger t before update on "a.b" for each row execute function f()', 'drop trigger t on "a.b"']) {
+    assert.deepEqual(SKIPPED(sql), [sql], sql);
+  }
+  const { tables } = replayMigrations([{ name: "1.sql", text: 'create table "a.b" (x int);\ncreate table a.b (y int);' }]);
+  assert.deepEqual([...tables.values()].map((t) => t.columns[0].name), ["y"]);
+  assert.deepEqual(replayMigrations([{ name: "1.sql", text: 'create table t ("a.b" int);' }]).tables.get("t").columns.map((c) => c.name), ["a.b"], "a column has no qualifier to confuse");
+});
+
+test("CR-244: a change to a column that is not there trips, whichever kind of change", () => {
+  const first = "create table t (a int);";
+  for (const action of ["alter column ghost set default 1", "alter column ghost drop default", "alter ghost set not null", "alter column ghost drop not null", "alter column ghost add generated always as identity"]) {
+    assert.deepEqual(SKIPPED("alter table t " + action, first), ["alter table t " + action], action);
+  }
+});
+
+test("CR-245: DDL in a string in a DO block is text, unless it is executed", () => {
+  const first = "create table t (a int);";
+  for (const sql of ["do $$ begin raise notice 'alter table t rename to u'; end $$", "do $$ declare q text := 'drop table t'; begin perform 1; end $$", "do $$ begin raise notice $m$create table x (a int)$m$; end $$", "do $$ begin raise notice 'to execute later'; end $$"]) {
+    assert.deepEqual(SKIPPED(sql, first), [], sql);
+  }
+  for (const sql of ["do $$ begin execute 'alter table t rename to u'; end $$", "do $$ begin execute $q$alter table t rename to u$q$; end $$", "do 'begin alter table t rename to u; end'", "do language plpgsql 'begin alter table t rename to u; end'"]) {
+    assert.deepEqual(SKIPPED(sql, first), [sql], sql);
+  }
+});
+
+test("CR-246: a comment between two words keeps them two", () => {
+  for (const text of ["alter/* why */table t rename to u;", "alter-- why\ntable t rename to u;", "alter table/**/t rename to u;"]) {
+    assert.deepEqual([...replayMigrations([{ name: "1.sql", text: "create table t (a int);\n" + text }]).tables.keys()], ["u"], text);
+  }
+});
+
+test("CR-248: what a file changes and changes back is undone, in every part of the model", () => {
+  const undone = (...texts) => replayMigrations(texts.map((text, i) => ({ name: i + ".sql", text }))).undone.length;
+  const t = "create table t (a text);";
+  const f = "create function f() returns void language sql as $$ select 1 $$;";
+  assert.equal(undone(t, "alter table t alter column a type bigint; alter table t alter column a type text;"), 1);
+  assert.equal(undone(t, "alter table t set schema archive; alter table archive.t set schema public;"), 1);
+  assert.equal(undone(f, "alter function f() rename to g; alter function g() rename to f;"), 1);
+  assert.equal(undone(f, "alter function f() set schema archive; alter function archive.f() set schema public;"), 1);
+  assert.equal(undone(f + "drop function f();"), 1);
+  assert.equal(undone(t + f + "create trigger tr before update on t for each row execute function f(); drop trigger tr on t;"), 1);
+  assert.equal(undone(t, "alter table t alter column a type bigint;", "alter table t alter column a type text;"), 0, "two migrations are two steps");
+  assert.equal(undone(f, "drop function f(); create function f() returns int language sql as $$ select 1 $$;"), 0, "drop then create is forward");
+});
+
+test("CR-249: a rename onto something that is there is reported, and nothing is lost", () => {
+  const { tables, skipped } = replayMigrations([{ name: "1.sql", text: "create table a (x int);\ncreate table b (y int);\ncreate table archive.a (z int);\nalter table a rename to b;\nalter table a set schema archive;\nalter table a set schema public;" }]);
+  assert.deepEqual(tables.get("b").columns.map((c) => c.name), ["y"]);
+  assert.ok(tables.has("a"));
+  assert.equal(skipped.length, 2);
+  const col = replayMigrations([{ name: "1.sql", text: "create table t (a int, b int);\nalter table t rename column a to b;" }]);
+  assert.deepEqual(col.tables.get("t").columns.map((c) => c.name), ["a", "b"]);
+  assert.equal(col.skipped.length, 1);
+});
+
+test("CR-251: a DO block is held to what the top level holds: DROP TYPE CASCADE, and triggers", () => {
+  const first = "create table t (a int);\ncreate function f() returns trigger language plpgsql as $$ begin return new; end; $$;";
+  for (const sql of ["do $$ begin drop type mood cascade; end $$", "do $$ begin drop domain d cascade; end $$", "do $$ begin drop schema s cascade; end $$", "do $$ begin drop trigger tr on t; end $$", "do $$ begin create trigger tr before update on t for each row execute function f(); end $$"]) {
+    assert.deepEqual(SKIPPED(sql, first), [sql], sql);
+  }
+  assert.deepEqual(SKIPPED("do $$ begin drop type mood; end $$", first), []);
+  const answered = "do $$ begin create table v (id int); create trigger tr before update on v for each row execute function f(); end $$;";
+  assert.deepEqual(replayMigrations([{ name: "1.sql", text: first + answered }, { name: "2.sql", text: "create table if not exists v (id int);\ncreate trigger tr before update on v for each row execute function f();" }]).skipped, []);
+});
+
+test("CR-254: a procedure's whole life: made, moved, dropped", () => {
+  const { functions, skipped } = replayMigrations([{ name: "1.sql", text: "create procedure p() language sql as $$ select 1 $$;\nalter procedure p() set schema archive;" }, { name: "2.sql", text: "drop procedure archive.p();" }]);
+  assert.equal(functions.size, 0);
+  assert.deepEqual(skipped, []);
+  assert.deepEqual([...replayMigrations([{ name: "1.sql", text: "create procedure p() language sql as $$ select 1 $$;\nalter procedure p() set schema archive;" }]).functions.keys()], ["archive.p"]);
+});

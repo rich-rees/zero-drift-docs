@@ -57,11 +57,17 @@ function judge(dir, names, scan) {
   const unseen = replay.skipped.filter((s) => s.unseen);
   const unreadable = replay.skipped.filter((s) => !s.unseen);
   const reasons = [];
-  if (unseen.length) reasons.push(`\`${dir}\`: statements change a table they never create (${quote(unseen)})`);
+  if (unseen.length) reasons.push(`\`${dir}\`: statements change a table or function they never create (${quote(unseen)})`);
   if (unreadable.length) reasons.push(`\`${dir}\`: statements it cannot read (${quote(unreadable)})`);
   if (replay.undone.length) reasons.push(`\`${dir}\`: files undo themselves, so they hold undo steps a replay would apply (${quote(replay.undone)})`);
   if (replay.created && !replay.tables.size) reasons.push(`\`${dir}\`: files create tables and end with none`);
-  return { reasons, tables: [...replay.tables.keys()] };
+  const folds = new Map();
+  for (const name of [...replay.tables.keys(), ...replay.functions.keys()]) {
+    const fold = name.toLowerCase();
+    if (folds.has(fold) && folds.get(fold) !== name) reasons.push("`" + dir + "`: `" + folds.get(fold) + "` and `" + name + "` differ only by case, and a record's file name cannot");
+    folds.set(fold, name);
+  }
+  return { reasons, tables: [...replay.tables.keys()], held: replay.tables.size + replay.functions.size + replay.buckets.size };
 }
 
 export function detect({ scan }) {
@@ -81,22 +87,27 @@ export function detect({ scan }) {
 
   const reasons = [];
   const owner = new Map(); // table key -> dir, for a table two folders make
+  let held = 0; // tables, functions and buckets, across every folder
   for (const dir of dirs) {
-    // One folder is one history. A lone file in a folder below `migrations`,
-    // with nothing beside that folder, is a history spread over folders: each
-    // later migration would be a folder nobody listed.
+    // One folder is one history. A lone file in a folder below `migrations`
+    // whose name starts with a version, with no files beside that folder, is a
+    // history spread over folders: each later migration would be a folder
+    // nobody listed. A plainly named one is a database of its own.
     const parent = dir.slice(0, dir.lastIndexOf("/"));
-    if (/(^|\/)migrations(\/|$)/.test(parent) && sqlDirs.get(dir).length === 1 && !sqlDirs.has(parent)) {
+    const folder = dir.slice(dir.lastIndexOf("/") + 1);
+    if (/(^|\/)migrations(\/|$)/.test(parent) && /^\d/.test(folder) && sqlDirs.get(dir).length === 1 && !sqlDirs.has(parent)) {
       reasons.push(`\`${dir}\`: a folder per migration, and the replay reads the files of one folder`);
       continue;
     }
     const judged = judge(dir, sqlDirs.get(dir), scan);
     reasons.push(...judged.reasons);
+    held += judged.held ?? 0;
     for (const key of judged.tables ?? []) {
       if (owner.has(key)) reasons.push(`two folders make the table \`${key}\` (\`${owner.get(key)}\` and \`${dir}\`), and a name must say which`);
       else owner.set(key, dir);
     }
   }
+  if (!reasons.length && !held) reasons.push("the migrations yield nothing a schema reader holds: no table, function or bucket");
   if (reasons.length) return { declined: reasons };
 
   const names = namespaceNames(dirs);
