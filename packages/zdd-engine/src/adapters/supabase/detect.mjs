@@ -2,7 +2,7 @@
 // namespace per migrations folder.
 
 export const DETECTION = {
-  parts: ["database access"],
+  parts: ["schema"],
   order: 10,
   optionShape: { objectLists: { migrationNamespaces: { required: ["dir"] } } },
   exampleClaims: ["a table: `../../metadata/table/db--things.json`"],

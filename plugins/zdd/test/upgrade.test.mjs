@@ -626,7 +626,7 @@ test("0.9 adds the data-access adapters detection proposes, with its evidence, t
   };
   const repo = app("da-add", { extractors: ["supabase", "nextjs"], engine: "2.5.0", settings: { extraKnownMarketplaces: LOCK("v2.5.0") } });
   const plan = runJson(repo, ["upgrade", "--plan"]);
-  assert.ok(plan.notes.some((n) => /^zdd\/config\.json: extractor "supabase-js" added \(0\.9\.0, decision 0037: the database access the route and screen adapters stopped reading\) — detection: Supabase beside JS code \(nextjs/.test(n)), plan.notes.join("\n"));
+  assert.ok(plan.notes.some((n) => /^zdd\/config\.json: extractor "supabase-js" added \(0\.9\.0, decision 0037: the queries the route and screen adapters stopped reading\) — detection: Supabase beside JS code \(nextjs/.test(n)), plan.notes.join("\n"));
   runJson(repo, ["upgrade"]);
   const cfg = JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8"));
   assert.deepEqual(cfg.extractors, ["supabase", "nextjs", "supabase-js"]);

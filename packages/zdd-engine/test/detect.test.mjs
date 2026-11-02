@@ -196,7 +196,8 @@ test("the queue readers: Inngest, Trigger.dev and SQS are each proposed from the
 test("coverage part by part: what is covered and by which adapter, and the parts nothing covers", () => {
   const d = detectRepo(join(PKG, "test", "fixture-fastapi"), modules);
   assert.deepEqual(d.coverage.find((c) => c.part === "routes").adapters, ["fastapi"]);
-  assert.deepEqual(d.coverage.find((c) => c.part === "database access").adapters, ["supabase", "supabase-py"]);
+  assert.deepEqual(d.coverage.find((c) => c.part === "schema").adapters, ["supabase"]);
+  assert.deepEqual(d.coverage.find((c) => c.part === "queries").adapters, ["supabase-py"]);
   assert.deepEqual(d.uncovered, ["screens", "components", "background tasks", "external services"]);
   // The neutral greenfield list: adapters a stated stack can select, by part — catalogue data, no recommendation.
   assert.deepEqual(d.catalogue.find((c) => c.part === "routes").adapters, ["fastapi", "nextjs"]);

@@ -122,6 +122,14 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
   not only under `--verbose`: for what the branch that caused it should
   hear (the `external-services` extractor's "this env name matches no declared
   service"). Diagnostics stay the quiet channel. Neither ever fails derive.
+- **An `unread` list says what the adapter saw and could not read**
+  ([decision 0048](docs/decisions/0048-the-app-owns-its-adapters-zdd-ships-starters-not-readers.md)):
+  `[{ file, what }]`, optional, and returned beside `records`. Each item
+  prints on every derive and shows in the human index, and lint holds it
+  until the adapter is fixed or the item is marked fine once. Say it here,
+  not in a diagnostic: a diagnostic is what nobody reads. An adapter that
+  cannot tell what it missed has nothing to report; `coverage` stays the
+  second net.
 - **Missing source is "nothing to inventory."** A configured root that does not
   exist yields no records and a diagnostic, never an error — greenfield repos
   adopt ZDD before any code exists. The one exception is a single named file
@@ -172,6 +180,7 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
   | data access | 1 | no | `?code:<file>#<function>` refs, and `data-access` records naming the tables a function reaches (decision 0037) |
   | typed edges | 1 | no | `facts.edges`, a verb for a ref (decision 0016) |
   | `warnings` | 1 | no | a list printed on every derive |
+  | `unread` | 1 | no | a list of `{ file, what }`, what it saw and could not read (decision 0048) |
   | detection | 1 | no | `DETECTION` and `detect({ scan, proposed })` (decision 0039; every catalogue adapter has it) |
   | import reader | 1 | no | `IMPORTS`: `{ label, extensions, skipDirs, isTest(rel), resolver(io, files) }`, the repo files one file imports, read at render for an `extend` blessing's users (decision 0046; the JavaScript and Python adapters share `adapters/js/imports.mjs` and `adapters/python/imports.mjs`) |
 
@@ -184,7 +193,7 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
   ([decision 0039](docs/decisions/0039-detection-lives-in-each-adapter-bootstrap-builds-the-gaps-and-checks-together.md)):
   bootstrap asks every adapter whether it fits a repo, and is never edited to
   learn a stack. It exports `DETECTION` — `parts` (from
-  `src/core/lib/parts.mjs`: routes, screens, components, database access,
+  `src/core/lib/parts.mjs`: routes, screens, components, schema, queries,
   background tasks, external services), `order` (where its proposal sits),
   `optionShape` (which option keys hold a repo-relative path, a list of
   them, call names, or objects with a path key — bootstrap checks answers

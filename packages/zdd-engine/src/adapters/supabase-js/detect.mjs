@@ -9,7 +9,7 @@ const JS_READERS = ["nextjs", "react-router", "components", "expo-router"];
 const SUBSCRIBE_CALLS = "extractorOptions.supabase-js.subscribeCalls";
 
 export const DETECTION = {
-  parts: ["database access"],
+  parts: ["queries"],
   order: 11,
   after: true,
   // Before 0.9 the route and screen adapters read these calls (decision 0037).

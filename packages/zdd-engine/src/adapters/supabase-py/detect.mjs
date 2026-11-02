@@ -7,7 +7,7 @@
 import { PY_SKIP_DIRS, pythonLibraryEvidence } from "../python/detect.mjs";
 
 // upgradeAdds: before 0.9 `fastapi` read these calls itself (decision 0037).
-export const DETECTION = { parts: ["database access"], order: 12, upgradeAdds: "0.9.0", optionShape: { pathLists: ["roots"] }, skipDirs: PY_SKIP_DIRS };
+export const DETECTION = { parts: ["queries"], order: 12, upgradeAdds: "0.9.0", optionShape: { pathLists: ["roots"] }, skipDirs: PY_SKIP_DIRS };
 
 const TEST_FILE = /(^|\/)(test_[^/]*\.py|[^/]*_test\.py|conftest\.py)$/;
 const CALL = /\.(?:table|from_)\(\s*(['"])[\w-]+\1\s*\)/;

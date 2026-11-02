@@ -6,7 +6,7 @@ import { PY_SKIP_DIRS, pythonLibraryEvidence } from "../python/detect.mjs";
 
 // upgradeAdds: new in 0.9, and the only reader of a Python repo's raw SQL
 // once `jobs` stopped reading it (decision 0037).
-export const DETECTION = { parts: ["database access"], order: 13, upgradeAdds: "0.9.0", optionShape: { pathLists: ["roots"] }, skipDirs: PY_SKIP_DIRS };
+export const DETECTION = { parts: ["queries"], order: 13, upgradeAdds: "0.9.0", optionShape: { pathLists: ["roots"] }, skipDirs: PY_SKIP_DIRS };
 
 export function detect({ scan }) {
   const ev = pythonLibraryEvidence(scan, { dep: "sqlalchemy", module: "sqlalchemy", label: "SQLAlchemy" });
