@@ -1,0 +1,9 @@
+{
+  "name": "mobile",
+  "private": true,
+  "dependencies": {
+    "expo": "~52",
+    "expo-router": "~4",
+    "react-native": "0.76"
+  }
+}

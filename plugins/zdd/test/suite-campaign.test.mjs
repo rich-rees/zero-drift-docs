@@ -9,9 +9,11 @@ import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { addSuiteStep, SUITE_CHECK_COUNT, ciCommands, narrateApply } from "../scripts/bootstrap.mjs";
+import { copyFixture } from "../../../packages/zdd-starter-adapters/test/starters.mjs";
 
 const PLUGIN = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const ENGINE = resolve(PLUGIN, "..", "..", "packages", "zdd-engine");
+const STARTERS = resolve(PLUGIN, "..", "..", "packages", "zdd-starter-adapters");
 const ENGINE_BIN = join(ENGINE, "bin", "zdd-engine.mjs");
 const BOOTSTRAP = join(PLUGIN, "scripts", "bootstrap.mjs");
 const SCAFFOLD = join(PLUGIN, "scripts", "scaffold-extractor.mjs");
@@ -26,7 +28,7 @@ const config = (repo) => JSON.parse(readFileSync(join(repo, "zdd", "config.json"
 const writeConfig = (repo, c) => writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify(c, null, 2) + "\n");
 function adopted(t) {
   const repo = tmp(t, "zdd-suite-cr-plugin-");
-  cpSync(join(ENGINE, "test", "fixture-fastapi"), repo, { recursive: true });
+  copyFixture(join(STARTERS, "test", "fixture-fastapi"), repo);
   rmSync(join(repo, "zdd"), { recursive: true });
   const answers = join(tmp(t, "zdd-ans-"), "a.json");
   writeFileSync(answers, JSON.stringify({ name: "Suite" }));
@@ -95,7 +97,7 @@ test("CR-123 (plugin): adapters --raise refuses while a configured adapter of th
 test("CR-141: the scaffold's module declares CONTRACT 1, the comment mark of its syntax for each extension, and its fixture options", async (t) => {
   for (const [syntax, extensions, mark] of [["c-like", [".cs", ".java"], "//"], ["python", [".py"], "#"], ["sql", [".sql"], "--"], ["mysql", [".sql"], "#"]]) {
     const repo = tmp(t, "zdd-scaffold-cr141-");
-    cpSync(join(ENGINE, "test", "fixture-greenfield"), repo, { recursive: true });
+    copyFixture(join(STARTERS, "test", "fixture-greenfield"), repo);
     const answers = join(tmp(t, "zdd-ans-"), "a.json");
     const name = `acme-${syntax}`;
     writeFileSync(answers, JSON.stringify({ name, evidence: "x", shapedLike: "fastapi", kinds: ["route"], idExample: "route:/x", refs: [], roots: ["src"], extensions, syntax }));

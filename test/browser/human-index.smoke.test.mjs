@@ -14,16 +14,19 @@ import { test, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { chromium } from "playwright";
+import { copyFixture } from "../../packages/zdd-starter-adapters/test/starters.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ENGINE = resolve(HERE, "..", "..", "packages", "zdd-engine");
 const BIN = join(ENGINE, "bin", "zdd-engine.mjs");
-const FIXTURE = join(ENGINE, "test", "fixture");
+// The fixture lives with the starters that read it (decision 0048): the
+// engine ships no adapter, so a copy gets them in its zdd/extractors.
+const FIXTURE = resolve(HERE, "..", "..", "packages", "zdd-starter-adapters", "test", "fixture");
 const ARTIFACTS = join(HERE, "artifacts");
 // Longer than the slide-out's 0.25s transition and reveal's 200ms animation:
 // CR-167's panel opened and then closed, so "open" is read only after both.
@@ -35,7 +38,7 @@ const repos = [];
 function renderFixture(edit) {
   const repo = mkdtempSync(join(tmpdir(), "zdd-smoke-"));
   repos.push(repo);
-  cpSync(FIXTURE, repo, { recursive: true });
+  copyFixture(FIXTURE, repo);
   if (edit) edit(repo);
   for (const cmd of ["derive", "render"]) {
     execFileSync(process.execPath, [BIN, cmd], { cwd: repo, stdio: ["ignore", "ignore", "pipe"] });

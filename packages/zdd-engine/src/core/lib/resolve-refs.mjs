@@ -316,7 +316,7 @@ export function resolveRefs(records) {
   // how code reaches the database: every route -> table edge is silently gone.
   // Say so on every derive (CR-013). An app with no tables is not warned.
   if (codeRefs.size && !dataAccess.size && index.table.size) {
-    warnings.push(`${codeRefs.size} ref${codeRefs.size === 1 ? " names" : "s name"} the code a route or screen runs (?code:) and the schema has tables, but no data-access adapter is configured, so no route links to a table — add the adapter for your database layer to "extractors" (see the catalogue in README, "What ZDD reads"), or your own`);
+    warnings.push(`${codeRefs.size} ref${codeRefs.size === 1 ? " names" : "s name"} the code a route or screen runs (?code:) and the schema has tables, but no data-access adapter is configured, so no route links to a table — add the adapter for your database layer to "extractors" (the starter library has some, README "What ZDD reads"), or build your own`);
   }
   // Fold and absorb data access (decision 0037; see the head of this file).
   // The data-access records' own refs are final here: every record was

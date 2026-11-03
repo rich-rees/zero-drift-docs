@@ -1,0 +1,54 @@
+{
+  "notes": 1,
+  "versions": [
+    {
+      "version": "0.1.0",
+      "summary": "The first version: every starter as ZDD 0.13 ran it from the engine, so an upgrade that copies them in proves the records unchanged.",
+      "starters": {}
+    },
+    {
+      "version": "0.2.0",
+      "summary": "The schema and query readers ship with every bug known when the library began fixed. A repo that copied 0.1.0 is offered these; a new repo gets them from the start.",
+      "starters": {
+        "supabase": {
+          "fixes": [
+            {
+              "what": "A foreign key added after the table is read: by ALTER TABLE … ADD CONSTRAINT … FOREIGN KEY or ADD FOREIGN KEY, at table level, with no column list (the referenced table's primary key), or in a DO block that runs it outright or guards it on that constraint or table. DROP CONSTRAINT takes one away, by the name given or the name Postgres gave it, through renames. A column in a second key keeps it in an optional alsoReferences, beside references; a dropped column takes its whole key.",
+              "who": "A repo whose migrations add foreign keys after CREATE TABLE, or inside a DO block. Its column records gain the references, and the tables gain the edges between them.",
+              "moves": "No record id moves. Column records change: references (which may now name a table with no column) and alsoReferences."
+            },
+            {
+              "what": "A renamed table keeps the schema it was written with, public too: ALTER TABLE public.x RENAME TO y makes public.y, not y.",
+              "who": "A repo whose migrations rename a schema-qualified table. Code that named the renamed table with its schema lost its data-access records with no warning; they arrive.",
+              "moves": "The renamed table's id gains its schema: table:<namespace>/y becomes table:<namespace>/public.y. Repoint map links and blessings by the new record's renamedFrom."
+            },
+            {
+              "what": "f and public.f are one function, in every statement that names it.",
+              "who": "A repo whose migrations name one function both with and without public.",
+              "moves": "Where two function records were made, one remains: the id as first written. Repoint links to the other id at it."
+            },
+            {
+              "what": "UPDATE and DELETE on storage.buckets apply, or are reported when wider than one bucket; an INSERT of several buckets makes them all; its ON CONFLICT decides what a bucket already there does; a bucket's id and name are held apart, quoting read.",
+              "who": "A repo that creates buckets with one INSERT of several rows, or changes or removes them in a later migration. Bucket records gain, lose or change.",
+              "moves": "A bucket removed by a later DELETE loses its record; one made in a multi-row INSERT gains one."
+            },
+            {
+              "what": "UNIQUE(a, b) with no space is a constraint, never a column; a type changed USING an expression is the type alone; a CREATE TABLE over a table that is there is reported as unread.",
+              "who": "A repo with any of those statements. A junk column disappears, a column type is corrected, or an item appears in the unread report to answer.",
+              "moves": "No record id moves."
+            }
+          ]
+        },
+        "sqlalchemy": {
+          "fixes": [
+            {
+              "what": "A table is referred to by its bare name, PUBLIC folded, so code that writes public.x reaches the table in either spelling.",
+              "who": "A repo whose SQLAlchemy code qualifies table names with public, or whose schema reader writes them qualified. Data-access records arrive where they were missing.",
+              "moves": "No record id moves. Data-access records are added, and routes gain the edges to their tables."
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

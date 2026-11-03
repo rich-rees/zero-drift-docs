@@ -15,9 +15,11 @@ import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { addSuiteStep, SUITE_CHECK_COUNT, narrateAdapters } from "../scripts/bootstrap.mjs";
+import { copyFixture, ensureStarters } from "../../../packages/zdd-starter-adapters/test/starters.mjs";
 
 const PLUGIN = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const ENGINE = resolve(PLUGIN, "..", "..", "packages", "zdd-engine");
+const STARTERS = resolve(PLUGIN, "..", "..", "packages", "zdd-starter-adapters");
 const ENGINE_BIN = join(ENGINE, "bin", "zdd-engine.mjs");
 const BOOTSTRAP = join(PLUGIN, "scripts", "bootstrap.mjs");
 const TEMPLATE = readFileSync(join(PLUGIN, "templates", "zdd.yml"), "utf8");
@@ -29,6 +31,7 @@ const tmp = (t, prefix) => {
 };
 const run = (repo, args, env = process.env) => spawnSync(process.execPath, [BOOTSTRAP, ...args, `--root=${repo}`], { encoding: "utf8", env });
 const engineSuite = (repo) => {
+  ensureStarters(repo);
   const r = spawnSync(process.execPath, [ENGINE_BIN, "suite", "--json", `--root=${repo}`], { encoding: "utf8" });
   return { status: r.status, json: JSON.parse(r.stdout) };
 };
@@ -69,7 +72,7 @@ function withOwnAdapter(repo, text = ADAPTER) {
 
 function adopted(t) {
   const repo = tmp(t, "zdd-suite-plugin-");
-  cpSync(join(ENGINE, "test", "fixture-fastapi"), repo, { recursive: true });
+  copyFixture(join(STARTERS, "test", "fixture-fastapi"), repo);
   rmSync(join(repo, "zdd"), { recursive: true });
   const answers = join(tmp(t, "zdd-ans-"), "a.json");
   writeFileSync(answers, JSON.stringify({ name: "Suite" }));
@@ -87,7 +90,7 @@ test("writer to reader: a fresh install writes suiteChecks, and the engine's sui
   const repo = adopted(t);
   assert.equal(config(repo).suiteChecks, SUITE_CHECK_COUNT);
   const s = engineSuite(repo);
-  assert.equal(s.status, 0);
+  assert.equal(s.status, 0, JSON.stringify(s.json.adapters.map((a) => [a.name, a.loadError, a.contractFail, a.checks.filter((c) => !c.ok)])));
   assert.equal(s.json.suiteChecks, SUITE_CHECK_COUNT);
   // The workflow bootstrap wrote runs it.
   assert.match(readFileSync(join(repo, ".github", "workflows", "zdd.yml"), "utf8"), /run: npx -y "\$ZDD_ENGINE" suite\n/);
@@ -122,6 +125,9 @@ test("adapters: a failing check is named with its fix and --raise refuses; once 
   const c = config(repo);
   delete c.suiteChecks;
   writeConfig(repo, c);
+  // The starters the config names, copied in as bootstrap will (slice 5):
+  // they are the repo's own then, and pass the suite on their own fixtures.
+  ensureStarters(repo);
   const r = run(repo, ["adapters"]);
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /acme-routes — written for contract 1/);
@@ -141,7 +147,7 @@ test("adapters: a failing check is named with its fix and --raise refuses; once 
   writeFileSync(join(repo, "zdd", "extractors", "acme-routes", "index.mjs"), ADAPTER.replace('line.replace(/#.*$/, "").trim()', 'line.replace(/^#\\s*/, "").trim()'));
   const s = engineSuite(repo);
   assert.equal(s.status, 1);
-  assert.ok(s.json.adapters[0].checks.find((x) => x.n === 4).blocking);
+  assert.ok(s.json.adapters.find((a) => a.name === "acme-routes").checks.find((x) => x.n === 4).blocking);
 });
 
 test("adapters: no CONTRACT line is a question from the core's table, and --raise waits for it", (t) => {

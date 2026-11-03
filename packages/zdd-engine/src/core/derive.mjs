@@ -16,11 +16,13 @@
 //
 // Extractors are composed: config lists them by name, each one inventories one
 // convention, and this file merges their records and resolves cross-extractor
-// refs afterwards (lib/resolve-refs.mjs). Selection is by NAME only — from
-// the catalogue of adapters beside the core (lib/catalogue.mjs, decision
-// 0036), or from the one repo-local directory config may declare
-// (`localExtractorDir`), the single sanctioned place config can point at
-// code. A path in the extractors list is refused. This file names no adapter.
+// refs afterwards (lib/resolve-refs.mjs). Selection is by NAME only, from
+// the one repo-local directory config may declare (`localExtractorDir`),
+// the single sanctioned place config can point at code. The repo owns every
+// adapter it runs and the core holds none (decision 0048): a name the
+// folder does not hold is told where adapters come from, never run from
+// anywhere else. A path in the extractors list is refused. This file names
+// no adapter.
 
 import { readFileSync, writeFileSync, readdirSync, statSync, lstatSync, realpathSync, mkdirSync, rmSync, existsSync } from "node:fs";
 import { join, dirname, resolve, sep } from "node:path";
@@ -31,11 +33,10 @@ import { mergeBackgroundTasks } from "./lib/background-tasks.mjs";
 import { insideRepo } from "./lib/paths.mjs";
 import { makeExtractorIo } from "./lib/extractor-io.mjs";
 import { gitIgnoredPredicate } from "./lib/ignored.mjs";
-import { catalogue } from "./lib/catalogue.mjs";
 import { judgeContract } from "./lib/contract.mjs";
 import { UNREAD_KIND, unreadRecords, unreadConfig, unreadReport, unreadLines, itemOf } from "./lib/unread.mjs";
 
-const NAME_RE = /^[a-z][a-z0-9-]*$/;
+import { NAME_RE } from "./lib/adapter-folder.mjs";
 
 const RECORD_KEYS = ["kind", "id", "title", "description", "resource", "refs", "facts"];
 const FILENAME_RE = /^[A-Za-z0-9._~()\[\]-]+\.json$/;
@@ -147,10 +148,9 @@ function validateEdgeShapes(records) {
   }
 }
 
-// Which names are loadable: the catalogue plus whatever the local dir holds
-// (`<dir>/<name>.mjs` or `<dir>/<name>/index.mjs`). Local names may not
-// shadow a catalogue adapter: a different take on one is a copy under a new
-// name (decision 0036 point 5).
+// Which names are loadable: whatever the local dir holds
+// (`<dir>/<name>.mjs` or `<dir>/<name>/index.mjs`). Every name is the repo's
+// own, so a copy of a starter keeps its name (decision 0048).
 export function localExtractors(repoRoot, dir) {
   const found = new Map();
   if (!dir) return found;
@@ -166,6 +166,21 @@ export function localExtractors(repoRoot, dir) {
   return found;
 }
 
+// What a config is told when it selects a name its repo does not hold: since
+// 0.14 the core runs no adapter of its own, so a name an older release ran
+// from its catalogue lands here too. Generic on purpose: the core names no
+// stack, so it cannot tell a former catalogue name from a typo, and the same
+// two routes answer both (decision 0048 points 3 and 8).
+export function notHeld(name, localDir, local) {
+  const where = localDir ? `localExtractorDir (${localDir}) holds ${[...local.keys()].join(", ") || "no adapter"}` : "the config sets no localExtractorDir";
+  return (
+    `Extractor '${name}' is not one of this repo's adapters: ${where}. ` +
+    `Since ZDD 0.14 a repo owns every adapter it runs and the engine ships none. ` +
+    `If an older ZDD ran '${name}' for you, say "upgrade ZDD": it copies the adapter into the repo, from the starter library (npm @rich-rees/zdd-starter-adapters), and proves the records unchanged. ` +
+    `Otherwise build it with the extractor skill, or take it out of "extractors".`
+  );
+}
+
 async function loadExtractor(name, repoRoot, config) {
   const localDir = config.localExtractorDir;
   if (!NAME_RE.test(name)) {
@@ -175,23 +190,10 @@ async function loadExtractor(name, repoRoot, config) {
     );
   }
   const local = localExtractors(repoRoot, localDir);
-  const { names, aliases, retired } = catalogue();
-  // A Map, and hasOwn on the aliases: a local extractor called `constructor`
-  // must not hit Object.prototype (CR-022).
-  if (names.has(name)) {
-    if (local.has(name)) fail(`Local extractor '${name}' shadows the built-in of the same name — rename it`);
-    return import(pathToFileURL(names.get(name)).href);
-  }
-  // catalogue() refused an alias whose target is not a catalogue adapter, so
-  // a retired name never falls through to a local one (CR-002).
-  if (Object.hasOwn(aliases, name)) return import(pathToFileURL(names.get(aliases[name])).href);
-  // A retired name stops derive before any local extractor of that name runs
-  // (CR-080): a stale config is told, never served by old local code.
-  if (Object.hasOwn(retired, name)) fail(`Extractor '${name}' was retired: ${retired[name]}`);
+  // A Map: a local extractor called `constructor` must not hit
+  // Object.prototype (CR-022).
   if (local.has(name)) return import(pathToFileURL(local.get(name)).href);
-  const known = [...names.keys(), ...Object.keys(aliases)].sort().join(", ");
-  const localList = localDir ? `; local ${localDir}: ${[...local.keys()].join(", ") || "(none)"}` : "";
-  fail(`Unknown extractor '${name}' (known: ${known}${localList})`);
+  fail(notHeld(name, localDir, local));
 }
 
 // A module localExtractors found, for the standard suite (decision 0040):
@@ -206,15 +208,6 @@ export async function selectedModules(repoRoot, config) {
   if (selection.error) return [];
   const out = [];
   for (const { name } of selection.extractors) out.push(await loadExtractor(name, repoRoot, config));
-  return out;
-}
-
-// Every catalogue adapter's module, in name order (decision 0039): detection
-// asks each one whether it fits a repo. The one other place a name becomes a
-// module, beside loadExtractor.
-export async function catalogueModules() {
-  const out = [];
-  for (const [name, entry] of catalogue().names) out.push({ name, mod: await import(pathToFileURL(entry).href) });
   return out;
 }
 
@@ -306,12 +299,16 @@ export async function deriveRecords({ repoRoot, config, contract }) {
   // extractor's io.
   const ignored = gitIgnoredPredicate(repoRoot);
   if (ignored.error) fail(ignored.error); // fail closed (CR-403): never read ignored files as source
+  // The repo's adapter folder is its ZDD tooling, never its source (decision
+  // 0048): every adapter, with the tests and sample fixtures it carries, is
+  // there, and an adapter that walks the whole repo must not read them.
+  const notSource = typeof config.localExtractorDir === "string" ? [config.localExtractorDir] : [];
   // The standard suite asks which files each adapter read (decision 0040,
   // CR-118): ZDD_IO_TRACE names a file outside the repo that gets
   // { "<adapter>": [paths read] }. Unset, nothing is kept.
   const tracePath = process.env.ZDD_IO_TRACE;
   const trace = tracePath ? {} : null;
-  for (const { name, options, legacyName } of selection.extractors) {
+  for (const { name, options } of selection.extractors) {
     const extractor = await loadExtractor(name, repoRoot, config);
     if (typeof extractor.derive !== "function") fail(`Extractor '${name}' exports no derive()`);
     // The contract it was written for (decision 0040): newer than this
@@ -325,11 +322,8 @@ export async function deriveRecords({ repoRoot, config, contract }) {
     try {
       // A fresh io per extractor: one shared walk budget each, so a greedy
       // extractor cannot starve the next one (decision 0010).
-      // `legacyName`: the retired name the config used (2.3: `services`), so
-      // the extractor can keep the old record kind until "upgrade ZDD"
-      // renames the key — an engine-only adopter sees nothing move (CR-302).
       const onRead = trace ? (rel) => (trace[name] ??= []).push(rel) : undefined;
-      out = extractor.derive({ repoRoot, options, io: makeExtractorIo(repoRoot, name, { ignored, onRead }), ...(legacyName ? { legacyName } : {}) });
+      out = extractor.derive({ repoRoot, options, io: makeExtractorIo(repoRoot, name, { ignored, onRead, notSource }) });
     } catch (e) {
       fail(`Extractor '${name}' failed: ${e.message}`);
     }

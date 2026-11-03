@@ -11,10 +11,12 @@ import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:f
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { copyFixture, ensureStarters } from "../../../packages/zdd-starter-adapters/test/starters.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SCRIPT = resolve(HERE, "..", "scripts", "bootstrap.mjs");
 const ENGINE = resolve(HERE, "..", "..", "..", "packages", "zdd-engine");
+const STARTERS = resolve(HERE, "..", "..", "..", "packages", "zdd-starter-adapters");
 const BIN = join(ENGINE, "bin", "zdd-engine.mjs");
 const env = { ...process.env, ZDD_ENGINE_BIN: BIN, CLAUDE_PROJECT_DIR: "", CODEX_PROJECT_DIR: "" };
 
@@ -24,7 +26,7 @@ const tmp = (t, prefix) => {
   return dir;
 };
 const run = (repo, args) => spawnSync(process.execPath, [SCRIPT, ...args, `--root=${repo}`], { encoding: "utf8", env });
-const engine = (repo, ...args) => spawnSync(process.execPath, [BIN, ...args, `--root=${repo}`], { encoding: "utf8" });
+const engine = (repo, ...args) => (ensureStarters(repo), spawnSync)(process.execPath, [BIN, ...args, `--root=${repo}`], { encoding: "utf8" });
 const config = (repo) => JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8"));
 const writeConfig = (repo, c) => writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify(c, null, 2) + "\n");
 
@@ -32,7 +34,7 @@ const writeConfig = (repo, c) => writeFileSync(join(repo, "zdd", "config.json"),
 // schema adapter cannot read.
 function adopted(t, { statement = "DROP SCHEMA mine ON things;" } = {}) {
   const repo = tmp(t, "zdd-unread-plugin-");
-  cpSync(join(ENGINE, "test", "fixture-fastapi"), repo, { recursive: true });
+  copyFixture(join(STARTERS, "test", "fixture-fastapi"), repo);
   rmSync(join(repo, "zdd"), { recursive: true });
   const answers = join(tmp(t, "zdd-ans-"), "a.json");
   writeFileSync(answers, JSON.stringify({ name: "Unread" }));

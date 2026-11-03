@@ -23,7 +23,7 @@ import { explain, ARTIFACT_EXPLANATIONS, hostOf } from "../scripts/bootstrap.mjs
 const PLUGIN = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SCRIPT = join(PLUGIN, "scripts", "bootstrap.mjs");
 const VERSION = JSON.parse(readFileSync(join(PLUGIN, ".claude-plugin", "plugin.json"), "utf8")).version;
-const ENGINE_FIXTURES = resolve(PLUGIN, "..", "..", "packages", "zdd-engine", "test");
+const ENGINE_FIXTURES = resolve(PLUGIN, "..", "..", "packages", "zdd-starter-adapters", "test");
 
 let scratch, home;
 before(() => {

@@ -1,6 +1,6 @@
 // The adapter contract (decision 0040): a number of its own, separate from
 // ZDD's version, raised only when what the core asks of an adapter changes.
-// Every adapter — the catalogue's and an adopter's own — declares the
+// Every adapter — a starter's and one an adopter built — declares the
 // contract it was written for:
 //
 //   export const CONTRACT = 1;
@@ -65,7 +65,7 @@ export const CONTRACT_TABLE = [
     step: "SUITE",
     since: 1,
     required: true,
-    what: "a `fixture/` folder beside the adapter (a miniature repo in its convention) and `export const SUITE = { options }`, the options to read it with — what the standard suite runs on",
+    what: "a `fixture/` folder beside the adapter (a miniature repo in its convention) and `export const SUITE = { options }`, the options to read it with — what the standard suite runs on; optionally `companions` (adapters beside it in the repo that run beside it) and `allowEmpty: true` (it emits nothing by design)",
     ask: "Which small sample of your code shows this convention? It becomes the adapter's `fixture/`, and the standard suite runs on a copy of it, never on your repo.",
   },
   {
@@ -114,7 +114,7 @@ export const CONTRACT_TABLE = [
     step: "detection",
     since: 1,
     required: false,
-    what: "`DETECTION` and `detect({ scan, proposed })`, so bootstrap can propose the adapter (a catalogue adapter has it; a local one may)",
+    what: "`DETECTION` and `detect({ scan, proposed })`, so bootstrap can propose the adapter (a starter has it; an adapter built for one repo may)",
     ask: null,
   },
   {

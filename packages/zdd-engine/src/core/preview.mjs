@@ -1,48 +1,81 @@
 #!/usr/bin/env node
 // ZDD preview (decision 0039 point 4) — what a map will look like, for a
-// greenfield repo that has no code yet. Each chosen adapter ships a small
+// greenfield repo that has no code yet. Each chosen adapter, in the folder
+// of adapters it is given (the starter library's `adapters/`), ships a small
 // `example/` folder beside its index.mjs; this copies those folders into a
-// temporary directory OUTSIDE the adopter's repo, writes a config naming the
-// adapters with the options each example declares (DETECTION.example), and
-// runs derive and render there. It prints where the human index landed.
+// temporary directory OUTSIDE the adopter's repo, with the adapters
+// themselves and what they reach as its localExtractorDir, writes a config
+// naming the adapters with the options each example declares
+// (DETECTION.example), and runs derive and render there. It prints where the human index landed.
 // Nothing is written into the adopter's repo (0039 point 5): the output folder
 // — a new temporary one, or `--out` — must be a real folder (never a link)
 // outside `--root` (default: the current directory), checked on real paths
-// (CR-098). A name the catalogue does not hold is refused, never reported as
+// (CR-098). A name the folder does not hold is refused, never reported as
 // "no example" (CR-115).
 //
-//   zdd-engine preview --extractors=<a,b,…> [--root=<repo>] [--out=<empty dir>] [--json]
+//   zdd-engine preview --adapters=<dir> --extractors=<a,b,…> [--root=<repo>] [--out=<empty dir>] [--json]
 
 import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, isAbsolute } from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { catalogue } from "./lib/catalogue.mjs";
-import { catalogueModules } from "./derive.mjs";
+import { folderModules, readAdapterFolder } from "./lib/adapter-folder.mjs";
+import { moduleReach } from "./lib/suite.mjs";
 
 const BIN = fileURLToPath(new URL("../../bin/zdd-engine.mjs", import.meta.url));
 
-export async function buildPreview(names, out) {
-  const { names: entries } = catalogue();
-  const modules = new Map((await catalogueModules()).map(({ name, mod }) => [name, mod]));
+const LOCAL = "zdd/extractors"; // the preview repo's localExtractorDir
+
+// What copying adapter `entry` out of `dir` brings: its folder (not its
+// example/, fixture/ or test/) and every file of `dir` its modules reach.
+function adapterCopy(dir, entry) {
+  const own = dirname(entry);
+  const files = new Set();
+  const walk = (d) => {
+    for (const n of readdirSync(d).sort()) {
+      const p = join(d, n);
+      const st = lstatSync(p);
+      if (st.isDirectory() && !st.isSymbolicLink()) {
+        if (d === own && /^(?:example|fixture.*|test)$/.test(n)) continue;
+        walk(p);
+      } else if (st.isFile()) files.add(p);
+    }
+  };
+  walk(own);
+  for (const p of [...files].filter((f) => f.endsWith(".mjs"))) {
+    const r = moduleReach(p, dir);
+    if (r.outside.length || r.missing.length || r.limit) throw new Error(`${relative(dir, entry)} cannot be copied alone: ${[...r.outside, ...r.missing, r.limit].filter(Boolean).join("; ")}`);
+    for (const f of r.files) files.add(f);
+  }
+  return [...files].sort();
+}
+
+export async function buildPreview(names, out, dir) {
+  const modules = new Map((await folderModules(dir)).map(({ name, entry, mod }) => [name, { entry, mod }]));
   const used = [];
   const skipped = [];
   const extractorOptions = {};
   for (const name of names) {
-    const example = entries.has(name) ? join(dirname(entries.get(name)), "example") : null;
-    const declared = modules.get(name)?.DETECTION?.example;
+    const found = modules.get(name);
+    const example = found ? join(dirname(found.entry), "example") : null;
+    const declared = found?.mod?.DETECTION?.example;
     if (!example || !existsSync(example) || !declared) {
       skipped.push(name);
       continue;
     }
     cpSync(example, out, { recursive: true });
+    for (const f of adapterCopy(resolve(dir), found.entry)) {
+      const to = join(out, ...LOCAL.split("/"), relative(resolve(dir), f));
+      mkdirSync(dirname(to), { recursive: true });
+      cpSync(f, to);
+    }
     used.push(name);
     extractorOptions[name] = declared.options ?? {};
   }
   if (!used.length) return { out, used, skipped, humanIndex: null };
   mkdirSync(join(out, "zdd", "map"), { recursive: true });
-  writeFileSync(join(out, "zdd", "config.json"), JSON.stringify({ name: "Preview", extractors: used, extractorOptions, render: { storeChanges: false } }, null, 2) + "\n");
+  writeFileSync(join(out, "zdd", "config.json"), JSON.stringify({ name: "Preview", extractors: used, extractorOptions, localExtractorDir: LOCAL, render: { storeChanges: false } }, null, 2) + "\n");
   for (const cmd of ["derive", "render"]) execFileSync(process.execPath, [BIN, cmd, `--root=${out}`], { stdio: ["ignore", "pipe", "pipe"], encoding: "utf8" });
   return { out, used, skipped, humanIndex: join(out, "zdd", "human-index.html") };
 }
@@ -96,9 +129,21 @@ export async function run(args) {
     console.error("preview: --extractors=<a,b,…> names the adapters to preview");
     process.exit(2);
   }
-  const unknown = names.filter((n) => !catalogue().names.has(n));
+  const dir = arg("adapters");
+  if (!dir) {
+    console.error("preview: --adapters=<dir> names the folder of adapters to preview from (the starter library's adapters/, npm @rich-rees/zdd-starter-adapters); the engine ships no adapter of its own");
+    process.exit(2);
+  }
+  let held;
+  try {
+    held = readAdapterFolder(dir);
+  } catch (e) {
+    console.error(`preview: ${e.message}`);
+    process.exit(2);
+  }
+  const unknown = names.filter((n) => !held.has(n));
   if (unknown.length) {
-    console.error(`preview: ${unknown.join(", ")} ${unknown.length === 1 ? "is not an adapter" : "are not adapters"} in the catalogue (known: ${[...catalogue().names.keys()].join(", ")})`);
+    console.error(`preview: ${unknown.join(", ")} ${unknown.length === 1 ? "is not an adapter" : "are not adapters"} in ${resolve(dir)} (it holds: ${[...held.keys()].join(", ") || "none"})`);
     process.exit(2);
   }
   let out;
@@ -110,7 +155,7 @@ export async function run(args) {
   }
   let r;
   try {
-    r = await buildPreview(names, out);
+    r = await buildPreview(names, out, dir);
   } catch (e) {
     console.error(`preview: ${e.stderr || e.message}`);
     process.exit(1);

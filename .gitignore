@@ -13,3 +13,6 @@ packages/zdd-engine/test/.zdd-io-scan-*/
 
 # The browser smoke test's screenshots of failing flows (test/browser, decision 0044).
 test/browser/artifacts/
+
+# The starter library's release stages a version here (.github/workflows/release-starter-adapters.yml).
+.starter-adapters-stage/

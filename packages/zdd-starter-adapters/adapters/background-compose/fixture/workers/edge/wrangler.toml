@@ -1,0 +1,5 @@
+name = "edge"
+main = "src/index.ts"
+
+[triggers]
+crons = ["0 */6 * * *"]

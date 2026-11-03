@@ -12,6 +12,7 @@ import { readFileSync, writeFileSync, rmSync, mkdtempSync, mkdirSync } from "nod
 import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { ensureStarters } from "../../../packages/zdd-starter-adapters/test/starters.mjs";
 
 const PLUGIN = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const ENGINE_BIN = resolve(PLUGIN, "..", "..", "packages", "zdd-engine", "bin", "zdd-engine.mjs");
@@ -67,6 +68,7 @@ function engineRejects(config, command = "derive") {
   try {
     mkdirSync(join(repo, "zdd"));
     writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify(config));
+    ensureStarters(repo);
     const r = spawnSync(process.execPath, [ENGINE_BIN, command, "--check", `--root=${repo}`], { encoding: "utf8" });
     return r.status === 0 ? null : (r.stderr + r.stdout).trim();
   } finally {
@@ -142,7 +144,7 @@ test("repoBase: the schema pattern refuses internal whitespace exactly as the en
 });
 
 test("the schema's documented refs defaults are the engine's defaults (CR-116)", async () => {
-  const refs = await import(pathToFileURL(resolve(PLUGIN, "..", "..", "packages", "zdd-engine", "src", "adapters", "nextjs", "refs.mjs")).href);
+  const refs = await import(pathToFileURL(resolve(PLUGIN, "..", "..", "packages", "zdd-starter-adapters", "adapters", "nextjs", "refs.mjs")).href);
   const doc = SCHEMA.properties.extractorOptions.properties.nextjs.properties.refs.properties;
   assert.deepEqual(doc.extensions.default, refs.DEFAULT_REFS.extensions);
   assert.deepEqual(doc.excludeSuffixes.default, refs.DEFAULT_REFS.excludeSuffixes);
@@ -150,7 +152,7 @@ test("the schema's documented refs defaults are the engine's defaults (CR-116)",
 });
 
 test("the schema's documented supabase-js defaults are the engine's (ZDD-3 slice 2b, CR-073)", async () => {
-  const js = await import(pathToFileURL(resolve(PLUGIN, "..", "..", "packages", "zdd-engine", "src", "adapters", "_shared", "js", "source.mjs")).href);
+  const js = await import(pathToFileURL(resolve(PLUGIN, "..", "..", "packages", "zdd-starter-adapters", "adapters", "_shared", "js", "source.mjs")).href);
   const doc = SCHEMA.properties.extractorOptions.properties["supabase-js"].properties;
   assert.deepEqual(doc.extensions.default, js.DEFAULT_EXTENSIONS);
   assert.deepEqual(doc.excludeDirs.default, js.DEFAULT_EXCLUDE_DIRS);

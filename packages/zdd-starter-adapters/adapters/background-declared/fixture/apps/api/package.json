@@ -1,0 +1,13 @@
+{
+  "name": "api",
+  "private": true,
+  "scripts": {
+    "dev": "uv run fastapi dev app/main.py --port 8000",
+    "worker": "uv run python -m app.outbound.worker",
+    "housekeeping": "uv run python -m app.housekeeping",
+    "replay": "uv run python -m app.outbound.replay",
+    "test": "uv run pytest",
+    "test:mutation": "node ../../scripts/mutation.mjs",
+    "missing": "python -m app.nowhere"
+  }
+}

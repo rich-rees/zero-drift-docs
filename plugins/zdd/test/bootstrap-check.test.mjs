@@ -13,9 +13,11 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, 
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { copyFixture, ensureStarters } from "../../../packages/zdd-starter-adapters/test/starters.mjs";
 
 const PLUGIN = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const ENGINE = resolve(PLUGIN, "..", "..", "packages", "zdd-engine");
+const STARTERS = resolve(PLUGIN, "..", "..", "packages", "zdd-starter-adapters");
 const ENGINE_BIN = join(ENGINE, "bin", "zdd-engine.mjs");
 const BOOTSTRAP = join(PLUGIN, "scripts", "bootstrap.mjs");
 
@@ -25,7 +27,7 @@ const tmp = (t, prefix) => {
   return d;
 };
 const run = (repo, args, env = process.env) => execFileSync(process.execPath, [BOOTSTRAP, ...args, `--root=${repo}`], { encoding: "utf8", env });
-const engine = (repo, args) => execFileSync(process.execPath, [ENGINE_BIN, ...args, `--root=${repo}`], { encoding: "utf8" });
+const engine = (repo, args) => (ensureStarters(repo), execFileSync)(process.execPath, [ENGINE_BIN, ...args, `--root=${repo}`], { encoding: "utf8" });
 const applyDefaults = (t, repo) => {
   const answers = join(tmp(t, "zdd-ans-"), "a.json");
   writeFileSync(answers, JSON.stringify({ name: "Check" }));
@@ -34,7 +36,7 @@ const applyDefaults = (t, repo) => {
 
 test("the first map check: owed after apply, silent until derive finds records, then due; check names the unlinked; --done clears it", (t) => {
   const repo = tmp(t, "zdd-check-");
-  cpSync(join(ENGINE, "test", "fixture-fastapi"), repo, { recursive: true });
+  copyFixture(join(STARTERS, "test", "fixture-fastapi"), repo);
   rmSync(join(repo, "zdd"), { recursive: true });
   applyDefaults(t, repo);
   assert.equal(JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8")).mapCheck, "owed");
@@ -136,10 +138,10 @@ test("preview: the examples render outside the repo, and nothing is written into
   const bad = spawnSync(process.execPath, [BOOTSTRAP, "preview", "--extractors=../x", `--root=${repo}`], { encoding: "utf8" });
   assert.equal(bad.status, 1);
   assert.match(bad.stderr, /is not an adapter name/);
-  // A well-formed name the catalogue does not hold is refused, not "no example" (CR-115).
+  // A well-formed name the starter library does not hold is refused, not "no example" (CR-115).
   const typo = spawnSync(process.execPath, [BOOTSTRAP, "preview", "--extractors=fastapy", `--root=${repo}`], { encoding: "utf8" });
   assert.equal(typo.status, 1);
-  assert.match(typo.stderr, /fastapy is not an adapter in the catalogue/);
+  assert.match(typo.stderr, /fastapy is not an adapter in .*zdd-starter-adapters.adapters \(it holds: /);
   assert.deepEqual(readdirSync(repo), []);
 });
 

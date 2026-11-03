@@ -13,14 +13,16 @@ import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, re
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { BUILT_INS, RETIRED_BUILT_INS, REMOVED_BUILT_INS, IO_SINCE } from "../scripts/scaffold-extractor.mjs";
+import { BUILT_INS, IO_SINCE } from "../scripts/scaffold-extractor.mjs";
+import { ensureStarters } from "../../../packages/zdd-starter-adapters/test/starters.mjs";
 
 const PLUGIN = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SCRIPT = join(PLUGIN, "scripts", "scaffold-extractor.mjs");
 const TEMPLATES = join(PLUGIN, "templates", "extractor");
 const ENGINE = resolve(PLUGIN, "..", "..", "packages", "zdd-engine");
+const STARTERS = resolve(PLUGIN, "..", "..", "packages", "zdd-starter-adapters");
 const ENGINE_BIN = join(ENGINE, "bin", "zdd-engine.mjs");
-const GREENFIELD = join(ENGINE, "test", "fixture-greenfield");
+const GREENFIELD = join(STARTERS, "test", "fixture-greenfield");
 const POSIX = process.platform !== "win32";
 
 const CSHARP = {
@@ -40,7 +42,10 @@ function adopted(t, pin = IO_SINCE) {
   t.after(() => rmSync(repo, { recursive: true, force: true }));
   cpSync(GREENFIELD, repo, { recursive: true });
   const configPath = join(repo, "zdd", "config.json");
-  writeFileSync(configPath, JSON.stringify({ ...JSON.parse(readFileSync(configPath, "utf8")), engine: pin }, null, 2) + "\n");
+  // Before a scaffold the repo names no local folder (the fixture's is where
+  // the starters' suite copies them); a derive copies in what the config names.
+  const { localExtractorDir: _, ...config } = JSON.parse(readFileSync(configPath, "utf8"));
+  writeFileSync(configPath, JSON.stringify({ ...config, engine: pin }, null, 2) + "\n");
   return repo;
 }
 function scaffold(repo, answers, extra = []) {
@@ -109,6 +114,7 @@ test("a second run keeps every file and the config — nothing is overwritten", 
 test("the untouched scaffold loads in the engine: derive runs, finds nothing, and says why", (t) => {
   const repo = adopted(t);
   scaffoldJson(repo, CSHARP);
+  ensureStarters(repo);
   const r = spawnSync(process.execPath, [ENGINE_BIN, "derive", "--verbose", `--root=${repo}`], { encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stderr, /\[aspnet-routes\] src\/Api is missing — nothing to inventory/);
@@ -180,7 +186,6 @@ test("the scaffolded test is red until EXPECTED_IDS and a fixture exist, and gre
 
 test("refusals: every bad answer or repo state stops before the first write", (t) => {
   const cases = [
-    [{ ...CSHARP, name: "fastapi" }, /is a built-in extractor/],
     [{ ...CSHARP, name: "Aspnet" }, /name must match/],
     [{ ...CSHARP, name: "../evil" }, /name must match/],
     [{ ...CSHARP, evidence: " \n " }, /evidence must say/],
@@ -254,15 +259,12 @@ test("text bound for a generated comment is flattened to one line and every mask
   assert.equal(typeof loaded.derive, "function", "the flattened comment did not break the module");
 });
 
-test("the local-name guard mirrors the engine's catalogue", () => {
-  // The catalogue is a folder of adapters beside the core (decision 0036):
-  // every <name>/index.mjs is a name, and catalogue.json carries the retired ones.
-  const dir = join(ENGINE, "src", "adapters");
+test("the shapedLike list mirrors the starter library (decision 0048)", () => {
+  // The starters are a folder of adapters in their own package: every
+  // <name>/index.mjs is a name a scaffold may be shaped like.
+  const dir = join(STARTERS, "adapters");
   const names = readdirSync(dir).filter((n) => existsSync(join(dir, n, "index.mjs")));
   assert.deepEqual([...BUILT_INS].sort(), names.sort());
-  const { aliases, retired } = JSON.parse(readFileSync(join(dir, "catalogue.json"), "utf8"));
-  assert.deepEqual(RETIRED_BUILT_INS, aliases);
-  assert.deepEqual([...REMOVED_BUILT_INS].sort(), Object.keys(retired ?? {}).sort(), "the names the engine stops on (CR-080)");
 });
 
 // The masks, lifted out of their templates and run on text that tries to

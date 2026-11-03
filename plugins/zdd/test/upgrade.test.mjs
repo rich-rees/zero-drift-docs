@@ -16,10 +16,11 @@ import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { UPGRADE_NOTES, newestTag, INSTRUCTION_RULES, compareVersions, ruleChangedSince, mergeGate, IMPORT_COMMENT, RETIRED_NAMES, OLD_LINE_TAGS } from "../scripts/bootstrap.mjs";
 import { oldLine } from "../scripts/lib/repo.mjs";
+import { copyFixture } from "../../../packages/zdd-starter-adapters/test/starters.mjs";
 
 const PLUGIN = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SCRIPT = join(PLUGIN, "scripts", "bootstrap.mjs");
-const ENGINE_FIXTURES = resolve(PLUGIN, "..", "..", "packages", "zdd-engine", "test");
+const ENGINE_FIXTURES = resolve(PLUGIN, "..", "..", "packages", "zdd-starter-adapters", "test");
 const VERSION = JSON.parse(readFileSync(join(PLUGIN, ".claude-plugin", "plugin.json"), "utf8")).version;
 const MINOR = VERSION.split(".").slice(0, 2).join(".");
 const LOCK = (ref) => ({ "zero-drift-docs": { source: { source: "github", repo: "rich-rees/zero-drift-docs", ref }, autoUpdate: false } });
@@ -42,7 +43,7 @@ const fails = (root, args) => {
 const adopted = (name, { engine = "2.0.0", release, extractors = ["generic"], claude, settings = { extraKnownMarketplaces: LOCK("v2.0.0") }, fixture } = {}) => {
   const repo = join(scratch, name);
   if (fixture) {
-    cpSync(join(ENGINE_FIXTURES, fixture), repo, { recursive: true });
+    copyFixture(join(ENGINE_FIXTURES, fixture), repo);
     rmSync(join(repo, "zdd"), { recursive: true });
   }
   mkdirSync(join(repo, "zdd"), { recursive: true });

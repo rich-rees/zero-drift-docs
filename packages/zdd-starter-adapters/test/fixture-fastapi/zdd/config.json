@@ -1,0 +1,18 @@
+{
+  "name": "Fixture FastAPI",
+  "baseBranch": "main",
+  "localExtractorDir": "zdd/extractors",
+  "extractors": ["supabase", "supabase-py", "fastapi"],
+  "render": { "storeChanges": false },
+  "extractorOptions": {
+    "supabase": {
+      "migrationNamespaces": [{ "name": "db", "dir": "supabase/migrations" }]
+    },
+    "supabase-py": {
+      "roots": ["main.py", "api"]
+    },
+    "fastapi": {
+      "roots": ["main.py", "api"]
+    }
+  }
+}

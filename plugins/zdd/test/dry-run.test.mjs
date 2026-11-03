@@ -18,6 +18,7 @@ import { readFileSync, writeFileSync, existsSync, rmSync, mkdtempSync, mkdirSync
 import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { ensureStarters } from "../../../packages/zdd-starter-adapters/test/starters.mjs";
 
 const PLUGIN = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SCRIPT = join(PLUGIN, "scripts", "bootstrap.mjs");
@@ -41,7 +42,7 @@ const commit = (cwd, msg) => {
 };
 const bootstrap = (root, args) => execFileSync(process.execPath, [SCRIPT, ...args, `--root=${root}`, `--home=${home}`, "--date=2026-10-09"], { encoding: "utf8" });
 const bootstrapJson = (root, args) => JSON.parse(bootstrap(root, [...args, "--json"]));
-const engine = (root, args) => spawnSync(process.execPath, [ENGINE, ...args, `--root=${root}`], { encoding: "utf8" });
+const engine = (root, args) => (ensureStarters(root), spawnSync)(process.execPath, [ENGINE, ...args, `--root=${root}`], { encoding: "utf8" });
 const answers = (name, a) => {
   const p = join(scratch, `${name}.json`);
   writeFileSync(p, JSON.stringify(a));
@@ -69,8 +70,11 @@ const grepArtifacts = (repo, needle) => {
   const walk = (d) => {
     for (const e of readdirSync(d, { withFileTypes: true })) {
       const p = join(d, e.name);
-      if (e.isDirectory()) walk(p);
-      else if (readFileSync(p, "utf8").includes(needle)) hits.push(p);
+      // The adapter folder holds the repo's adapters and their sample
+      // fixtures, never an artifact: the needle is the app's own text.
+      if (e.isDirectory()) {
+        if (p !== join(repo, "zdd", "extractors")) walk(p);
+      } else if (readFileSync(p, "utf8").includes(needle)) hits.push(p);
     }
   };
   if (existsSync(join(repo, "zdd"))) walk(join(repo, "zdd"));

@@ -57,7 +57,7 @@ export const DETECT_DEPTH = 6;
 const BUNDLE = "zdd"; // ZDD's own folder is never evidence of a stack
 
 function broken(name, msg) {
-  throw new Error(`ZDD's adapter catalogue is broken (a packaging defect, not your repo): adapter '${name}' ${msg}`);
+  throw new Error(`adapter '${name}' cannot take part in detection (a defect in the adapter, not your repo): it ${msg}`);
 }
 
 export function makeScan(io, skipDirs = new Set()) {
@@ -124,7 +124,7 @@ export function detectScan(repoRoot, modules, caps = {}) {
   return makeScan(io, skipDirs);
 }
 
-// modules: [{ name, mod }] in name order (derive.mjs catalogueModules).
+// modules: [{ name, mod }] in name order (lib/adapter-folder.mjs folderModules).
 // `caps` lowers the io's limits, for the tests that reach them.
 export function detectRepo(repoRoot, modules, caps = {}) {
   const adapters = modules.filter(({ mod }) => mod.DETECTION);
@@ -157,7 +157,8 @@ export function detectRepo(repoRoot, modules, caps = {}) {
   const coverage = PARTS.map((part) => ({ part, adapters: proposals.filter((p) => p.parts.includes(part)).map((p) => p.name) }));
 
   // What a greenfield answer can select, and the neutral list of stacks the
-  // catalogue has adapters for (0039 point 6): adapter data, never core text.
+  // folder asked has adapters for (0039 point 6): adapter data, never core
+  // text. The key keeps its pre-0.14 name, `catalogue`, which bootstrap reads.
   const stacks = adapters
     .flatMap(({ name, mod }) => (mod.DETECTION.stack ?? []).map((r) => ({ adapter: r.app && !r.options ? null : name, rank: r.rank, match: r.match, options: r.options ?? null, path: r.path ?? null, app: r.app ?? null })))
     .sort((a, b) => a.rank - b.rank);

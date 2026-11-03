@@ -48,6 +48,8 @@ const run = (label, cmd, args, cwd) => {
 };
 let allOk = run("every pin names the tag", process.execPath, [join(ROOT, "scripts", "release-check.mjs"), tag], ROOT);
 allOk = run("engine suite", process.execPath, ["--test", "test/*.test.mjs"], join(ROOT, "packages", "zdd-engine")) && allOk;
+allOk = run("starter library suite", process.execPath, ["--test", "test/*.test.mjs"], join(ROOT, "packages", "zdd-starter-adapters")) && allOk;
+allOk = run("the starters' own tests", process.execPath, [ENGINE, "test", "--adapters=adapters"], join(ROOT, "packages", "zdd-starter-adapters")) && allOk;
 allOk = run("plugin suite", process.execPath, ["--test", "plugins/zdd/test/*.test.mjs"], ROOT) && allOk;
 
 for (const adopter of adopters) {

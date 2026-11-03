@@ -150,7 +150,7 @@ test("the human report names each failing check, its fix and whether it blocks",
   assert.match(r.stdout, /The suite FAILS/);
 });
 
-test("a single-module adapter has nowhere to keep a fixture: the fixture checks say so; no local adapter at all is nothing to check", (t) => {
+test("a single-module adapter has nowhere to keep a fixture: the fixture checks say so; a configured adapter the repo does not hold fails, as it fails derive", (t) => {
   const r = suite(scratch(t, { single: true }));
   assert.equal(r.status, 1);
   assert.deepEqual(failing(r.json), [1, 2, 4]);
@@ -160,18 +160,17 @@ test("a single-module adapter has nowhere to keep a fixture: the fixture checks 
   mkdirSync(join(none, "zdd"));
   writeFileSync(join(none, "zdd", "config.json"), JSON.stringify({ name: "x", extractors: ["generic"] }));
   const n = suite(none);
-  assert.equal(n.status, 0);
-  assert.deepEqual(n.json.adapters, []);
-  assert.deepEqual(n.json.skipped, ["generic"]);
+  assert.equal(n.status, 1);
+  assert.deepEqual([n.json.adapters, n.json.skipped, n.json.unknown], [[], [], ["generic"]]);
 });
 
-test("no SUITE export: the suite says to add one; a companion must be a catalogue adapter", (t) => {
+test("no SUITE export: the suite says to add one; a companion must be another adapter folder in the repo's localExtractorDir", (t) => {
   const r = suite(scratch(t, { adapter: GOOD.replace('export const SUITE = { options: { roots: ["routes"] } };\n', "") }));
   assert.equal(r.status, 1);
   assert.match(r.json.adapters[0].checks[0].detail, /no SUITE export/);
   const c = suite(scratch(t, { adapter: GOOD.replace('export const SUITE = { options: { roots: ["routes"] } };', 'export const SUITE = { options: { roots: ["routes"] }, companions: { "acme-db": {} } };') }));
   assert.equal(c.status, 1);
-  assert.match(c.json.adapters[0].checks[0].detail, /'acme-db', which is not a catalogue adapter/);
+  assert.match(c.json.adapters[0].checks[0].detail, /'acme-db', which is not another adapter folder in localExtractorDir/);
 });
 
 test("the trap folder: quoted code it holds must give nothing the fixture does not", (t) => {

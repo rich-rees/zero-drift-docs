@@ -16,15 +16,21 @@ test("extractors list: names + per-name options; missing options default to {}",
   assert.deepEqual(r.diagnostics, []);
 });
 
-test("legacy adapter expands to [supabase, supabase-js, nextjs] with options split by key and one deprecation note", () => {
-  const r = resolveExtractors({ adapter: "nextjs-supabase", adapterOptions: { appDir: "src/app", migrationNamespaces: [{ name: "db", dir: "m" }], externalBuckets: [] } });
-  // supabase-js reads the client calls nextjs read before 0.9 (decision 0037), at its defaults.
-  assert.deepEqual(r.extractors.map((e) => e.name), ["supabase", "supabase-js", "nextjs"]);
-  assert.deepEqual(r.extractors[0].options, { migrationNamespaces: [{ name: "db", dir: "m" }], externalBuckets: [] });
-  assert.deepEqual(r.extractors[1].options, {});
-  assert.deepEqual(r.extractors[2].options, { appDir: "src/app" });
-  assert.equal(r.diagnostics.length, 1);
-  assert.match(r.diagnostics[0], /deprecated/);
+test("the pre-1.0 adapter key is refused since 0.14, with the route across, whatever its options (decision 0048)", () => {
+  for (const config of [{ adapter: "nextjs-supabase", adapterOptions: { appDir: "src/app" } }, { adapter: "nextjs-supabase" }, { adapter: "anything" }, { adapter: 5 }]) {
+    const r = resolveExtractors(config);
+    assert.equal(r.extractors, undefined, JSON.stringify(config));
+    assert.match(r.error, /names 'adapter' \(.*\), a bundle of adapters the engine shipped before 1\.0\. Since ZDD 0\.14 a repo owns every adapter it runs/);
+    assert.match(r.error, /"upgrade ZDD" does both: it rewrites the config and copies the adapters in from the starter library \(npm @rich-rees\/zdd-starter-adapters\)/);
+  }
+});
+
+test("a name is what it says: no alias reads another name's options, and options under a name not listed are said, never a failure (CR-424)", () => {
+  const r = resolveExtractors({ extractors: ["a"], extractorOptions: { a: { x: 1 }, b: { y: 2 } } });
+  assert.deepEqual(r.extractors, [{ name: "a", options: { x: 1 } }]);
+  assert.deepEqual(r.diagnostics, [`[config] extractorOptions has 'b', which no adapter in "extractors" is called — those options are read by nobody; move them under the adapter's name, or delete them`]);
+  assert.deepEqual(resolveExtractors({ extractors: ["services"], extractorOptions: { "external-services": {} } }).extractors, [{ name: "services", options: {} }], "a pre-0.14 alias is just a name");
+  assert.deepEqual(resolveExtractors({ extractors: ["a"] }).diagnostics, []);
 });
 
 test("empty, duplicate and non-string extractor lists are errors (CR-001)", () => {
@@ -61,14 +67,13 @@ test("CR-107: extractorOptions / adapterOptions and each per-extractor entry mus
     const r = resolveExtractors({ extractors: ["nextjs"], extractorOptions: { nextjs: bad } });
     assert.match(r.error ?? "", /'extractorOptions\.nextjs' must be an object/, JSON.stringify(bad));
   }
-  // Legacy pair: `adapterOptions: null` used to destructure null (TypeError).
+  // Legacy pair: `adapterOptions: null` used to destructure null (TypeError);
+  // since 0.14 the pair is refused before its options are read.
   for (const bad of [null, [], "x"]) {
     const r = resolveExtractors({ adapter: "nextjs-supabase", adapterOptions: bad });
-    assert.match(r.error ?? "", /'adapterOptions' must be an object/, JSON.stringify(bad));
+    assert.match(r.error ?? "", /names 'adapter'/, JSON.stringify(bad));
   }
-  // Absent is fine on both forms.
   assert.ok(!resolveExtractors({ extractors: ["supabase"] }).error);
-  assert.ok(!resolveExtractors({ adapter: "nextjs-supabase" }).error);
 });
 
 test("CR-103: validateRepoBase accepts empty or an http(s) URL with no whitespace; refuses a bare scheme, other schemes, non-strings", () => {

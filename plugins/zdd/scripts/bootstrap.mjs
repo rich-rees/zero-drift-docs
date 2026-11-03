@@ -160,10 +160,12 @@ const LEGACY_ADAPTERS = {
 // border: end
 
 // ---------------------------------------------------------------------------
-// Detection — asked of the adapters (decision 0039). Each catalogue adapter
-// carries its own: the evidence that it fits, the options it would use and
-// the parts of the app it covers. The plugin carries no engine, so it runs
-// the engine of its own release and reads the answer; it names no stack.
+// Detection — asked of the adapters (decision 0039). Each starter in the
+// starter library carries its own: the evidence that it fits, the options
+// it would use and the parts of the app it covers. The plugin carries no
+// engine, so it runs the engine of its own release over the library's
+// adapters folder (decision 0048 point 3) and reads the answer; it names no
+// stack.
 //
 // Which engine: ZDD_ENGINE_BIN, when set, names an engine checkout's bin (a
 // test, a dry run against another build) — accepted only when it is an
@@ -222,10 +224,22 @@ export function runEngine(args) {
   return execFileSync(command.cmd, engineArgv(command, args), { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 * 1024 * 1024, timeout: 300_000, shell: command.shell });
 }
 
+// The starter library's adapters folder, which detection and the preview
+// ask (decision 0048 point 3): ZDD_STARTER_ADAPTERS_DIR, when set, names one; else
+// the library beside this plugin (this repository's checkout). ZDD-11 slice
+// 5 fetches the published library where neither is there, and copies what
+// the developer takes into the repo.
+const SIBLING_STARTERS = join(PLUGIN_ROOT, "..", "..", "packages", "zdd-starter-adapters", "adapters");
+export function starterAdapters({ env = process.env, sibling = SIBLING_STARTERS } = {}) {
+  if (env.ZDD_STARTER_ADAPTERS_DIR) return resolve(env.ZDD_STARTER_ADAPTERS_DIR);
+  if (existsSync(sibling)) return sibling;
+  throw new Error("the starter library is not on this machine — set ZDD_STARTER_ADAPTERS_DIR to its adapters/ folder (npm @rich-rees/zdd-starter-adapters)");
+}
+
 export function detect(root) {
   let d;
   try {
-    d = JSON.parse(runEngine(["detect", `--root=${root}`]));
+    d = JSON.parse(runEngine(["detect", `--adapters=${starterAdapters()}`, `--root=${root}`]));
   } catch (e) {
     throw new Error(`detection could not run — the engine said: ${String(e.stderr || e.message).trim().split(/\r?\n/).slice(-3).join(" ")}`);
   }
@@ -3257,7 +3271,7 @@ export function preview(root, names) {
   if (!names.length) throw new Error("preview needs --extractors=<a,b,…>");
   for (const n of names) if (!/^[a-z][a-z0-9-]*$/.test(n)) throw new Error(`preview: '${n}' is not an adapter name`);
   try {
-    return JSON.parse(runEngine(["preview", `--extractors=${names.join(",")}`, `--root=${root}`, "--json"]));
+    return JSON.parse(runEngine(["preview", `--adapters=${starterAdapters()}`, `--extractors=${names.join(",")}`, `--root=${root}`, "--json"]));
   } catch (e) {
     throw new Error(`the preview could not run — the engine said: ${String(e.stderr || e.message).trim().split(/\r?\n/).slice(-3).join(" ")}`);
   }

@@ -10,9 +10,10 @@ import { rmSync, mkdtempSync, cpSync, writeFileSync, mkdirSync, readFileSync } f
 import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { copyFixture } from "../../../packages/zdd-starter-adapters/test/starters.mjs";
 
 const PLUGIN = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const FIXTURES = resolve(PLUGIN, "..", "..", "packages", "zdd-engine", "test");
+const FIXTURES = resolve(PLUGIN, "..", "..", "packages", "zdd-starter-adapters", "test");
 const BOOTSTRAP = join(PLUGIN, "scripts", "bootstrap.mjs");
 
 const scratch = (t) => {
@@ -46,7 +47,7 @@ test("Supabase alone, or a web app alone: no Realtime question", (t) => {
 
 test("the services proposal says what usedBy sees: files carrying the marker, never a provider reached through a settings object", (t) => {
   const repo = scratch(t);
-  cpSync(join(FIXTURES, "fixture-services"), repo, { recursive: true });
+  copyFixture(join(FIXTURES, "fixture-services"), repo);
   rmSync(join(repo, "zdd"), { recursive: true });
   const services = JSON.parse(detect(repo)).proposals.find((p) => p.name === "external-services");
   assert.ok(services);

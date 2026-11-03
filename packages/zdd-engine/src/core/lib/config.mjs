@@ -17,7 +17,6 @@ const MAX_CONFIG_BYTES = 1024 * 1024; // the plugin's cap too (plugins/zdd/scrip
 import { dirname, join, resolve, relative } from "node:path";
 import { repoRelative, overlaps, agentIndexAreaDir } from "./paths.mjs";
 import { harnessPathsError } from "./adr-sets.mjs";
-import { catalogue, splitBundleOptions } from "./catalogue.mjs";
 
 export const DEFAULT_PATHS = {
   glossary: "zdd/glossary.md",
@@ -246,23 +245,20 @@ export function loadConfig(args, cwd = process.cwd()) {
 }
 
 // ---------------------------------------------------------------------------
-// Extractor selection. The 1.0 shape is `extractors: [names]` + per-extractor
-// `extractorOptions: { <name>: {...} }` — one extractor per convention,
-// composed by config, so a stack combination never needs a bespoke adapter
-// (docs/decisions/0001). The pre-1.0 `adapter` + `adapterOptions` pair still
-// works: it expands to the extractors it was a bundle of, with the old option
-// keys routed to the extractor that owns them, and prints a deprecation note.
-// The engine never rewrites the config; the plugin's `bootstrap --upgrade`
-// does (plugins/zdd/scripts/bootstrap.mjs mirrors the bundles for that),
-// and the deprecation note says how to do it by hand. Retired names and the
-// pre-1.0 bundles are the catalogue's data (its catalogue.json, read and
-// checked by lib/catalogue.mjs): the core names no adapter (decision 0036).
+// Extractor selection: `extractors: [names]` + `extractorOptions: { <name>:
+// {...} }` — one extractor per convention, composed by config, so a stack
+// combination never needs a bespoke adapter (docs/decisions/0001). Every
+// name is one of the repo's own adapters (decision 0048), so a name is
+// exactly what it says: there are no aliases. The pre-1.0 `adapter` +
+// `adapterOptions` pair named a bundle of adapters the engine shipped; the
+// engine ships none since 0.14, so the pair is refused with the route
+// across ("upgrade ZDD" rewrites it, plugins/zdd/scripts/bootstrap.mjs).
+// The core names no adapter (decision 0036).
 // ---------------------------------------------------------------------------
 
 const isPlainObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 
 export function resolveExtractors(config) {
-  const diagnostics = [];
   const hasNew = config.extractors !== undefined;
   // Both forms at once would mean one silently wins and the other's options
   // are ignored (CR-019: 15 records quietly became 9). Refuse.
@@ -286,64 +282,34 @@ export function resolveExtractors(config) {
     if (list.some((n) => typeof n !== "string")) return { error: `'extractors' entries must be strings (names)` };
     const dup = list.find((n, i) => list.indexOf(n) !== i);
     if (dup) return { error: `extractor '${dup}' is listed twice` };
-    // A retired name (2.3: `services` → `external-services`, 2.3.0, pick 3)
-    // still works for one release and is said once per derive; both names
-    // at once is the same extractor twice.
-    const aliases = catalogue().aliases;
-    for (const [old, now] of Object.entries(aliases)) {
-      if (!list.includes(old)) continue;
-      if (list.includes(now)) return { error: `extractors lists both '${old}' and '${now}' — they are one extractor; keep '${now}'` };
-      diagnostics.push(`[config] extractor '${old}' is now '${now}' (ZDD 2.3) — "upgrade ZDD" renames it in zdd/config.json (extractors and extractorOptions); the old name works for this release only`);
-    }
     // `extractorOptions: null` / `[]` / a string, or a per-extractor entry
     // that is not an object, reached the extractor's destructuring as-is
     // (CR-107). Refuse with the key named.
     const options = config.extractorOptions === undefined ? {} : config.extractorOptions;
     if (!isPlainObject(options)) return { error: `'extractorOptions' must be an object keyed by extractor name, got ${JSON.stringify(options)}` };
-    // hasOwn: an extractor named `constructor` must read its own options,
-    // not Object.prototype's (CR-022).
-    // The options key is the name as listed; a retired name's options may
-    // also sit under the current name. Both at once is a conflict, and the
-    // value validated is exactly the value handed over (CR-306).
-    const canonical = (name) => (Object.hasOwn(aliases, name) ? aliases[name] : name); // hasOwn: an extractor named `constructor` (CR-022)
-    // The retired name's options key is read for the current name too (a
-    // half-migrated config, verify CR-322), and the current name's for the
-    // retired one: one extractor, one options object, never two.
-    const retiredOf = (now) => Object.entries(aliases).filter(([, v]) => v === now).map(([k]) => k);
-    const optionsFor = (name) => {
-      const now = canonical(name);
-      const keys = [...new Set([name, now, ...retiredOf(now)])].filter((k) => Object.hasOwn(options, k));
-      if (keys.length > 1) return { error: `extractorOptions has both '${keys[0]}' and '${keys[1]}' — they are one extractor; keep '${now}'` };
-      const key = keys[0];
-      const value = key === undefined ? {} : options[key];
-      if (!isPlainObject(value)) return { error: `'extractorOptions.${key}' must be an object, got ${JSON.stringify(value)}` };
-      return { value };
-    };
     const extractors = [];
     for (const name of list) {
-      const picked = optionsFor(name);
-      if (picked.error) return { error: picked.error };
-      const now = canonical(name);
-      extractors.push(now === name ? { name, options: picked.value } : { name: now, options: picked.value, legacyName: name });
+      // hasOwn: an extractor named `constructor` must read its own options,
+      // not Object.prototype's (CR-022).
+      const value = Object.hasOwn(options, name) ? options[name] : {};
+      if (!isPlainObject(value)) return { error: `'extractorOptions.${name}' must be an object, got ${JSON.stringify(value)}` };
+      extractors.push({ name, options: value });
     }
+    // Options under a name no listed adapter has are read by nobody: said on
+    // every derive, never dropped in silence (CR-424), but no failure, so a
+    // stale key turns no CI red.
+    const diagnostics = Object.keys(options)
+      .filter((k) => !list.includes(k))
+      .map((k) => `[config] extractorOptions has '${k}', which no adapter in "extractors" is called — those options are read by nobody; move them under the adapter's name, or delete them`);
     return { extractors, diagnostics };
   }
   if (config.adapter !== undefined) {
-    const { bundles } = catalogue();
-    const legacy = typeof config.adapter === "string" && Object.hasOwn(bundles, config.adapter) ? bundles[config.adapter] : null;
-    if (!legacy) {
-      return { error: `Unknown adapter '${config.adapter}' — 'adapter' is deprecated; use "extractors": [...] (known legacy adapters: ${Object.keys(bundles).join(", ")})` };
-    }
-    const owned = Object.entries(legacy.options ?? {}).map(([name, keys]) => `${Object.keys(keys).join(" + ")} under ${name}`);
-    if (legacy.rest) owned.push(`the rest under ${legacy.rest}`);
-    diagnostics.push(
-      `[config] 'adapter' is deprecated — use "extractors": ${JSON.stringify(legacy.extractors)} with "extractorOptions" (split adapterOptions by key: ${owned.join(", ")})`,
-    );
-    if (config.adapterOptions !== undefined && !isPlainObject(config.adapterOptions)) {
-      return { error: `'adapterOptions' must be an object, got ${JSON.stringify(config.adapterOptions)}` };
-    }
-    const split = splitBundleOptions(legacy, config.adapterOptions);
-    return { extractors: legacy.extractors.map((name) => ({ name, options: split[name] ?? {} })), diagnostics };
+    return {
+      error:
+        `zdd/config.json names 'adapter' (${JSON.stringify(config.adapter)}), a bundle of adapters the engine shipped before 1.0. ` +
+        `Since ZDD 0.14 a repo owns every adapter it runs and the engine ships none: list them in "extractors", with their options in "extractorOptions", ` +
+        `and keep each in localExtractorDir. "upgrade ZDD" does both: it rewrites the config and copies the adapters in from the starter library (npm @rich-rees/zdd-starter-adapters)`,
+    };
   }
   return { error: `zdd/config.json names no extractors — add "extractors": [...], one adapter per convention in your stack (or "generic" for a map-only bundle)` };
 }

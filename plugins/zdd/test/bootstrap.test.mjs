@@ -12,11 +12,12 @@ import { createHash } from "node:crypto";
 import { dirname, resolve, join, relative } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { ensureStarters } from "../../../packages/zdd-starter-adapters/test/starters.mjs";
 
 const PLUGIN = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SCRIPT = join(PLUGIN, "scripts", "bootstrap.mjs");
 const ENGINE_BIN = resolve(PLUGIN, "..", "..", "packages", "zdd-engine", "bin", "zdd-engine.mjs");
-const ENGINE_FIXTURES = resolve(PLUGIN, "..", "..", "packages", "zdd-engine", "test");
+const ENGINE_FIXTURES = resolve(PLUGIN, "..", "..", "packages", "zdd-starter-adapters", "test");
 const PLUGIN_VERSION = JSON.parse(readFileSync(join(PLUGIN, ".claude-plugin", "plugin.json"), "utf8")).version;
 const OWNER = "Managed by Zero-Drift Docs (zdd)";
 const DATE = "2026-09-04";
@@ -39,6 +40,7 @@ const bootstrapFails = (root, args) => {
 };
 // stdout AND stderr: the engine's deprecation notes go to stderr (CR-112).
 const engine = (root, args) => {
+  ensureStarters(root);
   const r = spawnSync(process.execPath, [ENGINE_BIN, ...args, `--root=${root}`], { encoding: "utf8" });
   assert.equal(r.status, 0, `engine ${args.join(" ")} failed: ${r.stderr}${r.stdout}`);
   return r.stdout + r.stderr;
@@ -649,11 +651,18 @@ test("upgrade replaces the pre-0.4 section only when it IS the v0.3.1 snippet mo
 
 test("upgrade a v0.3.1 repo: adapter → extractors, every owned file rewritten and named, curated + generated artifacts untouched", () => {
   const repo = fresh("upgrade", join(ENGINE_FIXTURES, "fixture"));
-  // Populate metadata + generated artifacts so "untouched" means something. The
-  // legacy adapter config prints a deprecation note (on stderr) — the positive
-  // control for the "no note after migration" assertion below (CR-112).
-  assert.match(engine(repo, ["derive"]), /deprecated/i, "the pre-upgrade adapter config is announced as deprecated");
+  // Populate metadata + generated artifacts so "untouched" means something:
+  // the fixture's adapters as the extractors they are, then its config as
+  // v0.3.1 wrote it, the pre-1.0 bundle. Since 0.14 the engine refuses that
+  // config and names the route across — the positive control for the "no
+  // note after migration" assertion below (CR-112).
+  engine(repo, ["derive"]);
   engine(repo, ["render"]);
+  const { extractors: _composed, extractorOptions: { supabase, nextjs }, ...rest } = JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8"));
+  writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify({ ...rest, adapter: "nextjs-supabase", adapterOptions: { ...nextjs, ...supabase } }, null, 2) + "\n");
+  const refused = spawnSync(process.execPath, [ENGINE_BIN, "derive", `--root=${repo}`], { encoding: "utf8" });
+  assert.equal(refused.status, 1);
+  assert.match(refused.stderr, /names 'adapter' \("nextjs-supabase"\).*"upgrade ZDD"/, "the pre-upgrade adapter config is refused with the route across");
   const configBefore = JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8"));
   assert.equal(configBefore.adapter, "nextjs-supabase");
   configBefore.viewer = { nonAreaTags: ["react-flow"], defaultFocus: "map/features/things" };
@@ -700,7 +709,7 @@ test("upgrade a v0.3.1 repo: adapter → extractors, every owned file rewritten 
   assert.deepEqual(json.wrote, [], "second upgrade is a no-op");
 
   assert.match(engine(repo, ["derive"]), /Wrote \d+ records/);
-  assert.ok(!engine(repo, ["derive"]).includes("deprecated"), "no deprecation note after migration");
+  assert.ok(!/deprecated|names 'adapter'/.test(engine(repo, ["derive"])), "no deprecation note after migration");
   assert.match(engine(repo, ["derive", "--check"]), /in sync/, "migrated config derives the same bytes");
 });
 
