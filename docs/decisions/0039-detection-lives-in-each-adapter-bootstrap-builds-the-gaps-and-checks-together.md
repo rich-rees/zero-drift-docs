@@ -1,6 +1,6 @@
 # 0039 — Detection lives in each adapter; bootstrap builds the gaps and checks the map together
 
-**Date:** 2026-10-27 · **Status:** accepted; points 1 and 2 superseded in part by [0048](0048-the-app-owns-its-adapters-zdd-ships-starters-not-readers.md) (2026-11-02: detection is a trial read, and "database access" splits into schema and queries) · **Origin:** ZDD-3, questions 4–6 of the design session on 2026-10-27 (Rich's calls).
+**Date:** 2026-10-27 · **Status:** accepted; points 1 and 2 superseded in part by [0048](0048-the-app-owns-its-adapters-zdd-ships-starters-not-readers.md) (2026-11-02: detection is a trial read, and "database access" splits into schema and queries); point 3 extended by [0049](0049-every-update-checks-the-map-still-reaches-what-it-should.md) (2026-11-03: the coverage check runs at every update and in CI) · **Origin:** ZDD-3, questions 4–6 of the design session on 2026-10-27 (Rich's calls).
 
 ## Context
 
