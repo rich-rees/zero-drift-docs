@@ -190,19 +190,26 @@ test("the scaffolded test is red until EXPECTED_IDS and a fixture exist, and gre
 // test counted those among the extractor's ids, so an adapter using the
 // unread step (the skill's Step 6 asks for it) could never go green. The
 // ids leave them out; EXPECTED_UNREAD checks them, empty by default.
-test("an extractor that reports unread items goes green: EXPECTED_IDS leaves the core's unread records out, EXPECTED_UNREAD holds what it reported", (t) => {
+test("an extractor that reports unread items goes green: EXPECTED_IDS leaves the core's unread records out, EXPECTED_UNREAD holds each item's file and raw text, shown as the core shows it (CR-375)", (t) => {
   const repo = adopted(t);
   scaffoldJson(repo, CSHARP);
   const dir = join(repo, "zdd", "extractors", "aspnet-routes");
   const testFile = "zdd/extractors/aspnet-routes/aspnet-routes.test.mjs";
-  writeFileSync(join(dir, "fixture", "src", "Api", "OrdersController.cs"), ['[Route("api/orders")]', "public class OrdersController {", "    [HttpGet]", "    public void List() {}", "    [HttpPatch]", "    public void Touch() {}", "}", ""].join("\n"));
+  const controller = ['[Route("api/orders")]', "public class OrdersController {", "    [HttpGet]", "    public void List() {}", "    [HttpPatch]", "    public void Touch() {}", "}", ""].join("\n");
+  writeFileSync(join(dir, "fixture", "src", "Api", "OrdersController.cs"), controller);
+  writeFileSync(join(dir, "fixture", "src", "Api", "OtherController.cs"), controller.replace("api/orders", "api/others"));
   const testPath = join(dir, "aspnet-routes.test.mjs");
-  const base = readFileSync(testPath, "utf8").replace("const EXPECTED_IDS = null;", 'const EXPECTED_IDS = ["route:/api/orders"];').replace("const CONVENTION_RECURSES = null;", "const CONVENTION_RECURSES = false;");
+  const base = readFileSync(testPath, "utf8").replace("const EXPECTED_IDS = null;", 'const EXPECTED_IDS = ["route:/api/orders", "route:/api/others"];').replace("const CONVENTION_RECURSES = null;", "const CONVENTION_RECURSES = false;");
   writeFileSync(testPath, base);
+  // The same short text in two files, and in one of them a long item over
+  // two lines: past the 300 characters the core shows.
+  const long = `a long statement\n${"x".repeat(400)}`;
   const modPath = join(dir, "index.mjs");
   const logic = [
-    "  if (masked.includes(\"[Route(\")) out.push(record(\"route\", \"/api/orders\", rel, { methods: [\"GET\"] }));",
+    "  const m = /\\[Route\\(\"/.exec(masked);",
+    "  if (m) out.push(record(\"route\", \"/\" + text.slice(m.index + m[0].length, masked.indexOf('\"', m.index + m[0].length)), rel, { methods: [\"GET\"] }));",
     "  if (masked.includes(\"[HttpPatch]\")) unreadSeen.push({ file: rel, what: \"an [HttpPatch] action, which this adapter does not read\" });",
+    `  if (rel.endsWith("OrdersController.cs")) unreadSeen.push({ file: rel, what: ${JSON.stringify(long)} });`,
   ].join("\n");
   writeFileSync(
     modPath,
@@ -210,12 +217,31 @@ test("an extractor that reports unread items goes green: EXPECTED_IDS leaves the
       .replace("function fromSource(rel, masked, text, diagnostics) {\n  const out = [];", (head) => `const unreadSeen = [];\n${head}\n${logic}`)
       .replace("return { records: merge(records), diagnostics };", "return { records: merge(records), diagnostics, unread: unreadSeen.splice(0) };"),
   );
+  const patch = "an [HttpPatch] action, which this adapter does not read";
+  const expect = (items) => writeFileSync(testPath, base.replace("const EXPECTED_UNREAD = [];", `const EXPECTED_UNREAD = ${JSON.stringify(items)};`));
   const red = runTests(repo, testFile);
-  assert.notEqual(red.status, 0, "an item the test does not expect is red");
+  assert.notEqual(red.status, 0, "items the test does not expect are red");
   assert.match(red.stdout, /what derive reported unread differs from EXPECTED_UNREAD/);
-  writeFileSync(testPath, base.replace("const EXPECTED_UNREAD = [];", 'const EXPECTED_UNREAD = ["an [HttpPatch] action, which this adapter does not read"];'));
+  // One item named against the wrong file is red too.
+  expect([{ file: "src/Api/OrdersController.cs", what: patch }, { file: "src/Api/OrdersController.cs", what: patch }, { file: "src/Api/OrdersController.cs", what: long }]);
+  assert.notEqual(runTests(repo, testFile).status, 0, "a wrong file is red");
+  // Each item as the adapter returned it, the long one raw.
+  expect([{ file: "src/Api/OrdersController.cs", what: patch }, { file: "src/Api/OtherController.cs", what: patch }, { file: "src/Api/OrdersController.cs", what: long }]);
   const green = runTests(repo, testFile);
   assert.equal(green.status, 0, green.stdout + green.stderr);
+});
+
+// The template shows an expected `what` by the core's own rule, written out
+// so a scaffolded test imports nothing of ZDD: held equal here.
+test("CR-375: the scaffolded test shows an unread item's text exactly as the core's unread record does", async () => {
+  const { oneLine, cut, MAX_WHAT } = await import(pathToFileURL(join(ENGINE, "src", "core", "lib", "unread.mjs")).href);
+  const tmpl = readFileSync(join(PLUGIN, "templates", "extractor", "extractor.test.mjs.tmpl"), "utf8");
+  const body = /const shown = \(what\) => \{[\s\S]*?\n\};/.exec(tmpl);
+  assert.ok(body, "the template defines shown()");
+  const shown = new Function(`${body[0]}\nreturn shown;`)();
+  for (const s of ["plain", "  two\r\n lines\t", "x".repeat(299), "x".repeat(300), "x".repeat(301), `${"é".repeat(310)}`, "a​b c", "😀".repeat(305)]) {
+    assert.equal(shown(s), cut(oneLine(s), MAX_WHAT), JSON.stringify(s.slice(0, 20)));
+  }
 });
 
 test("refusals: every bad answer or repo state stops before the first write", (t) => {

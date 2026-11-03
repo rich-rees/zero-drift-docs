@@ -195,9 +195,13 @@ like the roots. It must hold:
 
 Fill `EXPECTED_IDS` in `<name>.test.mjs` by reading the fixture, before any
 logic exists. When the fixture holds something the adapter will recognise
-and not read (it goes in derive's `unread` list, Step 6), put each item's
-`what` in `EXPECTED_UNREAD`; the ids leave out the records the core keeps
-for those. Run `node --test <test path>`: the expected-records test fails
+and not read (it goes in derive's `unread` list, Step 6), put each item in
+`EXPECTED_UNREAD` as `{ file, what }`, exactly as derive returns it; the ids
+leave out the records the core keeps for those. A test scaffolded before
+0.14 has no `EXPECTED_UNREAD` and counts those records among its ids: before
+the adapter returns `unread`, scaffold the test again (move the file aside,
+rerun the script, which keeps every other file, then carry `EXPECTED_IDS`,
+`CONVENTION_RECURSES` and any test of your own across). Run `node --test <test path>`: the expected-records test fails
 on a mismatch — **red**, for the right reason.
 
 Done when that test is red on the ids and not on "fill in EXPECTED_IDS".

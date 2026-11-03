@@ -621,21 +621,28 @@ still change; 1.0.0 freezes it.
   while one is open. Each update also asks the library whether a starter
   now fits. **The upgrade** copies the baseline in (a query reader's route
   reader comes with it as a suite companion, never run by derive), proves
-  every record byte for byte (`starters --prove`), then offers the fixes as
-  one question (`starters --move` on a yes, `--decline` on a no), and
-  answers the unread items (`unread`, `unread --raise`) and the gaps
-  (`gaps`, `gaps --raise`). It fetches the library from npm. **What moves
-  on the bump**: `zdd/extractors/` arrives and `zdd/config.json` gains
-  `localExtractorDir`; `derive --check` keeps every record's bytes until
-  the fixes are taken, and then only the records they correct move (with
-  any map link at a moved id repointed); `render --check` moves the human
-  index (its Unread and Known gaps peeks); the agent index and
-  `graph.json` move only with the fixes or once a gap is answered known.
-  `lint` warns with every gap and every unread item until each is raised,
-  and never fails on them before (measured on two real adopters: 27 and
-  26 gaps). A config that still names the 2.3 alias, `jobs` or the pre-1.0
-  `adapter` key is refused by derive until the upgrade rewrites it. A fresh
-  install is strict on both from the start.
+  every adapter record byte for byte (`starters --prove`; an item the
+  adapters report unread for the first time is named, not counted as
+  moved), then offers the fixes as one question (`starters --move` on a
+  yes, `--decline` on a no), and asks about the unread items (`unread`,
+  `unread --raise`) and the gaps (`gaps`, `gaps --raise`); any left for
+  later are asked again by the next "update ZDD". From the old line the
+  upgrade derives 0.9's own changes before the proof. It fetches the
+  library from npm. **What moves on the bump**: `zdd/extractors/` arrives
+  and `zdd/config.json` gains `localExtractorDir`; `derive --check` keeps
+  every adapter record's bytes until the fixes are taken, and then only the
+  records they correct move (with `graph.json` and the agent index, and
+  any map link at a moved id repointed); the unread records it newly
+  writes are the report's; `render --check` moves the human index (its
+  Unread and Known gaps peeks); a gap answered known moves the agent index
+  and the human index, never a record or `graph.json`. `lint` warns with
+  every gap and every unread item until each is raised, and never fails on
+  them before (measured on two real adopters: 27 and 26 gaps). A config
+  that still names the 2.3 alias, `jobs` or the pre-1.0 `adapter` key is
+  refused by derive until the upgrade rewrites it. A local extractor
+  scaffolded before 0.14 is scaffolded again before it reports unread
+  items (the extractor skill says how). A fresh install is strict on both
+  from the start.
 - **`0.13.0` — a store header says each key once.** `lint` fails a
   blessing or a semantic-map page whose header writes a key twice (ZDD
   read only the last one) or opens a value with a quote and does not close

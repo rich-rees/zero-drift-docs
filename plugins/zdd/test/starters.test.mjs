@@ -187,6 +187,55 @@ test("upgrade from before the app owned its adapters: the baseline comes in, the
   assert.match(again.stderr, /every copy is already at/);
 });
 
+// CR-370 (slice 7 campaign): 0.13 wrote no `unread` records (the report is
+// new in 0.14), and the baseline returns one for every statement it skips.
+// Proof 1 was a plain derive --check, so it failed on the core's new record
+// before step 4c could answer it, and --move repeated the proof. The proof
+// is of the adapters' records; a new unread item is named, for step 4c.
+test("CR-370: proof 1 holds the adapters' records byte for byte and names the unread items 0.14 reports for the first time; the move goes through", (t) => {
+  const repo = oldApp(t);
+  writeFileSync(join(repo, "supabase", "migrations", "0003_copy.sql"), "create table public.booking_copies (like public.booking_processes);\n");
+  json(repo, ["upgrade"]);
+  // What 0.13 committed: every record, and no unread record.
+  assert.equal(engine(repo, "derive").status, 0);
+  const metadata = join(repo, "zdd", "metadata");
+  assert.ok(existsSync(join(metadata, "unread")), "the scenario: the baseline reports the statement");
+  rmSync(join(metadata, "unread"), { recursive: true, force: true });
+  const proved = json(repo, ["starters", "--prove"]);
+  assert.equal(proved.proved, true, proved.output.join("\n"));
+  assert.equal(proved.unreadNew, 1);
+  assert.match(run(repo, ["starters", "--prove"]).stdout, /1 item the adapters now report as unread is new in 0\.14 .*step 4c/s);
+  // A record that really moved still fails the proof.
+  const table = join(metadata, "table", "db--booking_processes.json");
+  const held = readFileSync(table, "utf8");
+  writeFileSync(table, held.replace('"title": "', '"title": "x'));
+  const moved = run(repo, ["starters", "--prove", "--json"]);
+  assert.notEqual(moved.status, 0);
+  assert.equal(JSON.parse(moved.stdout).proved, false);
+  writeFileSync(table, held);
+  const m = json(repo, ["starters", "--move"]);
+  assert.deepEqual(m.moved, ["supabase"]);
+  assert.ok(existsSync(join(metadata, "unread")), "the move's derive writes the unread record, for step 4c");
+});
+
+// CR-371 (slice 7 campaign): a repo from the old line crosses 0.9 in the
+// same upgrade, and 0.9's own changes move records, so proof 1 against what
+// the old line committed cannot hold. The upgrade says to derive first.
+test("CR-371: from the old line the upgrade says to derive 0.9's own changes first, and proof 1 then holds; from the new line it says the records must not move", (t) => {
+  const repo = oldApp(t);
+  const cfg = config(repo);
+  delete cfg.release;
+  writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify({ ...cfg, engine: "2.4.1" }, null, 2) + "\n");
+  const up = json(repo, ["upgrade"]);
+  assert.ok(up.notes.some((n) => /comes from the old line, so this upgrade also crosses 0\.9[\s\S]*run `derive` first[\s\S]*then `bootstrap\.mjs starters --prove`/.test(n)), up.notes.join("\n"));
+  assert.ok(!up.notes.some((n) => /^the records must not move/.test(n)), "never both");
+  assert.equal(engine(repo, "derive").status, 0);
+  assert.equal(json(repo, ["starters", "--prove"]).proved, true);
+  const fromNew = json(oldApp(t), ["upgrade"]);
+  assert.ok(fromNew.notes.some((n) => /^the records must not move/.test(n)));
+  assert.ok(!fromNew.notes.some((n) => /comes from the old line/.test(n)));
+});
+
 test("starters: a no is kept and not offered again; a changed copy is never moved; a failing test puts every copy back", (t) => {
   const repo = oldApp(t);
   json(repo, ["upgrade"]);

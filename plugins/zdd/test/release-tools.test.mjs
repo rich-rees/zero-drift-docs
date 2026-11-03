@@ -55,3 +55,26 @@ test("the release notes' engine line runs the new package at the tag", () => {
   assert.match(r.stdout, new RegExp(`Engine: \`npx -y @rich-rees/zdd@${VERSION.replace(/\./g, "\\.")}\``));
   assert.doesNotMatch(r.stdout, /zdd-engine@/);
 });
+
+// CR-381 (ZDD-11 slice 7 campaign): what pre-tag counts for each adopter,
+// and the engine every one of its steps runs.
+test("CR-381: pre-tag counts what the upgrade asks by kind or adapter, fails a list it cannot read, prints no name it did not check, and every step runs this checkout's engine", async () => {
+  const { answerCounts, dryRunEnv } = await import(new URL("../../../scripts/lib/pre-tag-report.mjs", import.meta.url).href);
+  const out = (open) => ({ status: 0, stdout: JSON.stringify({ open }) });
+  assert.deepEqual(answerCounts("gaps", out([])), { ok: true, count: 0, line: "0 gaps to answer" });
+  assert.equal(answerCounts("gaps", out([{ kind: "route" }, { kind: "surface" }, { kind: "route" }])).line, "3 gaps to answer (2 route, 1 surface)");
+  assert.equal(answerCounts("unread", out([{ adapter: "supabase" }])).line, "1 unread items to answer (1 supabase)");
+  assert.equal(answerCounts("gaps", out([{ kind: "x\n  ok   forged" }, { kind: 7 }])).line, "2 gaps to answer (2 ?)", "a name it did not check is never printed");
+  for (const bad of [{ status: 1, stdout: JSON.stringify({ open: [] }) }, { status: 0, stdout: "not json" }, { status: 0, stdout: JSON.stringify({ open: "x" }) }, { status: null, stdout: "" }]) {
+    assert.equal(answerCounts("gaps", bad).ok, false, JSON.stringify(bad));
+  }
+  assert.equal(dryRunEnv("/e/zdd-engine.mjs", { PATH: "p", ZDD_ENGINE_BIN: "other" }).ZDD_ENGINE_BIN, "/e/zdd-engine.mjs");
+  assert.equal(dryRunEnv("/e", { PATH: "p" }).PATH, "p");
+  // Every process pre-tag starts is given that environment.
+  const src = readFileSync(join(ROOT, "scripts", "pre-tag.mjs"), "utf8");
+  const spawns = [...src.matchAll(/\b(?:spawnSync|execFileSync)\(/g)].length;
+  const withEnv = [...src.matchAll(/\b(?:spawnSync|execFileSync)\([^\n]*\benv: ENV\b/g)].length;
+  const gitSetup = [...src.matchAll(/execFileSync\("git", \["(?:init|add|-c)"/g)].length;
+  assert.equal(withEnv + gitSetup, spawns, "a step without this checkout's engine");
+  assert.match(src, /const ENV = dryRunEnv\(ENGINE\);/);
+});

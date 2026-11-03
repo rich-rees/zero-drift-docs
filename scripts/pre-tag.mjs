@@ -13,7 +13,7 @@
 // runs derive, render and lint (after `starters --prove` and, as on a yes
 // to the fixes, `starters --move`) — exactly what the adopter's upgrade PR will
 // do. Any failure names the adopter and the step. The repo's own pins are
-// checked first (scripts/release-check.mjs), then both suites.
+// checked first (scripts/release-check.mjs), then the engine, starter library and plugin suites and the starters' own tests.
 //
 // Since 2.5 the upgrade PR also moves the blessings out of the map
 // (decision 0032): the dry run takes the plan's token and moves them with
@@ -27,6 +27,7 @@ import { cpSync, mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync } fro
 import { join, dirname, resolve, basename } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { dryRunEnv, answerCounts } from "./lib/pre-tag-report.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const PLUGIN = join(ROOT, "plugins", "zdd", "scripts", "bootstrap.mjs");
@@ -38,12 +39,8 @@ if (!/^v\d+\.\d+\.\d+$/.test(tag ?? "")) {
   console.error("usage: pre-tag.mjs vX.Y.Z [--split] <adopter checkout> …");
   process.exit(2);
 }
-// Every step runs this checkout's engine, never the one an adopter's pin
-// names: the dry run comes before the tag, so that version is not on npm
-// yet. A repo's own scaffolded adapter test runs the engine at its pin
-// through npx unless ZDD_ENGINE_BIN names one, and `starters --move` runs
-// those tests: without it, every adopter holding such an adapter fails here.
-const ENV = { ...process.env, ZDD_ENGINE_BIN: ENGINE };
+// Every step runs this checkout's engine (scripts/lib/pre-tag-report.mjs says why).
+const ENV = dryRunEnv(ENGINE);
 const run = (label, cmd, args, cwd) => {
   const r = spawnSync(cmd, args, { cwd, encoding: "utf8", env: ENV, shell: process.platform === "win32" && /\.cmd$|^npx$|^npm$/.test(cmd) });
   const ok = r.status === 0;
@@ -130,19 +127,11 @@ for (const adopter of adopters) {
     // many to expect. A list that cannot be read fails the adopter.
     for (const which of ["unread", "gaps"]) {
       const r = spawnSync(process.execPath, [PLUGIN, which, `--root=${copy}`, "--json"], { cwd: copy, encoding: "utf8", env: ENV, maxBuffer: 256 * 1024 * 1024 });
-      let list = null;
-      try {
-        list = r.status === 0 ? JSON.parse(r.stdout) : null;
-      } catch {
-        list = null;
-      }
-      if (!Array.isArray(list?.open)) {
-        console.log(`FAILED  ${label}: ${which} (the list to answer) — exit ${r.status}\n${(r.stdout + r.stderr).split("\n").slice(-20).join("\n")}`);
+      const counted = answerCounts(which, r);
+      if (!counted.ok) {
+        console.log(`FAILED  ${label}: ${counted.line}`);
         ok = false;
-        continue;
-      }
-      const kinds = Object.entries(list.open.reduce((m, x) => ((m[x.kind ?? x.adapter ?? "?"] = (m[x.kind ?? x.adapter ?? "?"] ?? 0) + 1), m), {})).map(([k, n]) => `${n} ${k}`).join(", ");
-      console.log(`        ${label}: ${list.open.length} ${which === "gaps" ? "gaps" : "unread items"} to answer${kinds ? ` (${kinds})` : ""}`);
+      } else console.log(`        ${label}: ${counted.line}`);
     }
     // --untracked: a record the derive just minted is not yet in the index (CR-515).
     const leaked = spawnSync("git", ["grep", "-l", "--untracked", "planted.ts", "--", "zdd"], { cwd: copy, encoding: "utf8", env: ENV });
@@ -157,6 +146,6 @@ for (const adopter of adopters) {
     rmSync(copy, { recursive: true, force: true });
   }
 }
-if (!adopters.length) console.log("\n(no adopter checkout was given: the pins and both suites were checked, no real repo was upgraded — CI's dry run on the three scenario fixtures is the only adopter proof)");
+if (!adopters.length) console.log("\n(no adopter checkout was given: the pins, the engine, starter library and plugin suites and the starters' own tests were checked, no real repo was upgraded — CI's dry run on the three scenario fixtures is the only adopter proof)");
 console.log(allOk ? `\nready to tag ${tag}` : `\nNOT ready to tag ${tag}: fix the FAILED steps above`);
 process.exit(allOk ? 0 : 1);

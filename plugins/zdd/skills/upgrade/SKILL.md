@@ -218,9 +218,18 @@ node "$PLUGIN/scripts/bootstrap.mjs" starters --prove
 
 It runs `derive --check` with the copies in place: every record must be
 byte for byte what the repo committed. Say "Proved: your records are
-exactly as before." If it is NOT proved, stop and show what it printed:
-that is a ZDD defect (the baseline exists to reproduce them), reported in
-ZDD's Discussions as step 5 says.
+exactly as before." What the adapters report unread for the first time is
+no record that moved (the report is new in 0.14): the proof names how many,
+the next derive writes them, and step 4c answers them. If it is NOT proved,
+stop and show what it printed: that is a ZDD defect (the baseline exists to
+reproduce them), reported in ZDD's Discussions as step 5 says.
+
+**From the old line** (a repo pinned before 0.9; the run's notes say so):
+this upgrade also crosses 0.9, whose own changes move records (the
+data-access readers it adds, background work read per platform file).
+Run `npx -y @rich-rees/zdd@0.14.0 derive` first and show what moved as a
+release's own change; then the first proof holds against those records,
+and what the fixes move stays apart from what 0.9 moved.
 
 **The fixes, one question.**
 
@@ -638,32 +647,45 @@ category: https://github.com/rich-rees/zero-drift-docs/discussions (decision 004
   and `starters.json` marks it `companionOf`. Say so plainly: it is code the
   app does not run, kept so the suite passes, until the fixture is rewritten
   in the app's own stack.
-- **Two proofs, in order.** `starters --prove` first: every record byte for
-  byte as committed. Then `starters` lists the fixes the library's 0.2.0
-  notes, and one question answers them: `starters --move` on a yes (the
-  copies move, their tests run, derive, every map link and blessing at a
-  moved id is repointed, lint), `starters --decline` on a no, kept.
+- **Two proofs, in order.** `starters --prove` first: every adapter record
+  byte for byte as committed (an item the adapters report unread for the
+  first time is named, not counted as moved). Then `starters` lists the
+  fixes noted in the library's 0.2.0, and one question answers them:
+  `starters --move` on a yes (the copies move, their tests run, derive,
+  every map link and blessing at a moved id is repointed, lint),
+  `starters --decline` on a no, kept. **From the old line** (before 0.9),
+  `derive` comes first: 0.9's own changes move records, and the first proof
+  then holds against them (step 3b).
 - **The suite.** A copy no one has changed passes the suite as the library
   proved it, so when every adapter is one the run raises `suiteChecks`;
   step 4b still interviews an adapter the repo wrote or changed.
-- **What the adapters could not read** (step 4c: `unread`, then `unread
-  --raise`) **and the map's gaps** (decision 0049, step 4d beside it:
+- **What the adapters could not read** (step 4c: `unread`, then
+  `unread --raise`) **and the map's gaps** (decision 0049, step 4d beside it:
   `gaps`, then `gaps --raise`). A gap is a route, screen or background task
   that reaches nothing, or a table nothing reaches; each is fixed through
   the **extractor** skill, or answered once, `--fine` or `--known`, with a
-  reason. Until each is raised, lint warns with every item and every gap
-  and never fails; from then a new one fails CI.
+  reason. Recommend answering both in this PR; the developer may leave some
+  for later (say so in the commit's record). Until each is raised, lint
+  warns with every item and every gap and never fails; from then a new one
+  fails CI. A gap left open is asked again at the next "update ZDD", which
+  does not finish while one is open.
+- **A local extractor scaffolded before 0.14** keeps its old test, which
+  counts the core's unread records among its ids: before it returns
+  `unread`, scaffold the test again (the extractor skill, Step 4, says how).
 - **Every update from now on** asks the starter library whether a starter
   now fits (`bootstrap.mjs library`), and the session start says one line
   when the library notes fixes for a copy not yet taken or declined.
 - **What moves on the bump**: `zdd/extractors/` arrives (the copies, their
   tests and fixtures, `_shared/`, `starters.json`) and `zdd/config.json`
   gains `localExtractorDir` (and `suiteChecks`, `unread`, `gaps` as
-  answered). `derive --check` keeps every record's bytes at the first
-  proof; on a yes to the fixes the records they correct move, in this PR.
-  `render --check` moves `human-index.html` (its Unread and Known gaps
-  peeks); the agent index and `graph.json` move only with the fixes or once
-  a gap is answered known. The pins move to 0.14.0.
+  answered). `derive --check` keeps every adapter record's bytes at the
+  first proof (the unread records it newly writes are the report's, step
+  4c); on a yes to the fixes the records they correct move, in this PR, and
+  `graph.json` and the agent index with them. `render --check` moves
+  `human-index.html` (its Unread and Known gaps peeks); a gap answered known
+  moves the agent index and the human index, never a record or `graph.json`.
+  From the old line, 0.9's own changes move too (its own section). The
+  pins move to 0.14.0.
 
 ## Upgrading to 0.13 (a store header says each key once)
 
