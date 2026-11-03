@@ -284,9 +284,18 @@ test("the record: a key added by ALTER is an edge, a function in two spellings i
   assert.equal(records.filter((r) => r.kind === "function").length, 1);
 });
 
-test("Prisma's own foreign keys are read, in a folder of files", (t) => {
-  const tables = read(t, { "db/migrations/001.sql": 'CREATE TABLE "public"."User" ("id" SERIAL NOT NULL, CONSTRAINT "User_pkey" PRIMARY KEY ("id"));\nCREATE TABLE "public"."Post" ("id" SERIAL NOT NULL, "authorId" INTEGER NOT NULL);\nALTER TABLE "public"."Post" ADD CONSTRAINT "Post_authorId_fkey" FOREIGN KEY ("authorId") REFERENCES "public"."User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;\n' });
-  assert.deepEqual(tables, { "public.Post": ["id", "authorId"], "public.User": ["id"] });
+test("CR-274: Prisma's own foreign keys are read, in a folder of files", (t) => {
+  const root = repo(t, { "db/migrations/001.sql": 'CREATE TABLE "public"."User" ("id" SERIAL NOT NULL, CONSTRAINT "User_pkey" PRIMARY KEY ("id"));\nCREATE TABLE "public"."Post" ("id" SERIAL NOT NULL, "authorId" INTEGER NOT NULL);\nALTER TABLE "public"."Post" ADD CONSTRAINT "Post_authorId_fkey" FOREIGN KEY ("authorId") REFERENCES "public"."User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;\n' });
+  const { records } = derive({ repoRoot: root, options: { migrationNamespaces: [{ name: "db", dir: "db/migrations" }] }, io: makeExtractorIo(root, "supabase") });
+  const post = records.find((r) => r.id === "table:db/public.Post");
+  assert.deepEqual(post.refs, ["table:db/public.User"]);
+  assert.equal(post.facts.columns.find((c) => c.name === "authorId").references, "public.User(id)");
+});
+
+test("a second key's table is an edge too", (t) => {
+  const root = repo(t, { "migrations/001.sql": "create table a (id int);\ncreate table z (id int);\ncreate table b (x int references a(id));\nalter table b add constraint two foreign key (x) references z(id);\n" });
+  const { records } = derive({ repoRoot: root, options: { migrationNamespaces: [{ name: "db", dir: "migrations" }] }, io: makeExtractorIo(root, "supabase") });
+  assert.deepEqual(records.find((r) => r.id === "table:db/b").refs, ["table:db/a", "table:db/z"]);
 });
 
 test("CR-253: a renamed function's record carries its new id and its history, after what was there", (t) => {

@@ -162,7 +162,7 @@ export. A hand-written local adapter is the only route that works today.
   EXISTS ONLY`, a `DROP` with no `COLUMN` word, and a column rename into the
   foreign keys that name it. A procedure is a record like a function. A
   routine record gains `renamedFrom`, as a table has. A rename stays in its
-  schema, except that a `public` table still loses `public.` (below).
+  schema.
 - **What a name is.** Quoted, with spaces, `"public"."User"`, `$` and letters
   past ASCII all read. A quoted name holding a dot does not: a name is held as
   one string with its schema before the first dot, so the statement reports.
@@ -180,7 +180,9 @@ export. A hand-written local adapter is the only route that works today.
 - **Tables an app does not own** are a named list of the schemas Postgres and
   the platform own, in the adapter. A schema the list misses raises an item,
   answered once, which is the safer way to be wrong.
-- **A `DO` block is judged, never applied.** Strings are blanked first. What
+- **A `DO` block is judged, and only its foreign keys are applied,** where
+  what decides them is known: the block runs them outright, or a guard asks
+  whether that constraint or that table exists. Strings are blanked first. What
   the model does not hold is quiet; `CREATE TABLE` and `CREATE TRIGGER` are
   answered when a plain statement makes the same thing by the end of the
   replay; anything else, and any `EXECUTE`, reports the whole block.
@@ -215,14 +217,16 @@ export. A hand-written local adapter is the only route that works today.
   with them, because a new adopter must never receive a known bug:
   - a foreign key added by `ALTER`, at table level, with no column list, or
     in a guarded `DO` block is read; `DROP CONSTRAINT` takes one away, by the
-    name given or the name Postgres gave it, through renames;
+    name given or the name Postgres gave it, through renames. A column in a
+    second key carries it in an optional `alsoReferences`, beside `references`;
   - a renamed table keeps the schema it was written with, `public` too, and
     `sqlalchemy` refs a table by its bare name, so `public.x` in code reaches
     the table in either spelling. Together these were not cosmetic: code that
     qualified a renamed table lost its data-access records with no warning;
   - `f` and `public.f` are one function, in every statement that names it;
   - `UPDATE` and `DELETE` on `storage.buckets` apply, or report when they
-    are wider than one bucket; an `INSERT` of several makes them all;
+    are wider than one bucket; an `INSERT` of several makes them all, and
+    its `ON CONFLICT` is read;
   - `UNIQUE(a, b)` with no space is no column; a type changed `USING`
     something is the type; a `CREATE TABLE` over a table that is there
     reports.
@@ -236,8 +240,9 @@ export. A hand-written local adapter is the only route that works today.
   baseline, proves the records byte-identical, then in the same upgrade
   offers the note and, on a yes, moves the copy to the fixed version, runs the
   adapter's tests, and derives. It reads the changed records against the note,
-  and repoints every map link and blessing at an id that moved, by the table's
-  `renamedFrom`, before `lint`. Two proofs, in order, so what the move did and
+  and repoints every map link and blessing at an id that moved, before `lint`:
+  by a table's `renamedFrom`, and to the surviving record where `f` and
+  `public.f` became one. Two proofs, in order, so what the move did and
   what the fixes did are never mixed. On a no, the note stands as point 7 says.
 
 ## Rejected

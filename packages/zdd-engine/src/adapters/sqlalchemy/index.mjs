@@ -108,11 +108,15 @@ function relation(sql, i, read = false) {
       continue;
     }
     if (sql[i] !== '"' && NOT_TABLES.has(p[0].toLowerCase())) return null;
-    let name = p[0];
+    // Unquoted, Postgres folds the schema: `PUBLIC.jobs` is `public.jobs`, and
+    // `"PUBLIC".jobs` is not. A quoted name with a dot in it is no schema.
+    let name = sql[i] !== '"' && p[0].toLowerCase() === "public" ? "public" : p[0];
     let next = p[1];
+    if (p[0].includes(".")) return null;
     if (sql[next] === ".") {
       const q = namePart(sql, next + 1);
       if (q) {
+        if (q[0].includes(".")) return null;
         name = `${name}.${q[0]}`;
         next = q[1];
       }

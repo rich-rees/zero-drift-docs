@@ -8,10 +8,11 @@
 //
 // Deliberately NOT modeled (their truth is one grep away in the latest
 // migration, and modeling them buys parser surface, not orientation):
-// constraints (the node_type CHECK churns across 7 migrations), indexes,
-// RLS, grants, policies, seed/backfill DML. A DO block is never applied: what
-// is in one is judged (judgeDo below). What LOOKS like a change to the model
-// and was not applied is reported, never dropped (decision 0048 point 5).
+// constraints other than foreign keys (the node_type CHECK churns across 7
+// migrations), indexes, RLS, grants, policies, seed/backfill DML. What is in a
+// DO block is judged, and only its foreign keys are ever applied (judgeDo
+// below). What LOOKS like a change to the model and was not applied is
+// reported, never dropped (decision 0048 point 5).
 // Triggers ARE modeled: trigger functions' bodies never name their
 // tables (`NEW.updated_at = now()`), so without CREATE TRIGGER the function
 // records float with no edges — the relationship lives only in the trigger
@@ -259,9 +260,26 @@ function parseColumnDef(def) {
   }
   const col = { name, type: typeTokens.join(" ").toLowerCase() };
   // With no column named, a reference is to the target's primary key.
-  const ref = REFERENCES.exec(def.replace(/'(?:[^']|'')*'/g, "''"));
+  const ref = REFERENCES.exec(blankStrings(text.slice(written.length)));
   if (ref) col.references = refTo(foldIdent(ref[1]), ref[2] && foldIdent(ref[2]));
   return col;
+}
+
+// A string is text, in either way of writing one.
+function blankStrings(sql) {
+  return sql.replace(/'(?:[^']|'')*'/g, "''").replace(/\$([A-Za-z_]*)\$[\s\S]*?\$\1\$/g, "''");
+}
+
+// The name Postgres gives an unnamed constraint: at most 63 characters, the
+// longer of the two parts giving way first.
+function constraintName(name1, name2, label) {
+  let [n1, n2] = [name1.length, name2.length];
+  const room = 63 - label.length - 2;
+  while (n1 + n2 > room) {
+    if (n1 > n2) n1--;
+    else n2--;
+  }
+  return `${name1.slice(0, n1)}_${name2.slice(0, n2)}_${label}`;
 }
 
 const refTo = (table, column) => (column ? `${table}(${column})` : table);
@@ -274,16 +292,18 @@ function readForeignKey(text) {
   return { name: m[1] ? foldIdent(m[1]) : null, columns: list(m[2]), target: foldIdent(m[3]), targetColumns: m[4] ? list(m[4]) : [] };
 }
 
-// A literal in a bucket's statement; undefined when it is anything else.
-function literal(v) {
+// A literal in a bucket's statement; undefined when it is anything else. An
+// array of arrays is not one, and an element that is not one spoils the array.
+function literal(v, nested = false) {
   if (v === undefined) return undefined;
   const t = v.trim().replace(/::[\w\s[\]]+$/, "");
   if (/^'.*'$/.test(t)) return t.slice(1, -1).replace(/''/g, "'");
   if (/^(true|false)$/i.test(t)) return t.toLowerCase() === "true";
   if (/^\d+$/.test(t)) return Number(t);
-  const arr = /^array\s*\[([\s\S]*)\]$/i.exec(t);
-  if (arr) return splitTopLevel(arr[1]).map((x) => literal(x)).filter((x) => x !== undefined);
-  return undefined;
+  const arr = nested ? null : /^array\s*\[([\s\S]*)\]$/i.exec(t);
+  if (!arr) return undefined;
+  const items = splitTopLevel(arr[1]).map((x) => literal(x, true));
+  return items.includes(undefined) ? undefined : items;
 }
 
 // Comment-block -> description: drop banner lines (`====`) and file-path
@@ -385,8 +405,9 @@ const WHOLE_NAME = new RegExp(`^${QNAME}$`);
 // else that would change the model (a rename above all) cannot be followed
 // safely, and an EXECUTE of text the reader cannot see is the same. A string
 // is text, so it is blanked first: only an EXECUTE gives one effect. Foreign
-// keys are the exception that is applied: they are what such a block is
-// usually for, guarded so a re-run is safe, and the model holds them.
+// keys are the exception that is applied, where the condition is known: they
+// are what such a block is usually for, and the model holds them.
+const DO_GUARD = /^if\s+(not\s+)?exists\s*\([\s\S]*\)\s*then$/i;
 const FOLLOWED_IN_DO = new Set(["ignored", "add-foreign-key", "drop-constraint", "rename-constraint"]);
 const DO_DDL = /\b(?:alter\s+(?:foreign\s+)?table|alter\s+(?:function|procedure|routine|schema)|create\s+table|create\s+(?:(?:global|local)\s+)?(?:unlogged\s+|foreign\s+)table|create\s+(?:or\s+replace\s+)?(?:function|procedure)|create\s+(?:or\s+replace\s+)?(?:constraint\s+)?trigger|drop\s+(?:foreign\s+)?table|drop\s+(?:function|procedure|routine|schema|trigger)|drop\s+(?:type|domain)\b(?=[\s\S]*\bcascade\b)|rename\s+table|sp_rename)\b[\s\S]*/i;
 const DO_EXECUTE = /(?<!\bgrant\s+)(?<!\brevoke\s+)(?<!\ball\s+)\bexecute\b(?!\s+(?:function|procedure)\b)/i;
@@ -394,12 +415,15 @@ function judgeDo(sql) {
   const quoted = /\$[A-Za-z_]*\$([\s\S]*)\$[A-Za-z_]*\$/.exec(sql)?.[1] ?? /'((?:[^']|'')*)'/.exec(sql)?.[1].replace(/''/g, "'");
   if (quoted === undefined) return { unread: true };
   const needs = [];
-  const keys = []; // { table, action } of the foreign keys it adds or drops
+  const keys = []; // { table, action, ifTable } of the foreign keys it adds or drops
+  let open = false; // inside an IF, past the statement that opened it
   for (const { sql: written } of tokenizeSql(quoted)) {
-    const inner = written.replace(/'(?:[^']|'')*'/g, "''").replace(/\$([A-Za-z_]*)\$[\s\S]*?\$\1\$/g, "''");
+    const inner = blankStrings(written);
     const ddl = DO_DDL.exec(inner)?.[0];
     if (!ddl) {
       if (DO_EXECUTE.test(inner)) return { unread: true };
+      if (/^\s*end\s+(?:if|loop|case)\s*$/i.test(inner)) open = false;
+      else if (/\b(?:then|else|loop)\b/i.test(inner)) open = true;
       continue;
     }
     const created = CREATE_TABLE.exec(ddl);
@@ -414,13 +438,52 @@ function judgeDo(sql) {
     }
     const altered = ALTER_TABLE.exec(ddl);
     const actions = altered ? splitTopLevel(altered[2]).map(readAction) : [];
-    if (altered && actions.every((a) => FOLLOWED_IN_DO.has(a.kind))) {
-      for (const action of actions) if (action.kind !== "ignored") keys.push({ table: foldIdent(altered[1]), action });
+    if (!altered || !actions.every((a) => FOLLOWED_IN_DO.has(a.kind))) return { unread: true };
+    const followed = actions.filter((a) => a.kind !== "ignored");
+    if (!followed.length) continue;
+    // A key is followed only where what decides it is known. The block runs
+    // it outright; or a guard asks whether this very constraint exists, which
+    // the guard makes a no-op on a re-run; or whether this table exists, which
+    // the replay can answer. Any other condition reports.
+    const table = foldIdent(altered[1]);
+    const guard = inner.slice(0, inner.length - ddl.length).trim().replace(/^begin\b\s*/i, "");
+    if (guard === "") {
+      if (open) return { unread: true };
+      for (const action of followed) keys.push({ table, action, ifTable: false });
       continue;
     }
-    return { unread: true };
+    const asked = DO_GUARD.exec(guard);
+    if (!asked || followed.length !== 1 || open) return { unread: true };
+    const constraint = /\bconname\s*=\s*'([^']*)'/i.exec(written)?.[1];
+    const named = /\btable_name\s*=\s*'([^']*)'/i.exec(written)?.[1];
+    const wanted = followed[0].fk?.name ?? followed[0].name ?? followed[0].from;
+    if (constraint !== undefined ? constraint !== wanted || Boolean(asked[1]) !== (followed[0].kind === "add-foreign-key") : !(named === bareName(table) && !asked[1])) return { unread: true };
+    keys.push({ table, action: followed[0], ifTable: constraint === undefined });
+    open = true;
   }
   return { unread: false, needs, keys };
+}
+
+// The bucket table however it is quoted, and what follows an INSERT's tuples.
+const BUCKET_TABLE = '(?:"storage"|storage)\\s*\\.\\s*(?:"buckets"|buckets)';
+const BUCKET_WHERE = "where\\s+(id|name)\\s*=\\s*('(?:[^']|'')*')\\s*$";
+const INSERT_BUCKETS = new RegExp(`^insert\\s+into\\s+${BUCKET_TABLE}\\s*\\(([^)]*)\\)\\s*values\\s*`, "i");
+const UPDATE_BUCKET = new RegExp(`^update\\s+${BUCKET_TABLE}\\s+set\\s+([\\s\\S]+?)\\s+${BUCKET_WHERE}`, "i");
+const DELETE_BUCKET = new RegExp(`^delete\\s+from\\s+${BUCKET_TABLE}\\s+${BUCKET_WHERE}`, "i");
+const ANY_BUCKET_CHANGE = new RegExp(`^(?:update|delete\\s+from|insert\\s+into)\\s+${BUCKET_TABLE}`, "i");
+const CONFLICT = new RegExp(`^(?:(?:on\\s+conflict\\s*(?:\\(\\s*(${IDENT})\\s*\\))?\\s*(do\\s+nothing|do\\s+update\\s+set\\s+([\\s\\S]+?)))?)\\s*$`, "i");
+const EXCLUDED = new RegExp(`^\\s*excluded\\s*\\.\\s*(${IDENT})\\s*$`, "i");
+const ASSIGNMENT = new RegExp(`^(${IDENT})\\s*=([\\s\\S]*)$`);
+
+// `a = 1, b = 2` as { a: "1", b: "2" }, or null for any other shape.
+function assignments(text) {
+  const out = {};
+  for (const set of splitTopLevel(text)) {
+    const m = ASSIGNMENT.exec(set);
+    if (!m) return null;
+    out[foldIdent(m[1])] = m[2];
+  }
+  return out;
 }
 
 // A bucket's columns the model holds. A `null` clears the fact.
@@ -432,6 +495,17 @@ function setBucketFacts(bucket, raw) {
     if (value !== undefined) bucket.facts[fact] = value;
     else if (/^\s*null\s*$/i.test(raw[column])) delete bucket.facts[fact];
   }
+}
+// An update, or false when it cannot be followed: a value that is no literal
+// in a column the model holds, or a new id. The id is the record's.
+function setBucket(bucket, set) {
+  if (set.id !== undefined) return false;
+  const opaque = (v) => literal(v) === undefined && !/^\s*null\s*$/i.test(v ?? "");
+  if (Object.keys(BUCKET_FACTS).some((column) => set[column] !== undefined && opaque(set[column]))) return false;
+  if (set.name !== undefined && typeof literal(set.name) !== "string") return false;
+  if (set.name !== undefined) bucket.name = literal(set.name);
+  setBucketFacts(bucket, set);
+  return true;
 }
 
 // Returns { tables: Map (key -> table, key = tableKey(name)), functions: Map
@@ -464,14 +538,10 @@ export function replayMigrations(files) {
     table.name = newName;
     tables.delete(tableKey(oldName));
     tables.set(tableKey(newName), table);
-    for (const other of tables.values()) {
-      for (const col of other.columns) {
-        const target = col.references?.split("(")[0];
-        if (target !== undefined && sameTable(target, oldName)) {
-          col.references = `${newName}${col.references.slice(target.length)}`;
-        }
-      }
-    }
+    rewriteRefs((ref) => {
+      const target = ref.split("(")[0];
+      return sameTable(target, oldName) ? `${newName}${ref.slice(target.length)}` : ref;
+    });
     for (const t of triggers) if (sameTable(t.table, oldName)) t.table = newName;
   };
   // Functions are keyed as tables are: `f` and `public.f` are one function, and
@@ -489,33 +559,62 @@ export function replayMigrations(files) {
     for (const t of triggers) if (sameTable(t.fn, oldName)) t.fn = newName;
   };
 
-  // table.keys: constraint name -> the columns whose `references` it gave.
+  const findBucket = (column, value) => (column === "id" ? buckets.get(value) : [...buckets.values()].find((b) => b.name === value));
+
+  // Every reference a column holds. `references` is the first; a column may be
+  // in further keys, and they go in `alsoReferences`.
+  const refsOf = (col) => [...(col.references ? [col.references] : []), ...(col.alsoReferences ?? [])];
+  const setRefs = (col, refs) => {
+    delete col.references;
+    delete col.alsoReferences;
+    if (refs.length) col.references = refs[0];
+    if (refs.length > 1) col.alsoReferences = refs.slice(1);
+  };
+  // Every reference in the model through `fn`: a rename reaches the columns and
+  // what the keys remember giving them.
+  const rewriteRefs = (fn) => {
+    for (const table of tables.values()) {
+      for (const col of table.columns) if (col.references) setRefs(col, refsOf(col).map(fn));
+      for (const key of table.keys.values()) for (const g of key.gave) g.ref = fn(g.ref);
+    }
+  };
+
+  // table.keys: constraint name -> { columns, gave: [{ column, ref }] }.
   // Postgres names an unnamed key after the table it was made on, and a later
   // rename of the table leaves that name alone, so this is decided once.
-  const defaultKey = (table, columns) => `${bareName(table.name)}_${columns.join("_")}_fkey`;
+  const defaultKey = (table, columns) => {
+    for (let n = 0; ; n++) {
+      const name = constraintName(bareName(table.name), columns.join("_"), n ? `fkey${n}` : "fkey");
+      if (!table.keys.has(name)) return name;
+    }
+  };
   const noteInlineKey = (table, col, def) => {
     if (!col.references) return;
     const named = NAMED_REFERENCE.exec(def);
-    table.keys.set(named ? foldIdent(named[1]) : defaultKey(table, [col.name]), [col.name]);
+    table.keys.set(named ? foldIdent(named[1]) : defaultKey(table, [col.name]), { columns: [col.name], gave: [{ column: col.name, ref: col.references }] });
   };
-  // One reference per column: a column that has one keeps it. False when a
-  // column it names is not in the table.
+  // False when a column it names is not in the table, or the two lists disagree.
   const addForeignKey = (table, fk) => {
     const columns = fk.columns.map((name) => table.columns.find((c) => c.name === name));
-    if (columns.some((c) => !c)) return false;
+    if (!columns.length || columns.some((c) => !c)) return false;
+    if (fk.targetColumns.length && fk.targetColumns.length !== columns.length) return false;
     const gave = [];
     columns.forEach((col, i) => {
-      if (col.references) return;
-      col.references = refTo(fk.target, fk.targetColumns[i]);
-      gave.push(col.name);
+      const ref = refTo(fk.target, fk.targetColumns[i]);
+      if (refsOf(col).includes(ref)) return;
+      setRefs(col, [...refsOf(col), ref]);
+      gave.push({ column: col.name, ref });
     });
-    table.keys.set(fk.name ?? defaultKey(table, fk.columns), gave);
+    table.keys.set(fk.name ?? defaultKey(table, fk.columns), { columns: fk.columns, gave });
     return true;
   };
   const dropConstraint = (table, name) => {
-    const gave = table.keys.get(name);
-    if (!gave) return false;
-    for (const col of table.columns) if (gave.includes(col.name)) delete col.references;
+    const key = table.keys.get(name);
+    if (!key) return false;
+    for (const { column, ref } of key.gave) {
+      const col = table.columns.find((c) => c.name === column);
+      if (col) setRefs(col, refsOf(col).filter((r) => r !== ref));
+    }
     table.keys.delete(name);
     return true;
   };
@@ -641,14 +740,15 @@ export function replayMigrations(files) {
               changed(col, "name", a.from, a.to);
               follow(here.columns, `${at} ${a.from}`, `${at} ${a.to}`);
               col.name = a.to;
-              for (const [key, gave] of table.keys) table.keys.set(key, gave.map((c) => (c === a.from ? a.to : c)));
-              // A foreign key names its target column: it follows too.
-              for (const other of tables.values()) {
-                for (const c of other.columns) {
-                  const ref = c.references && /^(.*)\((.*)\)$/.exec(c.references);
-                  if (ref && ref[2] === a.from && sameTable(ref[1], table.name)) c.references = `${ref[1]}(${a.to})`;
-                }
+              for (const key of table.keys.values()) {
+                key.columns = key.columns.map((c) => (c === a.from ? a.to : c));
+                for (const g of key.gave) if (g.column === a.from) g.column = a.to;
               }
+              // A foreign key names its target column: it follows too.
+              rewriteRefs((text) => {
+                const ref = /^(.*)\((.*)\)$/.exec(text);
+                return ref && ref[2] === a.from && sameTable(ref[1], table.name) ? `${ref[1]}(${a.to})` : text;
+              });
             } else missed = true;
             touched = true;
           } else if (a.kind === "add-column") {
@@ -661,8 +761,9 @@ export function replayMigrations(files) {
           } else if (a.kind === "drop-column") {
             if (here.columns.has(`${at} ${a.name}`)) selfUndone();
             if (!a.guarded && !table.columns.some((c) => c.name === a.name)) missed = true;
+            // A key goes whole with any column of it, its other columns' references too.
+            for (const [key, { columns }] of [...table.keys]) if (columns.includes(a.name)) dropConstraint(table, key);
             table.columns = table.columns.filter((c) => c.name !== a.name);
-            for (const [key, gave] of table.keys) if (gave.includes(a.name)) table.keys.delete(key);
             touched = true;
           } else if (a.kind === "add-foreign-key") {
             if (addForeignKey(table, a.fk)) touched = true;
@@ -681,8 +782,8 @@ export function replayMigrations(files) {
           } else if (a.kind === "unknown" || (a.column !== undefined && !table.columns.some((c) => c.name === a.column))) {
             missed = true;
           }
-          // ADD/DROP CONSTRAINT, SET DEFAULT, ENABLE/DISABLE ROW LEVEL
-          // SECURITY, VALIDATE, ... are deliberately ignored.
+          // Other constraints, SET DEFAULT, ENABLE/DISABLE ROW LEVEL SECURITY,
+          // VALIDATE, ... are deliberately ignored.
         }
         if (touched) {
           const current = tables.get(tableKey(table.name));
@@ -826,11 +927,17 @@ export function replayMigrations(files) {
         if (judged.unread) unread();
         else {
           if (judged.needs.length) waiting.push({ needs: judged.needs, item: { file: file.name, statement: head, text: sql } });
-          // On a table the replay has. One it has not is a guarded no-op.
-          for (const { table: name, action } of judged.keys) {
+          for (const { table: name, action, ifTable } of judged.keys) {
             const table = tables.get(tableKey(name));
-            if (!table) continue;
-            const did = action.kind === "add-foreign-key" ? addForeignKey(table, action.fk) : action.kind === "drop-constraint" ? dropConstraint(table, action.name) : renameConstraint(table, action.from, action.to);
+            if (!table) {
+              if (!ifTable && !notOurs(name)) unread({ unseen: true });
+              continue;
+            }
+            if (action.kind === "add-foreign-key" && !addForeignKey(table, action.fk)) {
+              unread();
+              continue;
+            }
+            const did = action.kind === "add-foreign-key" ? true : action.kind === "drop-constraint" ? dropConstraint(table, action.name) : renameConstraint(table, action.from, action.to);
             if (did && !table.resources.includes(file.name)) table.resources.push(file.name);
           }
         }
@@ -838,32 +945,48 @@ export function replayMigrations(files) {
       }
 
       // INSERT INTO storage.buckets — positional literal extraction from each
-      // VALUES tuple; non-literal values are simply omitted from facts.
-      if ((m = /^insert\s+into\s+storage\.buckets\s*\(([^)]*)\)\s*values\s*/i.exec(sql))) {
-        const cols = m[1].split(",").map((c) => foldIdent(c));
-        const keeps = /\bon\s+conflict\b[\s\S]*\bdo\s+nothing\b/i.test(sql); // a bucket that is there stays as it is
+      // VALUES tuple; non-literal values are simply omitted from facts. What
+      // follows the tuples decides what a bucket already there does.
+      if ((m = INSERT_BUCKETS.exec(sql))) {
+        const cols = splitTopLevel(m[1]).map(foldIdent);
+        const rows = [];
         let from = m[0].length - 1;
-        while (from !== null) {
+        let tail = null;
+        while (tail === null) {
           const tuple = parenBody(sql, from);
-          if (!tuple) {
-            unread();
-            break;
-          }
+          if (!tuple) break;
           const values = splitTopLevel(tuple.body);
           const raw = {};
           cols.forEach((c, idx) => (raw[c] = values[idx]));
+          rows.push(raw);
+          const more = /^\s*,/.exec(sql.slice(tuple.end + 1));
+          if (more) from = tuple.end + 1 + more[0].length;
+          else tail = sql.slice(tuple.end + 1).trim();
+        }
+        const conflict = tail === null ? null : CONFLICT.exec(tail);
+        const update = conflict?.[3] ? assignments(conflict[3]) : null;
+        if (!conflict || (conflict[3] && !update) || rows.some((raw) => !(literal(raw.id) ?? literal(raw.name)))) {
+          unread();
+          continue;
+        }
+        const onTarget = conflict[1] ? foldIdent(conflict[1]) : null;
+        for (const raw of rows) {
           const id = literal(raw.id) ?? literal(raw.name);
-          if (!id) {
+          const named = literal(raw.name) ?? id;
+          const there = onTarget === "name" ? findBucket("name", named) : buckets.get(id);
+          // Over a bucket that is there with no ON CONFLICT, Postgres refuses.
+          if (there && !conflict[2]) {
             unread();
-            break;
-          }
-          if (!(keeps && buckets.has(id))) {
-            const bucket = { id, resource: [file.name], description: commentsToDescription(leadingComments), facts: {} };
+          } else if (there && update) {
+            const set = {};
+            for (const [column, value] of Object.entries(update)) set[column] = EXCLUDED.exec(value) ? raw[foldIdent(EXCLUDED.exec(value)[1])] : value;
+            if (!setBucket(there, set)) unread();
+            else if (!there.resource.includes(file.name)) there.resource.push(file.name);
+          } else if (!there) {
+            const bucket = { id, name: named, resource: [file.name], description: commentsToDescription(leadingComments), facts: {} };
             setBucketFacts(bucket, raw);
             buckets.set(id, bucket);
           }
-          const more = /^\s*,/.exec(sql.slice(tuple.end + 1));
-          from = more ? tuple.end + 1 + more[0].length : null;
         }
         continue;
       }
@@ -871,25 +994,22 @@ export function replayMigrations(files) {
       // UPDATE and DELETE on storage.buckets, one bucket by its id or name. On
       // a bucket no migration made there is nothing to apply. Anything wider
       // cannot be followed, so it reports.
-      if ((m = /^update\s+storage\.buckets\s+set\s+([\s\S]+?)\s+where\s+(?:id|name)\s*=\s*('(?:[^']|'')*')\s*$/i.exec(sql))) {
-        const raw = {};
-        for (const set of splitTopLevel(m[1])) {
-          const eq = set.indexOf("=");
-          raw[foldIdent(set.slice(0, eq))] = set.slice(eq + 1);
-        }
-        const bucket = buckets.get(literal(m[2]));
-        if (Object.entries(raw).some(([key, v]) => BUCKET_FACTS[key] && literal(v) === undefined && !/^\s*null\s*$/i.test(v))) unread();
+      if ((m = UPDATE_BUCKET.exec(sql))) {
+        const set = assignments(m[1]);
+        const bucket = findBucket(m[2].toLowerCase(), literal(m[3]));
+        if (!set) unread();
         else if (bucket) {
-          setBucketFacts(bucket, raw);
-          if (!bucket.resource.includes(file.name)) bucket.resource.push(file.name);
+          if (!setBucket(bucket, set)) unread();
+          else if (!bucket.resource.includes(file.name)) bucket.resource.push(file.name);
         }
         continue;
       }
-      if ((m = /^delete\s+from\s+storage\.buckets\s+where\s+(?:id|name)\s*=\s*('(?:[^']|'')*')\s*$/i.exec(sql))) {
-        buckets.delete(literal(m[1]));
+      if ((m = DELETE_BUCKET.exec(sql))) {
+        const bucket = findBucket(m[1].toLowerCase(), literal(m[2]));
+        if (bucket) buckets.delete(bucket.id);
         continue;
       }
-      if (/^(?:update\s+storage\.buckets|delete\s+from\s+storage\.buckets)\b/i.test(sql)) {
+      if (ANY_BUCKET_CHANGE.test(sql)) {
         unread();
         continue;
       }

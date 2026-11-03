@@ -277,6 +277,7 @@ test("replay: ALTER PROCEDURE … RENAME TO, a procedure being a record like a f
     { name: "2.sql", text: "alter procedure tidy(int, text) rename to sweep;\nalter function public.bare rename to plain;" },
   ]);
   assert.deepEqual([...functions.values()].map((f) => f.name).sort(), ["plain", "public.sweep"], "a rename stays in the record's schema, spelled as the record spells it");
+  assert.deepEqual([...functions.keys()].sort(), ["plain", "sweep"], "keyed as a table is");
 });
 
 test("replay: a later CREATE OR REPLACE of a renamed function keeps its history", () => {
@@ -365,7 +366,7 @@ test("tripwire: a change the model cannot place — a column that is not there, 
   for (const sql of ["alter table t drop column if exists nope", "alter table t add column if not exists a int"]) assert.deepEqual(SKIPPED(sql, first), [], sql);
 });
 
-test("tripwire: everything ALTER TABLE does that the model holds nothing of stays quiet, on Postgres's list", () => {
+test("tripwire: what ALTER TABLE does to a table that is there, and the replay can place, stays quiet, on Postgres's list", () => {
   const first = "create table t (a int, b int);";
   for (const action of ["add constraint c unique (a)", "add primary key (a)", "add unique (a)", "add check (a > 0)", "add foreign key (a) references t (a)", "drop constraint c", "drop constraint if exists c cascade", "rename constraint c to d", "validate constraint c", "enable row level security", "disable row level security", "force row level security", "no force row level security", "enable trigger all", "owner to admin", "replica identity full", "alter column a set default 1", "alter column a drop default", "alter a set not null", "alter column a drop not null", "alter column a add generated always as identity", "set (fillfactor = 70)", "attach partition t2 for values from (1) to (2)"]) {
     assert.deepEqual(SKIPPED(`alter table t ${action}`, first), [], action);
@@ -547,9 +548,11 @@ test("a foreign key at table level in CREATE TABLE, with no space, and a column 
   assert.deepEqual(COLS(tables, "b"), { a_id: "a(id)", y: "a(x)" });
 });
 
-test("a composite foreign key maps pair by pair; a column that has a reference keeps it", () => {
+test("a composite foreign key maps pair by pair; a column in a second key holds both", () => {
   const { tables } = replayMigrations([{ name: "1.sql", text: "create table j (id int);\ncreate table n (id int, j_id int);\ncreate table e (src int, j_id int references j(id), foreign key (src, j_id) references n (id, j_id));" }]);
   assert.deepEqual(COLS(tables, "e"), { src: "n(id)", j_id: "j(id)" });
+  assert.deepEqual(tables.get("e").columns[1].alsoReferences, ["n(j_id)"]);
+  assert.equal(tables.get("e").columns[0].alsoReferences, undefined);
 });
 
 test("a reference with no column list is a reference, and its table follows a rename", () => {
@@ -582,8 +585,8 @@ test("a foreign key on a column that is not there is reported", () => {
   assert.equal(replayMigrations([{ name: "1.sql", text: "create table t (a int, foreign key (ghost) references t(a));" }]).skipped.length, 1);
 });
 
-test("a foreign key in a guarded DO block is followed; on a table not there, it is a no-op", () => {
-  const { tables, skipped } = replayMigrations([{ name: "1.sql", text: "create table a (code text);\ncreate table b (cat text);" }, { name: "2.sql", text: "do $$ begin if not exists (select 1 from pg_constraint where conname = 'fk') then alter table public.b add constraint fk foreign key (cat) references public.a(code) on delete restrict; end if; end $$;\ndo $$ begin alter table ghost add constraint g foreign key (x) references a(code); end $$;" }]);
+test("a foreign key in a guarded DO block is followed; a guard on a table that is not there is a no-op", () => {
+  const { tables, skipped } = replayMigrations([{ name: "1.sql", text: "create table a (code text);\ncreate table b (cat text);" }, { name: "2.sql", text: "do $$ begin if not exists (select 1 from pg_constraint where conname = 'fk') then alter table public.b add constraint fk foreign key (cat) references public.a(code) on delete restrict; end if; end $$;\ndo $$ begin if exists (select 1 from information_schema.tables where table_name = 'ghost') then alter table ghost add constraint g foreign key (x) references a(code); end if; end $$;" }]);
   assert.equal(tables.get("b").columns[0].references, "public.a(code)");
   assert.deepEqual(tables.get("b").resources, ["1.sql", "2.sql"]);
   assert.deepEqual(skipped, []);
@@ -639,7 +642,7 @@ test("an update that cannot be followed is reported; a bucket no migration made 
   assert.equal(SKIPPED("update storage.buckets set public = false where id like 'p%'", BUCKET).length, 1);
   assert.equal(SKIPPED("update storage.buckets set public = (select true) where id = 'pics'", BUCKET).length, 1);
   assert.deepEqual(SKIPPED("update storage.buckets set public = false where id = 'elsewhere'", BUCKET), []);
-  assert.deepEqual(SKIPPED("update storage.buckets set name = (select 'x') where id = 'pics'", BUCKET), [], "a column the model does not hold");
+  assert.deepEqual(SKIPPED("update storage.buckets set avif_autodetection = (select true) where id = 'pics'", BUCKET), [], "a column the model does not hold");
 });
 
 test("DELETE on storage.buckets takes the bucket away, or is reported when it is wider", () => {
@@ -651,4 +654,133 @@ test("an INSERT of several buckets makes them all; ON CONFLICT DO NOTHING leaves
   const { buckets } = replayMigrations([{ name: "1.sql", text: BUCKET + "insert into storage.buckets (id, name, public) values ('pics', 'pics', false), ('docs', 'docs', false), ('more', 'more', true) on conflict (id) do nothing;" }]);
   assert.deepEqual([...buckets.keys()], ["pics", "docs", "more"]);
   assert.equal(buckets.get("pics").facts.public, true);
+});
+
+// ---- Campaign CR-260 on ----
+
+test("CR-260: only a constraint is a reference: not a column's name, nor a default in either way of quoting", () => {
+  for (const def of ['"references a" int', "note text default $$references a$$", "note text default $x$references a(id)$x$", "note text default 'references a(id)'"]) {
+    assert.equal(replayMigrations([{ name: "1.sql", text: "create table a (id int);\ncreate table b (" + def + ");" }]).tables.get("b").columns[0].references, undefined, def);
+  }
+});
+
+test("CR-261: a key in a DO block is followed only where what decides it is known", () => {
+  const first = "create table a (id int);\ncreate table b (x int);";
+  const followed = (block) => replayMigrations([{ name: "1.sql", text: first + block }]);
+  const fk = "alter table b add constraint k foreign key (x) references a(id)";
+  assert.equal(followed("do $$ begin " + fk + "; end $$;").tables.get("b").columns[0].references, "a(id)", "no condition");
+  assert.equal(followed("do $$ begin " + fk + "; exception when duplicate_object then null; end $$;").tables.get("b").columns[0].references, "a(id)", "the common guard by exception");
+  assert.equal(followed("do $$ begin if not exists (select 1 from pg_constraint where conname = 'k') then " + fk + "; end if; end $$;").tables.get("b").columns[0].references, "a(id)");
+  for (const block of [
+    "do $$ begin if false then " + fk + "; end if; end $$;",
+    "do $$ begin if flag then null; else " + fk + "; end if; end $$;",
+    "do $$ begin if not exists (select 1 from pg_constraint where conname = 'other') then " + fk + "; end if; end $$;",
+    "do $$ begin if exists (select 1 from pg_constraint where conname = 'k') then " + fk + "; end if; end $$;",
+    "do $$ begin if exists (select 1 from information_schema.tables where table_name = 'other') then " + fk + "; end if; end $$;",
+    "do $$ begin if not exists (select 1 from pg_constraint where conname = 'k') then null; " + fk + "; end if; end $$;",
+    "do $$ begin for i in 1..2 loop " + fk + "; end loop; end $$;",
+  ]) {
+    const out = followed(block);
+    assert.equal(out.tables.get("b").columns[0].references, undefined, block);
+    assert.equal(out.skipped.length, 1, block);
+  }
+  assert.equal(followed("do $$ begin alter table ghost add constraint g foreign key (x) references a(id); end $$;").skipped[0].unseen, true, "no guard, no table");
+});
+
+test("CR-261: a guarded drop of a key in a DO block is followed", () => {
+  const out = replayMigrations([{ name: "1.sql", text: "create table a (id int);\ncreate table b (x int constraint k references a(id));\ndo $$ begin if exists (select 1 from pg_constraint where conname = 'k') then alter table b drop constraint k; end if; end $$;" }]);
+  assert.equal(out.tables.get("b").columns[0].references, undefined);
+  assert.deepEqual(out.skipped, []);
+});
+
+test("CR-262: a second key on a column is kept, followed through renames, and dropped alone", () => {
+  const { tables } = replayMigrations([
+    { name: "1.sql", text: "create table a (id int);\ncreate table z (id int);\ncreate table b (x int references a(id));\nalter table b add constraint two foreign key (x) references z(id);" },
+    { name: "2.sql", text: "alter table z rename to y;\nalter table y rename column id to yid;" },
+  ]);
+  assert.deepEqual(tables.get("b").columns[0].alsoReferences, ["y(yid)"]);
+  const { tables: after } = replayMigrations([
+    { name: "1.sql", text: "create table a (id int);\ncreate table z (id int);\ncreate table b (x int references a(id));\nalter table b add constraint two foreign key (x) references z(id);\nalter table z rename to y;" },
+    { name: "2.sql", text: "alter table b drop constraint b_x_fkey;" },
+  ]);
+  assert.deepEqual(after.get("b").columns[0], { name: "x", type: "int", references: "y(id)" }, "the second takes the first's place, and no empty list is left");
+  const same = replayMigrations([{ name: "1.sql", text: "create table a (id int);\ncreate table b (x int references a(id), foreign key (x) references a(id));" }]);
+  assert.deepEqual(same.tables.get("b").columns[0], { name: "x", type: "int", references: "a(id)" }, "the same key twice is one reference");
+});
+
+test("CR-262: lists that disagree, or an empty one, are reported", () => {
+  assert.equal(SKIPPED("alter table b add foreign key (x, y) references a(id)", "create table a (id int);\ncreate table b (x int, y int);").length, 1);
+  assert.equal(SKIPPED("alter table b add foreign key () references a(id)", "create table a (id int);\ncreate table b (x int);").length, 1);
+});
+
+test("CR-263: dropping one column of a key takes the whole key", () => {
+  const { tables } = replayMigrations([{ name: "1.sql", text: "create table a (p int, q int);\ncreate table b (x int, y int, foreign key (x, y) references a(p, q));\nalter table b drop column x;" }]);
+  assert.deepEqual(tables.get("b").columns, [{ name: "y", type: "int" }]);
+});
+
+test("CR-264: a default key name follows Postgres: 63 characters, the longer part giving way, and a number on a clash", () => {
+  const t = "t".repeat(40);
+  const c = "c".repeat(40);
+  const dropped = (name) => replayMigrations([{ name: "1.sql", text: "create table a (id int);\ncreate table " + t + " (" + c + " int references a(id));\nalter table " + t + " drop constraint " + name + ";" }]).tables.get(t).columns[0].references;
+  assert.equal(dropped(t + "_" + c + "_fkey"), "a(id)", "the long name is not the one");
+  assert.equal(dropped("t".repeat(29) + "_" + "c".repeat(28) + "_fkey"), undefined);
+  const second = replayMigrations([{ name: "1.sql", text: "create table a (id int);\ncreate table z (id int);\ncreate table b (x int references a(id));\nalter table b add foreign key (x) references z(id);\nalter table b drop constraint b_x_fkey1;" }]);
+  assert.equal(second.tables.get("b").columns[0].alsoReferences, undefined);
+  assert.equal(second.tables.get("b").columns[0].references, "a(id)");
+});
+
+test("CR-265: a bucket's id and name are two things", () => {
+  const made = "insert into storage.buckets (id, name, public) values ('key', 'label', true);";
+  assert.equal(replayMigrations([{ name: "1.sql", text: made + "update storage.buckets set public = false where name = 'label';" }]).buckets.get("key").facts.public, false);
+  assert.equal(replayMigrations([{ name: "1.sql", text: made + "delete from storage.buckets where name = 'label';" }]).buckets.size, 0);
+  assert.deepEqual(SKIPPED("delete from storage.buckets where id = 'label'", made), []);
+  assert.equal(replayMigrations([{ name: "1.sql", text: made + "delete from storage.buckets where id = 'label';" }]).buckets.size, 1, "no bucket has that id");
+  assert.equal(SKIPPED("update storage.buckets set id = 'new' where id = 'key'", made).length, 1, "the id is the record's");
+  assert.equal(replayMigrations([{ name: "1.sql", text: made + "update storage.buckets set name = 'other' where id = 'key';\nupdate storage.buckets set public = false where name = 'other';" }]).buckets.get("key").facts.public, false);
+});
+
+test("CR-266: the bucket table however it is quoted", () => {
+  const made = 'insert into "storage"."buckets" (id, name, public) values (\'p\', \'p\', true);';
+  assert.equal(replayMigrations([{ name: "1.sql", text: made + 'update "storage"."buckets" set public = false where id = \'p\';' }]).buckets.get("p").facts.public, false);
+  assert.equal(replayMigrations([{ name: "1.sql", text: made + 'delete from storage."buckets" where id = \'p\';' }]).buckets.size, 0);
+  assert.equal(SKIPPED('update "storage"."buckets" set public = false', made).length, 1);
+});
+
+test("CR-267: what follows an INSERT's tuples decides what a bucket already there does", () => {
+  const made = "insert into storage.buckets (id, name, public) values ('p', 'p', true);";
+  const add = (tail, row = "('p', 'p', false)") => replayMigrations([{ name: "1.sql", text: made + "insert into storage.buckets (id, name, public) values " + row + " " + tail + ";" }]);
+  assert.equal(add("on conflict (id) do nothing").buckets.get("p").facts.public, true);
+  assert.equal(add("on conflict do nothing").buckets.get("p").facts.public, true);
+  assert.equal(add("on conflict (id) do update set public = excluded.public").buckets.get("p").facts.public, false);
+  assert.equal(add("on conflict (id) do update set public = true").buckets.get("p").facts.public, true);
+  assert.equal(add("").skipped.length, 1, "Postgres refuses a duplicate");
+  assert.equal(add("on conflict (name) do nothing", "('other', 'p', false)").buckets.size, 1, "the conflict is on the name");
+  assert.equal(add("on conflict (id) do nothing", "('other', 'p', false)").buckets.size, 2);
+  assert.equal(add("on conflict (id) do update set public = (select true)").skipped.length, 1);
+  assert.equal(add("returning id").skipped.length, 1);
+  assert.equal(add("on conflict (id) do update set public = excluded.public", "('new', 'new', false)").buckets.get("new").facts.public, false, "no conflict: an insert");
+});
+
+test("CR-268: a long run of conflicts takes no time", () => {
+  const started = Date.now();
+  replayMigrations([{ name: "1.sql", text: "insert into storage.buckets (id) values ('p') " + "on conflict x ".repeat(40000) + ";" }]);
+  assert.ok(Date.now() - started < 2000, Date.now() - started + " ms");
+});
+
+test("CR-269: arrays inside arrays are no literal, and no crash at any depth", () => {
+  const deep = "array[".repeat(3000) + "'a'" + "]".repeat(3000);
+  const made = "insert into storage.buckets (id, name) values ('p', 'p');";
+  assert.equal(SKIPPED("update storage.buckets set allowed_mime_types = " + deep + " where id = 'p'", made).length, 1);
+  assert.equal(SKIPPED("update storage.buckets set allowed_mime_types = array['a', upper('b')] where id = 'p'", made).length, 1);
+});
+
+test("CR-270: an UPDATE's assignments are each one column, or it reports", () => {
+  assert.equal(SKIPPED("update storage.buckets set (public, file_size_limit) = (false, 5) where id = 'p'", "insert into storage.buckets (id, name) values ('p', 'p');").length, 1);
+});
+
+test("CR-273: a renamed function is found in the other spelling", () => {
+  const { functions } = replayMigrations([{ name: "1.sql", text: "create function public.f() returns void language sql as $$ select 1 $$;\nalter function f() rename to g;\nalter function public.g() rename to h;" }, { name: "2.sql", text: "drop function h();" }]);
+  assert.equal(functions.size, 0);
+  const kept = replayMigrations([{ name: "1.sql", text: "create function public.f() returns void language sql as $$ select 1 $$;\nalter function f() rename to g;" }]).functions;
+  assert.equal(kept.get("g").name, "public.g");
 });

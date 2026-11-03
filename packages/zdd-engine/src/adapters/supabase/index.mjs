@@ -111,8 +111,9 @@ export function derive({ repoRoot, options, io }) {
       const name = t.name;
       const refs = new Set();
       for (const col of t.columns) {
-        if (col.references) {
-          const target = tableId(col.references.split("(")[0]);
+        for (const reference of [col.references, ...(col.alsoReferences ?? [])]) {
+          if (!reference) continue;
+          const target = tableId(reference.split("(")[0]);
           if (target && target !== `table:${ns}/${name}`) refs.add(target);
         }
       }

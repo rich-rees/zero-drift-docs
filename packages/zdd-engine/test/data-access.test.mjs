@@ -466,9 +466,18 @@ test("sqlalchemy: `public.jobs` in SQL reaches a table the migrations left bare,
   mkdirSync(join(root, "app"));
   writeFileSync(join(root, "app", "db.py"), 'from sqlalchemy import text\n\ndef both(s):\n    s.execute(text("select * from public.jobs j join jobs k on k.id = j.id join public.offers o on o.id = j.id"))\n');
   const out = derive({ repoRoot: root, options: { roots: ["app"] }, io: makeExtractorIo(root, "sqlalchemy") });
-  const [found] = out.records;
-  assert.deepEqual(found.refs, ["?table:jobs", "?table:offers"], "the bare name, which the core finds in either spelling");
-  assert.deepEqual(found.facts.edges.reads, ["?table:jobs", "?table:offers"]);
+  const route = rec("route", "route:/x", ["?code:app/db.py#both"], { resource: ["app/routes.py"] });
+  const { records } = resolveRefs([rec("table", "table:db/jobs"), rec("table", "table:db/public.offers"), route, ...out.records]);
+  const found = records.find((r) => r.id.startsWith("data-access:"));
+  assert.deepEqual(found.refs, ["table:db/jobs", "table:db/public.offers"], "the record survives, and reaches both");
+  assert.deepEqual(found.facts.edges.reads, ["table:db/jobs", "table:db/public.offers"]);
+});
+
+test("CR-271: PUBLIC folds as Postgres folds it, a quoted schema does not, and a quoted dot is no schema", () => {
+  assert.deepEqual(sqlTables("SELECT * FROM PUBLIC.jobs").reads, ["public.jobs"]);
+  assert.deepEqual(sqlTables('SELECT * FROM "PUBLIC".jobs').reads, ["PUBLIC.jobs"]);
+  assert.deepEqual(sqlTables('SELECT * FROM "public.jobs"').reads, []);
+  assert.deepEqual(sqlTables('SELECT * FROM "public"."a.b"').reads, []);
 });
 
 // ---- end to end ----
