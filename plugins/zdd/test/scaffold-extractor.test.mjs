@@ -501,6 +501,8 @@ test("POSIX: a symlinked localExtractorDir is refused — nothing written throug
   const repo = adopted(t);
   const outside = mkdtempSync(join(tmpdir(), "zdd-scaffold-outside-"));
   t.after(() => rmSync(outside, { recursive: true, force: true }));
+  // The folder itself is the link: the starters adopted() placed go first.
+  rmSync(join(repo, "zdd", "extractors"), { recursive: true, force: true });
   symlinkSync(outside, join(repo, "zdd", "extractors"));
   const r = scaffold(repo, CSHARP);
   assert.equal(r.status, 1);

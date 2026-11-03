@@ -80,8 +80,20 @@ for (const adopter of adopters) {
     // 8): first proof, the records unchanged with the copies in place; then
     // the fixes, as the adopter's run takes them on a yes — the copies move,
     // their tests run, derive, the map is repointed, lint.
-    const status = JSON.parse(spawnSync(process.execPath, [PLUGIN, "starters", `--root=${copy}`, "--json"], { cwd: copy, encoding: "utf8" }).stdout || "{}");
-    if (status.copies?.length) {
+    // A status that fails is a failed adopter, never "nothing to prove" (CR-326).
+    const st = spawnSync(process.execPath, [PLUGIN, "starters", `--root=${copy}`, "--json"], { cwd: copy, encoding: "utf8" });
+    let status = null;
+    try {
+      status = st.status === 0 ? JSON.parse(st.stdout) : null;
+    } catch {
+      status = null;
+    }
+    if (!status || !Array.isArray(status.copies) || !Array.isArray(status.behind)) {
+      console.log(`FAILED  ${label}: starters (the copies' status) — exit ${st.status}\n${(st.stdout + st.stderr).split("\n").slice(-20).join("\n")}`);
+      ok = false;
+      status = { copies: [], behind: [] };
+    }
+    if (status.copies.length) {
       ok = run(`${label}: starters --prove (${status.copies.length} adapters copied in; the records unchanged)`, process.execPath, [PLUGIN, "starters", "--prove", `--root=${copy}`], copy) && ok;
       if (status.behind?.length) {
         const m = spawnSync(process.execPath, [PLUGIN, "starters", "--move", `--root=${copy}`, "--json"], { cwd: copy, encoding: "utf8" });

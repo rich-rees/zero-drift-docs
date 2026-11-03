@@ -197,8 +197,10 @@ notes match the plan's.
 
 ## Step 3b — the adapters come into the repo (decision 0048)
 
-Skip this step when the ledger names no adapter copied from the starter
-library. From 0.14 a repo owns every adapter it runs: the engine ships
+Run `node "$PLUGIN/scripts/bootstrap.mjs" starters` whenever the repo holds
+`zdd/extractors/starters.json`, even when this run copied nothing (an
+upgrade stopped before its proof is finished here); skip this step only when
+it reports no copy, or no copy behind and the proof already done. From 0.14 a repo owns every adapter it runs: the engine ships
 none, so this run copied each one the config names into `zdd/extractors/`,
 with its tests and its suite fixture (and `starters.json`, the record of
 the version each came from). Say so in plain words: "ZDD used to carry the
@@ -234,7 +236,9 @@ gaining its schema. Then ask **"Take these fixes now?"** Recommended yes:
 they are known bugs, fixed and tested; cost: the generated records that
 the fixes correct change in this PR, and a map link at an id that moved is
 repointed for them; saying no keeps the adapters exactly as they are, and
-the no is kept, so the same fixes are not offered again.
+the no is kept, so the same fixes are not offered again. A fix declined
+earlier is listed apart; `--move` would apply it too, so say so before a
+move.
 
 - On **yes**:
 
@@ -242,8 +246,10 @@ the no is kept, so the same fixes are not offered again.
   node "$PLUGIN/scripts/bootstrap.mjs" starters --move
   ```
 
-  The copies move to the version this release pins, their own tests run
-  (a failing test puts every copy back and stops), `derive` runs, every map
+  It runs the first proof again (`derive --check`; nothing is written
+  unless it passes), then the copies move to the version this release pins,
+  their own tests run (a failing test, or a derive that stops, puts every
+  copy back and stops), `derive` runs, every map
   link and blessing at a record whose id moved is repointed, and `lint`
   runs. Relay the result: how many records changed, which ids moved and
   where links were repointed, and lint's verdict. A red lint is fixed with

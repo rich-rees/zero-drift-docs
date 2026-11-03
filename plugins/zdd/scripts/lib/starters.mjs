@@ -31,6 +31,19 @@ export const SIBLING_LIBRARY = join(PLUGIN_ROOT, "..", "..", "packages", "zdd-st
 export const RECORD = "starters.json";
 export const DEFAULT_DIR = "zdd/extractors";
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+const NAME = /^[a-z][a-z0-9-]*$/;
+// What a record may hold: past any library's size, so a forged one is refused, not walked.
+export const MAX_RECORD_BYTES = 4 * 1024 * 1024;
+const MAX_RECORD_ADAPTERS = 500;
+const MAX_RECORD_FILES = 20_000;
+// A path in the folder a copy may own: segments with no dot-segment, no
+// backslash, colon or control character, under `_shared/` or an adapter
+// `adapters` names (a list or the record's object).
+export function isRecordPath(f, adapters) {
+  const segs = String(f).split("/");
+  if (segs.length < 2 || segs.some((x) => !x || x === "." || x === ".." || /[\\:\x00-\x1f\x7f]/.test(x))) return false;
+  return segs[0] === "_shared" || (Array.isArray(adapters) ? adapters.includes(segs[0]) : Object.hasOwn(adapters, segs[0]));
+}
 
 export const cmpVersions = (a, b) => {
   const pa = a.split(".").map(Number);
@@ -68,16 +81,15 @@ function check(dir, version) {
   return null;
 }
 
-function npmCommand(execPath = process.execPath, platform = process.platform) {
+export function npmCommand(execPath = process.execPath, platform = process.platform) {
   if (platform !== "win32") return { cmd: "npm", pre: [], shell: false };
   const cli = join(dirname(execPath), "node_modules", "npm", "bin", "npm-cli.js");
   if (existsSync(cli)) return { cmd: execPath, pre: [cli], shell: false };
   return { cmd: "npm.cmd", pre: [], shell: true };
 }
 
-export function npmFetch(version) {
-  const out = tempDir();
-  const npm = npmCommand();
+export function npmFetch(version, { exec = execFileSync, execPath = process.execPath, platform = process.platform, out = tempDir() } = {}) {
+  const npm = npmCommand(execPath, platform);
   let args = [...npm.pre, "install", "--prefix", out, "--no-save", "--no-package-lock", "--ignore-scripts", "--no-audit", "--no-fund", "--loglevel=error", `${STARTERS.package}@${version}`];
   // Through cmd.exe each argument is quoted, and one it would read differently is refused (as engineArgv does).
   if (npm.shell) {
@@ -85,7 +97,7 @@ export function npmFetch(version) {
     if (bad !== undefined) throw new Error(`cannot run npm through cmd.exe with ${JSON.stringify(bad)} — install npm's npm-cli.js beside node`);
     args = args.map((a) => `"${a}"`);
   }
-  execFileSync(npm.cmd, args, { stdio: ["ignore", "pipe", "pipe"], encoding: "utf8", timeout: 300_000, shell: npm.shell, cwd: out });
+  exec(npm.cmd, args, { stdio: ["ignore", "pipe", "pipe"], encoding: "utf8", timeout: 300_000, shell: npm.shell, cwd: out });
   return join(out, "node_modules", ...STARTERS.package.split("/"));
 }
 
@@ -150,8 +162,9 @@ export function starterLibrary(version = STARTERS.version, { env = process.env, 
 
 // A file's hash as a copy records it: line endings aside, so a checkout
 // that writes CRLF reads as the same copy.
-// latin1 maps each byte to one character and back, so a binary file hashes
-// as its bytes.
+// latin1 maps each byte to one character and back, so any file hashes by
+// its bytes, with every CRLF pair read as LF (in a binary file too: no
+// starter carries one).
 export const fileHash = (content) => {
   const bytes = Buffer.isBuffer(content) ? content : Buffer.from(String(content), "utf8");
   return createHash("sha256").update(bytes.toString("latin1").replace(/\r\n/g, "\n"), "latin1").digest("hex");
@@ -171,11 +184,24 @@ export function parseRecord(text, where) {
     throw new Error(`${where} cannot be read as JSON (${e.message}) — fix or remove it by hand; ZDD never guesses which adapter files are untouched`);
   }
   const obj = (v) => v && typeof v === "object" && !Array.isArray(v);
-  if (!obj(r) || r.starters !== 1 || !obj(r.adapters) || !obj(r.files)) throw new Error(`${where} is not a record ZDD wrote ("starters": 1, with adapters and files) — fix or remove it by hand`);
+  const bad = (msg) => {
+    throw new Error(`${where}: ${msg} — fix or remove it by hand; ZDD never guesses which adapter files are untouched`);
+  };
+  if (!obj(r) || r.starters !== 1 || !obj(r.adapters) || !obj(r.files)) bad('not a record ZDD wrote ("starters": 1, with adapters and files)');
+  if (r.package !== undefined && r.package !== STARTERS.package) bad(`it records copies from ${JSON.stringify(String(r.package).slice(0, 80))}, not ${STARTERS.package}`);
+  if (Object.keys(r.adapters).length > MAX_RECORD_ADAPTERS || Object.keys(r.files).length > MAX_RECORD_FILES) bad("it lists more adapters or files than any copy holds");
   for (const [name, a] of Object.entries(r.adapters)) {
-    if (!obj(a) || !SEMVER.test(String(a.version))) throw new Error(`${where}: adapters.${name} must carry the version it came from`);
+    if (!NAME.test(name)) bad(`${JSON.stringify(name.slice(0, 80))} is not an adapter name`);
+    if (!obj(a) || !SEMVER.test(String(a.version))) bad(`adapters.${name} must carry the version it came from`);
+    if (a.declined !== undefined && !SEMVER.test(String(a.declined))) bad(`adapters.${name}.declined must be a version`);
+    if (a.companionOf !== undefined && !(Array.isArray(a.companionOf) && a.companionOf.every((c) => typeof c === "string" && NAME.test(c)))) bad(`adapters.${name}.companionOf must list adapter names`);
   }
-  for (const [f, h] of Object.entries(r.files)) if (typeof h !== "string" || !/^[0-9a-f]{64}$/.test(h)) throw new Error(`${where}: files[${JSON.stringify(f)}] must be a SHA-256`);
+  // Every key a path inside the folder, under a recorded adapter or _shared/
+  // (CR-316): a forged key must never name a file a move would replace or remove.
+  for (const [f, h] of Object.entries(r.files)) {
+    if (!isRecordPath(f, r.adapters)) bad(`files[${JSON.stringify(f.slice(0, 120))}] is not a file of a recorded adapter or of _shared/`);
+    if (typeof h !== "string" || !/^[0-9a-f]{64}$/.test(h)) bad(`files[${JSON.stringify(f.slice(0, 120))}] must be a SHA-256`);
+  }
   return r;
 }
 
@@ -200,7 +226,8 @@ export function fixesFor(notes, name, from, to, declined = null) {
 // spellings of one name becoming one record. Anything else that is gone is
 // named, never guessed. `before` and `after` map id → record file.
 const ID = /^([a-z][a-z0-9-]*):([^/]+)\/(.+)$/;
-const bare = (name) => (name.includes(".") ? name.slice(name.indexOf(".") + 1) : name).toLowerCase();
+// The name past its schema, byte for byte: a quoted identifier keeps its case (CR-324).
+const bare = (name) => (name.includes(".") ? name.slice(name.indexOf(".") + 1) : name);
 export function movedIds(before, after) {
   const moves = [];
   const unmatched = [];

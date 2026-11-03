@@ -83,3 +83,30 @@ test("copy-set: a starter that reaches another adapter's file, or holds a link, 
   assert.equal(l.status, 1);
   assert.match(l.stderr, /generic: generic\/extra\.mjs is a link/);
 });
+
+test("copy-set loads only the adapters asked for (CR-320); a SUITE that is not plain data and a folder too deep each stop it, naming why (CR-347, CR-329)", (t) => {
+  const dir = tmp(t);
+  cpSync(join(ADAPTERS, "generic"), join(dir, "generic"), { recursive: true });
+  mkdirSync(join(dir, "broken"), { recursive: true });
+  writeFileSync(join(dir, "broken", "index.mjs"), "throw new Error('loaded');\n");
+  const only = copySet(dir, ["--extractors=generic"]);
+  assert.equal(only.status, 0, only.stderr);
+  assert.deepEqual(Object.keys(JSON.parse(only.stdout).adapters), ["generic"]);
+  assert.equal(copySet(dir).status, 1, "asked for everything, the broken one is loaded and fails");
+  // --files-only runs no adapter code: the reach of a half-written one is still read.
+  const files = copySet(dir, ["--files-only"]);
+  assert.equal(files.status, 0, files.stderr);
+  const all = JSON.parse(files.stdout).adapters;
+  assert.deepEqual([Object.keys(all), all.broken.files, all.generic.suite], [["broken", "generic"], ["broken/index.mjs"], null]);
+  mkdirSync(join(dir, "odd"), { recursive: true });
+  writeFileSync(join(dir, "odd", "index.mjs"), "export const SUITE = { options: { at: new Date(0) } };\nexport function derive() { return { records: [] }; }\n");
+  const odd = copySet(dir, ["--extractors=odd"]);
+  assert.equal(odd.status, 1);
+  assert.match(odd.stderr, /odd: SUITE is not plain data/);
+  let deep = join(dir, "generic", "fixture");
+  for (let i = 0; i < 40; i++) deep = join(deep, "d");
+  mkdirSync(deep, { recursive: true });
+  const d = copySet(dir, ["--extractors=generic"]);
+  assert.equal(d.status, 1);
+  assert.match(d.stderr, /generic: .* is more than 32 folders deep/);
+});

@@ -83,8 +83,11 @@ library notes for it is applied by hand, tests first.
 
 To keep the original beside a changed one, give the copy a name of its own:
 move its folder (`git mv zdd/extractors/<starter> zdd/extractors/<name>`),
-rename it in `extractors` and `extractorOptions`, and delete its entry in
-`starters.json` — it is no starter copy any more.
+rename it in `extractors` and `extractorOptions`, and in `starters.json`
+delete its entry under `adapters` and every key under `files` that starts
+with `<starter>/` — it is no starter copy any more. Leave the `_shared/`
+keys: a later move keeps every shared file an adapter in the folder still
+reaches, yours included.
 
 ## Step 1 — read a sample
 

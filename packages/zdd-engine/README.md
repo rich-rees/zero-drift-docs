@@ -27,6 +27,7 @@ npx @rich-rees/zdd lint [--merge] [--tempstate]
 npx @rich-rees/zdd freshness [--base <ref>]
 npx @rich-rees/zdd tally [--since <ref|date>] [--json]
 npx @rich-rees/zdd detect --adapters=<dir> [--root=<dir>]
+npx @rich-rees/zdd copy-set --adapters=<dir> [--extractors=<a,b>]
 npx @rich-rees/zdd coverage [--json]
 npx @rich-rees/zdd unread [--json]
 npx @rich-rees/zdd preview --adapters=<dir> --extractors=<a,b,…> [--out=<empty dir>] [--json]
@@ -107,6 +108,12 @@ npx @rich-rees/zdd contract [--json]
   `adapters/`); without it, the repo's own `localExtractorDir`. It reads only
   that key of the config, never walks the adapter folder as source, and
   writes nothing.
+- **copy-set** — what a copy of each adapter in a folder holds, as one JSON
+  object: its files (its folder without `example/`, and the `_shared/` files
+  its code and tests reach) and its `SUITE`, for the adapters asked for.
+  Bootstrap asks it of the starter library before it copies a starter into
+  an app (decision 0048), and of the app's own folder before a move. It
+  writes nothing.
 - **test** — runs the tests that travel with a folder's adapters,
   `<name>/test/*.test.mjs` (the repo's `localExtractorDir` by default), with
   `@rich-rees/zdd` resolved to this engine's test kit, so a repo with no
@@ -160,7 +167,7 @@ version:
 | `agentIndex.levels` | `1` | `2` lists the areas first and writes one file per area under `zdd/agent-index/`, each feature one hop away — for a repo whose feature list alone does not fit (2.3) |
 | `claims.strictKinds` | `[]` | The opt-in kinds (`component`, `background-task`, `external-service`) that `claims.strict` also fails on; unlisted they warn (decision 0017) |
 | `localExtractorDir` | — | Repo-relative folder of the repo's adapters (`<name>/index.mjs` or `<name>.mjs`, with `_shared/` beside them) — the one place config may point at code, never read as source, never the repo itself |
-| `suiteChecks` | absent (every check warns) | How many of the standard suite's checks block for the repo's own adapters, 0 to 5 (decision 0040). Bootstrap writes 5 at a fresh install; "upgrade ZDD" raises it at once only where the repo has no adapter of its own, and otherwise `bootstrap.mjs adapters --raise` does, once they pass |
+| `suiteChecks` | absent (every check warns) | How many of the standard suite's checks block for the repo's own adapters, 0 to 5 (decision 0040). Bootstrap writes 5 at a fresh install; "upgrade ZDD" raises it at once only where every adapter is a starter copy no one has changed, and otherwise `bootstrap.mjs adapters --raise` does, once they pass |
 | `unread.strict` | `false` | `true`: `lint` fails on anything an adapter saw and could not read that has no answer; off, it warns (decision 0048). Bootstrap writes `true` at a fresh install; `bootstrap.mjs unread --raise` does on an upgraded repo, once every item has an answer |
 | `unread.fine` | `[]` | Items marked fine once, each `{ id, what, why }` (`bootstrap.mjs unread --mark` writes them). A mark survives the code around the item moving and lapses when the item changes; a mark no item answers warns |
 | `adapter` / `adapterOptions` | *(retired)* | The pre-1.0 single adapter, a bundle the engine shipped: refused since 0.14, naming "upgrade ZDD", which rewrites it |

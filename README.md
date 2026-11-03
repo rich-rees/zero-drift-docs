@@ -195,11 +195,15 @@ walks the tests red to green. There are three tiers, in the order the skill offe
 
 1. **Local**: the extractor lives in your repo's `localExtractorDir`, and the
    engine loads it by name on the next `derive`. You don't fork or publish
-   anything.
-2. **Registry**: propose it here as a PR once it has proven itself, and it
-   ships to everyone in the next minor release.
-3. **Fork**: publish the engine under your own scope and repin the plugin
-   to it, for a convention upstream won't take.
+   anything. It starts as a copy of a starter from the starter library when
+   one fits or nearly fits, else from a scaffold
+   ([decision 0048](docs/decisions/0048-the-app-owns-its-adapters-zdd-ships-starters-not-readers.md)).
+2. **Starter library**: once it has proven itself, propose it here as a PR
+   to the starter library (`@rich-rees/zdd-starter-adapters`); later repos
+   can copy it from the library's next release. No repo that holds a copy
+   changes.
+3. **Fork**: keep your own copy of the starter library, for a convention
+   upstream won't take. The engine is never forked: it ships no adapter.
 
 ### Producing decisions — ZDD stands alone, grilling makes it sharper
 

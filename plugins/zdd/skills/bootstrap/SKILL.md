@@ -203,7 +203,13 @@ nothing):
   adapters today — with **no recommendation**: any stack works, and one
   without an adapter gets one built with the `extractor` skill.
 
-  Once the stack is chosen, **show what the map will look like**:
+  Once the stack is chosen, ask **the offer** for the adapters it selects,
+  exactly as for an existing codebase (one question, the same costs; record
+  `"starters": true` or `false`). The same holds when an existing repo's
+  answer adds a planned part detection did not propose: those adapters come
+  from the library only on a yes.
+
+  Then **show what the map will look like**:
 
   ```
   node "$PLUGIN/scripts/bootstrap.mjs" preview --extractors=<the chosen adapters, comma-separated>
@@ -399,9 +405,11 @@ is written into the host's settings.
    table) and which are wrong. Then open the human index and ask: **"does
    this all look right, and is any link missing?"** Every "that's wrong"
    becomes a **fixture test in the adapter before it is fixed** — in a local
-   adapter, with the `extractor` skill; in a catalogue adapter, it is a ZDD
-   defect: say so in plain words and offer the ready-written report for the
-   repo's Discussions (decision 0041). When you are both done:
+   adapter, with the `extractor` skill — a starter copied in is the repo's
+   own adapter now, fixed the same way (decision 0048). Say so in plain
+   words; when the starter itself is wrong for every repo of that stack,
+   also offer the ready-written report for ZDD's Discussions (decision
+   0041), so the library's next release carries the fix. When you are both done:
    `node "$PLUGIN/scripts/bootstrap.mjs" check --done`.
 5. **The mapping session** (the only AI-heavy step, paid once; skip on
    greenfield beyond the declared apps). With the glossary and ADRs loaded,
@@ -427,8 +435,8 @@ The config holds `suiteChecks`: how many checks of ZDD's standard suite
 block in CI for the repo's own adapters (decision 0040). A fresh install
 writes all of them. When an uncovered part is built through the extractor
 skill, its last test runs the suite; the CI workflow runs it again on every
-pull request (the engine's `suite`). With no adapter of the repo's own, the
-step says so and passes.
+pull request (the engine's `suite`) on every adapter in the folder the
+config runs, starter copies included; their own tests run with `test`.
 
 ### What the adapters could not read
 

@@ -94,7 +94,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, lstatSync, chmodSync, openSync, writeSync, closeSync, rmSync, opendirSync } from "node:fs";
 import { findMapBlessings, proposeMove, blessingSlug, blessingFileText, removeMoved } from "./lib/blessing-move.mjs";
 import { scopeTag, repointLinks, linksToMoved } from "./lib/adr-split.mjs";
-import { STARTERS, RECORD, DEFAULT_DIR, starterLibrary, fileHash, emptyRecord, parseRecord, fixesFor, movedIds, cmpVersions } from "./lib/starters.mjs";
+import { STARTERS, RECORD, DEFAULT_DIR, MAX_RECORD_BYTES, starterLibrary, fileHash, emptyRecord, parseRecord, isRecordPath, fixesFor, movedIds, cmpVersions } from "./lib/starters.mjs";
 import { join, dirname, basename, relative, resolve, posix } from "node:path";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -127,6 +127,7 @@ import {
   pluginsDir,
   agentIndexAreaDir,
   GENERATED_KEYS,
+  pathsOverlap,
 } from "./lib/repo.mjs";
 
 const TEMPLATES = join(PLUGIN_ROOT, "templates");
@@ -1739,17 +1740,22 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
   // before the app owned its adapters, the library's baseline: what that
   // engine ran, so the records can be proved unchanged before any fix is
   // offered. Otherwise the version this release pins.
-  const fromBefore = !fromRelease || compareReleases(fromRelease, STARTERS.ownedSince) < 0;
-  const brought = bringStarters(ledger, config, { version: fromBefore ? STARTERS.baseline : STARTERS.version, changes });
+  const brought = bringStarters(ledger, config, { version: starterVersionFor(fromRelease), changes });
   // The standard suite (decision 0040): a copy no one has changed passes it
   // as the library proved, so with no other adapter of the repo's own every
   // check blocks at once. With one the repo wrote or changed, the number
   // stays where it is (absent: every check warns) until `bootstrap.mjs
-  // adapters --raise`, after the interview.
-  const own = (Array.isArray(config.extractors) ? config.extractors : []).filter((n) => typeof n === "string" && /^[a-z][a-z0-9-]*$/.test(n) && typeof config.localExtractorDir === "string" && adapterHeld(ledger, copyDir(config), n));
-  const record = own.length ? readRecordAt(ledger, copyDir(config)) : emptyRecord();
-  const untouched = (n) => Object.hasOwn(record.adapters, n) && Object.entries(record.files).filter(([f]) => f.startsWith(`${n}/`)).every(([f, h]) => ledger.exists(`${copyDir(config)}/${f}`) && fileHash(bytesAt(ledger, `${copyDir(config)}/${f}`)) === h);
-  const written = own.filter((n) => !untouched(n));
+  // adapters --raise`, after the interview. "Changed" is judged on what a
+  // copy's code reaches, shared code and its companions included (CR-319);
+  // a copy this run made, colliding with no file of the repo's, is
+  // untouched by construction (in a plan it is only in the ledger).
+  const ownDir = typeof config.localExtractorDir === "string" ? copyDir(config) : null;
+  const own = ownDir ? (Array.isArray(config.extractors) ? config.extractors : []).filter((n) => typeof n === "string" && /^[a-z][a-z0-9-]*$/.test(n) && adapterHeld(ledger, ownDir, n)) : [];
+  const record = own.length ? readRecordAt(ledger, ownDir) : emptyRecord();
+  const fresh = new Set(brought.kept.length ? [] : [...brought.copied, ...brought.companions]);
+  const drift = own.length ? copyChanges(ledger, ownDir, record, Object.keys(record.adapters).filter((n) => !fresh.has(n))) : new Map();
+  const changedCopy = (n) => (drift.get(n) ?? []).length > 0;
+  const written = own.filter((n) => !Object.hasOwn(record.adapters, n) || changedCopy(n) || Object.entries(record.adapters).some(([c, a]) => (a.companionOf ?? []).includes(n) && changedCopy(c)));
   if (!written.length && config.suiteChecks !== SUITE_CHECK_COUNT) {
     changes.push(`suiteChecks ${config.suiteChecks ?? "(none)"} → ${SUITE_CHECK_COUNT}: ${own.length ? "every adapter here is a starter copy no one has changed, which passes" : "no adapter of this repo's own, so"} every check of the standard suite ${own.length ? "" : "blocks "}(decision 0040)`);
     config.suiteChecks = SUITE_CHECK_COUNT;
@@ -3074,9 +3080,22 @@ export const SUITE_CHECK_COUNT = 5;
 // replaced.
 // ---------------------------------------------------------------------------
 const adapterHeld = (ledger, dir, n) => ledger.exists(`${dir}/${n}/index.mjs`) || ledger.exists(`${dir}/${n}.mjs`);
+// The record, read as untrusted input (CR-316, CR-317): a regular file under
+// a size bound, then checked whole by parseRecord.
 function readRecordAt(ledger, dir) {
   const rel = `${dir}/${RECORD}`;
-  return ledger.exists(rel) ? parseRecord(ledger.read(rel), rel) : emptyRecord();
+  if (!ledger.exists(rel)) {
+    let st = null;
+    try {
+      st = lstatSync(ledger.abs(rel));
+    } catch {
+      st = null;
+    }
+    if (st && !ledger.pending.has(rel)) throw new Error(`${rel} is not a regular file (a link or a folder) — remove it by hand; ZDD never reads through a link`);
+    return emptyRecord();
+  }
+  if (!ledger.pending.has(rel) && lstatSync(ledger.abs(rel)).size > MAX_RECORD_BYTES) throw new Error(`${rel} is over ${MAX_RECORD_BYTES / 1024 / 1024} MiB — no record ZDD writes is; remove it by hand`);
+  return parseRecord(ledger.read(rel), rel);
 }
 function bytesAt(ledger, rel) {
   if (ledger.pending.has(rel)) return Buffer.from(ledger.pending.get(rel));
@@ -3087,35 +3106,87 @@ const asText = (bytes) => {
   const s = bytes.toString("utf8");
   return Buffer.from(s, "utf8").equals(bytes) ? s : bytes;
 };
-function copySetOf(lib) {
+// The engine's copy set over a folder of adapters, each path checked to be a
+// file of that adapter or of _shared/.
+function copySetIn(dir, names, label, { filesOnly = false } = {}) {
   let set;
   try {
-    set = JSON.parse(runEngine(["copy-set", `--adapters=${lib.adapters}`]));
+    set = JSON.parse(runEngine(["copy-set", `--adapters=${dir}`, ...(names ? [`--extractors=${names.join(",")}`] : []), ...(filesOnly ? ["--files-only"] : [])]));
   } catch (e) {
-    throw new Error(`the starter library ${lib.version} could not be read — the engine said: ${String(e.stderr || e.message).trim().split(/\r?\n/).slice(-3).join(" ")}`);
+    throw new Error(`${label} could not be read — the engine said: ${String(e.stderr || e.message).trim().split(/\r?\n/).slice(-3).join(" ")}`);
   }
   for (const [n, a] of Object.entries(set.adapters ?? {})) {
-    if (!/^[a-z][a-z0-9-]*$/.test(n) || !Array.isArray(a.files) || a.files.some((f) => typeof f !== "string" || !/^[^/]/.test(f) || f.split("/").some((s) => s === ".." || s === "." || !s))) throw new Error(`the starter library ${lib.version}: the engine's copy set for ${JSON.stringify(n)} is not a list of paths inside the folder`);
+    if (!/^[a-z][a-z0-9-]*$/.test(n) || !Array.isArray(a.files) || a.files.some((f) => typeof f !== "string" || !isRecordPath(f, [n]) || !(f.startsWith(`${n}/`) || f.startsWith("_shared/")))) throw new Error(`${label}: the engine's copy set for ${JSON.stringify(n)} is not a list of paths inside the folder`);
   }
   return set.adapters ?? {};
 }
+const copySetOf = (lib) => copySetIn(lib.adapters, null, `the starter library ${lib.version}`);
 // The folder a copy goes to: the config's localExtractorDir, else the
-// default, checked as the engine checks it (never the repo itself).
+// default, checked as the engine checks it (never the repo itself) and,
+// as the scaffold checks it, never over an artifact or the config (CR-327).
 function copyDir(config) {
-  if (config.localExtractorDir === undefined) return DEFAULT_DIR;
-  const dir = typeof config.localExtractorDir === "string" ? config.localExtractorDir : null;
-  if (!dir || dir === "." || !/^[A-Za-z0-9_-][A-Za-z0-9._-]*(?:\/[A-Za-z0-9_-][A-Za-z0-9._-]*)*$/.test(dir) || dir.split("/").includes("..")) throw new Error(`zdd/config.json's localExtractorDir ${JSON.stringify(config.localExtractorDir)} is not a folder inside the repo the engine reads adapters from — fix it by hand, then run this again; nothing was written`);
-  return dir.replace(/\/+$/, "");
+  const given = config.localExtractorDir;
+  const dir = given === undefined ? DEFAULT_DIR : typeof given === "string" ? given.replace(/\/+$/, "") : null;
+  if (!dir || dir === "." || !/^[A-Za-z0-9_-][A-Za-z0-9._-]*(?:\/[A-Za-z0-9_-][A-Za-z0-9._-]*)*$/.test(dir) || dir.split("/").includes("..")) throw new Error(`zdd/config.json's localExtractorDir ${JSON.stringify(given)} is not a folder inside the repo the engine reads adapters from — fix it by hand, then run this again; nothing was written`);
+  for (const [key, value] of [...Object.entries(artifactPaths(config, { lenient: true })), ["config", "zdd/config.json"]]) {
+    if (key === "bundleDir" || typeof value !== "string") continue;
+    if (pathsOverlap(dir, value)) throw new Error(`localExtractorDir '${dir}' overlaps ${key === "config" ? "zdd/config.json" : `paths.${key} '${value}'`} — the adapters are a folder of their own; move one of them, then run this again; nothing was written`);
+  }
+  return dir;
 }
+// Every adapter the folder holds on disk: `<name>/index.mjs` or `<name>.mjs`.
+function heldAdapters(ledger, dir) {
+  let names = [];
+  try {
+    names = readdirSync(ledger.abs(dir)).sort();
+  } catch {
+    return [];
+  }
+  return [...new Set(names.map((n) => n.replace(/\.mjs$/, "")).filter((n) => /^[a-z][a-z0-9-]*$/.test(n) && adapterHeld(ledger, dir, n)))];
+}
+// Per copy, what is no longer as ZDD copied it (CR-319): a recorded file of
+// its own that is missing or changed, and any file its code reaches now —
+// shared code included — that the record does not hold or holds changed. A
+// folder the engine cannot read marks every copy changed, never untouched.
+function copyChanges(ledger, dir, record, names) {
+  const out = new Map(names.map((n) => [n, []]));
+  const own = names.filter((n) => existsSync(join(ledger.abs(dir), n, "index.mjs")));
+  let reach = {};
+  if (own.length) {
+    try {
+      reach = copySetIn(ledger.abs(dir), own, `this repo's ${dir}/`, { filesOnly: true });
+    } catch (e) {
+      for (const n of names) out.get(n).push(`(the folder could not be read: ${e.message.slice(0, 160)})`);
+      return out;
+    }
+  }
+  const differs = (f) => !ledger.exists(`${dir}/${f}`) || !Object.hasOwn(record.files, f) || fileHash(bytesAt(ledger, `${dir}/${f}`)) !== record.files[f];
+  for (const n of names) {
+    const files = new Set([...Object.keys(record.files).filter((f) => f.startsWith(`${n}/`)), ...(reach[n]?.files ?? [])]);
+    if (!own.includes(n)) files.add(`${n}/index.mjs`);
+    out.set(n, [...files].filter(differs).sort());
+  }
+  return out;
+}
+// Which library version a copy takes: the baseline for a repo coming from a
+// release before the app owned its adapters (what that engine ran), else
+// the pinned version (decision 0048 point 8).
+export const starterVersionFor = (fromRelease) => (!fromRelease || compareReleases(fromRelease, STARTERS.ownedSince) < 0 ? STARTERS.baseline : STARTERS.version);
 
 // Copies every adapter `names` lists (default: config's extractors) that the
 // folder does not hold and the library at `version` does. Sets
 // localExtractorDir when the config has none and something was copied.
+// Every source is read before the first write, and a write that fails
+// removes what this run created (CR-325). Only a file this run created is
+// recorded: one the repo had, even byte for byte the same, stays the repo's
+// (CR-315).
 export function bringStarters(ledger, config, { version, changes = [], names = null } = {}) {
   const isAdapterName = (n) => typeof n === "string" && /^[a-z][a-z0-9-]*$/.test(n);
   const listed = (names ?? (Array.isArray(config.extractors) ? config.extractors : [])).filter(isAdapterName);
+  const out = { version, dir: null, copied: [], companions: [], missing: [], kept: [] };
+  if (!listed.length) return out;
   const dir = copyDir(config);
-  const out = { version, dir, copied: [], companions: [], missing: [], kept: [] };
+  out.dir = dir;
   const wanted = listed.filter((n) => !adapterHeld(ledger, dir, n));
   if (!wanted.length) return out;
   const lib = starterLibrary(version);
@@ -3136,22 +3207,26 @@ export function bringStarters(ledger, config, { version, changes = [], names = n
     }
   }
   const record = readRecordAt(ledger, dir);
-  for (const n of [...take, ...companionOf.keys()]) {
-    for (const f of set[n].files) {
+  const plan = [];
+  for (const n of [...take, ...companionOf.keys()]) for (const f of set[n].files) if (!plan.some((p) => p.f === f)) plan.push({ f, bytes: readFileSync(join(lib.adapters, ...f.split("/"))) });
+  const created = [];
+  try {
+    for (const { f, bytes } of plan) {
       const rel = `${dir}/${f}`;
-      const bytes = readFileSync(join(lib.adapters, ...f.split("/")));
-      const hash = fileHash(bytes);
       if (ledger.exists(rel)) {
-        // A shared file another copy brought, or one of the app's own.
-        if (fileHash(bytesAt(ledger, rel)) === hash) record.files[f] ??= hash;
-        else if (!out.kept.includes(f)) out.kept.push(f);
+        if (fileHash(bytesAt(ledger, rel)) !== fileHash(bytes) && !out.kept.includes(f)) out.kept.push(f);
         continue;
       }
-      ledger.create(rel, asText(bytes));
-      record.files[f] = hash;
+      if (ledger.create(rel, asText(bytes))) {
+        created.push(rel);
+        record.files[f] = fileHash(bytes);
+      } else if (!out.kept.includes(f)) out.kept.push(f);
     }
-    record.adapters[n] = { version: lib.version, ...(companionOf.has(n) ? { companionOf: [...companionOf.get(n)].sort() } : {}) };
+  } catch (e) {
+    if (!ledger.dryRun) for (const rel of created) rmSync(ledger.abs(rel), { force: true });
+    throw new Error(`copying the starters into ${dir}/ failed (${e.message}); every file this run had copied was removed, and nothing else was written — fix that, then run this again`);
   }
+  for (const n of [...take, ...companionOf.keys()]) record.adapters[n] = { version: lib.version, ...(companionOf.has(n) ? { companionOf: [...companionOf.get(n)].sort() } : {}) };
   record.adapters = Object.fromEntries(Object.entries(record.adapters).sort(([a], [b]) => (a < b ? -1 : 1)));
   record.files = Object.fromEntries(Object.entries(record.files).sort(([a], [b]) => (a < b ? -1 : 1)));
   ledger.overwrite(`${dir}/${RECORD}`, JSON.stringify(record, null, 2) + "\n");
@@ -3171,17 +3246,17 @@ function starterNotes(b, { upgrade = false } = {}) {
     if (upgrade) notes.push(`the records must not move: after this write, run \`bootstrap.mjs starters --prove\` — derive --check with the copies in place, before anything else changes (decision 0048 point 8)`);
   }
   if (b.companions.length) notes.push(`${b.dir}/: ${b.companions.join(", ")} copied too, only as the companion${b.companions.length === 1 ? "" : "s"} another starter's suite fixture is read beside (not listed in "extractors", so derive never runs ${b.companions.length === 1 ? "it" : "them"}); delete one once the adapter that needs it has a fixture of your own stack`);
-  for (const f of b.kept) notes.push(`${b.dir}/${f}: kept as it is — it differs from the starter library's (${b.version}); the copied adapters were written against the library's, so compare the two`);
+  for (const f of b.kept) notes.push(`${b.dir}/${f}: kept as it is — it is the repo's own and differs from the starter library's (${b.version}); the copied adapters were written against the library's, so compare the two`);
   for (const n of b.missing) notes.push(`extractor "${n}" is not in this repo's ${b.dir}/ and the starter library has no adapter of that name: build it with the extractor skill, or take it out of "extractors" — derive stops until then`);
   return notes;
 }
 
 // The repo's copies, what a fix would move, and the steps that prove a
-// copy: `starters` (status), `--prove` (derive --check, nothing written but
-// what derive checks), `--move` (on a yes to the fixes: the copies move to
-// the pinned version, their tests run, derive, every map link and blessing
-// at an id that moved is repointed, then lint), `--decline` (a no, kept in
-// the record so the same fixes are not offered again).
+// copy: `starters` (status), `--prove` (derive --check, which writes
+// nothing), `--move` (on a yes to the fixes: proof 1 again, then the copies
+// move to the pinned version, their tests run, derive, every map link and
+// blessing at an id that moved is repointed, then lint), `--decline` (a no,
+// kept in the record so the same fixes are not offered again).
 function snapshotRecords(root, metadataDir) {
   const out = new Map();
   const base = join(root, ...metadataDir.split("/"));
@@ -3214,6 +3289,9 @@ function engineStep(args, root) {
   }
 }
 const tail = (text, n = 12) => String(text).trim().split(/\r?\n/).slice(-n);
+// Each closed HTML comment left as written: the render does not read a link
+// inside one (CR-328). A link in inline code it does read, so it moves too.
+const outsideComments = (text, fn) => text.split(/(<!--[\s\S]*?-->)/).map((part, i) => (i % 2 ? part : fn(part))).join("");
 
 export function starters(root, { prove = false, move = null, decline = false } = {}) {
   if ([prove, move !== null && move !== false, decline].filter(Boolean).length > 1) throw new Error("starters takes one of --prove, --move, --decline at a time");
@@ -3225,23 +3303,29 @@ export function starters(root, { prove = false, move = null, decline = false } =
   const record = dir ? readRecordAt(ledger, dir) : emptyRecord();
   const pin = STARTERS.version;
   const listed = new Set(Array.isArray(config.extractors) ? config.extractors : []);
-  const changedFiles = (name) =>
-    Object.keys(record.files)
-      .filter((f) => f.startsWith(`${name}/`))
-      .filter((f) => !ledger.exists(`${dir}/${f}`) || fileHash(bytesAt(ledger, `${dir}/${f}`)) !== record.files[f]);
-  const copies = Object.entries(record.adapters).map(([name, a]) => ({ name, version: a.version, companionOf: a.companionOf ?? null, listed: listed.has(name), declined: a.declined ?? null, changed: changedFiles(name) }));
+  const names = Object.keys(record.adapters);
+  const changes = dir && names.length ? copyChanges(ledger, dir, record, names) : new Map();
+  const copies = Object.entries(record.adapters).map(([name, a]) => ({ name, version: a.version, companionOf: a.companionOf ?? null, listed: listed.has(name), declined: a.declined ?? null, changed: changes.get(name) ?? [] }));
   const behind = copies.filter((c) => cmpVersions(c.version, pin) < 0);
   const lib = behind.length ? starterLibrary(pin) : null;
-  const offers = [];
-  for (const c of behind) {
-    for (const v of fixesFor(lib.notes, c.name, c.version, pin, c.declined)) {
-      let o = offers.find((x) => x.version === v.version);
-      if (!o) offers.push((o = { version: v.version, summary: v.summary, starters: {} }));
-      o.starters[c.name] = v.fixes;
+  // What is on offer, and what was declined: a move applies both (CR-323).
+  const group = (list, fixesOf) => {
+    const out = [];
+    for (const c of list) {
+      for (const v of fixesOf(c)) {
+        let o = out.find((x) => x.version === v.version);
+        if (!o) out.push((o = { version: v.version, summary: v.summary, starters: {} }));
+        o.starters[c.name] = v.fixes;
+      }
     }
-  }
-  offers.sort((a, b) => cmpVersions(a.version, b.version));
-  const status = { version: pin, package: STARTERS.package, dir, copies, behind: behind.map((c) => c.name), offers };
+    return out.sort((a, b) => cmpVersions(a.version, b.version));
+  };
+  const offers = group(behind, (c) => fixesFor(lib.notes, c.name, c.version, pin, c.declined));
+  const declinedFixes = group(
+    behind.filter((c) => c.declined),
+    (c) => fixesFor(lib.notes, c.name, c.version, c.declined),
+  );
+  const status = { version: pin, package: STARTERS.package, dir, copies, behind: behind.map((c) => c.name), offers, declinedFixes };
   if (prove) {
     const r = engineStep(["derive", "--check"], root);
     return { ...status, proved: r.ok, output: tail(r.output, 40) };
@@ -3257,49 +3341,46 @@ export function starters(root, { prove = false, move = null, decline = false } =
   const to = move === true ? pin : String(move);
   if (to !== pin) throw new Error(`--move takes ${pin}, the starter library version this ZDD release pins — got ${to}`);
   if (!behind.length) throw new Error(`every copy is already at ${pin}: nothing to move`);
+  // Every check before the first write (CR-321).
   const edited = behind.filter((c) => c.changed.length);
   if (edited.length) throw new Error(`${edited.map((c) => `${c.name} (${c.changed.slice(0, 3).join(", ")}${c.changed.length > 3 ? ", …" : ""})`).join("; ")} changed since ${edited.length === 1 ? "it was" : "they were"} copied — a move would overwrite your changes, so nothing was written. Apply the fixes the notes describe by hand, through the extractor skill (its tests red, then green), or put the files back as copied`);
-  const paths = artifactPaths(config, { lenient: true });
-  // Before: the records as the copies derive them now.
-  const first = engineStep(["derive"], root);
-  if (!first.ok) throw new Error(`derive does not run with the copies as they are, so there is nothing to compare the move against — fix that first:\n${tail(first.output).join("\n")}`);
-  const before = snapshotRecords(root, paths.metadataDir);
   const set = copySetOf(lib);
   const moving = behind.map((c) => c.name).filter((n) => Object.hasOwn(set, n));
-  const stay = Object.keys(record.adapters).filter((n) => !moving.includes(n) && adapterHeld(ledger, dir, n));
-  // The shared files the copies that stay reach, as they are in the repo.
-  let keepShared = new Set();
-  if (stay.length) {
-    let own;
-    try {
-      own = JSON.parse(runEngine(["copy-set", `--adapters=${ledger.abs(dir)}`, `--extractors=${stay.join(",")}`]));
-    } catch (e) {
-      throw new Error(`the copies that stay (${stay.join(", ")}) could not be read, so ZDD cannot tell which shared files they need — the engine said: ${tail(engineTail(e), 3).join(" ")}`);
-    }
-    keepShared = new Set(Object.values(own.adapters ?? {}).flatMap((a) => (a.files ?? []).filter((f) => f.startsWith("_shared/"))));
-  }
-  // What every touched file held, so a failing test puts the copies back.
+  const newFiles = new Set(moving.flatMap((n) => set[n].files));
+  const sharedEdited = [...newFiles].filter((f) => f.startsWith("_shared/") && ledger.exists(`${dir}/${f}`) && Object.hasOwn(record.files, f) && fileHash(bytesAt(ledger, `${dir}/${f}`)) !== record.files[f]);
+  if (sharedEdited.length) throw new Error(`${sharedEdited.map((f) => `${dir}/${f}`).join(", ")} changed since copied — a move would overwrite your changes, so nothing was written`);
+  // The shared files every adapter that stays reaches, recorded or not (CR-322).
+  const stay = heldAdapters(ledger, dir).filter((n) => !moving.includes(n));
+  const keepShared = new Set(stay.length ? Object.values(copySetIn(ledger.abs(dir), stay, `the adapters that stay in ${dir}/ (${stay.join(", ")})`, { filesOnly: true })).flatMap((a) => a.files.filter((f) => f.startsWith("_shared/"))) : []);
+  // Proof 1 again, enforced: the copies as they are reproduce the committed records.
+  const proof = engineStep(["derive", "--check"], root);
+  if (!proof.ok) throw new Error(`the copies as they are do not reproduce the committed records (derive --check fails), so a move would mix what the copy did with what the fixes do — nothing was written; run \`starters --prove\` and settle that first:\n${tail(proof.output).join("\n")}`);
+  const paths = artifactPaths(config, { lenient: true });
+  const before = snapshotRecords(root, paths.metadataDir);
+  // What every touched file held, so a failure puts the copies back.
   const undo = new Map();
   const save = (rel) => {
     if (!undo.has(rel)) undo.set(rel, ledger.exists(rel) ? bytesAt(ledger, rel) : null);
   };
-  const oldFiles = new Set(Object.keys(record.files).filter((f) => moving.some((n) => f.startsWith(`${n}/`))));
-  const newFiles = new Set(moving.flatMap((n) => set[n].files));
+  const restore = () => {
+    for (const [rel, bytes] of undo) {
+      if (bytes === null) rmSync(ledger.abs(rel), { force: true });
+      else {
+        mkdirSync(dirname(ledger.abs(rel)), { recursive: true });
+        writeFileSync(ledger.abs(rel), bytes);
+      }
+    }
+  };
+  const oldFiles = Object.keys(record.files).filter((f) => moving.some((n) => f.startsWith(`${n}/`)));
   const sharedHeld = Object.keys(record.files).filter((f) => f.startsWith("_shared/"));
-  const sharedEdited = sharedHeld.filter((f) => newFiles.has(f) && (!ledger.exists(`${dir}/${f}`) || fileHash(bytesAt(ledger, `${dir}/${f}`)) !== record.files[f]));
-  if (sharedEdited.length) throw new Error(`${sharedEdited.map((f) => `${dir}/${f}`).join(", ")} changed since copied — a move would overwrite your changes, so nothing was written`);
   for (const f of newFiles) {
     const rel = `${dir}/${f}`;
     const bytes = readFileSync(join(lib.adapters, ...f.split("/")));
-    const own = ledger.exists(rel) && !Object.hasOwn(record.files, f);
-    if (own) {
+    if (ledger.exists(rel) && !Object.hasOwn(record.files, f)) {
       if (fileHash(bytesAt(ledger, rel)) !== fileHash(bytes)) ledger.notes.push(`${rel}: kept as it is — it is not a file ZDD copied, and the library's ${pin} differs; compare the two`);
       continue;
     }
-    if (ledger.exists(rel) && fileHash(bytesAt(ledger, rel)) === fileHash(bytes)) {
-      record.files[f] = fileHash(bytes);
-      continue;
-    }
+    if (ledger.exists(rel) && fileHash(bytesAt(ledger, rel)) === fileHash(bytes)) continue;
     save(rel);
     ledger.overwrite(rel, asText(bytes));
     record.files[f] = fileHash(bytes);
@@ -3310,10 +3391,9 @@ export function starters(root, { prove = false, move = null, decline = false } =
     if (ledger.exists(`${dir}/${f}`)) ledger.remove(`${dir}/${f}`);
     delete record.files[f];
   }
-  // A shared file no moved copy reaches any more, and no other copy holds.
-  const reached = new Set([...newFiles].filter((f) => f.startsWith("_shared/")));
+  // A shared file no copy reaches any more, untouched since copied.
   for (const f of sharedHeld) {
-    if (reached.has(f) || keepShared.has(f)) continue;
+    if (newFiles.has(f) || keepShared.has(f)) continue;
     if (ledger.exists(`${dir}/${f}`) && fileHash(bytesAt(ledger, `${dir}/${f}`)) !== record.files[f]) {
       ledger.notes.push(`${dir}/${f}: no copy reaches it at ${pin}, but it changed since copied, so it was kept — delete it if nothing of yours needs it`);
       continue;
@@ -3323,7 +3403,7 @@ export function starters(root, { prove = false, move = null, decline = false } =
     delete record.files[f];
   }
   for (const n of moving) {
-    const { declined, ...rest } = record.adapters[n];
+    const { declined: _declined, ...rest } = record.adapters[n];
     record.adapters[n] = { ...rest, version: pin };
   }
   record.files = Object.fromEntries(Object.entries(record.files).sort(([a], [b]) => (a < b ? -1 : 1)));
@@ -3332,29 +3412,29 @@ export function starters(root, { prove = false, move = null, decline = false } =
   ledger.overwrite(recordRel, JSON.stringify(record, null, 2) + "\n");
   const tests = engineStep(["test"], root);
   if (!tests.ok) {
-    for (const [rel, bytes] of undo) {
-      if (bytes === null) {
-        if (ledger.exists(rel)) rmSync(ledger.abs(rel));
-      } else {
-        mkdirSync(dirname(ledger.abs(rel)), { recursive: true });
-        writeFileSync(ledger.abs(rel), bytes);
-      }
-    }
+    restore();
     throw new Error(`the adapters' own tests fail at ${pin}, so every copy was put back as it was (nothing else changed):\n${tail(tests.output, 30).join("\n")}`);
   }
   const derived = engineStep(["derive"], root);
-  if (!derived.ok) throw new Error(`the copies moved to ${pin} and their tests pass, but derive stops — fix what it names, then run derive and lint:\n${tail(derived.output).join("\n")}`);
+  if (!derived.ok) {
+    restore();
+    const again = engineStep(["derive"], root);
+    throw new Error(`derive stops with the copies at ${pin}, so every copy was put back as it was${again.ok ? " and derive ran again with them" : " — derive does not run on them either now; run it and fix what it names"}:\n${tail(derived.output).join("\n")}`);
+  }
   const after = snapshotRecords(root, paths.metadataDir);
   const files = (m) => new Map([...m].map(([id, v]) => [id, v.file]));
   const { moves, unmatched } = movedIds(files(before), files(after));
   // Repoint every map link and blessing at a record whose id moved.
   const movedFiles = new Map(moves.map((m) => [m.fromFile, m.toFile]));
   const repointed = [];
+  const unread = [];
   if (movedFiles.size) {
     for (const where of [paths.mapDir, paths.blessingsDir]) {
-      for (const rel of listMapPages(ledger, where).files) {
+      const pages = listMapPages(ledger, where);
+      unread.push(...pages.skipped);
+      for (const rel of pages.files) {
         const text = ledger.read(rel);
-        const next = outsideFences(text, (chunk) => repointLinks(chunk, { oldRel: rel, newRel: rel, moved: movedFiles, bundleDir: paths.bundleDir }));
+        const next = outsideFences(text, (chunk) => outsideComments(chunk, (part) => repointLinks(part, { oldRel: rel, newRel: rel, moved: movedFiles, bundleDir: paths.bundleDir })));
         if (next !== text) {
           ledger.overwrite(rel, next);
           repointed.push(rel);
@@ -3362,6 +3442,7 @@ export function starters(root, { prove = false, move = null, decline = false } =
       }
     }
   }
+  for (const what of unread) ledger.notes.push(`${what} was not read for links to a moved record — check it by hand`);
   const idMap = new Map(moves.map((m) => [m.from, m.to]));
   if (idMap.size && Array.isArray(config.claims?.allowUnclaimed) && config.claims.allowUnclaimed.some((id) => idMap.has(id))) {
     config.claims.allowUnclaimed = config.claims.allowUnclaimed.map((id) => idMap.get(id) ?? id);
@@ -3386,6 +3467,12 @@ export function narrateStarters(r) {
   if (r.proved !== undefined) {
     out.push("", r.proved ? "Proved: with the copies in place, derive --check finds every record byte for byte as committed." : "NOT proved: derive --check finds records that differ from those committed:", ...(r.proved ? [] : r.output.map((l) => `  ${l}`)));
   }
+  const fixLines = (list) => {
+    for (const o of list) {
+      out.push(`  ${o.version}: ${o.summary}`);
+      for (const [name, fixes] of Object.entries(o.starters)) for (const f of fixes) out.push(`    ${name}: ${f.what}`, `      who: ${f.who}`, `      ids: ${f.moves}`);
+    }
+  };
   if (r.moved) {
     out.push("", `Moved ${r.moved.join(", ")} to ${r.to}; their tests pass; derive ran (${r.records.before} records before, ${r.records.after} after).`);
     for (const m of r.moves) out.push(`  ${m.from} → ${m.to}`);
@@ -3395,14 +3482,18 @@ export function narrateStarters(r) {
     for (const id of r.unmatched) out.push(`  ${id} is gone, and no record took its place: a link to it is a broken link lint names — fix it by hand`);
     for (const f of r.repointed) out.push(`  repointed links in ${f}`);
     out.push(r.lint.ok ? "lint passes." : "lint FAILS:", ...(r.lint.ok ? [] : r.lint.output.map((l) => `  ${l}`)));
-  } else if (r.offers.length && !r.declined) {
-    out.push("", "Fixes on offer (read each against this repo, then ask once: on a yes `starters --move`, on a no `starters --decline`):");
-    for (const o of r.offers) {
-      out.push(`  ${o.version}: ${o.summary}`);
-      for (const [name, fixes] of Object.entries(o.starters)) for (const f of fixes) out.push(`    ${name}: ${f.what}`, `      who: ${f.who}`, `      ids: ${f.moves}`);
+  } else if (r.declined) out.push("", "Declined: kept in the record; the adapters stay as they are.");
+  else {
+    if (r.offers.length) {
+      out.push("", "Fixes on offer (read each against this repo, then ask once: on a yes `starters --move`, on a no `starters --decline`):");
+      fixLines(r.offers);
     }
-  } else if (r.behind.length && !r.declined) out.push("", `${r.behind.join(", ")} ${r.behind.length === 1 ? "is" : "are"} behind ${r.version} with no fix noted for ${r.behind.length === 1 ? "it" : "them"}: \`starters --move\` brings them level, and changes no record.`);
-  if (r.declined) out.push("", "Declined: kept in the record; the adapters stay as they are.");
+    if (r.declinedFixes?.length) {
+      out.push("", "Fixes declined before (not offered again; `starters --move` would apply them, and the records they name would change):");
+      fixLines(r.declinedFixes);
+    }
+    if (r.behind.length && !r.offers.length && !r.declinedFixes?.length) out.push("", `${r.behind.join(", ")} ${r.behind.length === 1 ? "is" : "are"} behind ${r.version} with no fix noted for ${r.behind.length === 1 ? "it" : "them"}: \`starters --move\` brings them level, and changes no record.`);
+  }
   for (const n of r.notes ?? []) out.push(`note: ${n}`);
   return out.map(printable).join("\n");
 }
@@ -3684,7 +3775,7 @@ export function narrateDetect(d, pocock) {
     }
     for (const a of d.apps) out.push(`  - map only: ${a.name} — ${a.evidence}; extractor ${a.extractor}`);
     // The offer (decision 0048 point 3): the developer may take it or leave it.
-    if (d.library?.offer?.length) out.push(`Starter library (${d.library.package} ${d.library.version}) has adapters for: ${d.library.offer.join(", ")} — offer to bring them across: they are copied in with their tests and become this repo's own. On a no ("starters": false) nothing is copied and each adapter is built with the extractor skill.`);
+    if (d.library?.offer?.length) out.push(`Starter library (${d.library.package} ${d.library.version}) has adapters for: ${d.library.offer.join(", ")} — offer to bring them across: they are copied in with their tests and become this repo's own. On a no ("starters": false) only generic is copied (it reads nothing, so derive runs) and each adapter is built with the extractor skill.`);
     for (const q of d.questions ?? []) out.push(`  ask: ${q.ask} (recorded under ${q.records})`);
     // Part by part (decision 0039): what an adapter covers, and what nothing does.
     if (d.coverage) {

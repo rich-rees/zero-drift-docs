@@ -4,22 +4,28 @@
 // into an app, and the upgrade before it moves a copy to a later version.
 // It writes nothing; bootstrap is the one writer of the copy.
 //
-//   zdd-engine copy-set --adapters=<dir> [--extractors=<a,b>]   one JSON object on stdout
+//   zdd-engine copy-set --adapters=<dir> [--extractors=<a,b>] [--files-only]   one JSON object on stdout
+//
+// `--files-only` reads no module (the files come from the imports as text),
+// so no adapter code runs and `suite` is null: what bootstrap asks of an
+// app's own folder, where an adapter may be half-written.
 //
 // A copy is the adapter's folder without its `example/` (the library's own,
 // read only by the preview), and every `_shared/` file that any of its
 // modules reach by their static imports, its tests' included: they travel
 // with it (As built, slice 3). A fixture's or an example's modules are
 // sample repos, never code, so their imports are not followed. Each
-// adapter's `SUITE` comes with it, as plain data, so bootstrap can leave out
-// a companion the app does not take (a companion must be an adapter beside
-// it, lib/suite.mjs).
+// adapter's `SUITE` comes with it, as plain data, so bootstrap can copy the
+// companions it names too (a companion must be an adapter beside it,
+// lib/suite.mjs). Only the adapters asked for are loaded.
 //
 // `{ adapters: { <name>: { files: [<path in the folder>…], suite } },
 //    missing: [<name asked for that the folder does not hold>] }`, names in
 // order, files sorted. An adapter whose reach leaves the folder, passes
-// through a link or hits a bound stops the command, naming it. Bounded as
-// the suite's copies are: 20,000 files and 64 MiB in all, 1 MiB a file.
+// through a link or hits a bound stops the command, naming it, as does a
+// SUITE that is not plain data. Bounded as the suite's copies are: 20,000
+// entries (files and folders) and 64 MiB in all, each file counted once,
+// 1 MiB a file, 32 folders deep.
 
 import { lstatSync, readdirSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
@@ -28,6 +34,7 @@ import { moduleReach } from "./lib/suite.mjs";
 
 const MAX_FILES = 20_000;
 const MAX_BYTES = 64 * 1024 * 1024;
+const MAX_DEPTH = 32;
 const MAX_FILE = 1024 * 1024;
 const LIBRARY_ONLY = /^example$/; // never copied
 const SAMPLE = /^(?:example|fixture.*)$/; // copied (fixture), never code
@@ -46,19 +53,25 @@ function plain(v, depth = 0) {
   return Object.values(Object.getOwnPropertyDescriptors(v)).every((d) => "value" in d && plain(d.value, depth + 1));
 }
 
-export async function copySet(dir, only = null) {
+export async function copySet(dir, only = null, { filesOnly = false } = {}) {
   const abs = resolve(dir);
   const held = readAdapterFolder(abs);
   const names = only ?? [...held.keys()];
   const adapters = {};
   const missing = [];
-  const budget = { files: 0, bytes: 0 };
-  // SUITE comes from the module, loaded as detection loads it: its imports
-  // checked to stay in the folder first.
-  let mods = null;
-  const modOf = async (name) => (mods ??= new Map((await folderModules(abs)).map((m) => [m.name, m.mod]))).get(name);
+  const budget = { entries: 0, bytes: 0 };
+  const counted = new Set();
+  // SUITE comes from the module, loaded as detection loads it (its imports
+  // checked to stay in the folder first), and only for the names asked.
+  const mods = filesOnly ? new Map() : new Map((await folderModules(abs, names.filter((n) => held.has(n)))).map((m) => [m.name, m.mod]));
+  const entry = (name) => {
+    if (++budget.entries > MAX_FILES) throw new Error(`${name}: the copy is over ${MAX_FILES} files and folders`);
+  };
   const count = (p, st, name) => {
-    if (++budget.files > MAX_FILES || (budget.bytes += st.size) > MAX_BYTES) throw new Error(`${name}: the copy is over ${MAX_FILES} files or ${MAX_BYTES / 1024 / 1024} MiB`);
+    if (counted.has(p)) return;
+    counted.add(p);
+    entry(name);
+    if ((budget.bytes += st.size) > MAX_BYTES) throw new Error(`${name}: the copy is over ${MAX_BYTES / 1024 / 1024} MiB`);
     if (st.size > MAX_FILE) throw new Error(`${name}: ${posix(relative(abs, p))} is over 1 MiB`);
   };
   for (const name of names) {
@@ -69,14 +82,16 @@ export async function copySet(dir, only = null) {
     const own = join(abs, name);
     const files = [];
     const code = [];
-    const walk = (d) => {
+    const walk = (d, depth = 0) => {
+      if (depth > MAX_DEPTH) throw new Error(`${name}: ${posix(relative(abs, d))} is more than ${MAX_DEPTH} folders deep`);
       for (const n of readdirSync(d).sort()) {
         const p = join(d, n);
         const st = lstatSync(p);
         if (st.isSymbolicLink()) throw new Error(`${name}: ${posix(relative(abs, p))} is a link — a copy holds real files only`);
         if (st.isDirectory()) {
           if (d === own && LIBRARY_ONLY.test(n)) continue;
-          walk(p);
+          entry(name);
+          walk(p, depth + 1);
           continue;
         }
         if (!st.isFile()) continue;
@@ -99,8 +114,9 @@ export async function copySet(dir, only = null) {
       }
     }
     for (const f of [...shared].sort()) count(f, lstatSync(f), name);
-    const mod = await modOf(name);
-    const suite = mod.SUITE === undefined ? null : plain(mod.SUITE) ? JSON.parse(JSON.stringify(mod.SUITE)) : null;
+    const mod = mods.get(name) ?? {};
+    if (mod.SUITE !== undefined && !plain(mod.SUITE)) throw new Error(`${name}: SUITE is not plain data (strings, numbers, booleans, null, arrays and plain objects), so its companions cannot be read`);
+    const suite = mod.SUITE === undefined ? null : JSON.parse(JSON.stringify(mod.SUITE));
     adapters[name] = { files: [...files, ...shared].map((f) => posix(relative(abs, f))).sort(), suite };
   }
   return { adapters, missing };
@@ -113,7 +129,7 @@ export async function run(args) {
   try {
     if (!dir) throw new Error("pass --adapters=<folder of adapters> (the starter library's adapters/)");
     const only = arg("extractors") ? arg("extractors").split(",").map((s) => s.trim()).filter(Boolean) : null;
-    out = await copySet(dir, only);
+    out = await copySet(dir, only, { filesOnly: args.includes("--files-only") });
   } catch (e) {
     console.error(`copy-set: ${e.message}`);
     process.exit(1);

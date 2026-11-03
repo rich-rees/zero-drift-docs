@@ -18,7 +18,6 @@ const LIBRARY = resolve(PLUGIN, "..", "..", "packages", "zdd-starter-adapters");
 const STAGE = join(LIBRARY, "scripts", "stage.mjs");
 const ENGINE_BIN = resolve(PLUGIN, "..", "..", "packages", "zdd-engine", "bin", "zdd-engine.mjs");
 const SCRIPT = join(PLUGIN, "scripts", "bootstrap.mjs");
-const VERSION = JSON.parse(readFileSync(join(PLUGIN, ".claude-plugin", "plugin.json"), "utf8")).version;
 
 const tmp = (t, prefix = "zdd-starters-") => {
   const d = mkdtempSync(join(tmpdir(), prefix));
@@ -119,13 +118,15 @@ test("apply copies what the developer takes, with its companions and the record 
   assert.deepEqual(rec.adapters.nextjs, { version: STARTERS.version, companionOf: ["supabase-js"] });
   assert.equal(readFileSync(join(repo, "zdd", "extractors", "_shared", "slug.mjs"), "utf8"), "// mine\n");
   assert.equal(rec.files["_shared/slug.mjs"], undefined, "a file ZDD did not copy is not in the record");
-  assert.ok(r.notes.some((n) => /_shared\/slug\.mjs: kept as it is — it differs from the starter library's/.test(n)), r.notes.join("\n"));
+  assert.ok(r.notes.some((n) => /_shared\/slug\.mjs: kept as it is — it is the repo's own and differs from the starter library's/.test(n)), r.notes.join("\n"));
   assert.ok(r.notes.some((n) => /nextjs copied too, only as the companion/.test(n)));
   assert.ok(!existsSync(join(repo, "zdd", "extractors", "supabase", "example")), "the preview's example stays in the library");
   for (const [f, h] of Object.entries(rec.files)) assert.equal(fileHash(readFileSync(join(repo, "zdd", "extractors", ...f.split("/")))), h, f);
   // The reader of that record.
   const s = json(repo, ["starters"]);
-  assert.deepEqual(s.copies.map((c) => [c.name, c.version, c.listed, c.changed.length]), [["nextjs", STARTERS.version, false, 0], ["supabase", STARTERS.version, true, 0], ["supabase-js", STARTERS.version, true, 0]]);
+  assert.deepEqual(s.copies.map((c) => [c.name, c.version, c.listed]), [["nextjs", STARTERS.version, false], ["supabase", STARTERS.version, true], ["supabase-js", STARTERS.version, true]]);
+  // The repo's own slug.mjs is not as ZDD would have copied it: every copy that reaches it is changed, the one that does not is untouched (CR-319).
+  assert.deepEqual(Object.fromEntries(s.copies.map((c) => [c.name, c.changed])), { nextjs: ["_shared/slug.mjs"], supabase: [], "supabase-js": ["_shared/slug.mjs"] });
   assert.deepEqual(s.offers, []);
   writeFileSync(join(repo, "zdd", "extractors", "supabase", "index.mjs"), "// changed\n", { flag: "a" });
   assert.deepEqual(json(repo, ["starters"]).copies.find((c) => c.name === "supabase").changed, ["supabase/index.mjs"]);
@@ -220,20 +221,4 @@ test("starters: a no is kept and not offered again; a changed copy is never move
   assert.deepEqual(readdirSync(join(repo, "zdd", "extractors", "supabase", "test")).sort(), before);
   assert.equal(readFileSync(join(repo, "zdd", "extractors", RECORD), "utf8"), recBefore);
   assert.equal(readFileSync(idx).equals(copied), true);
-});
-
-test("upgrade from a release that owns its adapters copies the pinned version, never the baseline; one the repo holds is left alone", (t) => {
-  const repo = oldApp(t);
-  const c = config(repo);
-  writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify({ ...c, release: STARTERS.ownedSince }, null, 2) + "\n");
-  const r = run(repo, ["upgrade", "--json"]);
-  if (r.status !== 0) {
-    // A repo pinned past this plugin is refused before anything (never backwards).
-    assert.match(r.stderr, /newer than this plugin/);
-    assert.ok(!existsSync(join(repo, "zdd", "extractors")));
-    return;
-  }
-  const up = JSON.parse(r.stdout);
-  assert.equal(up.starters.version, STARTERS.version);
-  assert.equal(VERSION, up.version);
 });

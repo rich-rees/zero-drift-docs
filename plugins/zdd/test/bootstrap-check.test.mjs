@@ -141,7 +141,7 @@ test("preview: the examples render outside the repo, and nothing is written into
   // A well-formed name the starter library does not hold is refused, not "no example" (CR-115).
   const typo = spawnSync(process.execPath, [BOOTSTRAP, "preview", "--extractors=fastapy", `--root=${repo}`], { encoding: "utf8" });
   assert.equal(typo.status, 1);
-  assert.match(typo.stderr, /fastapy is not an adapter in .*adapters \(it holds: /);
+  assert.match(typo.stderr, /fastapy is not an adapter in .*zdd-starters-[^\\/]+[\\/]library[\\/]adapters \(it holds: /, "the library the sibling route staged");
   assert.deepEqual(readdirSync(repo), []);
 });
 

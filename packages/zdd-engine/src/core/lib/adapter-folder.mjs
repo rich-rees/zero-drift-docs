@@ -57,10 +57,13 @@ export function readAdapterFolder(dir) {
 // one's static imports are checked before it is imported (CR-295): they
 // must stay in the folder and never pass through a link, or its top-level
 // code would run from wherever the link points.
-export async function folderModules(dir) {
+// With `only`, just the adapters named there are checked and loaded: one
+// broken adapter beside them is not theirs to answer for.
+export async function folderModules(dir, only = null) {
   const out = [];
   const abs = resolve(dir);
   for (const [name, entry] of readAdapterFolder(abs)) {
+    if (only && !only.includes(name)) continue;
     const reach = moduleReach(entry, abs);
     const wrong = [...reach.outside, ...reach.missing.map((m) => `${m} is not there`), ...(reach.limit ? [reach.limit] : [])];
     if (wrong.length) throw new Error(`${name} in the adapter folder ${abs} reaches outside it, or through a link: ${wrong.slice(0, 3).join("; ")}`);
