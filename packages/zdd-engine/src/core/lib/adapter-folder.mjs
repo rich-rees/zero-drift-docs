@@ -82,8 +82,11 @@ export function ownAdapterFolder(root, { strict = false, configPath = null } = {
   let st;
   try {
     st = statSync(p);
-  } catch {
-    if (strict && configPath) throw new Error(`no config at ${p}`);
+  } catch (e) {
+    // Only absence is no config; anything else (permissions, I/O) is a
+    // config that cannot be read, which strict says (CR-314).
+    const absent = e?.code === "ENOENT" || e?.code === "ENOTDIR";
+    if (strict && (configPath || !absent)) throw new Error(absent ? `no config at ${p}` : `${p} cannot be read for its localExtractorDir: ${e.code ?? e.message}`);
     return null;
   }
   try {

@@ -9,7 +9,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -279,4 +279,18 @@ test("io notSource: a walk never enters the folder, a read is refused as absent,
   assert.match(r.reason, /is in the repo's adapter folder \(localExtractorDir\) — ZDD's own tooling, not source, not read/);
   assert.equal(io.isIgnored("tools/a"), true);
   assert.equal(io.isIgnored("tools/ab.txt"), false);
+});
+
+test("CR-314: a config that is there but cannot be examined is said by strict detection, never taken for no config", { skip: process.platform === "win32" || process.getuid?.() === 0 ? "needs a POSIX folder this user cannot enter" : false }, (t) => {
+  const repo = scratch(t);
+  put(repo, { "zdd/config.json": JSON.stringify({ localExtractorDir: "zdd/extractors" }) });
+  chmodSync(join(repo, "zdd"), 0o000);
+  let r;
+  try {
+    r = run(["detect", `--root=${repo}`]);
+  } finally {
+    chmodSync(join(repo, "zdd"), 0o755); // before the folder is removed
+  }
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /config\.json cannot be read for its localExtractorDir: EACCES/);
 });

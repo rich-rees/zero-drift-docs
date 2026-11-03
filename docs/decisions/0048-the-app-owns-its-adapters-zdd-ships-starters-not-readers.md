@@ -412,7 +412,7 @@ export. A hand-written local adapter is the only route that works today.
   module hook, so an app with no `node_modules` runs them. The hook needs
   Node 20.6, so both packages now say `>=20.6` (CR-299). `--config` names
   the config whose `localExtractorDir` it reads (CR-298), and a config that
-  cannot be read is said, never taken for no folder (CR-303). The kit
+  cannot be read is said, never taken for no folder (CR-303, CR-314). The kit
   freezes with the contract at 1.0.
 - **Tests.** The engine keeps the tests of the core alone, a small
   stack-free fixture for its store lints, and two test-only adapters in
