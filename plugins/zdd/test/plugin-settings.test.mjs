@@ -12,10 +12,11 @@ import { readFileSync, writeFileSync, existsSync, rmSync, mkdtempSync, cpSync, m
 import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { copyFixture } from "../../../packages/zdd-starter-adapters/test/starters.mjs";
 
 const PLUGIN = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SCRIPT = join(PLUGIN, "scripts", "bootstrap.mjs");
-const ENGINE_FIXTURES = resolve(PLUGIN, "..", "..", "packages", "zdd-engine", "test");
+const ENGINE_FIXTURES = resolve(PLUGIN, "..", "..", "packages", "zdd-starter-adapters", "test");
 const PLUGIN_VERSION = JSON.parse(readFileSync(join(PLUGIN, ".claude-plugin", "plugin.json"), "utf8")).version;
 const DATE = "2026-10-06";
 const CHECK_RELEASE = join(PLUGIN, "scripts", "check-release.mjs");
@@ -46,7 +47,7 @@ const answersFile = (name, answers) => {
 const applyJson = (repo, name, answers) => JSON.parse(bootstrap(repo, ["apply", `--answers=${answersFile(name, answers)}`, "--json"]));
 const fastapiRepo = (name) => {
   const repo = join(scratch, name);
-  cpSync(join(ENGINE_FIXTURES, "fixture-fastapi"), repo, { recursive: true });
+  copyFixture(join(ENGINE_FIXTURES, "fixture-fastapi"), repo);
   rmSync(join(repo, "zdd"), { recursive: true });
   return repo;
 };

@@ -13,7 +13,10 @@
 //   extensions  file suffixes read as source         default __EXTENSIONS__
 //
 // The contract (CONTRIBUTING.md, "The prize: writing an extractor"):
-//   - derive({ repoRoot, options, io }) returns { records, diagnostics }.
+//   - derive({ repoRoot, options, io }) returns { records, diagnostics },
+//     and `unread: [{ file, what }]` for what it saw and could not read:
+//     that shows on every run and, under unread.strict, fails lint until
+//     answered (decision 0048).
 //   - Same source bytes in ⇒ byte-identical records out: no dates, no
 //     randomness, no absolute paths, nothing from the environment.
 //   - Every read goes through io.read and every listing through io.walk —
@@ -128,8 +131,9 @@ function merge(records) {
   return [...byId.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
 
-// The engine's filename scheme (src/core/lib/slug.mjs), copied because a local
-// extractor cannot import the engine: `/` → `--`, `{p}` → `_p`, `.` → `-`.
+// The starters' filename scheme (their _shared/slug.mjs), written out so this
+// adapter imports nothing of ZDD (decision 0048): `/` → `--`, `{p}` → `_p`,
+// `.` → `-`.
 // Two ids that slug alike fail derive loudly — never a silent overwrite.
 function slugify(key) {
   const cleaned = key.replace(/^\/+/, "");

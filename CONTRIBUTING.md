@@ -6,14 +6,19 @@ at **both ends** of the pipeline: **extractors** feed data in (one per
 convention), and **viewers** render it out (one per visualization), with a stable
 graph in the middle.
 
-> **Status.** ZDD is `0.13.0` and public, on the new line that 0.9.0 started
+> **Status.** ZDD is `0.14.0` and public, on the new line that 0.9.0 started
 > (decision 0042). The engine (`packages/zdd-engine`, on npm as
 > `@rich-rees/zdd`) is what the plugin's skills and adopters' CI
 > both run, and both contracts below — extractors and viewers — are the ones it
-> executes today. Pull requests are welcome, and bug reports go to the repo's
+> executes today. Since 0.14 the engine ships no adapter: the starters an
+> app copies and then owns are the starter library
+> (`packages/zdd-starter-adapters`, on npm as
+> `@rich-rees/zdd-starter-adapters`, on a version line of its own, decision
+> 0048). Pull requests are welcome, and bug reports go to the repo's
 > Discussions ("Bug reports"; decision 0041 — the repo has no Issues); the tests are the contract
-> (`node --test` in `packages/zdd-engine` and over `plugins/zdd/test`), and CI
-> runs both suites, and a browser smoke test of the human index, on every PR.
+> (`node --test` in `packages/zdd-engine`, in `packages/zdd-starter-adapters`
+> with the starters' own tests, and over `plugins/zdd/test`), and CI runs all
+> three, and a browser smoke test of the human index, on every PR.
 
 ## The shape of a contribution
 
@@ -25,8 +30,9 @@ Everything here goes through the standard GitHub loop:
 4. **Open a pull request** back here. It's a proposal — we'll review, discuss, and
    merge if it fits. You keep authorship; the maintainer decides what lands.
 
-A merged change ships to everyone via the marketplace on the next version bump
-(a new extractor is backward-compatible, so a **minor** bump).
+A merged change ships to everyone via the marketplace on the next version bump.
+A new or fixed starter ships in the starter library's next release, on its own
+version line, and reaches a repo when it copies it in (decision 0048).
 
 ## The prize: writing an extractor
 
@@ -95,14 +101,14 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
   `?route:<url>` (`*` = one segment the scan could not read; it matches a
   route parameter only, never a fixed word, and a template hole typed as a
   union of literals is expanded before emission — [decision 0019](docs/decisions/0019-a-variable-segment-matches-a-parameter-never-a-fixed-word.md),
-  `src/core/lib/template-paths.mjs`), and `?code:<file>#<function>` — the
+  `adapters/_shared/template-paths.mjs` in the starter library), and `?code:<file>#<function>` — the
   code a route or screen runs, which a data-access adapter's `data-access`
   records answer ([decision 0037](docs/decisions/0037-routes-reach-tables-through-a-data-access-record-joined-on-file-and-function.md):
   the referrer takes their tables; one in the referrer's own file is
   absorbed; a miss is silent). `?code:<file>#*` is every data-access record
   in the file, for a referrer whose unit is the whole file. A JS unit is a
   top-level declaration by its local name, or `<module>` for the module's
-  own top-level code (`src/adapters/js/source.mjs`). Put the `?code:` ref
+  own top-level code (the starters' `adapters/_shared/js/source.mjs`). Put the `?code:` ref
   under a verb (`edges.reads`) and the tables the data-access record leaves
   untyped take that verb. The deriver resolves them after the
   merge, drops misses with a diagnostic, and drops a record flagged
@@ -122,6 +128,22 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
   not only under `--verbose`: for what the branch that caused it should
   hear (the `external-services` extractor's "this env name matches no declared
   service"). Diagnostics stay the quiet channel. Neither ever fails derive.
+- **An `unread` list says what the adapter saw and could not read**
+  ([decision 0048](docs/decisions/0048-the-app-owns-its-adapters-zdd-ships-starters-not-readers.md)):
+  `[{ file, what }]`, optional, and returned beside `records`. Each item
+  prints on every derive and shows in the human index, and under
+  `unread.strict` fails lint until the adapter is fixed or the item is
+  marked fine once. Say it here,
+  not in a diagnostic: a diagnostic is what nobody reads. An adapter that
+  cannot tell what it missed has nothing to report; `coverage` stays the
+  second net.
+- **The core holds the map's gaps**
+  ([decision 0049](docs/decisions/0049-every-update-checks-the-map-still-reaches-what-it-should.md)):
+  a route, surface or background task that links to nothing, and a table
+  nothing links to, are listed by every update and by `lint` until an
+  adapter reads the link or the gap is answered once (fine, or a known gap
+  that both indexes show). An adapter may add kinds of its own records with
+  an optional `GAPS` export; the core names record kinds, never a stack.
 - **Missing source is "nothing to inventory."** A configured root that does not
   exist yields no records and a diagnostic, never an error — greenfield repos
   adopt ZDD before any code exists. The one exception is a single named file
@@ -133,12 +155,22 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
   out. No LLM, no timestamps, no environment-dependent values — the blocking CI
   check depends on this. Anything needing judgment is *not* metadata; it belongs in
   the semantic map, which links down to your records.
-- It's selected by **name** from config, never by path — from the engine's
-  catalogue (`src/adapters/<name>/`), or from the adopter's declared `localExtractorDir`
-  (`<name>.mjs` or `<name>/index.mjs`, the one place config may point at code;
-  local names may not shadow built-ins). Try a convention there first, with the
-  skill's scaffold; propose it for the catalogue once it has run against a real
-  repo.
+- It's selected by **name** from config, never by path, from the adopter's
+  declared `localExtractorDir` (`<name>.mjs` or `<name>/index.mjs`, the one
+  place config may point at code). Since 0.14 the engine runs no adapter of
+  its own ([decision 0048](docs/decisions/0048-the-app-owns-its-adapters-zdd-ships-starters-not-readers.md)):
+  the starters live in `packages/zdd-starter-adapters/adapters/<name>/`, and a
+  repo copies the ones it uses, keeping their names. Try a convention in a
+  repo first, with the skill's scaffold; propose it as a starter once it has
+  run against a real repo.
+- **It is self-contained** ([decision 0048](docs/decisions/0048-the-app-owns-its-adapters-zdd-ships-starters-not-readers.md)
+  point 4). Its one link to ZDD is the contract: the `io` it is handed and what
+  it returns. It imports nothing from the core. Code several adapters share
+  lives once in `_shared/` beside them (`_shared/js/`, `_shared/python/`,
+  `_shared/background/` and the small helpers at its top), by a static relative
+  import, so the files one adapter needs are the ones its imports reach, and
+  copying it into an app brings exactly those. An adapter imports no other
+  adapter's folder. A test holds both rules.
 - **It declares the contract it was written for and passes the standard
   suite** ([decision 0040](docs/decisions/0040-adapters-declare-a-contract-number-and-pass-one-standard-suite.md)).
   `export const CONTRACT = 1`, a number of its own that moves only when the
@@ -152,10 +184,12 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
   record, and every read through `io` (a text scan for the honest mistake —
   `node:fs`, a process or network module, `require`, `process.env` — not a
   sandbox: a local adapter is the repo's own code, trusted like its tests,
-  decision 0010). A catalogue adapter is listed, with
-  its fixture and options, in `packages/zdd-engine/test/standard-suite.test.mjs`
-  — a new one cannot ship without passing; a local one keeps its `fixture/`
-  beside it and `export const SUITE = { options }`. A check added in a
+  decision 0010). Every adapter keeps its `fixture/` beside it and
+  `export const SUITE = { options }` (with `companions` that run beside it,
+  and `allowEmpty: true` for one that emits nothing by design). The starter
+  library's suite (`packages/zdd-starter-adapters/test/standard-suite.test.mjs`)
+  runs every starter exactly as an app's suite will run its copy, so a new
+  starter cannot ship without passing. A check added in a
   release goes at the end of the list and warns for adopters until "upgrade
   ZDD" has their adapters pass it (`suiteChecks`).
 
@@ -166,25 +200,27 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
   | `io` | 1 | yes | every read and listing through the `io` the engine hands in, never `node:fs`, the environment or the network; a gitignored path is never read |
   | missing source | 1 | yes | a configured root that does not exist is nothing to inventory: no records and a diagnostic, never an error |
   | `COMMENT` | 1 | yes | `{ ".ext": "<line comment mark>" }` for every kind of file the adapter reads (`null` for one that takes no line comment, such as JSON), so the suite can comment out the fixture |
-  | `SUITE` | 1 | yes (an adopter's own) | a `fixture/` folder beside the adapter and `export const SUITE = { options, companions? }`; a catalogue adapter's fixture lives in ZDD's tests |
+  | `SUITE` | 1 | yes | a `fixture/` folder beside the adapter and `export const SUITE = { options, companions?, allowEmpty? }`; every starter carries its own |
   | `FACTS_KEY_ORDER` | 1 | no | facts in a stable order, per kind |
   | unresolved refs | 1 | no | `?table:<name>`, `?route:<url>`, … for another adapter's records; the core resolves them |
-  | data access | 1 | no | `?code:<file>#<function>` refs, and `data-access` records naming the tables a function reaches (decision 0037) |
+  | data access | 1 | no | `?code:<file>#<function>` refs, and `data-access` records naming the tables a function reaches, joined on `resource[0]` and `facts.function` (decision 0037) |
   | typed edges | 1 | no | `facts.edges`, a verb for a ref (decision 0016) |
   | `warnings` | 1 | no | a list printed on every derive |
-  | detection | 1 | no | `DETECTION` and `detect({ scan, proposed })` (decision 0039; every catalogue adapter has it) |
-  | import reader | 1 | no | `IMPORTS`: `{ label, extensions, skipDirs, isTest(rel), resolver(io, files) }`, the repo files one file imports, read at render for an `extend` blessing's users (decision 0046; the JavaScript and Python adapters share `adapters/js/imports.mjs` and `adapters/python/imports.mjs`) |
+  | `unread` | 1 | no | a list of `{ file, what }`, what it saw and could not read (decision 0048) |
+  | gaps | 1 | no | `GAPS`: `{ reachNothing: [kinds], reachedByNothing: [kinds] }`, further kinds of its own records that must link, beside the core's (decision 0049) |
+  | detection | 1 | no | `DETECTION` and `detect({ scan, proposed })` (decision 0039; every starter has it) |
+  | import reader | 1 | no | `IMPORTS`: `{ label, extensions, skipDirs, isTest(rel), resolver(io, files) }`, the repo files one file imports, read at render for an `extend` blessing's users (decision 0046; the JavaScript and Python adapters share `adapters/_shared/js/imports.mjs` and `adapters/_shared/python/imports.mjs`) |
 
   Before 1.0 the contract is open (it stays at 1 and may change without
   interviews). From 1.0 a change is a new row with `since` one higher and
   `CONTRACT` raised to match (a test holds them together), its interview
   question in `ask` (`src/core/lib/contract.mjs`); a new **required** step
   is a major release.
-- **A catalogue adapter carries its own detection**
+- **A starter carries its own detection**
   ([decision 0039](docs/decisions/0039-detection-lives-in-each-adapter-bootstrap-builds-the-gaps-and-checks-together.md)):
   bootstrap asks every adapter whether it fits a repo, and is never edited to
   learn a stack. It exports `DETECTION` — `parts` (from
-  `src/core/lib/parts.mjs`: routes, screens, components, database access,
+  `src/core/lib/parts.mjs`: routes, screens, components, schema, queries,
   background tasks, external services), `order` (where its proposal sits),
   `optionShape` (which option keys hold a repo-relative path, a list of
   them, call names, or objects with a path key — bootstrap checks answers
@@ -196,8 +232,10 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
   adapter where detection proposes it and its `companion`s run — for a part
   an older release's adapters read themselves; decision 0037) —
   and `detect({ scan, proposed })`, returning `null` or `{ proposal:
-  { evidence, options }, apps, questions }`. Evidence is plain words
-  ("`APIRouter` under `api/routes`"). The `scan` is one walk of the repo
+  { evidence, options }, apps, questions, declined }`. Evidence is plain
+  words ("`APIRouter` under `api/routes`"). `declined` is the other answer
+  to a trial read: plain words saying what did not make sense, no proposal,
+  and the parts stay uncovered (decision 0048 point 6). The `scan` is one walk of the repo
   shared by every adapter (six folders deep, gitignored paths never seen,
   under one io's caps): `files`, `read(rel)`, `json(rel)` and `memo(key,
   fn)`. The engine's `detect` prints what they all answer.
@@ -233,10 +271,17 @@ purely on the visualization.
 A viewer is one module exporting
 `render({ graph, docs, changed, options, bundleName, repoBase })` and returning
 the page as a string. `graph` is exactly what was written to `graph.json`; `docs`
-is `{ glossary, adrs, blessings }` (the store text, for viewers that embed it;
+is `{ glossary, adrs, blessings, unread, gaps }` (the store text, for viewers that embed it;
 `blessings` comes ready-read — exemplar, app, users, cited ADRs, and
 `importance` (`"high"` or null, high entries first) — so no viewer
-parses the store, [decision 0043](docs/decisions/0043-viewers-get-the-blessing-store-ready-read.md), [0045](docs/decisions/0045-blessings-carry-an-importance-high-or-nothing-kept-scarce.md)); `changed` is
+parses the store, [decision 0043](docs/decisions/0043-viewers-get-the-blessing-store-ready-read.md), [0045](docs/decisions/0045-blessings-carry-an-importance-high-or-nothing-kept-scarce.md);
+`unread` is there only when an adapter reported something: a list of
+`{ id, adapter, file, what, why }`, unanswered first with `why` null, and
+**every viewer shows it**, [decision 0048](docs/decisions/0048-the-app-owns-its-adapters-zdd-ships-starters-not-readers.md);
+`gaps` is there only when a gap is answered as known: a list of
+`{ id, node, kind, title, file, direction, what, why }`, `node` the graph node
+or null — the parts of the map not to trust, and **every viewer shows it**,
+[decision 0049](docs/decisions/0049-every-update-checks-the-map-still-reaches-what-it-should.md)); `changed` is
 the latest-store-change highlight; `options` is whatever the adopter put in
 `viewer` besides `name`, plus the resolved top-level `nonAreaTags` whenever it
 is non-empty (your area model should exclude the same tags the graph did). A viewer is a good contribution when it honours the
@@ -293,11 +338,12 @@ A change to the reference viewer's behaviour adds or changes a flow there.
   serve the ritual (not project-specific workflow — ZDD ships mechanism, not
   opinions about how *your* team plans work).
 - **Engine** — determinism fixes, better ref resolution, the renderer, the checks.
-- **Detection** — a catalogue adapter's own `DETECTION` and `detect()`
+- **Detection** — a starter's own `DETECTION` and `detect()`
   (above; decision 0039): what evidence says it fits, what options that
   implies. Bootstrap is never edited to learn a stack. Prove it in the
-  engine's suite (`packages/zdd-engine/test/detect.test.mjs`); the plugin's
-  tests drive bootstrap against what the engine answers.
+  starter library's suite (`packages/zdd-starter-adapters/test/detect.test.mjs`);
+  the plugin's tests drive bootstrap against what the engine answers over
+  the library's adapters.
 - **Docs** — clearer setup, worked examples, fixing anything that misled you.
 
 ## What ZDD deliberately does *not* want

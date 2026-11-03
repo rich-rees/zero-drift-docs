@@ -15,14 +15,17 @@
 //          "unreadable"   present, but the read failed (permissions, I/O)
 //          "ignored"      git ignores the path (or it is .claude/worktrees):
 //                         not source, so not read — the same thing a clean
-//                         clone would say (2.3.0, pick 1, CR-307)
+//                         clone would say (2.3.0, pick 1, CR-307); or it is
+//                         in the repo's own adapter folder, ZDD's tooling
+//                         and never the app's source (decision 0048)
 //        Only "missing" and "ignored" mean absence (CI has neither); every
 //        other refusal is worth a diagnostic, and an extractor must never
 //        treat one as greenfield.
 //
 //   io.isIgnored(rel)
 //     -> true when git ignores the path, or it is `.claude/worktrees` (never
-//        source; lib/ignored.mjs) — for an extractor that walks on its own.
+//        source; lib/ignored.mjs), or it is in the repo's adapter folder —
+//        for an extractor that walks on its own.
 //
 //   io.walk(relDir, onFile, { enter })
 //     -> { exists, truncated, skipped }
@@ -54,6 +57,7 @@
 import { lstatSync, opendirSync, readSync, openSync, fstatSync, closeSync, realpathSync, constants } from "node:fs";
 import { join } from "node:path";
 import { regularFileInside } from "./walk-markdown.mjs";
+import { foldCase } from "./paths.mjs";
 import { gitIgnoredPredicate } from "./ignored.mjs";
 
 export const IO_MAX_READ_BYTES = 1024 * 1024;
@@ -99,8 +103,12 @@ function directoryInside(root, rel) {
 // them); `ignored` is the shared git-ignore predicate derive computes once
 // per run (lib/ignored.mjs) so N extractors do not ask git N times. Absent,
 // the io asks git itself on first use — a local extractor's unit test and
-// the CLI then veto the same paths.
-export function makeExtractorIo(repoRoot, label = "extractor", { maxEntries = IO_MAX_ENTRIES, maxDepth = IO_MAX_DEPTH, maxTotalBytes = IO_MAX_TOTAL_BYTES, ignored, onRead } = {}) {
+// the CLI then veto the same paths. `notSource` lists repo-relative folders
+// that are the repo's ZDD tooling, never its source: the adapter folder
+// (localExtractorDir), which since 0.14 holds every adapter the repo runs,
+// with the tests and sample fixtures each carries (decision 0048). A walk
+// never enters one and a read refuses it, as an ignored path.
+export function makeExtractorIo(repoRoot, label = "extractor", { maxEntries = IO_MAX_ENTRIES, maxDepth = IO_MAX_DEPTH, maxTotalBytes = IO_MAX_TOTAL_BYTES, ignored, onRead, notSource = [] } = {}) {
   let realRoot = null;
   try {
     // .native: the Windows runner's RUNNER~1 short name must not survive
@@ -113,7 +121,16 @@ export function makeExtractorIo(repoRoot, label = "extractor", { maxEntries = IO
   let ignoredPredicate = ignored;
   // Repo-relative POSIX path (a file or a directory) that git ignores, or
   // the worktree folder: never source, never walked, never read as source.
+  // Compared case-folded where the filesystem folds, so `ZDD/Extractors`
+  // names the same folder as `zdd/extractors` there (CR-294). The root
+  // itself is never a tooling folder: config refuses it.
+  const tooling = notSource.map((d) => foldCase(String(d).replace(/^\.\//, "").replace(/\/+$/, ""))).filter((d) => d && d !== ".");
+  const inTooling = (rel) => {
+    const clean = foldCase(rel.replace(/^\.\//, "").replace(/\/$/, ""));
+    return tooling.some((d) => clean === d || clean.startsWith(`${d}/`));
+  };
   const isIgnored = (rel) => {
+    if (inTooling(rel)) return true;
     if (!ignoredPredicate) ignoredPredicate = gitIgnoredPredicate(realRoot ?? repoRoot);
     return ignoredPredicate(rel);
   };
@@ -123,6 +140,7 @@ export function makeExtractorIo(repoRoot, label = "extractor", { maxEntries = IO
     const cap = Math.min(Number.isFinite(maxBytes) && maxBytes >= 0 ? maxBytes : IO_MAX_READ_BYTES, IO_MAX_READ_BYTES);
     const refuse = (code, reason) => ({ ok: false, code, reason: `${clean} ${reason}` });
     if (!realRoot) return refuse("missing", "is missing");
+    if (inTooling(clean)) return refuse("ignored", "is in the repo's adapter folder (localExtractorDir) — ZDD's own tooling, not source, not read");
     if (isIgnored(clean)) return refuse("ignored", "is gitignored — not source, not read");
     const abs = join(realRoot, clean);
     let st;

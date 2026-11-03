@@ -188,6 +188,14 @@ refs to a record another adapter minted.
   `supabase-js`; proposing `supabase-py` / `sqlalchemy` stays with detection
   (slice 4).
 
+## As built (ZDD-11 slice 3: paths moved)
+
+The helper folders this decision names, `adapters/python/` and `adapters/js/`,
+are now `adapters/_shared/python/` and `adapters/_shared/js/`, the one shared
+folder an app keeps beside its adapters ([0048](0048-the-app-owns-its-adapters-zdd-ships-starters-not-readers.md)
+point 4). The data-access record's builder moved with them to
+`adapters/_shared/data-access.mjs`. What the core joins on is unchanged.
+
 ## Rejected
 
 - **One adapter writes refs into another's records** (the data-access

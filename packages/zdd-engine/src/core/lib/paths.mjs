@@ -34,6 +34,8 @@ export function repoRelative(value, label) {
 // containment rules below share the one switch.
 const FOLDS_CASE = process.platform === "win32" || process.platform === "darwin";
 const fold = (s) => (FOLDS_CASE ? s.toLowerCase() : s);
+// The same fold, for a comparison of repo-relative paths elsewhere.
+export const foldCase = fold;
 
 // Two repoRelative() names overlap when one is the other or an ancestor of
 // it (`.` is the root, so it overlaps everything). The layout rule in

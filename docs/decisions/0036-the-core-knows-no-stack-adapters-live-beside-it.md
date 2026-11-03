@@ -1,6 +1,6 @@
 # 0036 — The core knows no stack; adapters live beside it, one convention each, loaded by name
 
-**Date:** 2026-10-27 · **Status:** accepted · **Origin:** ZDD-3, the design session on 2026-10-27 (Rich's calls), from an adopter's FastAPI + SQLAlchemy API whose routes had no edges to tables. **Supersedes, in part:** [0010](0010-local-extractors-first-tier-engine-hands-them-io.md), the "registry" tier: the registry becomes the catalogue, a folder of adapters beside the core, not a list inside it. **Extends** [0001](0001-composed-extractors.md): an extractor is still one convention plus an options schema; it is now called an adapter, and the core never holds one.
+**Date:** 2026-10-27 · **Status:** accepted; points 2 to 5 superseded in part by [0048](0048-the-app-owns-its-adapters-zdd-ships-starters-not-readers.md) (2026-11-02: the app owns its adapters; the catalogue becomes a starter library outside the package) · **Origin:** ZDD-3, the design session on 2026-10-27 (Rich's calls), from an adopter's FastAPI + SQLAlchemy API whose routes had no edges to tables. **Supersedes, in part:** [0010](0010-local-extractors-first-tier-engine-hands-them-io.md), the "registry" tier: the registry becomes the catalogue, a folder of adapters beside the core, not a list inside it. **Extends** [0001](0001-composed-extractors.md): an extractor is still one convention plus an options schema; it is now called an adapter, and the core never holds one.
 
 ## Context
 

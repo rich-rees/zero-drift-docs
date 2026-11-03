@@ -1,0 +1,55 @@
+{
+  "name": "Fixture Jobs",
+  "baseBranch": "main",
+  "localExtractorDir": "zdd/extractors",
+  "extractors": [
+    "supabase",
+    "supabase-js",
+    "supabase-py",
+    "sqlalchemy",
+    "nextjs",
+    "background-railway",
+    "background-procfile",
+    "background-vercel",
+    "background-cloudflare",
+    "background-pg-cron",
+    "background-compose",
+    "background-bullmq"
+  ],
+  "render": {
+    "storeChanges": false
+  },
+  "extractorOptions": {
+    "supabase": {
+      "migrationNamespaces": [
+        {
+          "name": "db",
+          "dir": "supabase/migrations"
+        }
+      ]
+    },
+    "nextjs": {
+      "appDir": "apps/web/src/app",
+      "refs": {
+        "roots": [
+          "apps/web/src"
+        ]
+      }
+    },
+    "supabase-py": {
+      "roots": [
+        "apps/api"
+      ]
+    },
+    "sqlalchemy": {
+      "roots": [
+        "apps/api"
+      ]
+    },
+    "background-procfile": {
+      "modes": {
+        "worker": "worker"
+      }
+    }
+  }
+}

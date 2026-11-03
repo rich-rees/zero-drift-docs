@@ -1,0 +1,35 @@
+{
+  "name": "@rich-rees/zdd-starter-adapters",
+  "version": "0.2.0",
+  "description": "Zero-Drift Docs starter adapters: readers for common stacks that ZDD copies into an app, which then owns them. An offer, never a requirement: the engine depends on nothing here, and a repo whose adapters are in place needs this package for nothing.",
+  "type": "module",
+  "exports": {
+    "./package.json": "./package.json",
+    "./notes.json": "./notes.json"
+  },
+  "files": [
+    "adapters",
+    "notes.json",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20.6"
+  },
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\" && node ../zdd-engine/bin/zdd-engine.mjs test --adapters=adapters"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rich-rees/zero-drift-docs.git",
+    "directory": "packages/zdd-starter-adapters"
+  },
+  "homepage": "https://github.com/rich-rees/zero-drift-docs",
+  "author": "Rich Rees (https://github.com/rich-rees)",
+  "license": "MIT",
+  "keywords": [
+    "documentation",
+    "zero-drift",
+    "adapters",
+    "starters"
+  ]
+}

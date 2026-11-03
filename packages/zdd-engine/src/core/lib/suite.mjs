@@ -1,6 +1,6 @@
 // The standard suite (decision 0040 point 5): one set of checks every
-// adapter passes, the catalogue's in ZDD's own CI and an adopter's own in
-// theirs (`zdd-engine suite`). It runs on the adapter's own fixture — a
+// adapter passes, a starter's in the starter library's CI and an adopter's
+// own in theirs (`zdd-engine suite`). It runs on the adapter's own fixture — a
 // miniature repo in its convention — copied into temporary folders outside
 // any repo, never on the adopter's code: ZDD never writes throwaway files
 // into a repo to test itself (0039 point 5). Each run is a real `derive` by
@@ -24,7 +24,7 @@ import { spawnSync, execFileSync } from "node:child_process";
 import { closeSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const SUITE_CHECKS = [
   {
@@ -115,17 +115,101 @@ export function readFixture(dir) {
 }
 
 // An adopter's own adapter, as rel -> bytes under zdd/extractors/: a folder
-// without its fixtures and tests, or a single module.
-function readLocalAdapter(name, path) {
+// without its fixtures and tests, or a single module, and every other file
+// its imports reach inside `within` (localExtractorDir: the shared folder
+// beside the adapters, decision 0048 point 4), at the same place.
+function readLocalAdapter(name, path, entry, within) {
   const out = new Map();
   const budget = { bytes: 0 };
   if (lstatSync(path).isDirectory()) {
     walkFiles(path, (p, rel) => out.set(`${name}/${rel}`, readCapped(p, budget)), {
       // Only the suite's own folders are test data (CR-135).
-      skip: (rel, n) => /^fixture(?:-deep|-trap)?$/.test(rel) || n === "node_modules" || n === ".git" || n.endsWith(".test.mjs"),
+      // An adapter's own `test/` folder is its tests, never its code.
+      skip: (rel, n) => /^fixture(?:-deep|-trap)?$/.test(rel) || rel === "test" || n === "node_modules" || n === ".git" || n.endsWith(".test.mjs"),
     });
   } else out.set(`${name}.mjs`, readCapped(path, budget));
+  if (entry && within) {
+    const root = resolve(within);
+    const own = resolve(path);
+    const reach = moduleReach(entry, root);
+    if (reach.limit) throw new Error(`${name}: its imports reach too much to copy (${reach.limit})`);
+    for (const abs of reach.files) {
+      if (abs === own || abs.startsWith(own + sep)) continue;
+      out.set(relative(root, abs).split(sep).join("/"), readCapped(abs, budget));
+    }
+  }
   return out;
+}
+
+// The JS files a module reaches by its static relative imports, itself
+// included, that stay inside `within`: what copying it elsewhere must bring
+// (decision 0048 point 4). An import is resolved as Node resolves it, as a
+// URL against the importing file, so `./x.mjs?v=1`, `./x.mjs#y` and `./a%20b.mjs`
+// name the files Node loads (CR-284). `outside` names each import that
+// leaves `within`, or reaches a file through a link (a link's target is not
+// the folder's own, CR-278); `missing` each reached file that is not a
+// regular file. Read as check 5 reads an import, from the code view (comments
+// and template text blanked). Bounded as the suite's copies are: no file over
+// 1 MiB, 64 MiB and 20,000 files in all, else `limit` says which ran out and
+// the reach stops (CR-279). Sorted, so a copy is the same every time.
+export function moduleReach(entry, within) {
+  const root = resolve(within);
+  const seen = new Set();
+  const outside = [];
+  const missing = [];
+  let limit = null;
+  let bytes = 0;
+  const show = (abs) => relative(root, abs).split(sep).join("/");
+  // A link on any segment from `within` down: the path's spelling stays
+  // inside while the file it names may not.
+  const linked = (abs) => {
+    let at = root;
+    for (const seg of relative(root, abs).split(sep)) {
+      at = join(at, seg);
+      try {
+        if (lstatSync(at).isSymbolicLink()) return true;
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  };
+  const queue = [resolve(entry)];
+  while (queue.length && !limit) {
+    const abs = queue.pop();
+    if (seen.has(abs)) continue;
+    let text;
+    try {
+      const st = lstatSync(abs);
+      if (!st.isFile()) throw new Error("not a file");
+      if (st.size > MAX_FILE) {
+        limit = `${show(abs)} is over ${MAX_FILE} bytes`;
+        break;
+      }
+      text = readFileSync(abs, "utf8");
+    } catch {
+      missing.push(show(abs));
+      continue;
+    }
+    seen.add(abs);
+    bytes += Buffer.byteLength(text);
+    if (bytes > MAX_TOTAL) limit = `more than ${MAX_TOTAL} bytes reached`;
+    else if (seen.size > MAX_ENTRIES) limit = `more than ${MAX_ENTRIES} files reached`;
+    for (const spec of importSpecs(text)) {
+      if (!spec.startsWith(".")) continue;
+      let target;
+      try {
+        target = fileURLToPath(new URL(spec, pathToFileURL(abs)));
+      } catch {
+        missing.push(`${show(abs)} imports ${spec}`);
+        continue;
+      }
+      if (!target.startsWith(root + sep)) outside.push(`${show(abs)} imports ${spec}`);
+      else if (linked(target)) outside.push(`${show(abs)} imports ${spec}, through a link`);
+      else queue.push(target);
+    }
+  }
+  return { files: [...seen].sort(), outside, missing, limit };
 }
 
 function makeRepo(files, opts) {
@@ -144,7 +228,7 @@ function fillRepo(repo, files, { name, options, local, companions, alone = false
     mkdirSync(dirname(to), { recursive: true });
     writeFileSync(to, bytes);
   }
-  // Companions run beside the adapter: catalogue adapters whose records it
+  // Companions run beside the adapter: adapters of the same folder whose records it
   // needs to say anything (a data-access adapter's tables come from a schema
   // adapter). They are held to nothing here; the adapter is.
   const config = alone
@@ -244,6 +328,23 @@ const BANNED_CALLS = [
   [call("fetch"), "calls fetch"],
 ];
 const IMPORT_RE = /^\s*(?:import|export)\b[^;]*?\bfrom\s*["']([^"']+)["']|^\s*import\s*["']([^"']+)["']/gm;
+
+// The specifiers a file's static imports and re-exports name. A statement is
+// found in the view with strings blanked, so `export const s = 'from "./x"'`
+// is a string, not an import, while `import { "odd" as x } from "./y"` is one
+// (CR-284, CR-289); the specifier is read from the code view at the same
+// place, where strings are kept.
+const STATEMENT_RE = /^\s*(?:import|export)\b[^;]*?\bfrom\s*(["'])|^\s*import\s*(["'])/gm;
+export function importSpecs(text) {
+  const { code, mask } = lexJs(text);
+  const specs = [];
+  for (const m of mask.matchAll(STATEMENT_RE)) {
+    const at = m.index + m[0].length;
+    const end = code.indexOf(m[1] ?? m[2], at);
+    if (end > at) specs.push(code.slice(at, end));
+  }
+  return specs;
+}
 
 // The adapter's own source, two views at the same offsets (CR-121, CR-122):
 // `code` has comments, regex literal bodies and template text blanked —
@@ -384,7 +485,7 @@ function coreReachesFs(abs, seen = new Set()) {
 }
 
 // The adapter's own JS files: `entry` and every relative import it reaches
-// inside `within` (the catalogue folder, or the adopter's localExtractorDir).
+// inside `within` (the starter library's adapters, or the adopter's localExtractorDir).
 // A core module is allowed when it reaches no filesystem of its own.
 export function ioProblems(entry, within) {
   const problems = [];
@@ -402,9 +503,8 @@ export function ioProblems(entry, within) {
       problems.push(`${rel} cannot be read`);
       return;
     }
-    const { code, mask } = lexJs(text);
-    for (const m of code.matchAll(IMPORT_RE)) {
-      const spec = m[1] ?? m[2];
+    const { mask } = lexJs(text);
+    for (const spec of importSpecs(text)) {
       if (BANNED_MODULES.test(spec)) problems.push(`${rel} imports ${spec}`);
       else if (spec.startsWith(".")) {
         const target = resolve(dirname(abs), spec);
@@ -426,11 +526,14 @@ export function ioProblems(entry, within) {
 // The run
 // ---------------------------------------------------------------------------
 
-// One adapter through every check. `local` is { path } for an adopter's own
-// adapter (a folder or a module, copied into each scratch repo), absent for
-// a catalogue one (selected by name). `entry`/`within` locate its source for
-// check 5. Returns { name, records, precondition, checks: [{ n, id, ok, detail }] }.
-export function runSuite({ name, fixtureDir, options = {}, comment, trapDir = null, local = null, entry, within, allowEmpty = false, companions = {} }) {
+// One adapter through every check. `local` is { path }, the adapter (a
+// folder or a module) copied into each scratch repo with what it reaches
+// inside `within`; `entry` locates its source for check 5. A companion
+// runs beside it and is copied the same way, from `companionPaths`
+// ({ name: { path, entry } }, the same folder's adapters): since 0.14 the
+// engine holds no adapter to select by name (decision 0048).
+// Returns { name, records, precondition, checks: [{ n, id, ok, detail }] }.
+export function runSuite({ name, fixtureDir, options = {}, comment, trapDir = null, local = null, entry, within, allowEmpty = false, companions = {}, companionPaths = {} }) {
   const made = [];
   const repo = (files) => {
     const r = makeRepo(files, { name, options, local: localFiles, companions });
@@ -441,11 +544,17 @@ export function runSuite({ name, fixtureDir, options = {}, comment, trapDir = nu
   const result = (n, ok, detail = null) => results.push({ n, id: SUITE_CHECKS[n - 1].id, ok, detail });
   let localFiles = null;
   try {
-    if (local) localFiles = readLocalAdapter(name, local.path);
+    if (local) localFiles = readLocalAdapter(name, local.path, entry, within);
+    for (const c of Object.keys(companions)) {
+      const at = companionPaths[c];
+      if (!at) throw new Error(`${name}: its companion '${c}' is not an adapter beside it`);
+      localFiles ??= new Map();
+      for (const [rel, bytes] of readLocalAdapter(c, at.path, at.entry, within)) if (!localFiles.has(rel)) localFiles.set(rel, bytes);
+    }
     let fixture = null;
     let precondition = null;
     if (!fixtureDir || !existsSync(fixtureDir) || !lstatSync(fixtureDir).isDirectory()) {
-      precondition = `no fixture: ${local ? `add a fixture/ folder beside the adapter (a miniature repo in its convention) and export SUITE = { options }` : "the catalogue table names none"} — the suite runs on it, never on your repo`;
+      precondition = `no fixture: add a fixture/ folder beside the adapter (a miniature repo in its convention) and export SUITE = { options } — the suite runs on it, never on your repo`;
     } else fixture = readFixture(fixtureDir);
     let base = null;
     let reads = [];
@@ -469,7 +578,7 @@ export function runSuite({ name, fixtureDir, options = {}, comment, trapDir = nu
         // (a data-access adapter's tables land on the routes that reach them).
         let adds = base.size > 0;
         if (adds && Object.keys(companions).length) {
-          const c = makeRepo(fixture, { name, options, companions, alone: true });
+          const c = makeRepo(fixture, { name, options, local: localFiles, companions, alone: true });
           made.push(c);
           adds = derive(c).status !== 0 || difference(metadata(c), base, { what: "the adapter" }) !== null;
         }
@@ -485,7 +594,7 @@ export function runSuite({ name, fixtureDir, options = {}, comment, trapDir = nu
     else {
       let theirs = new Map();
       if (Object.keys(companions).length) {
-        const c = makeRepo(new Map(), { name, options, companions, alone: true });
+        const c = makeRepo(new Map(), { name, options, local: localFiles, companions, alone: true });
         made.push(c);
         if (derive(c).status === 0) theirs = metadata(c);
       }

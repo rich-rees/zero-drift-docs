@@ -6,6 +6,9 @@
 //   zdd-engine derive --check     # exit 1 if metadata/ is stale
 //   zdd-engine derive --verbose   # extractor diagnostics to stderr
 //
+// What an adapter saw and could not read prints on every run, --verbose or
+// not (decision 0048 point 5, lib/unread.mjs).
+//
 // Deterministic: same source bytes in, byte-identical metadata/*.json out (the
 // blocking CI check relies on this). No dependencies beyond Node stdlib, no
 // LLM anywhere. Nothing in this file may be stack- or project-specific — stack
@@ -13,14 +16,16 @@
 //
 // Extractors are composed: config lists them by name, each one inventories one
 // convention, and this file merges their records and resolves cross-extractor
-// refs afterwards (lib/resolve-refs.mjs). Selection is by NAME only — from
-// the catalogue of adapters beside the core (lib/catalogue.mjs, decision
-// 0036), or from the one repo-local directory config may declare
-// (`localExtractorDir`), the single sanctioned place config can point at
-// code. A path in the extractors list is refused. This file names no adapter.
+// refs afterwards (lib/resolve-refs.mjs). Selection is by NAME only, from
+// the one repo-local directory config may declare (`localExtractorDir`),
+// the single sanctioned place config can point at code. The repo owns every
+// adapter it runs and the core holds none (decision 0048): a name the
+// folder does not hold is told where adapters come from, never run from
+// anywhere else. A path in the extractors list is refused. This file names
+// no adapter.
 
 import { readFileSync, writeFileSync, readdirSync, statSync, lstatSync, realpathSync, mkdirSync, rmSync, existsSync } from "node:fs";
-import { join, dirname, resolve, sep } from "node:path";
+import { join, dirname, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { loadConfig, resolveExtractors } from "./lib/config.mjs";
 import { resolveRefs } from "./lib/resolve-refs.mjs";
@@ -28,10 +33,11 @@ import { mergeBackgroundTasks } from "./lib/background-tasks.mjs";
 import { insideRepo } from "./lib/paths.mjs";
 import { makeExtractorIo } from "./lib/extractor-io.mjs";
 import { gitIgnoredPredicate } from "./lib/ignored.mjs";
-import { catalogue } from "./lib/catalogue.mjs";
 import { judgeContract } from "./lib/contract.mjs";
+import { UNREAD_KIND, unreadRecords, unreadConfig, unreadReport, unreadLines, itemOf, oneLine, cut } from "./lib/unread.mjs";
+import { checkGaps, gapKinds, gapsConfig } from "./lib/gaps.mjs";
 
-const NAME_RE = /^[a-z][a-z0-9-]*$/;
+import { NAME_RE } from "./lib/adapter-folder.mjs";
 
 const RECORD_KEYS = ["kind", "id", "title", "description", "resource", "refs", "facts"];
 const FILENAME_RE = /^[A-Za-z0-9._~()\[\]-]+\.json$/;
@@ -143,10 +149,9 @@ function validateEdgeShapes(records) {
   }
 }
 
-// Which names are loadable: the catalogue plus whatever the local dir holds
-// (`<dir>/<name>.mjs` or `<dir>/<name>/index.mjs`). Local names may not
-// shadow a catalogue adapter: a different take on one is a copy under a new
-// name (decision 0036 point 5).
+// Which names are loadable: whatever the local dir holds
+// (`<dir>/<name>.mjs` or `<dir>/<name>/index.mjs`). Every name is the repo's
+// own, so a copy of a starter keeps its name (decision 0048).
 export function localExtractors(repoRoot, dir) {
   const found = new Map();
   if (!dir) return found;
@@ -156,10 +161,38 @@ export function localExtractors(repoRoot, dir) {
   if (!existsSync(abs)) return found;
   for (const name of readdirSync(abs).sort()) {
     const p = join(abs, name);
-    if (statSync(p).isDirectory() && existsSync(join(p, "index.mjs"))) found.set(name, join(p, "index.mjs"));
-    else if (name.endsWith(".mjs")) found.set(name.slice(0, -4), p);
+    const st = lstatSync(p);
+    // A link is never an adapter, as in a folder of adapters (CR-295): it
+    // would run code from wherever it points. Kept, so derive can say so.
+    if (st.isSymbolicLink()) {
+      found.set(name.endsWith(".mjs") ? name.slice(0, -4) : name, { link: p });
+      continue;
+    }
+    if (st.isDirectory()) {
+      const entry = join(p, "index.mjs");
+      const est = lstatSync(entry, { throwIfNoEntry: false });
+      if (est?.isSymbolicLink()) found.set(name, { link: entry });
+      else if (est) found.set(name, entry);
+    } else if (name.endsWith(".mjs")) found.set(name.slice(0, -4), p);
   }
   return found;
+}
+
+// What a config is told when it selects a name its repo does not hold: since
+// 0.14 the core runs no adapter of its own, so a name an older release ran
+// from its catalogue lands here too. Generic on purpose: the core names no
+// stack, so it cannot tell a former catalogue name from a typo, and the same
+// two routes answer both (decision 0048 points 3 and 8).
+export function notHeld(name, localDir, local) {
+  // Only the names config could select: a folder entry is no text to echo (CR-311).
+  const held = [...local.keys()].filter((n) => NAME_RE.test(n));
+  const where = localDir ? `localExtractorDir (${localDir}) holds ${held.join(", ") || "no adapter"}` : "the config sets no localExtractorDir";
+  return (
+    `Extractor '${name}' is not one of this repo's adapters: ${where}. ` +
+    `Since ZDD 0.14 a repo owns every adapter it runs and the engine ships none. ` +
+    `If an older ZDD ran '${name}' for you, say "upgrade ZDD": it copies the adapter into the repo, from the starter library (npm @rich-rees/zdd-starter-adapters), and proves the records unchanged. ` +
+    `Otherwise build it with the extractor skill, or take it out of "extractors".`
+  );
 }
 
 async function loadExtractor(name, repoRoot, config) {
@@ -171,23 +204,12 @@ async function loadExtractor(name, repoRoot, config) {
     );
   }
   const local = localExtractors(repoRoot, localDir);
-  const { names, aliases, retired } = catalogue();
-  // A Map, and hasOwn on the aliases: a local extractor called `constructor`
-  // must not hit Object.prototype (CR-022).
-  if (names.has(name)) {
-    if (local.has(name)) fail(`Local extractor '${name}' shadows the built-in of the same name — rename it`);
-    return import(pathToFileURL(names.get(name)).href);
-  }
-  // catalogue() refused an alias whose target is not a catalogue adapter, so
-  // a retired name never falls through to a local one (CR-002).
-  if (Object.hasOwn(aliases, name)) return import(pathToFileURL(names.get(aliases[name])).href);
-  // A retired name stops derive before any local extractor of that name runs
-  // (CR-080): a stale config is told, never served by old local code.
-  if (Object.hasOwn(retired, name)) fail(`Extractor '${name}' was retired: ${retired[name]}`);
-  if (local.has(name)) return import(pathToFileURL(local.get(name)).href);
-  const known = [...names.keys(), ...Object.keys(aliases)].sort().join(", ");
-  const localList = localDir ? `; local ${localDir}: ${[...local.keys()].join(", ") || "(none)"}` : "";
-  fail(`Unknown extractor '${name}' (known: ${known}${localList})`);
+  // A Map: a local extractor called `constructor` must not hit
+  // Object.prototype (CR-022).
+  const found = local.get(name);
+  if (typeof found === "object") fail(`Extractor '${name}': ${relative(repoRoot, found.link).split(sep).join("/")} is a link — an adapter is a real folder or file in localExtractorDir, never a link to code elsewhere`);
+  if (found) return import(pathToFileURL(found).href);
+  fail(notHeld(name, localDir, local));
 }
 
 // A module localExtractors found, for the standard suite (decision 0040):
@@ -205,13 +227,37 @@ export async function selectedModules(repoRoot, config) {
   return out;
 }
 
-// Every catalogue adapter's module, in name order (decision 0039): detection
-// asks each one whether it fits a repo. The one other place a name becomes a
-// module, beside loadExtractor.
-export async function catalogueModules() {
-  const out = [];
-  for (const [name, entry] of catalogue().names) out.push({ name, mod: await import(pathToFileURL(entry).href) });
-  return out;
+// The kinds the gap list counts (decision 0049): the core's, plus what each
+// adapter the config selects names in its GAPS. For lint and render, which
+// read records and run no adapter's derive. The modules are the repo's own
+// code, which derive imports and runs in full in the same CI step before
+// lint (CR-358). A selection derive would refuse is derive's to report; a
+// module that will not load is named in `failed`, with a note, and the
+// core's kinds stand for it: lint fails on it under `gaps.strict` (the kinds
+// are unknown), render warns. A malformed GAPS is { error }.
+export async function selectedGapKinds(repoRoot, config) {
+  const selection = resolveExtractors(config);
+  const notes = [];
+  const failed = [];
+  const adapters = [];
+  if (!selection.error) {
+    const local = localExtractors(repoRoot, config.localExtractorDir);
+    for (const { name } of selection.extractors) {
+      // Not held, or a link: derive refuses it and says so, every run.
+      const found = NAME_RE.test(name) ? local.get(name) : undefined;
+      if (typeof found !== "string") continue;
+      try {
+        adapters.push({ name, mod: await import(pathToFileURL(found).href) });
+      } catch (e) {
+        // Whatever was thrown, as one plain line (CR-361).
+        const why = cut(oneLine(String(e instanceof Error ? e.message : e)), 200);
+        failed.push(name);
+        notes.push(`adapter '${name}' did not load (${why}), so the gap list counts only the core's kinds for it`);
+      }
+    }
+  }
+  const kinds = gapKinds(adapters);
+  return kinds.error ? { error: kinds.error, notes, failed } : { kinds, notes, failed };
 }
 
 // The lexical check above is the braces; this is the belt (CR-060). A
@@ -296,17 +342,23 @@ export async function deriveRecords({ repoRoot, config, contract }) {
   const warnings = [];
   const configDiagnostics = selection.diagnostics;
   let records = [];
+  const unread = []; // the core's own records: kept apart from what adapters minted
   const factsOrder = {};
+  const adapterModules = []; // for the gap list's kinds (decision 0049)
   // What git ignores is never source (pick 1): asked once, shared by every
   // extractor's io.
   const ignored = gitIgnoredPredicate(repoRoot);
   if (ignored.error) fail(ignored.error); // fail closed (CR-403): never read ignored files as source
+  // The repo's adapter folder is its ZDD tooling, never its source (decision
+  // 0048): every adapter, with the tests and sample fixtures it carries, is
+  // there, and an adapter that walks the whole repo must not read them.
+  const notSource = typeof config.localExtractorDir === "string" ? [config.localExtractorDir] : [];
   // The standard suite asks which files each adapter read (decision 0040,
   // CR-118): ZDD_IO_TRACE names a file outside the repo that gets
   // { "<adapter>": [paths read] }. Unset, nothing is kept.
   const tracePath = process.env.ZDD_IO_TRACE;
   const trace = tracePath ? {} : null;
-  for (const { name, options, legacyName } of selection.extractors) {
+  for (const { name, options } of selection.extractors) {
     const extractor = await loadExtractor(name, repoRoot, config);
     if (typeof extractor.derive !== "function") fail(`Extractor '${name}' exports no derive()`);
     // The contract it was written for (decision 0040): newer than this
@@ -314,23 +366,34 @@ export async function deriveRecords({ repoRoot, config, contract }) {
     // warns; optional steps it is behind on are said under --verbose only.
     const judged = judgeContract(name, extractor, contract);
     if (judged.fail) fail(judged.fail);
+    // The kinds of its own records it says must link (decision 0049), an
+    // optional step: a malformed one is a contract fault, said here first.
+    const gaps = checkGaps(name, extractor.GAPS);
+    if (gaps.error) fail(gaps.error);
+    adapterModules.push({ name, mod: extractor });
     if (judged.warning) warnings.push(`WARNING [contract]: ${judged.warning}`);
     for (const r of judged.behind) diagnostics.push(`[contract] ${name} was written for contract ${judged.declared}; it does not have "${r.step}" (contract ${r.since}, optional): ${r.what}`);
     let out;
     try {
       // A fresh io per extractor: one shared walk budget each, so a greedy
       // extractor cannot starve the next one (decision 0010).
-      // `legacyName`: the retired name the config used (2.3: `services`), so
-      // the extractor can keep the old record kind until "upgrade ZDD"
-      // renames the key — an engine-only adopter sees nothing move (CR-302).
       const onRead = trace ? (rel) => (trace[name] ??= []).push(rel) : undefined;
-      out = extractor.derive({ repoRoot, options, io: makeExtractorIo(repoRoot, name, { ignored, onRead }), ...(legacyName ? { legacyName } : {}) });
+      out = extractor.derive({ repoRoot, options, io: makeExtractorIo(repoRoot, name, { ignored, onRead, notSource }) });
     } catch (e) {
       fail(`Extractor '${name}' failed: ${e.message}`);
     }
     if (!out || !Array.isArray(out.records) || !Array.isArray(out.diagnostics)) fail(`Extractor '${name}' must return { records: [], diagnostics: [] }`);
+    // `unread` is the core's kind: an adapter says it through its own list.
+    if (out.records.some((r) => r?.kind === UNREAD_KIND)) fail(`Extractor '${name}' minted a record of kind '${UNREAD_KIND}' — that kind is the core's; return the item in the \`unread\` list instead (decision 0048)`);
     records.push(...out.records);
     diagnostics.push(...out.diagnostics.map((d) => `[${name}] ${d}`));
+    // What it saw and could not read (decision 0048 point 5). Optional: an
+    // adapter without the list keeps working, with nothing said.
+    if (out.unread !== undefined) {
+      const minted = unreadRecords(name, out.unread);
+      if (minted.error) fail(minted.error);
+      unread.push(...minted.records);
+    }
     // An optional third channel (2.1.0): warnings print on EVERY derive,
     // not only under --verbose — for what the branch that caused it should
     // hear (an environment name no declared service covers). Still never
@@ -358,7 +421,8 @@ export async function deriveRecords({ repoRoot, config, contract }) {
   warnings.push(...resolved.warnings.map((w) => `WARNING [data-access]: ${w}`));
   validateRecords(records);
   records.sort((a, b) => (a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : a.id < b.id ? -1 : 1));
-  return { records, factsOrder, diagnostics, configDiagnostics, warnings };
+  unread.sort((a, b) => (a.id < b.id ? -1 : 1));
+  return { records, unread, factsOrder, diagnostics, configDiagnostics, warnings, gapKinds: gapKinds(adapterModules) };
 }
 
 export async function run(args) {
@@ -373,16 +437,24 @@ export async function run(args) {
   if (!metadataDir.startsWith(REPO + sep)) fail(`metadataDir '${metadataRel}' resolves outside the repo`);
   assertMetadataDirContained(REPO, metadataDir, metadataRel);
 
-  const { records, factsOrder, diagnostics, configDiagnostics, warnings } = await deriveRecords({ repoRoot: REPO, config });
+  // Before an adapter runs: a malformed block is the one thing said.
+  const unreadCfg = unreadConfig(config);
+  if (unreadCfg.error) fail(unreadCfg.error);
+  // The gaps block too: CI runs derive first, so a misspelt key stops it
+  // before lint could read the block as enforcement off (decision 0049).
+  const gapsCfg = gapsConfig(config);
+  if (gapsCfg.error) fail(gapsCfg.error);
+  const { records, unread, factsOrder, diagnostics, configDiagnostics, warnings } = await deriveRecords({ repoRoot: REPO, config });
   // Config-level notes (deprecations) and extractor warnings always print;
   // extractor diagnostics are opt-in noise.
   for (const d of configDiagnostics) console.error(d);
   for (const w of warnings) console.error(w);
+  for (const line of unreadLines(unreadReport(unread.map(itemOf), unreadCfg))) console.error(line);
   if (VERBOSE) for (const d of diagnostics) console.error(d);
 
   const expected = new Map(); // rel path under metadataDir -> content
   try {
-    for (const r of records) expected.set(`${r.kind}/${r.filename}`, stableStringify(r, factsOrder[r.kind] ?? []));
+    for (const r of [...records, ...unread]) expected.set(`${r.kind}/${r.filename}`, stableStringify(r, factsOrder[r.kind] ?? []));
   } catch (e) {
     fail(e.message);
   }
@@ -419,7 +491,7 @@ export async function run(args) {
           `\nRun \`npx -y @rich-rees/zdd@${typeof config.release === "string" ? config.release : "<release>"} derive\` and commit the result.`,
       );
     }
-    console.log(`codebase metadata in sync (${records.length} records)`);
+    console.log(`codebase metadata in sync (${records.length} records${unread.length ? `, ${unread.length} unread` : ""})`);
   } else {
     // A link AT a record path (or a linked kind dir above it) would be
     // followed by writeFileSync — scanMetadata skips links, but skipping is
@@ -449,6 +521,6 @@ export async function run(args) {
     for (const r of records) byKind[r.kind] = (byKind[r.kind] ?? 0) + 1;
     const plural = (k) => (k.endsWith("ss") ? `${k}es` : `${k}s`); // data-access -> data-accesses; any other kind as before
     const summary = Object.entries(byKind).map(([k, n]) => `${n} ${plural(k)}`).join(", ") || "nothing to inventory";
-    console.log(`Wrote ${records.length} records (${summary}) -> ${metadataRel}`);
+    console.log(`Wrote ${records.length} records (${summary})${unread.length ? ` and ${unread.length} unread` : ""} -> ${metadataRel}`);
   }
 }

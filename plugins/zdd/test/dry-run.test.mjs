@@ -69,8 +69,11 @@ const grepArtifacts = (repo, needle) => {
   const walk = (d) => {
     for (const e of readdirSync(d, { withFileTypes: true })) {
       const p = join(d, e.name);
-      if (e.isDirectory()) walk(p);
-      else if (readFileSync(p, "utf8").includes(needle)) hits.push(p);
+      // The adapter folder holds the repo's adapters and their sample
+      // fixtures, never an artifact: the needle is the app's own text.
+      if (e.isDirectory()) {
+        if (p !== join(repo, "zdd", "extractors")) walk(p);
+      } else if (readFileSync(p, "utf8").includes(needle)) hits.push(p);
     }
   };
   if (existsSync(join(repo, "zdd"))) walk(join(repo, "zdd"));
@@ -118,10 +121,22 @@ test("young app (the video repo's shape): detection proposes Supabase, Next.js, 
   assert.ok(existsSync(join(repo, "zdd", "metadata", "route", "orders.json")), "the checkout route");
   assert.ok(existsSync(join(repo, "zdd", "metadata", "table", "db--public.orders.json")) || existsSync(join(repo, "zdd", "metadata", "table", "db--orders.json")), readdirSync(join(repo, "zdd", "metadata", "table")).join(","));
   assert.ok(existsSync(join(repo, "zdd", "metadata", "external-service", "resend.json")));
+  // A fresh install is strict on the map's gaps (decision 0049 point 5): the
+  // two pages that read no table yet and the table nothing reads hold lint
+  // until the check together answers each.
+  assert.deepEqual(JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8")).gaps, { strict: true, fine: [], known: [] });
+  const red = engine(repo, ["lint"]);
+  assert.equal(red.status, 1);
+  const gaps = bootstrapJson(repo, ["gaps"]).open;
+  assert.deepEqual(gaps.map((g) => g.what), ["surface /: reaches nothing", "surface /menu: reaches nothing", "table public.menu_items (db): nothing reaches it"]);
+  for (const g of gaps) assert.ok(red.stderr.includes(g.id), g.id);
+  bootstrapJson(repo, ["gaps", `--fine=${gaps[0].id},${gaps[1].id}`, "--why=the pages read the menu through the API route, which the map links"]);
+  bootstrapJson(repo, ["gaps", `--known=${gaps[2].id}`, "--why=read by a script no adapter sees yet"]);
   for (const cmd of ["render", "lint"]) {
     const r = engine(repo, [cmd]);
     assert.equal(r.status, 0, `${cmd}: ${r.stderr}`);
   }
+  assert.match(readFileSync(join(repo, "zdd", "agent-index.md"), "utf8"), /^## Known gaps$/m, "the known gap is a part of the map not to trust");
   assert.equal(engine(repo, ["derive", "--check"]).status, 0);
   assert.equal(engine(repo, ["render", "--check"]).status, 0);
   // The install's own text is the plain-words kind: every written file has a card.
@@ -147,6 +162,7 @@ test("mature codebase: an Express API, a React Router web app, a Python archiver
   cfg.extractorOptions.services = cfg.extractorOptions["external-services"];
   delete cfg.extractorOptions["external-services"];
   delete cfg.release; // the old line's pin (decision 0042)
+  delete cfg.gaps; // an old-line config has no gaps block (decision 0049)
   cfg.engine = "2.2.1";
   writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + "\n");
   // The repo's lock sat at v2.1.0 (its own lock test still says so, in docs/setup.md).
@@ -175,10 +191,15 @@ test("mature codebase: an Express API, a React Router web app, a Python archiver
   assert.deepEqual(moved["background-procfile"], { modes: { emails: "worker", archive: "worker" } }, "modes go to the readers that read processes");
   assert.deepEqual(moved["background-bullmq"], {}, "a queue reader takes only roots");
   assert.ok(json.notes.some((n) => /^2\.3 moves ZDD's rules out of the marked block/.test(n)), "the 2.3 note is said when crossing it");
+  // An upgrade never turns the gaps strict (decision 0049 point 5): its plan
+  // names the step, and lint warns until `gaps --raise`.
+  assert.equal(JSON.parse(readFileSync(cfgPath, "utf8")).gaps, undefined);
+  assert.ok(json.notes.some((n) => /^the map's gaps \(decision 0049\): after `derive`, run `bootstrap\.mjs gaps`/.test(n)), json.notes.join("\n"));
   for (const cmd of ["derive", "render", "lint"]) {
     const r = engine(repo, [cmd]);
     assert.equal(r.status, 0, `${cmd}: ${r.stderr}`);
   }
+  assert.match(engine(repo, ["lint"]).stderr, /WARNING: 4 gaps in the map with no answer yet/);
   const index = readFileSync(join(repo, "zdd", "agent-index.md"), "utf8");
   assert.match(index, /^## Background work$/m, index);
   assert.match(index, /\[emails\]\(metadata\/background-task\/emails\.json\) — queue `emails`/, index);
@@ -240,7 +261,8 @@ test("hosted off GitHub: no workflow is written, the four commands are printed, 
 
 test("the preflight's messages: a dead registry, a dead GitHub, no repository — each named in plain words; all present passes", async () => {
   const ok = await new Promise((r) => {
-    const s = createServer((req, res) => res.writeHead(req.url === `/@rich-rees%2fzdd/${VERSION}` ? 200 : req.url === "/" ? 200 : 404).end("{}"));
+    const lib = JSON.parse(readFileSync(join(PLUGIN, "starter-adapters.json"), "utf8"));
+    const s = createServer((req, res) => res.writeHead(req.url === `/@rich-rees%2fzdd/${VERSION}` || req.url === `/@rich-rees%2fzdd-starter-adapters/${lib.version}` ? 200 : req.url === "/" ? 200 : 404).end("{}"));
     s.listen(0, "127.0.0.1", () => r({ url: `http://127.0.0.1:${s.address().port}`, close: () => s.close() }));
   });
   try {

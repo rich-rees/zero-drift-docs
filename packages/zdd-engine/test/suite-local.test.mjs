@@ -107,6 +107,25 @@ for (const n of [1, 2, 3, 4, 5]) {
   });
 }
 
+// Decision 0048 point 4: an app keeps code its adapters share once, in
+// `_shared/` beside them. The suite's scratch repos get what the adapter's
+// imports reach there, and nothing else of the folder.
+test("a local adapter that imports from _shared/ beside it passes every check; only the reached shared files travel", (t) => {
+  const shared = GOOD.replace('const code = line.replace(/#.*$/, "").trim();', "const code = uncomment(line);");
+  const repo = scratch(t, {
+    adapter: `import { uncomment } from "../_shared/lines.mjs";\n${shared}`,
+    extra: {
+      "zdd/extractors/_shared/lines.mjs": `import { trimmed } from "./text/trim.mjs";\nexport const uncomment = (line) => trimmed(line.replace(/#.*$/, ""));\n`,
+      "zdd/extractors/_shared/text/trim.mjs": `export const trimmed = (s) => s.trim();\n`,
+      "zdd/extractors/_shared/unused.mjs": `import { readFileSync } from "node:fs";\nexport const x = readFileSync;\n`,
+    },
+  });
+  const r = suite(repo);
+  assert.equal(r.status, 0, r.err);
+  assert.deepEqual(failing(r.json), [], "the unused shared file that reads the filesystem is neither copied nor judged");
+  assert.equal(r.json.adapters[0].records, 3);
+});
+
 test("suiteChecks: a failing check above the number warns and the run passes; absent, nothing blocks", (t) => {
   const below = suite(scratch(t, { adapter: BROKEN[4], suiteChecks: 3 }));
   assert.equal(below.status, 0, below.err);
@@ -131,7 +150,7 @@ test("the human report names each failing check, its fix and whether it blocks",
   assert.match(r.stdout, /The suite FAILS/);
 });
 
-test("a single-module adapter has nowhere to keep a fixture: the fixture checks say so; no local adapter at all is nothing to check", (t) => {
+test("a single-module adapter has nowhere to keep a fixture: the fixture checks say so; a configured adapter the repo does not hold fails, as it fails derive", (t) => {
   const r = suite(scratch(t, { single: true }));
   assert.equal(r.status, 1);
   assert.deepEqual(failing(r.json), [1, 2, 4]);
@@ -141,18 +160,17 @@ test("a single-module adapter has nowhere to keep a fixture: the fixture checks 
   mkdirSync(join(none, "zdd"));
   writeFileSync(join(none, "zdd", "config.json"), JSON.stringify({ name: "x", extractors: ["generic"] }));
   const n = suite(none);
-  assert.equal(n.status, 0);
-  assert.deepEqual(n.json.adapters, []);
-  assert.deepEqual(n.json.skipped, ["generic"]);
+  assert.equal(n.status, 1);
+  assert.deepEqual([n.json.adapters, n.json.skipped, n.json.unknown], [[], [], ["generic"]]);
 });
 
-test("no SUITE export: the suite says to add one; a companion must be a catalogue adapter", (t) => {
+test("no SUITE export: the suite says to add one; a companion must be another adapter folder in the repo's localExtractorDir", (t) => {
   const r = suite(scratch(t, { adapter: GOOD.replace('export const SUITE = { options: { roots: ["routes"] } };\n', "") }));
   assert.equal(r.status, 1);
   assert.match(r.json.adapters[0].checks[0].detail, /no SUITE export/);
   const c = suite(scratch(t, { adapter: GOOD.replace('export const SUITE = { options: { roots: ["routes"] } };', 'export const SUITE = { options: { roots: ["routes"] }, companions: { "acme-db": {} } };') }));
   assert.equal(c.status, 1);
-  assert.match(c.json.adapters[0].checks[0].detail, /'acme-db', which is not a catalogue adapter/);
+  assert.match(c.json.adapters[0].checks[0].detail, /'acme-db', which is not another adapter folder in localExtractorDir/);
 });
 
 test("the trap folder: quoted code it holds must give nothing the fixture does not", (t) => {

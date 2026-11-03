@@ -1,0 +1,60 @@
+{
+  "name": "Fixture App",
+  "repoBase": "https://github.com/example/fixture/tree/main/",
+  "baseBranch": "main",
+  "extractors": [
+    "supabase",
+    "supabase-js",
+    "nextjs"
+  ],
+  "localExtractorDir": "zdd/extractors",
+  "render": {
+    "storeChanges": false
+  },
+  "extractorOptions": {
+    "supabase": {
+      "migrationNamespaces": [
+        {
+          "name": "db",
+          "dir": "migrations"
+        }
+      ],
+      "externalBuckets": [
+        {
+          "name": "cdn-assets",
+          "namespace": "db"
+        }
+      ]
+    },
+    "supabase-js": {},
+    "nextjs": {
+      "appDir": "src/app",
+      "apiPrefix": "/api",
+      "middlewarePath": "src/middleware.ts",
+      "authPatterns": [
+        {
+          "includes": "verifySignature",
+          "auth": "hmac"
+        }
+      ],
+      "refs": {
+        "roots": [
+          "src"
+        ],
+        "extensions": [
+          ".ts",
+          ".tsx"
+        ],
+        "excludeDirs": [
+          "node_modules"
+        ],
+        "excludeSuffixes": [
+          ".test.ts"
+        ]
+      }
+    }
+  },
+  "agentIndex": {
+    "summary": "Fixture app \u2014 a tiny things catalogue used to prove the ZDD engine."
+  }
+}

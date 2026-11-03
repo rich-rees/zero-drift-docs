@@ -58,6 +58,11 @@ jobs:
       - name: Engine tests
         run: cd packages/zdd-engine && node --test "test/*.test.mjs"
 
+      # The engine's goldens are compared in the starter library's suite
+      # (decision 0048): it runs before an engine release too.
+      - name: Starter library tests
+        run: cd packages/zdd-starter-adapters && node --test "test/*.test.mjs" && node ../zdd-engine/bin/zdd-engine.mjs test --adapters=adapters
+
       - name: Plugin tests
         run: node --test "plugins/zdd/test/*.test.mjs"
 

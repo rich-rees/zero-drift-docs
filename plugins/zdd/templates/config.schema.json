@@ -4,11 +4,9 @@
   "title": "ZDD repo config (zdd/config.json)",
   "description": "Per-repo ZDD configuration: which extractors to run, where the artifacts live, and per-extractor source paths. Artifact CONTENTS never live here — this is the small, portable config tier only.",
   "type": "object",
-  "$comment": "Exactly one config tier: `extractors` (+ extractorOptions) OR the deprecated `adapter` (+ adapterOptions). The engine refuses a config carrying both, and so does this schema.",
-  "oneOf": [
-    { "required": ["extractors"], "not": { "anyOf": [{ "required": ["adapter"] }, { "required": ["adapterOptions"] }] } },
-    { "required": ["adapter"], "not": { "anyOf": [{ "required": ["extractors"] }, { "required": ["extractorOptions"] }] } }
-  ],
+  "$comment": "One config tier: `extractors` (+ extractorOptions). The pre-1.0 `adapter` (+ adapterOptions) named a bundle of adapters the engine shipped; since 0.14 the engine ships none and refuses it (decision 0048), and so does this schema — \"upgrade ZDD\" rewrites it.",
+  "required": ["extractors"],
+  "allOf": [{ "not": { "anyOf": [{ "required": ["adapter"] }, { "required": ["adapterOptions"] }] } }],
   "not": { "required": ["engine", "release"] },
   "additionalProperties": true,
   "properties": {
@@ -22,14 +20,112 @@
       "maximum": 5,
       "description": "How many of the standard suite's checks block for this repo's own adapters (decision 0040): the engine's `suite` fails on a failing check numbered at or below it and warns on a newer one. Written by bootstrap at a fresh install (every check), raised by \"upgrade ZDD\" where the repo has no adapter of its own, and by `bootstrap.mjs adapters --raise` once its own adapters pass. Absent: every check warns."
     },
+    "unread": {
+      "type": "object",
+      "description": "What the adapters saw and could not read (decision 0048). Written by bootstrap: `unread.strict` at a fresh install or by `bootstrap.mjs unread --raise`, the marks by `bootstrap.mjs unread --mark`. Unknown keys are refused, so a misspelt 'strict' never leaves enforcement silently off.",
+      "additionalProperties": false,
+      "properties": {
+        "strict": {
+          "type": "boolean",
+          "default": false,
+          "description": "true: `lint` fails on an item with no answer. Absent or false: it warns. Written true at a fresh install; an upgraded repo turns it on once every item has an answer."
+        },
+        "fine": {
+          "type": "array",
+          "maxItems": 10000,
+          "description": "Items marked fine, once. A mark keeps its item answered while the code around it moves, and lapses when the item itself changes, whitespace included.",
+          "items": {
+            "type": "object",
+            "required": ["id", "why"],
+            "additionalProperties": false,
+            "properties": {
+              "id": { "type": "string", "pattern": "^unread:[a-z][a-z0-9-]*/[0-9a-f]{16}$", "description": "The item's id, as `derive` and `unread` print it." },
+              "what": { "type": "string", "description": "The item's text when it was marked, for whoever reviews the mark. Not compared." },
+              "why": { "type": "string", "pattern": "\\S", "maxLength": 500, "description": "Why the item is fine." }
+            }
+          }
+        }
+      }
+    },
+    "gaps": {
+      "type": "object",
+      "description": "The map's gaps (decision 0049): routes, surfaces and background tasks that link to nothing, tables nothing links to, and any kind an adapter names in its GAPS. Written by bootstrap: `gaps.strict` at a fresh install or by `bootstrap.mjs gaps --raise`, the answers by `bootstrap.mjs gaps --fine` and `--known`. Unknown keys are refused, so a misspelt 'strict' never leaves enforcement silently off. An id is in one list at most.",
+      "additionalProperties": false,
+      "properties": {
+        "strict": {
+          "type": "boolean",
+          "default": false,
+          "description": "true: `lint` fails on a gap with no answer. Absent or false: it warns. Written true at a fresh install; an upgraded repo turns it on once every gap has an answer."
+        },
+        "fine": {
+          "type": "array",
+          "maxItems": 10000,
+          "description": "Gaps with nothing to map, answered once (a health check touches no table).",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "why"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^gap:[a-z][a-z0-9_-]*/[0-9a-f]{16}$",
+                "description": "The gap's id, as `gaps` and `lint` print it."
+              },
+              "what": {
+                "type": "string",
+                "description": "The gap's text when it was answered, for whoever reviews the answer. Not compared."
+              },
+              "why": {
+                "type": "string",
+                "pattern": "\\S",
+                "maxLength": 500,
+                "description": "Why: nothing to map (fine), or why it cannot be mapped (known)."
+              }
+            }
+          }
+        },
+        "known": {
+          "type": "array",
+          "maxItems": 10000,
+          "description": "Gaps that cannot be mapped, answered once (table names built at runtime). Both indexes show them as parts of the map not to trust.",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "why"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^gap:[a-z][a-z0-9_-]*/[0-9a-f]{16}$",
+                "description": "The gap's id, as `gaps` and `lint` print it."
+              },
+              "what": {
+                "type": "string",
+                "description": "The gap's text when it was answered, for whoever reviews the answer. Not compared."
+              },
+              "why": {
+                "type": "string",
+                "pattern": "\\S",
+                "maxLength": 500,
+                "description": "Why: nothing to map (fine), or why it cannot be mapped (known)."
+              }
+            }
+          }
+        }
+      }
+    },
     "extractors": {
       "type": "array",
       "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
       "minItems": 1,
       "uniqueItems": true,
-      "description": "Extractors to run, composed: one per convention in the stack (built-in: supabase, nextjs, fastapi, react-router, components, expo-router, the background-* readers (vercel, railway, cloudflare, procfile, compose, pg-cron, bullmq, inngest, trigger-dev, sqs, github-actions, declared), external-services, supabase-js, supabase-py, sqlalchemy, generic; `services` is the pre-2.3 name of external-services). Selected by NAME from the engine's registry or from localExtractorDir — never by path. Records from every extractor are merged and cross-extractor refs resolved after the merge.",
-      "examples": [["supabase", "supabase-js", "nextjs"], ["supabase", "supabase-py", "fastapi"], ["supabase", "fastapi", "sqlalchemy"], ["fastapi", "react-router"], ["generic"]],
-      "not": { "allOf": [{ "contains": { "const": "services" } }, { "contains": { "const": "external-services" } }] }
+      "description": "Extractors to run, composed: one per convention in the stack. Selected by NAME from localExtractorDir, which holds every adapter the repo runs (decision 0048), never by path: a starter copied in from the starter library (@rich-rees/zdd-starter-adapters: supabase, nextjs, fastapi, react-router, components, expo-router, the background-* readers, external-services, supabase-js, supabase-py, sqlalchemy, generic) keeps its name, and any name is the repo's to use. Records from every extractor are merged and cross-extractor refs resolved after the merge.",
+      "examples": [["supabase", "supabase-js", "nextjs"], ["supabase", "supabase-py", "fastapi"], ["supabase", "fastapi", "sqlalchemy"], ["fastapi", "react-router"], ["generic"]]
     },
     "extractorOptions": {
       "type": "object",
@@ -228,38 +324,26 @@
             "extensions": { "type": "array", "items": { "type": "string" }, "default": [".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"] }
           }
         },
-        "services": {
-          "type": "object",
-          "deprecated": true,
-          "description": "The 2.1–2.2 name of `external-services`, accepted for one release (ZDD 2.3) and never beside it (both names, or both option keys, are refused); \"upgrade ZDD\" renames it. Under this name the records keep the pre-2.3 kind `service`. Same shape.",
-          "additionalProperties": false,
-          "properties": {
-            "services": { "type": "array", "items": { "type": "object", "required": ["name"], "additionalProperties": false, "anyOf": [{ "required": ["imports"], "properties": { "imports": { "minItems": 1, "contains": { "pattern": "[^ \t\r\n]" } } } }, { "required": ["env"], "properties": { "env": { "minItems": 1, "contains": { "pattern": "[^ \t\r\n]" } } } }], "properties": { "name": { "type": "string", "pattern": "[A-Za-z0-9]" }, "imports": { "type": "array", "items": { "type": "string" } }, "env": { "type": "array", "items": { "type": "string" }, "description": "Env name prefixes, e.g. \"SENTRY_\"." } } } },
-            "ignore": { "type": "array", "items": { "type": "string" } },
-            "roots": { "type": "array", "items": { "type": "string" } },
-            "extensions": { "type": "array", "items": { "type": "string" } }
-          }
-        },
         "generic": { "type": "object", "additionalProperties": false }
       },
-      "additionalProperties": { "type": "object" },
-      "not": { "required": ["services", "external-services"] }
+      "additionalProperties": { "type": "object" }
     },
     "localExtractorDir": {
       "type": "string",
-      "description": "Repo-relative directory holding repo-local extractors (<name>.mjs or <name>/index.mjs), each selectable by name in `extractors`. The one place config may point at code; a one-off convention lives here instead of in a fork, and the plugin's `extractor` skill scaffolds one here. Local names may not shadow built-ins.",
+      "description": "Repo-relative directory holding the repo's adapters (<name>/index.mjs or <name>.mjs), each selectable by name in `extractors`: since 0.14 every adapter the repo runs (decision 0048), a copied starter keeping its name, beside `_shared/`. The one place config may point at code; the plugin's `extractor` skill scaffolds a new one here. Never read as source, so never the repo itself ('.').",
+      "not": { "enum": [".", "./"] },
       "examples": ["zdd/extractors"]
     },
     "adapter": {
       "type": "string",
       "deprecated": true,
-      "description": "DEPRECATED (pre-1.0): the single monolithic adapter. Still honoured — `nextjs-supabase` expands to extractors [supabase, supabase-js, nextjs] with adapterOptions split by key — but prints a deprecation note on every derive; \"upgrade ZDD\" migrates it for you.",
+      "description": "RETIRED (pre-1.0): the single monolithic adapter, a bundle the engine shipped. Refused since 0.14, when the engine ships no adapter (decision 0048): \"upgrade ZDD\" rewrites it to extractors and copies the adapters in.",
       "examples": ["nextjs-supabase"]
     },
     "adapterOptions": {
       "type": "object",
       "deprecated": true,
-      "description": "DEPRECATED (pre-1.0): options for the single `adapter`. Use extractorOptions.",
+      "description": "RETIRED (pre-1.0): options for the single `adapter`, refused with it since 0.14. Use extractorOptions.",
       "additionalProperties": true
     },
     "release": {
@@ -367,7 +451,7 @@
           "items": { "type": "string", "enum": ["component", "background-task", "external-service", "service"] },
           "uniqueItems": true,
           "default": [],
-          "description": "The opt-in kinds (ZDD 2.1: component, background-task — `job` before 0.9 —, external-service — spelt `service` until 2.3, still accepted while the config says `services`) that strict also governs. Unlisted, an unclaimed record of such a kind is a warning under strict, never a failure, so switching an extractor on never turns a green lint red by itself (decision 0017). A shared component is claimable; a page-private one is not."
+          "description": "The opt-in kinds (ZDD 2.1: component, background-task — `job` before 0.9 —, external-service — spelt `service` until 2.3, still accepted for records an adapter writes under that kind) that strict also governs. Unlisted, an unclaimed record of such a kind is a warning under strict, never a failure, so switching an extractor on never turns a green lint red by itself (decision 0017). A shared component is claimable; a page-private one is not."
         }
       }
     },

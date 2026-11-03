@@ -12,12 +12,13 @@ import { readFileSync, writeFileSync, rmSync, mkdtempSync, mkdirSync } from "nod
 import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { placeStarters } from "../../../packages/zdd-starter-adapters/test/starters.mjs";
 
 const PLUGIN = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const ENGINE_BIN = resolve(PLUGIN, "..", "..", "packages", "zdd-engine", "bin", "zdd-engine.mjs");
 const SCHEMA = JSON.parse(readFileSync(join(PLUGIN, "templates", "config.schema.json"), "utf8"));
 
-const KNOWN = new Set(["$schema", "$id", "$comment", "title", "description", "default", "examples", "deprecated", "type", "properties", "additionalProperties", "required", "items", "minItems", "uniqueItems", "pattern", "enum", "anyOf", "oneOf", "allOf", "not", "contains", "const", "minimum"]);
+const KNOWN = new Set(["$schema", "$id", "$comment", "title", "description", "default", "examples", "deprecated", "type", "properties", "additionalProperties", "required", "items", "minItems", "maxItems", "maxLength", "uniqueItems", "pattern", "enum", "anyOf", "oneOf", "allOf", "not", "contains", "const", "minimum"]);
 const typeOf = (v) => (v === null ? "null" : Array.isArray(v) ? "array" : typeof v);
 
 // Returns the list of violations (empty = valid).
@@ -34,6 +35,7 @@ function validate(schema, value, path = "$") {
   if (schema.minimum !== undefined && typeof value === "number" && value < schema.minimum) errs.push(`${path}: below ${schema.minimum}`);
   if (schema.enum && !schema.enum.some((e) => JSON.stringify(e) === JSON.stringify(value))) errs.push(`${path}: not one of ${JSON.stringify(schema.enum)}`);
   if (schema.pattern && typeof value === "string" && !new RegExp(schema.pattern).test(value)) errs.push(`${path}: does not match ${schema.pattern}`);
+  if (schema.maxLength !== undefined && typeof value === "string" && value.length > schema.maxLength) errs.push(`${path}: longer than ${schema.maxLength}`);
   if (typeOf(value) === "object") {
     for (const r of schema.required ?? []) if (!(r in value)) errs.push(`${path}: missing ${r}`);
     for (const [k, v] of Object.entries(value)) {
@@ -45,6 +47,7 @@ function validate(schema, value, path = "$") {
   if (Array.isArray(value)) {
     if (schema.items) value.forEach((v, i) => errs.push(...validate(schema.items, v, `${path}[${i}]`)));
     if (schema.minItems !== undefined && value.length < schema.minItems) errs.push(`${path}: fewer than ${schema.minItems} items`);
+    if (schema.maxItems !== undefined && value.length > schema.maxItems) errs.push(`${path}: more than ${schema.maxItems} items`);
     if (schema.uniqueItems && new Set(value.map((v) => JSON.stringify(v))).size !== value.length) errs.push(`${path}: duplicate items`);
   }
   if (schema.anyOf && !schema.anyOf.some((s) => validate(s, value, path).length === 0)) errs.push(`${path}: matches none of anyOf`);
@@ -64,7 +67,10 @@ function engineRejects(config, command = "derive") {
   const repo = mkdtempSync(join(tmpdir(), "zdd-schema-"));
   try {
     mkdirSync(join(repo, "zdd"));
-    writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify(config));
+    // Its adapters in place, as an app holds them: the engine runs only those (decision 0048).
+    const held = config && typeof config === "object" && !Array.isArray(config) && config.localExtractorDir === undefined && Array.isArray(config.extractors) ? { ...config, localExtractorDir: "zdd/extractors" } : config;
+    if (held !== config) placeStarters(repo);
+    writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify(held));
     const r = spawnSync(process.execPath, [ENGINE_BIN, command, "--check", `--root=${repo}`], { encoding: "utf8" });
     return r.status === 0 ? null : (r.stderr + r.stdout).trim();
   } finally {
@@ -83,21 +89,82 @@ test("templates/config.example.json validates against templates/config.schema.js
   assert.deepEqual(validate(SCHEMA, example), []);
 });
 
-test("a config with both `extractors` and `adapter` is invalid under the schema, exactly as the engine refuses it (CR-082)", () => {
+test("a config with both `extractors` and `adapter` is invalid under the schema, exactly as the engine refuses it (CR-082); the pre-1.0 tier alone too, since 0.14; no name is reserved (CR-304)", () => {
   const mixed = { extractors: ["generic"], adapter: "nextjs-supabase" };
   assert.notDeepEqual(validate(SCHEMA, mixed), [], "schema must refuse the mixed shape");
   assert.match(engineRejects(mixed) ?? "", /adapter/, "and so does the engine");
   const mixedOptions = { extractors: ["generic"], adapterOptions: {} };
   assert.notDeepEqual(validate(SCHEMA, mixedOptions), []);
   assert.match(engineRejects(mixedOptions) ?? "", /adapter/);
-  // Each tier alone is fine for both.
-  for (const ok of [{ extractors: ["generic"] }, { adapter: "nextjs-supabase" }, { extractors: ["generic"], extractorOptions: { generic: {} } }]) {
+  // `extractors` alone is fine for both; the pre-1.0 tier alone is refused
+  // by both since 0.14, the engine naming the route across (decision 0048).
+  for (const ok of [{ extractors: ["generic"] }, { extractors: ["generic"], extractorOptions: { generic: {} } }]) {
     assert.deepEqual(validate(SCHEMA, ok), [], JSON.stringify(ok));
   }
   assert.equal(engineRejects({ extractors: ["generic"] }), null);
+  assert.notDeepEqual(validate(SCHEMA, { adapter: "nextjs-supabase" }), []);
+  assert.match(engineRejects({ adapter: "nextjs-supabase" }) ?? "", /names 'adapter'.*"upgrade ZDD"/);
+  // Any name is the repo's own: a local `services` beside `external-services`, or `jobs`.
+  const own = { extractors: ["services", "external-services", "jobs"], localExtractorDir: "zdd/extractors" };
+  assert.deepEqual(validate(SCHEMA, own), [], "the schema reserves no name");
+  assert.match(engineRejects(own) ?? "", /Extractor 'services' is not one of this repo's adapters/, "the engine asks only that the repo holds it");
+  assert.notDeepEqual(validate(SCHEMA, { extractors: ["generic"], localExtractorDir: "." }), [], "the repo itself is no adapter folder");
+  assert.match(engineRejects({ extractors: ["generic"], localExtractorDir: "." }) ?? "", /localExtractorDir is the repo itself/);
   // Neither tier is invalid for both.
   assert.notDeepEqual(validate(SCHEMA, { name: "x" }), []);
   assert.notEqual(engineRejects({ name: "x" }), null);
+});
+
+test("unread: the schema and the engine accept and refuse the same blocks (CR-236)", () => {
+  const id = `unread:acme/${"0".repeat(16)}`;
+  const cfg = (unread) => ({ extractors: ["generic"], unread });
+  for (const ok of [{}, { strict: true }, { strict: false, fine: [] }, { fine: [{ id, why: "x" }] }, { fine: [{ id, what: "y", why: "x" }] }]) {
+    assert.deepEqual(validate(SCHEMA, cfg(ok)), [], JSON.stringify(ok));
+    assert.equal(engineRejects(cfg(ok)), null, JSON.stringify(ok));
+  }
+  for (const bad of [
+    { strcit: true },
+    { strict: "yes" },
+    { fine: {} },
+    { fine: [{ id }] },
+    { fine: [{ id, why: "   " }] },
+    { fine: [{ id, why: "x".repeat(501) }] },
+    { fine: [{ id, why: "x", because: "y" }] },
+    { fine: [{ id: "unread:acme/nothex", why: "x" }] },
+    { fine: [{ id: `${id}\nFORGED`, why: "x" }] },
+    { fine: Array.from({ length: 10_001 }, () => ({ id, why: "x" })) },
+  ]) {
+    const shown = JSON.stringify(bad).slice(0, 60);
+    assert.notDeepEqual(validate(SCHEMA, cfg(bad)), [], `schema: ${shown}`);
+    assert.match(engineRejects(cfg(bad)) ?? "", /unread/, `engine: ${shown}`);
+  }
+});
+
+test("gaps: the schema and the engine accept and refuse the same blocks, and a fresh install's block is valid (decision 0049, CR-356)", () => {
+  const id = `gap:route/${"0".repeat(16)}`;
+  const cfg = (gaps) => ({ extractors: ["generic"], gaps });
+  for (const ok of [{}, { strict: true, fine: [], known: [] }, { fine: [{ id, why: "x" }] }, { known: [{ id, what: "y", why: "x" }] }]) {
+    assert.deepEqual(validate(SCHEMA, cfg(ok)), [], JSON.stringify(ok));
+    assert.equal(engineRejects(cfg(ok)), null, JSON.stringify(ok));
+  }
+  for (const bad of [
+    { strickt: true },
+    { strict: "yes" },
+    { known: {} },
+    { fine: [{ id }] },
+    { known: [{ id, why: "   " }] },
+    { fine: [{ id, why: "x".repeat(501) }] },
+    { known: [{ id, why: "x", because: "y" }] },
+    { fine: [{ id: "unread:acme/0000000000000000", why: "x" }] },
+    { known: [{ id: `${id}\nFORGED`, why: "x" }] },
+    { fine: Array.from({ length: 10_001 }, () => ({ id, why: "x" })) },
+  ]) {
+    const shown = JSON.stringify(bad).slice(0, 60);
+    assert.notDeepEqual(validate(SCHEMA, cfg(bad)), [], `schema: ${shown}`);
+    assert.match(engineRejects(cfg(bad)) ?? "", /gaps/, `engine: ${shown}`);
+  }
+  // One answer per id: the engine refuses it; the schema cannot say it.
+  assert.match(engineRejects(cfg({ fine: [{ id, why: "a" }], known: [{ id, why: "b" }] })) ?? "", /one answer per item/);
 });
 
 test("repoBase: the schema pattern refuses internal whitespace exactly as the engine does (CR-103)", () => {
@@ -115,7 +182,7 @@ test("repoBase: the schema pattern refuses internal whitespace exactly as the en
 });
 
 test("the schema's documented refs defaults are the engine's defaults (CR-116)", async () => {
-  const refs = await import(pathToFileURL(resolve(PLUGIN, "..", "..", "packages", "zdd-engine", "src", "adapters", "nextjs", "refs.mjs")).href);
+  const refs = await import(pathToFileURL(resolve(PLUGIN, "..", "..", "packages", "zdd-starter-adapters", "adapters", "nextjs", "refs.mjs")).href);
   const doc = SCHEMA.properties.extractorOptions.properties.nextjs.properties.refs.properties;
   assert.deepEqual(doc.extensions.default, refs.DEFAULT_REFS.extensions);
   assert.deepEqual(doc.excludeSuffixes.default, refs.DEFAULT_REFS.excludeSuffixes);
@@ -123,7 +190,7 @@ test("the schema's documented refs defaults are the engine's defaults (CR-116)",
 });
 
 test("the schema's documented supabase-js defaults are the engine's (ZDD-3 slice 2b, CR-073)", async () => {
-  const js = await import(pathToFileURL(resolve(PLUGIN, "..", "..", "packages", "zdd-engine", "src", "adapters", "js", "source.mjs")).href);
+  const js = await import(pathToFileURL(resolve(PLUGIN, "..", "..", "packages", "zdd-starter-adapters", "adapters", "_shared", "js", "source.mjs")).href);
   const doc = SCHEMA.properties.extractorOptions.properties["supabase-js"].properties;
   assert.deepEqual(doc.extensions.default, js.DEFAULT_EXTENSIONS);
   assert.deepEqual(doc.excludeDirs.default, js.DEFAULT_EXCLUDE_DIRS);

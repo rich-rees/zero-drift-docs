@@ -12,16 +12,18 @@ import { readFileSync, rmSync, mkdtempSync, cpSync, writeFileSync, mkdirSync } f
 import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { copyFixture } from "../../../packages/zdd-starter-adapters/test/starters.mjs";
 
 const PLUGIN = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const ENGINE = resolve(PLUGIN, "..", "..", "packages", "zdd-engine");
-const FIXTURES = join(ENGINE, "test");
+const STARTERS = resolve(PLUGIN, "..", "..", "packages", "zdd-starter-adapters");
+const FIXTURES = join(STARTERS, "test");
 const BOOTSTRAP = join(PLUGIN, "scripts", "bootstrap.mjs");
 
 const fresh = (t, fixture) => {
   const repo = mkdtempSync(join(tmpdir(), "zdd-boot21-"));
   t.after(() => rmSync(repo, { recursive: true, force: true }));
-  cpSync(join(FIXTURES, fixture), repo, { recursive: true });
+  copyFixture(join(FIXTURES, fixture), repo);
   rmSync(join(repo, "zdd"), { recursive: true });
   return repo;
 };

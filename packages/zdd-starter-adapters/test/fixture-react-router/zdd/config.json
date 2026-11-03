@@ -1,0 +1,11 @@
+{
+  "name": "Fixture React Router",
+  "baseBranch": "main",
+  "localExtractorDir": "zdd/extractors",
+  "extractors": ["fastapi", "react-router"],
+  "render": { "storeChanges": false },
+  "extractorOptions": {
+    "fastapi": { "roots": ["apps/api"] },
+    "react-router": { "routesFile": "apps/web/src/routes.tsx" }
+  }
+}

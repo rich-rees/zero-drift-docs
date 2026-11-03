@@ -12,11 +12,12 @@ import { createHash } from "node:crypto";
 import { dirname, resolve, join, relative } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { copyFixture } from "../../../packages/zdd-starter-adapters/test/starters.mjs";
 
 const PLUGIN = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SCRIPT = join(PLUGIN, "scripts", "bootstrap.mjs");
 const ENGINE_BIN = resolve(PLUGIN, "..", "..", "packages", "zdd-engine", "bin", "zdd-engine.mjs");
-const ENGINE_FIXTURES = resolve(PLUGIN, "..", "..", "packages", "zdd-engine", "test");
+const ENGINE_FIXTURES = resolve(PLUGIN, "..", "..", "packages", "zdd-starter-adapters", "test");
 const PLUGIN_VERSION = JSON.parse(readFileSync(join(PLUGIN, ".claude-plugin", "plugin.json"), "utf8")).version;
 const OWNER = "Managed by Zero-Drift Docs (zdd)";
 const DATE = "2026-09-04";
@@ -52,7 +53,7 @@ function answersFile(name, answers) {
 const applyJson = (repo, name, answers) => JSON.parse(bootstrap(repo, ["apply", `--answers=${answersFile(name, answers)}`, "--json"]));
 function fresh(name, from) {
   const dir = join(scratch, name);
-  if (from) cpSync(from, dir, { recursive: true });
+  if (from) copyFixture(from, dir); // its starters placed, as an app holds them
   else mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -228,7 +229,7 @@ test("detect: several migration dirs get distinct namespace names; symlinked dir
   const repo = fresh("detect-multi");
   for (const d of ["apps/a/supabase/migrations", "apps/b/supabase/migrations"]) {
     mkdirSync(join(repo, d), { recursive: true });
-    writeFileSync(join(repo, d, "0001.sql"), "create table t(id int);");
+    writeFileSync(join(repo, d, "0001.sql"), `create table t_${d.slice(5, 6)}(id int);`);
   }
   const json = JSON.parse(bootstrap(repo, ["detect", "--json"]));
   assert.deepEqual(json.proposals[0].options.migrationNamespaces, [
@@ -649,11 +650,18 @@ test("upgrade replaces the pre-0.4 section only when it IS the v0.3.1 snippet mo
 
 test("upgrade a v0.3.1 repo: adapter → extractors, every owned file rewritten and named, curated + generated artifacts untouched", () => {
   const repo = fresh("upgrade", join(ENGINE_FIXTURES, "fixture"));
-  // Populate metadata + generated artifacts so "untouched" means something. The
-  // legacy adapter config prints a deprecation note (on stderr) — the positive
-  // control for the "no note after migration" assertion below (CR-112).
-  assert.match(engine(repo, ["derive"]), /deprecated/i, "the pre-upgrade adapter config is announced as deprecated");
+  // Populate metadata + generated artifacts so "untouched" means something:
+  // the fixture's adapters as the extractors they are, then its config as
+  // v0.3.1 wrote it, the pre-1.0 bundle. Since 0.14 the engine refuses that
+  // config and names the route across — the positive control for the "no
+  // note after migration" assertion below (CR-112).
+  engine(repo, ["derive"]);
   engine(repo, ["render"]);
+  const { extractors: _composed, extractorOptions: { supabase, nextjs }, ...rest } = JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8"));
+  writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify({ ...rest, adapter: "nextjs-supabase", adapterOptions: { ...nextjs, ...supabase } }, null, 2) + "\n");
+  const refused = spawnSync(process.execPath, [ENGINE_BIN, "derive", `--root=${repo}`], { encoding: "utf8" });
+  assert.equal(refused.status, 1);
+  assert.match(refused.stderr, /names 'adapter' \("nextjs-supabase"\).*"upgrade ZDD"/, "the pre-upgrade adapter config is refused with the route across");
   const configBefore = JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8"));
   assert.equal(configBefore.adapter, "nextjs-supabase");
   configBefore.viewer = { nonAreaTags: ["react-flow"], defaultFocus: "map/features/things" };
@@ -700,7 +708,7 @@ test("upgrade a v0.3.1 repo: adapter → extractors, every owned file rewritten 
   assert.deepEqual(json.wrote, [], "second upgrade is a no-op");
 
   assert.match(engine(repo, ["derive"]), /Wrote \d+ records/);
-  assert.ok(!engine(repo, ["derive"]).includes("deprecated"), "no deprecation note after migration");
+  assert.ok(!/deprecated|names 'adapter'/.test(engine(repo, ["derive"])), "no deprecation note after migration");
   assert.match(engine(repo, ["derive", "--check"]), /in sync/, "migrated config derives the same bytes");
 });
 
@@ -940,4 +948,12 @@ test("detect: supabase-js is proposed once beside Supabase and each JS reader on
     assert.equal(names.filter((n) => n === "supabase-js").length, 1, `${reader}: ${names.join(", ")}`);
     assert.equal(names.indexOf("supabase-js"), names.indexOf("supabase") + 1, "right after supabase");
   }
+});
+
+test("an adapter that tried the repo and declined says why, and the part stays not covered (decision 0048 point 6)", async () => {
+  const { narrateDetect } = await import(`file://${SCRIPT.replace(/\\/g, "/")}`);
+  const d = { mode: "existing", sourceFiles: 1, proposals: [{ name: "a", evidence: ["e"], options: {} }], apps: [], coverage: [{ part: "schema", adapters: [] }], declined: [{ name: "reader", parts: ["schema"], reasons: ["`m`: files create tables and end with none"] }] };
+  const out = narrateDetect(d, { installed: false, hits: [], searched: [] });
+  assert.match(out, /schema: the `reader` adapter tried this repo and declined — `m`: files create tables and end with none/);
+  assert.match(out, /not covered: schema/);
 });

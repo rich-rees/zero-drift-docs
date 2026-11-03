@@ -22,6 +22,7 @@ import { join, dirname, relative } from "node:path";
 import { parseFrontmatter } from "./frontmatter.mjs";
 import { extractLinks } from "./map-links.mjs";
 import { walkMarkdown, readBounded, MAX_STORE_FILE_BYTES } from "./walk-markdown.mjs";
+import { UNREAD_KIND, itemOf } from "./unread.mjs";
 
 export const CLAIMABLE_KINDS = ["route", "table", "function", "surface"];
 // The kinds ZDD 2.1 added (decision 0017): claimable, warned about when
@@ -92,7 +93,7 @@ function walkJson(dir, out = [], state = { depth: 0, entries: 0 }) {
 
 // The claimable records under metadataDir, each with the node id a map link
 // resolves to (bundle-relative path minus extension), sorted by id.
-export function claimableRecords(metadataDir, bundleDir, skipped, unplaced, unknownTasks) {
+export function claimableRecords(metadataDir, bundleDir, skipped, unplaced, unknownTasks, unread, all) {
   const out = [];
   const why = (p) => {
     try {
@@ -127,6 +128,12 @@ export function claimableRecords(metadataDir, bundleDir, skipped, unplaced, unkn
     // 0020): lint asks for the platform's committed manifest or a `modes`
     // entry on the reader that read it (CR-010), rather than guessing.
     if (unknownTasks && record.kind === "background-task" && record.facts?.mode === "unknown") unknownTasks.push({ id: String(record.id ?? nodeId), title: String(record.title ?? ""), file, manifest: String(record.facts.manifest ?? ""), reader: typeof record.facts.reader === "string" ? record.facts.reader : null });
+    // What an adapter could not read (decision 0048): lint's to hold, in this
+    // same walk. Never claimable.
+    if (unread && record.kind === UNREAD_KIND) unread.push(itemOf(record));
+    // Every other record, as the gap list reads it (decision 0049): its
+    // links, and nothing it does not need.
+    if (all && record.kind !== UNREAD_KIND && typeof record.id === "string" && typeof record.kind === "string") all.push({ id: record.id, kind: record.kind, title: record.title, resource: record.resource, refs: record.refs, facts: { edges: record.facts?.edges } });
     if (!claimable(record)) continue;
     out.push({ kind: record.kind, id: String(record.id ?? nodeId), title: String(record.title ?? record.id ?? nodeId), nodeId, file, optIn: OPT_IN_CLAIMABLE_KINDS.includes(record.kind) });
   }
@@ -174,19 +181,28 @@ export function unclaimedRecords({ metadataDir, mapDir, bundleDir }) {
   const claimed = featureClaims(mapDir, bundleDir, raw);
   const unplaced = [];
   const unknownTasks = [];
-  const records = claimableRecords(metadataDir, bundleDir, raw, unplaced, unknownTasks);
+  const unread = [];
+  const all = [];
+  const records = claimableRecords(metadataDir, bundleDir, raw, unplaced, unknownTasks, unread, all);
   unplaced.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   unknownTasks.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   const skipped = raw
     .map((s) => {
       const inMetadata = !relative(metadataDir, s.path).startsWith("..");
-      return { file: posixify(relative(dirname(bundleDir), s.path)), reason: s.reason, record: inMetadata };
+      // Could an unread record be behind this? Its own folder, the metadata
+      // folder itself, or a walk cut short; judged from metadataDir, which a
+      // config can name anything.
+      const under = relative(metadataDir, s.path).split(/[\\/]/)[0];
+      const unreadGap = inMetadata && (under === UNREAD_KIND || under === "" || /^the walk passed/.test(s.reason));
+      return { file: posixify(relative(dirname(bundleDir), s.path)), reason: s.reason, record: inMetadata, unreadGap };
     })
     .sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : 0));
   return {
     skipped,
     unplaced,
     unknownTasks,
+    unread,
+    all,
     total: records.length,
     records,
     unclaimed: records.filter((r) => !claimed.has(r.nodeId)),

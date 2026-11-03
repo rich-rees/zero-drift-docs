@@ -14,7 +14,7 @@ import { makeExtractorIo, IO_MAX_READ_BYTES } from "../src/core/lib/extractor-io
 
 const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const BIN = join(PKG, "bin", "zdd-engine.mjs");
-const FIXTURE_GREENFIELD = join(PKG, "test", "fixture-greenfield");
+const FIXTURE = join(PKG, "test", "fixture");
 const POSIX = process.platform !== "win32";
 
 const scratch = (files) => {
@@ -237,7 +237,7 @@ export function derive({ io }) {
 test("CLI: a local extractor is handed io; its records land; a bad io path fails derive naming the extractor", (t) => {
   const repo = mkdtempSync(join(tmpdir(), "zdd-io-cli-"));
   t.after(() => rmSync(repo, { recursive: true, force: true }));
-  cpSync(FIXTURE_GREENFIELD, repo, { recursive: true });
+  cpSync(FIXTURE, repo, { recursive: true });
   mkdirSync(join(repo, "zdd", "extractors"), { recursive: true });
   writeFileSync(join(repo, "zdd", "extractors", "rawsql.mjs"), IO_EXTRACTOR);
   mkdirSync(join(repo, "db"), { recursive: true });

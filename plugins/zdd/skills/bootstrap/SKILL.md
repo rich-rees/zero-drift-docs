@@ -114,9 +114,11 @@ node "$PLUGIN/scripts/bootstrap.mjs" detect
 
 It prints the mode, where the repo is hosted (that decides the CI offer in
 step 3), and whether Matt Pocock's skills are installed (used in step 7).
-The detection is the adapters' own (decision 0039): each one in the engine's
-catalogue says whether it fits, with its evidence, and the engine runs them
-(bootstrap runs the engine of its own release; detection writes nothing):
+The detection is the adapters' own (decision 0039): each starter in ZDD's
+starter library (`@rich-rees/zdd-starter-adapters`, fetched at the version
+this release pins) says whether it fits, with its evidence, and the engine
+runs them (bootstrap runs the engine of its own release; detection writes
+nothing):
 
 - **EXISTING codebase** — a proposed extractor set, and for each one the
   **evidence** it found ("SQL migrations under `supabase/migrations`",
@@ -155,14 +157,33 @@ catalogue says whether it fits, with its evidence, and the engine runs them
      carrying its marker, never those that reach the provider through a
      settings object.
 
+  Then **the offer** (decision 0048 point 3), one question: the
+  **Starter library** line names the starters that fit. Say in plain words
+  what you recognised and what bringing them across saves, for example: "I
+  recognise your stack is Supabase with SQLAlchemy. I already have adapters
+  for that in my starter library. Would you like me to bring them across to
+  save you time and tokens?" Recommended yes; cost: their code, tests and a
+  small sample repo each land in `zdd/extractors/`, and are the repo's own
+  from then on — yours to change, fix or delete, with no ZDD release; saying
+  no means every adapter is built from nothing with the `extractor` skill
+  after bootstrap (longer, and tested with fixtures), and derive runs an
+  adapter that reads nothing until then. The library is an offer, never a
+  requirement: a no is a fine answer. Record it as `"starters": false`.
+
   Then ask every **`ask:`** line detection printed, one at a time — today,
   when Supabase sits beside a web app, whether the app subscribes to
   Realtime through a wrapper of its own. Record a named wrapper's call names
   in the answer set under the key the line names (`subscribeCalls`).
 
   Then read the **coverage, part by part** block aloud: the parts of the app
-  (routes, screens, components, database access, background tasks, external
-  services), which adapter covers each, and the ones **not covered**. For
+  (routes, screens, components, schema, queries, background tasks, external
+  services), which adapter covers each, and the ones **not covered**. Schema
+  (the tables, read from migrations or models) and queries (the code that
+  reaches them) are two parts: a repo with one covered is told about the
+  other. An adapter may have tried the repo and **declined**: the block says
+  which and why, in its own words (a trial read that did not make sense).
+  Read that out: the part is not covered, and what declined it
+  is where the build starts. For
   each part not covered, ask whether the app has it, and say plainly what
   happens: "Your routes are FastAPI, and I have an adapter for that. Your
   database layer is Prisma, and I don't yet, so I'll build a `prisma`
@@ -182,7 +203,13 @@ catalogue says whether it fits, with its evidence, and the engine runs them
   adapters today — with **no recommendation**: any stack works, and one
   without an adapter gets one built with the `extractor` skill.
 
-  Once the stack is chosen, **show what the map will look like**:
+  Once the stack is chosen, ask **the offer** for the adapters it selects,
+  exactly as for an existing codebase (one question, the same costs; record
+  `"starters": true` or `false`). The same holds when an existing repo's
+  answer adds a planned part detection did not propose: those adapters come
+  from the library only on a yes.
+
+  Then **show what the map will look like**:
 
   ```
   node "$PLUGIN/scripts/bootstrap.mjs" preview --extractors=<the chosen adapters, comma-separated>
@@ -270,7 +297,7 @@ omitted keys take the detection / the defaults):
   "stack": ["FastAPI", { "name": "Supabase", "path": "db/migrations" }, "React web", "Expo"],
   "apps": ["Web (React)", "Mobile (Expo)"],
   "optIns": { "autoLoad": true, "fence": true, "stop": true, "ci": true, "prePush": true },
-  "codex": false, "seedAdr": true
+  "starters": true, "codex": false, "seedAdr": true
 }
 ```
 
@@ -313,6 +340,13 @@ apply"):
 5. the semantic map and its example feature — theirs; the example shows how
    a feature claims its code by linking it;
 6. the codebase metadata — the inventory, generated, never hand-edited;
+   and, when the starters were taken, **the adapters** in `zdd/extractors/`
+   (one line per adapter, with its card): the code that reads the stack
+   into that inventory, copied from the starter library with its tests and
+   a small sample repo each, the shared code they use in `_shared/`, any
+   companion one's sample needs, and `starters.json`, which records the
+   version each came from so a later fix can be offered. They are the
+   repo's own: changed, fixed or deleted without a ZDD release;
 7. the agent index, the human index, the ADR index (and the harness ADR
    index, if that set was opened) and the blessing index —
    generated at step 5 by `render`, never hand-edited (the cards for these
@@ -343,14 +377,14 @@ is written into the host's settings.
 
 ## Step 5 — the engine, then the one mapping session
 
-1. **Derive** — `npx -y @rich-rees/zdd@0.13.0 derive`. "This reads the
+1. **Derive** — `npx -y @rich-rees/zdd@0.14.0 derive`. "This reads the
    code and writes the inventory." On a greenfield repo it writes nothing and
    passes; that is correct.
-2. **Render** — `npx -y @rich-rees/zdd@0.13.0 render`. "This writes the
+2. **Render** — `npx -y @rich-rees/zdd@0.14.0 render`. "This writes the
    indexes from the inventory and the map." Commit the generated artifacts
    (`zdd/graph.json`, the agent, ADR and blessing indexes, the human index);
    never edit them.
-3. **Lint** — `npx -y @rich-rees/zdd@0.13.0 lint`. The same blocking
+3. **Lint** — `npx -y @rich-rees/zdd@0.14.0 lint`. The same blocking
    check CI runs: ADR numbering, supersession symmetry, every blessing's
    citation and trigger question, and every blessing and map-page header
    (a key written twice, or a quote that does not close the same way, fails). A failure here is fixed now, not discovered
@@ -368,12 +402,16 @@ is written into the host's settings.
    and **by name** the ones that link to nothing and the ones nothing links
    to ("2 routes; 1 links to a table; 1 links to nothing: `/health`").
    Go through it with the person: which gaps are fine (`/health` touches no
-   table) and which are wrong. Then open the human index and ask: **"does
+   table) and which are wrong. The ones lint holds — routes, screens and
+   background tasks that reach nothing, tables nothing reaches — are
+   answered once each (see "The map's gaps" below). Then open the human index and ask: **"does
    this all look right, and is any link missing?"** Every "that's wrong"
    becomes a **fixture test in the adapter before it is fixed** — in a local
-   adapter, with the `extractor` skill; in a catalogue adapter, it is a ZDD
-   defect: say so in plain words and offer the ready-written report for the
-   repo's Discussions (decision 0041). When you are both done:
+   adapter, with the `extractor` skill — a starter copied in is the repo's
+   own adapter now, fixed the same way (decision 0048). Say so in plain
+   words; when the starter itself is wrong for every repo of that stack,
+   also offer the ready-written report for ZDD's Discussions (decision
+   0041), so the library's next release carries the fix. When you are both done:
    `node "$PLUGIN/scripts/bootstrap.mjs" check --done`.
 5. **The mapping session** (the only AI-heavy step, paid once; skip on
    greenfield beyond the declared apps). With the glossary and ADRs loaded,
@@ -399,8 +437,51 @@ The config holds `suiteChecks`: how many checks of ZDD's standard suite
 block in CI for the repo's own adapters (decision 0040). A fresh install
 writes all of them. When an uncovered part is built through the extractor
 skill, its last test runs the suite; the CI workflow runs it again on every
-pull request (the engine's `suite`). With no adapter of the repo's own, the
-step says so and passes.
+pull request (the engine's `suite`) on every adapter in the folder the
+config runs, starter copies included; their own tests run with `test`.
+
+### What the adapters could not read
+
+`derive` prints an `UNREAD` line for everything an adapter saw and could not
+read (decision 0048), on every run. A fresh install writes `unread.strict`,
+so lint fails on any item with no answer. Run:
+
+```
+node "$PLUGIN/scripts/bootstrap.mjs" unread
+```
+
+Take the items **one at a time**, in plain words, with your recommendation.
+Each is either fixed (the adapter learns to read it, through the extractor
+skill, its tests red then green) or marked fine, once, with the reason:
+
+```
+node "$PLUGIN/scripts/bootstrap.mjs" unread --mark=<id> --why="<why this is fine>"
+```
+
+The mark is kept in `zdd/config.json`; run `derive`, then `render`, and
+commit it all.
+
+### The map's gaps
+
+The check together (step 4 above) is where the map's gaps are first
+answered (decision 0049). A fresh install writes `gaps.strict`, so lint
+fails on any gap with no answer:
+
+```
+node "$PLUGIN/scripts/bootstrap.mjs" gaps
+```
+
+It names every route, screen and background task that reaches nothing,
+and every table nothing reaches: where a gap usually means a reader is
+missing. Take them **one at a time**, in plain words, with your
+recommendation. Each is fixed (an adapter reads the link, through the
+extractor skill), marked fine with a reason when there is nothing to map
+(`gaps --fine=<id> --why="…"`: a health check touches no table), or marked a
+known gap with a reason when it cannot be mapped (`gaps --known=<id>
+--why="…"`: table names built at runtime). A known gap stays in the agent
+index and the human index as a part of the map not to trust. Every later
+"update ZDD" asks about new ones, over the whole repo. Run `render` after,
+and commit the marks with it.
 
 ## Step 6 — the backfill, offered once (never default)
 

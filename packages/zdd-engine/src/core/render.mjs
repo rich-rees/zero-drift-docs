@@ -36,9 +36,10 @@ import { adrSets } from "./lib/adr-sets.mjs";
 import { buildBlessingIndex, viewerBlessings } from "./lib/blessing-index.mjs";
 import { loadBlessings, usersOf } from "./lib/blessings.mjs";
 import { importReaders, importersOf } from "./lib/importers.mjs";
-import { selectedModules } from "./derive.mjs";
+import { selectedModules, selectedGapKinds } from "./derive.mjs";
+import { gapsConfig, gapsOf, gapReport } from "./lib/gaps.mjs";
 import { MAX_STORE_FILE_BYTES } from "./lib/walk-markdown.mjs";
-import { slugify } from "./lib/slug.mjs";
+import { UNREAD_KIND, itemOf, unreadConfig, unreadReport } from "./lib/unread.mjs";
 import { loadConfig, resolveViewer, resolveNonAreaTags, validateRepoBase, absentStoreNotes } from "./lib/config.mjs";
 import { loadViewer, DEFAULT_VIEWER } from "./viewers/index.mjs";
 
@@ -46,7 +47,7 @@ import { loadViewer, DEFAULT_VIEWER } from "./viewers/index.mjs";
 // paths, the bundle folder node ids are relative to (the zdd/ folder), the
 // display name, the GitHub base URL for source links, and the base branch.
 let REPO, CONFIG, PATHS, BUNDLE, SEMANTIC, BLESSINGS, DERIVED, OUT_HTML, OUT_INDEX, OUT_ADR_INDEX, OUT_BLESSING_INDEX, OUT_GRAPH;
-let BUNDLE_NAME, REPO_BASE, BASE_BRANCH, VIEWER, NON_AREA_TAGS, AGENT_INDEX;
+let BUNDLE_NAME, REPO_BASE, BASE_BRANCH, VIEWER, NON_AREA_TAGS, AGENT_INDEX, UNREAD, GAPS;
 const RECORDS_BY_NODE = new Map(); // node id -> the derived record behind a metadata concept
 
 // Record kind -> the graph's display type. These names are the graph
@@ -345,9 +346,14 @@ function buildConcepts() {
 
   // Derived layer: node id = bundle-relative path minus .json.
   const derivedRecords = [];
+  const unread = []; // what an adapter could not read (decision 0048): for the viewer, never a graph node
   const idOfRef = new Map(); // record id ("table:env/journeys") -> node id
   for (const path of walk(DERIVED, ".json")) {
     const record = JSON.parse(readFileSync(path, "utf8"));
+    if (record.kind === UNREAD_KIND) {
+      unread.push(itemOf(record));
+      continue;
+    }
     const nodeId = posixify(relative(BUNDLE, path)).replace(/\.json$/, "");
     derivedRecords.push({ record, nodeId });
     idOfRef.set(record.id, nodeId);
@@ -527,7 +533,7 @@ function buildConcepts() {
     process.exit(1);
   }
 
-  return { concepts, features, appWarnings };
+  return { concepts, features, appWarnings, unread, derivedRecords };
 }
 
 // ---------------------------------------------------------------------------
@@ -584,7 +590,7 @@ function buildGraph(concepts) {
 // within budget and every feature is one hop away. An area is a feature's
 // first tag that is not a nonAreaTag; an untagged feature is "Other". The
 // bytes at one level are exactly the pre-2.3 bytes.
-function buildAgentIndex(concepts, features, adrs, { levels = 1, areaDir = "", recordOf = null } = {}) {
+function buildAgentIndex(concepts, features, adrs, { levels = 1, areaDir = "", recordOf = null, knownGaps = [] } = {}) {
   const byId = new Map(concepts.map((c) => [c.id, c]));
   const NON_AREA = new Set(NON_AREA_TAGS);
   const areaOf = (f) => (Array.isArray(f.tags) ? f.tags.find((t) => !NON_AREA.has(t)) : undefined) ?? "Other";
@@ -712,6 +718,23 @@ function buildAgentIndex(concepts, features, adrs, { levels = 1, areaDir = "", r
     lines.push("");
   }
   tail("Apps & packages", ["Application", "Package"]);
+  // Known gaps (decision 0049): records that should link and do not, which
+  // no adapter can map yet. A session reading this part of the map is told
+  // not to trust its missing links. Only when there are some, so a repo with
+  // none keeps its bytes.
+  if (knownGaps.length) {
+    lines.push("## Known gaps", "", `Parts of the map not to trust: each of these should link and does not, and no adapter maps it yet (answered in \`zdd/config.json\`'s \`gaps.known\`). Read the code, not the map, here.`, "");
+    // Record and config text is escaped as markdown, so a title cannot forge
+    // a link, close a code span or open raw HTML (CR-359); a destination
+    // with a bracket or a space is written in <…>, which no file name holds.
+    const md = (s) => String(s).replace(/[\\`*_[\]()<>#!|~&]/g, (c) => `\\${c}`);
+    const dest = (h) => (/[\s()[\]]/.test(h) ? `<${h}>` : h);
+    for (const g of knownGaps) {
+      const label = g.node ? `[${md(g.title)}](${dest(hrefOf(g.node))})` : md(g.record);
+      lines.push(`- ${g.kind} ${label}${g.file ? ` (${md(g.file)})` : ""}: ${g.direction === "reachNothing" ? "reaches nothing" : "nothing reaches it"} — ${md(g.why)}`);
+    }
+    lines.push("");
+  }
 
   lines.push("---");
   lines.push("");
@@ -751,8 +774,19 @@ export function resolveAgentIndexOptions(config) {
 
 // ---------------------------------------------------------------------------
 async function render() {
-  const { concepts, features, appWarnings } = buildConcepts();
+  const { concepts, features, appWarnings, unread, derivedRecords } = buildConcepts();
   for (const w of appWarnings) console.error(`WARNING: ${w}`);
+  // Known gaps (decision 0049): parts of the map not to trust, in both
+  // indexes. Read only when the config answers some gap `known`, so a repo
+  // with none renders as before and no adapter module is loaded for it.
+  let knownGaps = [];
+  if (GAPS.known.size) {
+    const found = await selectedGapKinds(REPO, CONFIG);
+    if (found.error) throw new Error(found.error);
+    for (const n of found.notes) console.error(`WARNING: ${n}`);
+    const nodeOf = new Map(derivedRecords.map(({ record, nodeId }) => [record.id, nodeId]));
+    knownGaps = gapReport(gapsOf(derivedRecords.map(({ record }) => record), found.kinds), GAPS).known.map((i) => ({ ...i, node: nodeOf.get(i.record) ?? null }));
+  }
   const docs = loadDocs();
   const changed = computeStoreChanges(docs.glossary);
   const graph = buildGraph(concepts);
@@ -801,14 +835,19 @@ async function render() {
   // An ADR outside zdd/adr — a harness ADR, or a custom adrDir's — carries
   // its folder (`dir`), so the viewer names its source and resolves its links
   // from there (CR-033); one in zdd/adr carries nothing new.
-  const viewerDocs = { ...docs, adrs: docs.adrs.map(({ num, file, title, body, dir }) => (dir !== "zdd/adr" ? { num, file, title, body, dir } : { num, file, title, body })), blessings: blessingsForViewer };
+  // Unread items ride along ready-read too (decision 0048), each with its
+  // answer: unanswered first. Set only when there are some, so a repo with
+  // none keeps its bytes.
+  const unreadView = unreadReport(unread, UNREAD);
+  const unreadForViewer = [...unreadView.open.map((i) => ({ ...i, why: null })), ...unreadView.fine];
+  const viewerDocs = { ...docs, adrs: docs.adrs.map(({ num, file, title, body, dir }) => (dir !== "zdd/adr" ? { num, file, title, body, dir } : { num, file, title, body })), blessings: blessingsForViewer, ...(unreadForViewer.length ? { unread: unreadForViewer } : {}), ...(knownGaps.length ? { gaps: knownGaps.map(({ id, node, kind, title, file, direction, what, why }) => ({ id, node, kind, title, file, direction, what, why })) } : {}) };
   const html = viewer.render({ graph, docs: viewerDocs, changed, options, bundleName: BUNDLE_NAME, repoBase: REPO_BASE });
   if (typeof html !== "string") {
     console.error(`Viewer '${VIEWER.name}' must return the human index as a string`);
     process.exit(1);
   }
   const graphJson = JSON.stringify(graph, null, 2) + "\n";
-  const built = buildAgentIndex(concepts, features, docs.adrs, { levels: AGENT_INDEX.levels, areaDir: agentIndexAreaDir(PATHS.agentIndex).split("/").pop(), recordOf: (c) => RECORDS_BY_NODE.get(c.id) ?? null });
+  const built = buildAgentIndex(concepts, features, docs.adrs, { levels: AGENT_INDEX.levels, areaDir: agentIndexAreaDir(PATHS.agentIndex).split("/").pop(), recordOf: (c) => RECORDS_BY_NODE.get(c.id) ?? null, knownGaps });
   const agentIndex = typeof built === "string" ? built : built.text;
   const areaFiles = typeof built === "string" ? new Map() : built.areaFiles;
   // ADR index: the always-load-whole orientation summary of
@@ -895,6 +934,16 @@ export async function run(args) {
   AGENT_INDEX = resolveAgentIndexOptions(CONFIG);
   if (AGENT_INDEX.error) {
     console.error(AGENT_INDEX.error);
+    process.exit(1);
+  }
+  UNREAD = unreadConfig(CONFIG);
+  if (UNREAD.error) {
+    console.error(UNREAD.error);
+    process.exit(1);
+  }
+  GAPS = gapsConfig(CONFIG);
+  if (GAPS.error) {
+    console.error(GAPS.error);
     process.exit(1);
   }
   // A missing store dir renders as empty; name it when the bundle is

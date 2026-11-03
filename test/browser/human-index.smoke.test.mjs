@@ -4,8 +4,8 @@
 // blessing to its cited ADR and back, a blessing to a node and back WITH A NODE
 // ALREADY SELECTED (CR-167: the detail panel opened and closed at once, and no
 // test or hand pass saw it), high blessings pinned first with their chip
-// (decision 0045), a hostile blessing and the empty store. Every
-// flow also fails on an uncaught page error, a dialog, or a request that
+// (decision 0045), the Unread peek (decision 0048), a hostile blessing and the
+// empty store. Every flow also fails on an uncaught page error, a dialog, or a request that
 // leaves the page (the viewer contract promises none).
 // Run: cd test/browser && npm ci && npx playwright install chromium && node --test "*.test.mjs"
 // (on a clean Linux machine, `npx playwright install --with-deps chromium` also
@@ -13,16 +13,20 @@
 import { test, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { cpSync, mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { chromium } from "playwright";
+import { copyFixture } from "../../packages/zdd-starter-adapters/test/starters.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ENGINE = resolve(HERE, "..", "..", "packages", "zdd-engine");
 const BIN = join(ENGINE, "bin", "zdd-engine.mjs");
-const FIXTURE = join(ENGINE, "test", "fixture");
+// The fixture lives with the starters that read it (decision 0048): the
+// engine ships no adapter, so a copy gets them in its zdd/extractors.
+const FIXTURE = resolve(HERE, "..", "..", "packages", "zdd-starter-adapters", "test", "fixture");
 const ARTIFACTS = join(HERE, "artifacts");
 // Longer than the slide-out's 0.25s transition and reveal's 200ms animation:
 // CR-167's panel opened and then closed, so "open" is read only after both.
@@ -34,7 +38,7 @@ const repos = [];
 function renderFixture(edit) {
   const repo = mkdtempSync(join(tmpdir(), "zdd-smoke-"));
   repos.push(repo);
-  cpSync(FIXTURE, repo, { recursive: true });
+  copyFixture(FIXTURE, repo);
   if (edit) edit(repo);
   for (const cmd of ["derive", "render"]) {
     execFileSync(process.execPath, [BIN, cmd], { cwd: repo, stdio: ["ignore", "ignore", "pipe"] });
@@ -76,6 +80,21 @@ before(() => {
     empty: renderFixture((repo) => {
       const dir = join(repo, "zdd", "blessings");
       for (const f of readdirSync(dir)) rmSync(join(dir, f));
+    }),
+    // Two statements the schema adapter cannot read (decision 0048): one
+    // answered in the config, one not, and one carrying markup.
+    unread: renderFixture((repo) => {
+      writeFileSync(join(repo, "migrations", "20990101000000_unread.sql"), `DROP SCHEMA "<img src=x onerror=window.__pwned=1>" ON things;\nDROP SCHEMA some_schema;\n`);
+      const hash = (what) => createHash("sha256").update(`supabase\0migrations/20990101000000_unread.sql\0${what}`).digest("hex").slice(0, 16);
+      const config = join(repo, "zdd", "config.json");
+      writeFileSync(config, JSON.stringify({ ...JSON.parse(readFileSync(config, "utf8")), unread: { fine: [{ id: `unread:supabase/${hash("DROP SCHEMA some_schema")}`, why: "a schema nothing uses" }] } }));
+    }),
+    // A known gap (decision 0049): the status route reaches nothing, and
+    // its reason carries markup. A fine one beside it is not shown.
+    gaps: renderFixture((repo) => {
+      const id = (kind, dir, record) => `gap:${kind}/${createHash("sha256").update(`${dir}\0${record}`).digest("hex").slice(0, 16)}`;
+      const config = join(repo, "zdd", "config.json");
+      writeFileSync(config, JSON.stringify({ ...JSON.parse(readFileSync(config, "utf8")), gaps: { known: [{ id: id("route", "reachNothing", "route:/api/hooks/status"), why: `polled by a worker no adapter reads <img src=x onerror=window.__pwned=1>` }], fine: [{ id: id("surface", "reachNothing", "surface:/_layout"), why: "a layout reads nothing" }] } }));
     }),
   };
 });
@@ -166,6 +185,46 @@ async function tapNode(id) {
   }, id);
   await page.mouse.click(at.x, at.y);
 }
+
+smoke("unread: the button counts what is open, the peek lists it unanswered first, the filter narrows it, and markup stays text", async () => {
+  await open(urls.unread);
+  assert.equal(await text("#btn-unread"), "Unread: 1 open");
+  await page.click("#btn-unread");
+  await expectDocs("Unread", null);
+  assert.equal(await visibleCount("#docs-body .unread-item"), 2);
+  assert.match(await text("#docs-body .unread-item:first-child"), /not answered/);
+  assert.match(await text("#docs-body .unread-item:last-child"), /marked fine.*a schema nothing uses/);
+  assert.equal(await page.evaluate(() => window.__pwned), undefined);
+  assert.equal(await page.$$eval("#docs-body img", (els) => els.length), 0, "the statement's markup is text");
+  await page.fill("#docs-filter", "some_schema");
+  assert.equal(await visibleCount("#docs-body .unread-item"), 1);
+  await page.fill("#docs-filter", "nothing like this");
+  assert.equal(await visibleCount("#docs-body .unread-item"), 0);
+  assert.match(await text("#docs-body .filter-empty"), /Nothing matches/);
+});
+
+smoke("a repo with nothing unread has no Unread button", async () => {
+  await open(urls.fixture);
+  assert.equal(await page.$("#btn-unread"), null);
+  assert.equal(await page.$("#btn-gaps"), null, "nor a Known gaps button with no known gap");
+});
+
+smoke("known gaps: the button counts them, the peek lists each with its reason as text, the filter narrows it, and a gap opens its node with the way back", async () => {
+  await open(urls.gaps);
+  assert.equal(await text("#btn-gaps"), "Known gaps: 1");
+  await page.click("#btn-gaps");
+  await expectDocs("Known gaps", null);
+  assert.equal(await visibleCount("#docs-body .gap-item"), 1, "a fine mark is not a part of the map not to trust");
+  assert.match(await text("#docs-body .gap-item"), /\/api\/hooks\/status.*route.*reaches nothing.*polled by a worker no adapter reads/s);
+  assert.equal(await page.evaluate(() => window.__pwned), undefined);
+  assert.equal(await page.$$eval("#docs-body img", (els) => els.length), 0, "the reason's markup is text");
+  await page.fill("#docs-filter", "nothing like this");
+  assert.equal(await visibleCount("#docs-body .gap-item"), 0);
+  await page.fill("#docs-filter", "worker");
+  assert.equal(await visibleCount("#docs-body .gap-item"), 1);
+  await clickDocs(".gap-item a.internal", "/api/hooks/status");
+  await expectDetail("metadata/route/hooks--status", "Known gaps");
+});
 
 smoke("each header button does its job", async () => {
   await open(urls.fixture);

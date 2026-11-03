@@ -83,6 +83,14 @@ records (a component and its module) was also counted twice.
 - Adapter contract stays at 1. `IMPORTS` is optional, and an adapter
   without it changes nothing.
 
+## As built (ZDD-11 slice 3: paths moved)
+
+The import readers named here, `adapters/js/imports.mjs` and
+`adapters/python/imports.mjs`, are now `adapters/_shared/js/imports.mjs` and
+`adapters/_shared/python/imports.mjs`
+([0048](0048-the-app-owns-its-adapters-zdd-ships-starters-not-readers.md)
+point 4). The `IMPORTS` contract is unchanged.
+
 ## Rejected
 
 - **Derive writes a full import list into the metadata.** It is the cleaner

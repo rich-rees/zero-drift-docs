@@ -195,6 +195,81 @@ A name already taken in the store, a wrong `--kinds` name or a `paths` value
 the engine would refuse also stops the run before its first write. Relay the ledger in plain words, as in step 2. Its
 notes match the plan's.
 
+## Step 3b — the adapters come into the repo (decision 0048)
+
+Run `node "$PLUGIN/scripts/bootstrap.mjs" starters` whenever the repo holds
+`zdd/extractors/starters.json`, even when this run copied nothing (an
+upgrade stopped before its proof is finished here); skip this step only when
+it reports no copy, or no copy behind and the proof already done. From 0.14 a repo owns every adapter it runs: the engine ships
+none, so this run copied each one the config names into `zdd/extractors/`,
+with its tests and its suite fixture (and `starters.json`, the record of
+the version each came from). Say so in plain words: "ZDD used to carry the
+code that reads your stack; from now on that code lives in your repo, so
+you can fix it yourself without waiting for a ZDD release." A repo coming
+from before 0.14 gets the starter library's **baseline**: the adapters
+exactly as the old engine ran them. Two proofs follow, in order, so what
+the move did and what the fixes do are never mixed:
+
+**First proof — nothing moved.**
+
+```
+node "$PLUGIN/scripts/bootstrap.mjs" starters --prove
+```
+
+It runs `derive --check` with the copies in place: every record must be
+byte for byte what the repo committed. Say "Proved: your records are
+exactly as before." What the adapters report unread for the first time is
+no record that moved (the report is new in 0.14): the proof names how many,
+the next derive writes them, and step 4c answers them. If it is NOT proved,
+stop and show what it printed: that is a ZDD defect (the baseline exists to
+reproduce them), reported in ZDD's Discussions as step 5 says.
+
+**From the old line** (a repo pinned before 0.9; the run's notes say so):
+this upgrade also crosses 0.9, whose own changes move records (the
+data-access readers it adds, background work read per platform file).
+Run `npx -y @rich-rees/zdd@0.14.0 derive` first and show what moved as a
+release's own change; then the first proof holds against those records,
+and what the fixes move stays apart from what 0.9 moved.
+
+**The fixes, one question.**
+
+```
+node "$PLUGIN/scripts/bootstrap.mjs" starters
+```
+
+It lists the fixes the starter library's later version notes for these
+adapters: what changed, who it affects, and how record ids move. Read each
+`who` against this repo (its migrations, its code) and say which apply
+here and what the person will see — records gaining links, a table's id
+gaining its schema. Then ask **"Take these fixes now?"** Recommended yes:
+they are known bugs, fixed and tested; cost: the generated records that
+the fixes correct change in this PR, and a map link at an id that moved is
+repointed for them; saying no keeps the adapters exactly as they are, and
+the no is kept, so the same fixes are not offered again. A fix declined
+earlier is listed apart; `--move` would apply it too, so say so before a
+move.
+
+- On **yes**:
+
+  ```
+  node "$PLUGIN/scripts/bootstrap.mjs" starters --move
+  ```
+
+  It runs the first proof again (`derive --check`; nothing is written
+  unless it passes), then the copies move to the version this release pins,
+  their own tests run (a failing test, or a derive that stops, puts every
+  copy back and stops), `derive` runs, every map
+  link and blessing at a record whose id moved is repointed, and `lint`
+  runs. Relay the result: how many records changed, which ids moved and
+  where links were repointed, and lint's verdict. A red lint is fixed with
+  the person in this PR. A copy changed since it was copied is never moved:
+  the run says so and writes nothing.
+- On **no**:
+
+  ```
+  node "$PLUGIN/scripts/bootstrap.mjs" starters --decline
+  ```
+
 ## Step 4 — the questions the notes raise, one at a time
 
 Work through every note that asks something, one question at a time, each
@@ -265,6 +340,64 @@ Done when `adapters` says every adapter passes and `--raise` has run, or
 the developer has chosen to leave a warning-only check for later (say so in
 the commit's record).
 
+## Step 4c — what the adapters could not read (decision 0048)
+
+Skip this step when the plan has no note about it (`unread.strict` is
+already on). Otherwise, after `derive`:
+
+```
+node "$PLUGIN/scripts/bootstrap.mjs" unread
+```
+
+It lists what the adapters saw and could not read. Lint only warns about
+these for now, so nothing turns red by surprise. Take them **one at a time**,
+in plain words, with your recommendation: the adapter is fixed through the
+**extractor** skill (tests red, then green), or the item is marked fine,
+once, with the reason (`unread --mark=<id> --why="…"`; ids may be comma
+separated when one reason covers several). Then:
+
+```
+node "$PLUGIN/scripts/bootstrap.mjs" unread --raise
+```
+
+`--raise` writes `unread.strict`, so a new item fails lint from now on; it
+refuses while any item has no answer. Marks go in `zdd/config.json`, and the
+human index shows them: run `derive`, then `render`, before the commit.
+
+Done when `--raise` has run, or the developer has chosen to leave items for
+later (say so in the commit's record).
+
+## Step 4d — the map's gaps (decision 0049)
+
+Skip this step when the plan has no note about it (`gaps.strict` is already
+on). Otherwise, after `derive`:
+
+```
+node "$PLUGIN/scripts/bootstrap.mjs" gaps
+```
+
+It lists every route, screen and background task that reaches nothing,
+and every table nothing reaches, over the whole repo. Lint only warns about
+these for now, so nothing turns red by surprise. Take them **one at a
+time**, in plain words, with your recommendation: an adapter is fixed to
+read the link through the **extractor** skill (tests red, then green); or
+the gap is answered once, with the reason — `gaps --fine=<id> --why="…"`
+when there is nothing to map, `gaps --known=<id> --why="…"` when it cannot be
+mapped (it then shows in both indexes as a part of the map not to trust).
+Ids may be comma separated when one reason covers several. Then:
+
+```
+node "$PLUGIN/scripts/bootstrap.mjs" gaps --raise
+```
+
+`--raise` writes `gaps.strict`, so a new gap fails lint from now on; it
+refuses while any gap has no answer. Run `render` before the commit, so a
+known gap is in the indexes.
+
+Done when `--raise` has run, or the developer has chosen to leave gaps for
+later (say so in the commit's record) — the next "update ZDD" asks about
+every one still open.
+
 ## Step 5 — regenerate, check, and list the commit
 
 Run the preflight once more — the engine pin may have moved, and a new pin is
@@ -277,9 +410,9 @@ node "$PLUGIN/scripts/bootstrap.mjs" preflight
 Then, with the engine this plugin pins:
 
 ```
-npx -y @rich-rees/zdd@0.13.0 derive
-npx -y @rich-rees/zdd@0.13.0 render
-npx -y @rich-rees/zdd@0.13.0 lint
+npx -y @rich-rees/zdd@0.14.0 derive
+npx -y @rich-rees/zdd@0.14.0 render
+npx -y @rich-rees/zdd@0.14.0 lint
 ```
 
 Show what moved in the generated artifacts and say why, from the notes (a
@@ -377,7 +510,7 @@ category: https://github.com/rich-rees/zero-drift-docs/discussions (decision 004
   record:` it replaces is still read, as the blessings section. A squash
   merge loses the record unless the merger keeps the message; a merge
   commit keeps it.
-- **The tally.** `npx -y @rich-rees/zdd@0.13.0 tally [--since <ref|date>] [--json]` counts,
+- **The tally.** `npx -y @rich-rees/zdd@0.14.0 tally [--since <ref|date>] [--json]` counts,
   per section, how often an artifact turned, confirmed, was reused or
   stored, then names the ADRs, glossary terms and blessings in the stores
   that no record ever named.
@@ -496,6 +629,63 @@ category: https://github.com/rich-rees/zero-drift-docs/discussions (decision 004
   `render --check` moves `human-index.html` only (with another viewer,
   possibly nothing); `derive --check`, `graph.json`, the agent index and the blessing
   index keep their bytes. Commit it in the same PR.
+
+## Upgrading to 0.14 (the app owns its adapters; every update checks the map's gaps)
+
+- **The adapters come into the repo** (decision 0048, step 3b). The
+  engine ships no adapter from 0.14, so the run copies each one the config
+  names into `zdd/extractors/` from the starter library (npm
+  `@rich-rees/zdd-starter-adapters`), with its tests, its suite fixture and
+  the `_shared/` code it reaches, and records each copy's version and files
+  in `zdd/extractors/starters.json`. A repo from before 0.14 gets the
+  library's baseline, 0.1.0: the adapters exactly as the old engine ran
+  them. Configs still naming the 2.3 alias, `jobs` or the pre-1.0 `adapter`
+  key are rewritten first, as before; the engine now refuses them.
+- **A companion may come too.** A query reader's suite fixture gives
+  nothing without the route reader beside it, so that reader is copied as
+  well, into the folder but not into `extractors`: derive never runs it,
+  and `starters.json` marks it `companionOf`. Say so plainly: it is code the
+  app does not run, kept so the suite passes, until the fixture is rewritten
+  in the app's own stack.
+- **Two proofs, in order.** `starters --prove` first: every adapter record
+  byte for byte as committed (an item the adapters report unread for the
+  first time is named, not counted as moved). Then `starters` lists the
+  fixes noted in the library's 0.2.0, and one question answers them:
+  `starters --move` on a yes (the copies move, their tests run, derive,
+  every map link and blessing at a moved id is repointed, lint),
+  `starters --decline` on a no, kept. **From the old line** (before 0.9),
+  `derive` comes first: 0.9's own changes move records, and the first proof
+  then holds against them (step 3b).
+- **The suite.** A copy no one has changed passes the suite as the library
+  proved it, so when every adapter is one the run raises `suiteChecks`;
+  step 4b still interviews an adapter the repo wrote or changed.
+- **What the adapters could not read** (step 4c: `unread`, then
+  `unread --raise`) **and the map's gaps** (decision 0049, step 4d beside it:
+  `gaps`, then `gaps --raise`). A gap is a route, screen or background task
+  that reaches nothing, or a table nothing reaches; each is fixed through
+  the **extractor** skill, or answered once, `--fine` or `--known`, with a
+  reason. Recommend answering both in this PR; the developer may leave some
+  for later (say so in the commit's record). Until each is raised, lint
+  warns with every item and every gap and never fails; from then a new one
+  fails CI. A gap left open is asked again at the next "update ZDD", which
+  does not finish while one is open.
+- **A local extractor scaffolded before 0.14** keeps its old test, which
+  counts the core's unread records among its ids: before it returns
+  `unread`, scaffold the test again (the extractor skill, Step 4, says how).
+- **Every update from now on** asks the starter library whether a starter
+  now fits (`bootstrap.mjs library`), and the session start says one line
+  when the library notes fixes for a copy not yet taken or declined.
+- **What moves on the bump**: `zdd/extractors/` arrives (the copies, their
+  tests and fixtures, `_shared/`, `starters.json`) and `zdd/config.json`
+  gains `localExtractorDir` (and `suiteChecks`, `unread`, `gaps` as
+  answered). `derive --check` keeps every adapter record's bytes at the
+  first proof (the unread records it newly writes are the report's, step
+  4c); on a yes to the fixes the records they correct move, in this PR, and
+  `graph.json` and the agent index with them. `render --check` moves
+  `human-index.html` (its Unread and Known gaps peeks); a gap answered known
+  moves the agent index and the human index, never a record or `graph.json`.
+  From the old line, 0.9's own changes move too (its own section). The
+  pins move to 0.14.0.
 
 ## Upgrading to 0.13 (a store header says each key once)
 

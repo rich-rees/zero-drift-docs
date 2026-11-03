@@ -13,14 +13,16 @@ import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, re
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { BUILT_INS, RETIRED_BUILT_INS, REMOVED_BUILT_INS, IO_SINCE } from "../scripts/scaffold-extractor.mjs";
+import { BUILT_INS, IO_SINCE } from "../scripts/scaffold-extractor.mjs";
+import { placeStarters } from "../../../packages/zdd-starter-adapters/test/starters.mjs";
 
 const PLUGIN = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SCRIPT = join(PLUGIN, "scripts", "scaffold-extractor.mjs");
 const TEMPLATES = join(PLUGIN, "templates", "extractor");
 const ENGINE = resolve(PLUGIN, "..", "..", "packages", "zdd-engine");
+const STARTERS = resolve(PLUGIN, "..", "..", "packages", "zdd-starter-adapters");
 const ENGINE_BIN = join(ENGINE, "bin", "zdd-engine.mjs");
-const GREENFIELD = join(ENGINE, "test", "fixture-greenfield");
+const GREENFIELD = join(STARTERS, "test", "fixture-greenfield");
 const POSIX = process.platform !== "win32";
 
 const CSHARP = {
@@ -40,7 +42,12 @@ function adopted(t, pin = IO_SINCE) {
   t.after(() => rmSync(repo, { recursive: true, force: true }));
   cpSync(GREENFIELD, repo, { recursive: true });
   const configPath = join(repo, "zdd", "config.json");
-  writeFileSync(configPath, JSON.stringify({ ...JSON.parse(readFileSync(configPath, "utf8")), engine: pin }, null, 2) + "\n");
+  // Before a scaffold the repo names no local folder (the fixture's is where
+  // the starters' suite copies them); a derive copies in what the config names.
+  const { localExtractorDir: _, ...config } = JSON.parse(readFileSync(configPath, "utf8"));
+  writeFileSync(configPath, JSON.stringify({ ...config, engine: pin }, null, 2) + "\n");
+  // The adapters the config names, where the scaffold points localExtractorDir.
+  placeStarters(repo);
   return repo;
 }
 function scaffold(repo, answers, extra = []) {
@@ -178,9 +185,67 @@ test("the scaffolded test is red until EXPECTED_IDS and a fixture exist, and gre
   assert.equal(count("pass"), POSIX ? 10 : 9, green.stdout);
 });
 
+// Found building a schema adapter from nothing (ZDD-11 slice 7): the core
+// keeps each unread item as a record of kind `unread`, and the scaffolded
+// test counted those among the extractor's ids, so an adapter using the
+// unread step (the skill's Step 6 asks for it) could never go green. The
+// ids leave them out; EXPECTED_UNREAD checks them, empty by default.
+test("an extractor that reports unread items goes green: EXPECTED_IDS leaves the core's unread records out, EXPECTED_UNREAD holds each item's file and raw text, shown as the core shows it (CR-375)", (t) => {
+  const repo = adopted(t);
+  scaffoldJson(repo, CSHARP);
+  const dir = join(repo, "zdd", "extractors", "aspnet-routes");
+  const testFile = "zdd/extractors/aspnet-routes/aspnet-routes.test.mjs";
+  const controller = ['[Route("api/orders")]', "public class OrdersController {", "    [HttpGet]", "    public void List() {}", "    [HttpPatch]", "    public void Touch() {}", "}", ""].join("\n");
+  writeFileSync(join(dir, "fixture", "src", "Api", "OrdersController.cs"), controller);
+  writeFileSync(join(dir, "fixture", "src", "Api", "OtherController.cs"), controller.replace("api/orders", "api/others"));
+  const testPath = join(dir, "aspnet-routes.test.mjs");
+  const base = readFileSync(testPath, "utf8").replace("const EXPECTED_IDS = null;", 'const EXPECTED_IDS = ["route:/api/orders", "route:/api/others"];').replace("const CONVENTION_RECURSES = null;", "const CONVENTION_RECURSES = false;");
+  writeFileSync(testPath, base);
+  // The same short text in two files, and in one of them a long item over
+  // two lines: past the 300 characters the core shows.
+  const long = `a long statement\n${"x".repeat(400)}`;
+  const modPath = join(dir, "index.mjs");
+  const logic = [
+    "  const m = /\\[Route\\(\"/.exec(masked);",
+    "  if (m) out.push(record(\"route\", \"/\" + text.slice(m.index + m[0].length, masked.indexOf('\"', m.index + m[0].length)), rel, { methods: [\"GET\"] }));",
+    "  if (masked.includes(\"[HttpPatch]\")) unreadSeen.push({ file: rel, what: \"an [HttpPatch] action, which this adapter does not read\" });",
+    `  if (rel.endsWith("OrdersController.cs")) unreadSeen.push({ file: rel, what: ${JSON.stringify(long)} });`,
+  ].join("\n");
+  writeFileSync(
+    modPath,
+    readFileSync(modPath, "utf8")
+      .replace("function fromSource(rel, masked, text, diagnostics) {\n  const out = [];", (head) => `const unreadSeen = [];\n${head}\n${logic}`)
+      .replace("return { records: merge(records), diagnostics };", "return { records: merge(records), diagnostics, unread: unreadSeen.splice(0) };"),
+  );
+  const patch = "an [HttpPatch] action, which this adapter does not read";
+  const expect = (items) => writeFileSync(testPath, base.replace("const EXPECTED_UNREAD = [];", `const EXPECTED_UNREAD = ${JSON.stringify(items)};`));
+  const red = runTests(repo, testFile);
+  assert.notEqual(red.status, 0, "items the test does not expect are red");
+  assert.match(red.stdout, /what derive reported unread differs from EXPECTED_UNREAD/);
+  // One item named against the wrong file is red too.
+  expect([{ file: "src/Api/OrdersController.cs", what: patch }, { file: "src/Api/OrdersController.cs", what: patch }, { file: "src/Api/OrdersController.cs", what: long }]);
+  assert.notEqual(runTests(repo, testFile).status, 0, "a wrong file is red");
+  // Each item as the adapter returned it, the long one raw.
+  expect([{ file: "src/Api/OrdersController.cs", what: patch }, { file: "src/Api/OtherController.cs", what: patch }, { file: "src/Api/OrdersController.cs", what: long }]);
+  const green = runTests(repo, testFile);
+  assert.equal(green.status, 0, green.stdout + green.stderr);
+});
+
+// The template shows an expected `what` by the core's own rule, written out
+// so a scaffolded test imports nothing of ZDD: held equal here.
+test("CR-375: the scaffolded test shows an unread item's text exactly as the core's unread record does", async () => {
+  const { oneLine, cut, MAX_WHAT } = await import(pathToFileURL(join(ENGINE, "src", "core", "lib", "unread.mjs")).href);
+  const tmpl = readFileSync(join(PLUGIN, "templates", "extractor", "extractor.test.mjs.tmpl"), "utf8");
+  const body = /const shown = \(what\) => \{[\s\S]*?\n\};/.exec(tmpl);
+  assert.ok(body, "the template defines shown()");
+  const shown = new Function(`${body[0]}\nreturn shown;`)();
+  for (const s of ["plain", "  two\r\n lines\t", "x".repeat(299), "x".repeat(300), "x".repeat(301), `${"é".repeat(310)}`, "a​b c", "😀".repeat(305)]) {
+    assert.equal(shown(s), cut(oneLine(s), MAX_WHAT), JSON.stringify(s.slice(0, 20)));
+  }
+});
+
 test("refusals: every bad answer or repo state stops before the first write", (t) => {
   const cases = [
-    [{ ...CSHARP, name: "fastapi" }, /is a built-in extractor/],
     [{ ...CSHARP, name: "Aspnet" }, /name must match/],
     [{ ...CSHARP, name: "../evil" }, /name must match/],
     [{ ...CSHARP, evidence: " \n " }, /evidence must say/],
@@ -254,15 +319,12 @@ test("text bound for a generated comment is flattened to one line and every mask
   assert.equal(typeof loaded.derive, "function", "the flattened comment did not break the module");
 });
 
-test("the local-name guard mirrors the engine's catalogue", () => {
-  // The catalogue is a folder of adapters beside the core (decision 0036):
-  // every <name>/index.mjs is a name, and catalogue.json carries the retired ones.
-  const dir = join(ENGINE, "src", "adapters");
+test("the shapedLike list mirrors the starter library (decision 0048)", () => {
+  // The starters are a folder of adapters in their own package: every
+  // <name>/index.mjs is a name a scaffold may be shaped like.
+  const dir = join(STARTERS, "adapters");
   const names = readdirSync(dir).filter((n) => existsSync(join(dir, n, "index.mjs")));
   assert.deepEqual([...BUILT_INS].sort(), names.sort());
-  const { aliases, retired } = JSON.parse(readFileSync(join(dir, "catalogue.json"), "utf8"));
-  assert.deepEqual(RETIRED_BUILT_INS, aliases);
-  assert.deepEqual([...REMOVED_BUILT_INS].sort(), Object.keys(retired ?? {}).sort(), "the names the engine stops on (CR-080)");
 });
 
 // The masks, lifted out of their templates and run on text that tries to
@@ -498,6 +560,8 @@ test("POSIX: a symlinked localExtractorDir is refused — nothing written throug
   const repo = adopted(t);
   const outside = mkdtempSync(join(tmpdir(), "zdd-scaffold-outside-"));
   t.after(() => rmSync(outside, { recursive: true, force: true }));
+  // The folder itself is the link: the starters adopted() placed go first.
+  rmSync(join(repo, "zdd", "extractors"), { recursive: true, force: true });
   symlinkSync(outside, join(repo, "zdd", "extractors"));
   const r = scaffold(repo, CSHARP);
   assert.equal(r.status, 1);

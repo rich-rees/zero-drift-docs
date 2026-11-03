@@ -14,10 +14,12 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { findMapBlessings, proposeMove, blessingSlug, rebaseLinks, removeMoved, blessingFileText, triggerQuestion } from "../scripts/lib/blessing-move.mjs";
 import { extractBlessings, blessingShape } from "../../../packages/zdd-engine/src/core/lib/map-links.mjs";
+import { copyFixture } from "../../../packages/zdd-starter-adapters/test/starters.mjs";
 
 const PLUGIN = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SCRIPT = join(PLUGIN, "scripts", "bootstrap.mjs");
 const ENGINE = resolve(PLUGIN, "..", "..", "packages", "zdd-engine");
+const STARTERS = resolve(PLUGIN, "..", "..", "packages", "zdd-starter-adapters");
 const ENGINE_BIN = join(ENGINE, "bin", "zdd-engine.mjs");
 const VERSION = JSON.parse(readFileSync(join(PLUGIN, ".claude-plugin", "plugin.json"), "utf8")).version;
 
@@ -77,7 +79,7 @@ Kept as written.
 `;
 const adopter = (name) => {
   const repo = join(scratch, name);
-  cpSync(join(ENGINE, "test", "fixture"), repo, { recursive: true });
+  copyFixture(join(STARTERS, "test", "fixture"), repo);
   rmSync(join(repo, "zdd", "blessings"), { recursive: true, force: true });
   const cfg = JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8"));
   writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify({ ...cfg, engine: "2.4.1" }, null, 2) + "\n");

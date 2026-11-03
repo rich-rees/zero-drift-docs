@@ -16,10 +16,11 @@ import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { UPGRADE_NOTES, newestTag, INSTRUCTION_RULES, compareVersions, ruleChangedSince, mergeGate, IMPORT_COMMENT, RETIRED_NAMES, OLD_LINE_TAGS } from "../scripts/bootstrap.mjs";
 import { oldLine } from "../scripts/lib/repo.mjs";
+import { copyFixture, placeStarters } from "../../../packages/zdd-starter-adapters/test/starters.mjs";
 
 const PLUGIN = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SCRIPT = join(PLUGIN, "scripts", "bootstrap.mjs");
-const ENGINE_FIXTURES = resolve(PLUGIN, "..", "..", "packages", "zdd-engine", "test");
+const ENGINE_FIXTURES = resolve(PLUGIN, "..", "..", "packages", "zdd-starter-adapters", "test");
 const VERSION = JSON.parse(readFileSync(join(PLUGIN, ".claude-plugin", "plugin.json"), "utf8")).version;
 const MINOR = VERSION.split(".").slice(0, 2).join(".");
 const LOCK = (ref) => ({ "zero-drift-docs": { source: { source: "github", repo: "rich-rees/zero-drift-docs", ref }, autoUpdate: false } });
@@ -42,7 +43,7 @@ const fails = (root, args) => {
 const adopted = (name, { engine = "2.0.0", release, extractors = ["generic"], claude, settings = { extraKnownMarketplaces: LOCK("v2.0.0") }, fixture } = {}) => {
   const repo = join(scratch, name);
   if (fixture) {
-    cpSync(join(ENGINE_FIXTURES, fixture), repo, { recursive: true });
+    copyFixture(join(ENGINE_FIXTURES, fixture), repo);
     rmSync(join(repo, "zdd"), { recursive: true });
   }
   mkdirSync(join(repo, "zdd"), { recursive: true });
@@ -277,13 +278,24 @@ test("2.4.1, finding 1 and the first adopter 1: an owned workflow's pre-2.2 head
   assert.doesNotMatch(again.notes.join("\n"), /header comment now names/, "once only");
 });
 
-test("2.4.1, finding 3: an upgrade lists only the units speaking to a rule changed since the repo's pin — a repo at 2.4.0 is asked about the generated-files rule (2.4.1), not about load or update", () => {
+test("2.4.1, finding 3: an upgrade lists only the units speaking to a rule changed since the repo's pin — a repo at 2.4.0 is asked about the generated-files rule (2.4.1) and the update verb (0.14), not about load", () => {
   const repo = adopted("dupes-since", { claude: CLAUDE_WITH_DUPES, engine: "2.4.0", settings: { extraKnownMarketplaces: LOCK("v2.4.0") } });
   const plan = runJson(repo, ["upgrade", "--plan"]);
-  assert.deepEqual(plan.duplicates.map((d) => [d.heading, d.rules]), [["## Loading ZDD", ["generated"]]]);
+  assert.deepEqual(plan.duplicates.map((d) => [d.heading, d.rules]), [["## Loading ZDD", ["generated"]], ["### Docs", ["update"]]]);
   const text = run(repo, ["upgrade", "--plan"]);
   assert.ok(!text.includes('ZDD now says: "load ZDD"'), "an unchanged rule is not shown again");
   assert.ok(text.includes("ZDD now says: the generated artifacts"), text);
+});
+
+// CR-379 (slice 7 campaign): 0.14 changes the update verb (every gap the
+// map check names is answered) and the defect rule (the repo's own adapters
+// are no ZDD defect), so a repo at 0.13 is shown its own text on those.
+test("CR-379: a repo at 0.13.0 is asked about its own text on the update verb, which 0.14 changed, and not about loading, which it did not", () => {
+  const repo = adopted("dupes-014", { claude: CLAUDE_WITH_DUPES, engine: null, release: "0.13.0", settings: { extraKnownMarketplaces: LOCK("v0.13.0") } });
+  const plan = runJson(repo, ["upgrade", "--plan"]);
+  assert.deepEqual(plan.duplicates.map((d) => [d.heading, d.rules]), [["### Docs", ["update"]]], JSON.stringify(plan.duplicates));
+  assert.ok(run(repo, ["upgrade", "--plan"]).includes("answer every gap the map check names"));
+  assert.ok(ruleChangedSince(INSTRUCTION_RULES.find((r) => r.id === "findings"), "0.13.0"));
 });
 
 test("2.4.1 CR-011, CR-013, CR-014: from 2.4.0, the changed rules catch the adopter's wording in any order — the area folder, conflicts-before-merge, an old `ZDD:` line", () => {
@@ -336,8 +348,8 @@ test("2.4.1 CR-020: the opt-in offer is quiet for an extractor already on", () =
 
 test("2.4.1, finding 3: each rule's `since` is a release no later than this plugin, and moves with what the rule says — change `says`, then bump `since` and this table together", () => {
   const PINNED = {
-    load: oldLine("2.4.0"), patterns: "0.11.0", update: oldLine("2.4.0"), upgrade: oldLine("2.3.0"), skew: oldLine("2.3.0"), generated: oldLine("2.4.1"),
-    merge: oldLine("2.4.1"), renumber: oldLine("2.4.1"), install: oldLine("2.3.0"), grill: oldLine("2.3.0"), findings: "0.9.0", record: oldLine("2.4.1"), blessings: oldLine("2.5.0"),
+    load: oldLine("2.4.0"), patterns: "0.11.0", update: "0.14.0", upgrade: oldLine("2.3.0"), skew: oldLine("2.3.0"), generated: oldLine("2.4.1"),
+    merge: oldLine("2.4.1"), renumber: oldLine("2.4.1"), install: oldLine("2.3.0"), grill: oldLine("2.3.0"), findings: "0.14.0", record: oldLine("2.4.1"), blessings: oldLine("2.5.0"),
   };
   const VERSION = JSON.parse(readFileSync(join(PLUGIN, ".claude-plugin", "plugin.json"), "utf8")).version;
   const SAYS_SHA = {};
@@ -349,8 +361,8 @@ test("2.4.1, finding 3: each rule's `since` is a release no later than this plug
   }
   assert.deepEqual(Object.keys(SAYS_SHA).sort(), Object.keys(PINNED).sort());
   const SAYS_PINNED = {
-    load: "f5ab5c09cab0", patterns: "5a1de9697705", update: "0143764c1f10", upgrade: "1f328adcb3f1", skew: "c0a3cd59c82f", generated: "d342fc5876db",
-    merge: "98d4b51c843c", renumber: "d1f96292c08e", install: "df690ac41ed2", grill: "474fe1670736", findings: "c6a5958dbb61", record: "3767c173ae7e", blessings: "5d7a511af2c2",
+    load: "f5ab5c09cab0", patterns: "5a1de9697705", update: "50c26adee792", upgrade: "1f328adcb3f1", skew: "c0a3cd59c82f", generated: "d342fc5876db",
+    merge: "98d4b51c843c", renumber: "d1f96292c08e", install: "df690ac41ed2", grill: "474fe1670736", findings: "0879068ff188", record: "3767c173ae7e", blessings: "5d7a511af2c2",
   };
   assert.deepEqual(SAYS_SHA, SAYS_PINNED, "a rule's `says` changed — bump its `since` to this release, then copy the new hashes here");
 });
@@ -589,6 +601,8 @@ test("CR-150: a prerelease sorts before its release — an upgrade from 0.9.0-rc
 
 test("CR-156: detection that cannot run never stops the 0.9 upgrade — the pin still moves, nothing is added, and the hand route is named", () => {
   const repo = adopted("no-detect", { extractors: ["supabase", "nextjs"], engine: "2.5.0", settings: { extraKnownMarketplaces: LOCK("v2.5.0") } });
+  // Its adapters already in place, so the step that copies them needs no engine (that step stops, with nothing written, when the engine cannot run).
+  placeStarters(repo, { configure: true });
   const r = spawnSync(process.execPath, [SCRIPT, "upgrade", "--json", `--root=${repo}`, `--home=${home}`], { encoding: "utf8", env: { ...process.env, ZDD_ENGINE_BIN: join(repo, "missing.mjs") } });
   assert.equal(r.status, 0, r.stderr);
   const json = JSON.parse(r.stdout);
@@ -626,7 +640,7 @@ test("0.9 adds the data-access adapters detection proposes, with its evidence, t
   };
   const repo = app("da-add", { extractors: ["supabase", "nextjs"], engine: "2.5.0", settings: { extraKnownMarketplaces: LOCK("v2.5.0") } });
   const plan = runJson(repo, ["upgrade", "--plan"]);
-  assert.ok(plan.notes.some((n) => /^zdd\/config\.json: extractor "supabase-js" added \(0\.9\.0, decision 0037: the database access the route and screen adapters stopped reading\) — detection: Supabase beside JS code \(nextjs/.test(n)), plan.notes.join("\n"));
+  assert.ok(plan.notes.some((n) => /^zdd\/config\.json: extractor "supabase-js" added \(0\.9\.0, decision 0037: the queries the route and screen adapters stopped reading\) — detection: Supabase beside JS code \(nextjs/.test(n)), plan.notes.join("\n"));
   runJson(repo, ["upgrade"]);
   const cfg = JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8"));
   assert.deepEqual(cfg.extractors, ["supabase", "nextjs", "supabase-js"]);

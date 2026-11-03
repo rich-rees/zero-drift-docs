@@ -1,40 +1,47 @@
-// The border between the core and the adapters (decision 0036): the core
-// knows no stack. The adapters may import the core's helpers; the core finds
-// adapters only by name, through lib/catalogue.mjs.
+// The border between the core and the adapters (decisions 0036 and 0048):
+// the core knows no stack and holds no adapter. Since 0.14 every adapter a
+// repo runs is its own, in its localExtractorDir, and the starters are a
+// second package the core depends on nothing in; detection and the preview
+// read whichever folder of adapters they are handed (lib/adapter-folder.mjs).
+// From the other side an adapter imports nothing of the core (the starter
+// library's own suite holds that, test/self-contained.test.mjs there).
 //
-// Two rules hold it, and the first is the guarantee:
+// Three rules hold it here, and the first is the guarantee:
 //
 // 1. Imports. A core file imports only Node's built-in modules (`node:…`)
 //    and other core files, by a quoted relative path. A computed import
-//    (`import(x)`) appears only in the two loaders that turn a name into a
-//    module: derive.mjs (adapters) and viewers/index.mjs (viewers).
-//    `require` and `createRequire` appear nowhere. And a path into the
-//    adapters folder (`adapters/` or `adapters\`) appears in exactly one
-//    file, lib/catalogue.mjs, so an import built from pieces, wrapped in
-//    `new URL`, or hidden behind a comment still has to spell it out there.
+//    (`import(x)`) appears only in the loaders that turn a name or a folder
+//    into a module: derive.mjs and lib/adapter-folder.mjs (adapters) and
+//    viewers/index.mjs (viewers). `require` and `createRequire` appear
+//    nowhere. And no core file spells a path out of src/ into an adapters
+//    folder beside it (`../adapters/`), so an import built from pieces,
+//    wrapped in `new URL`, or hidden behind a comment still has to spell it.
 // 2. Words. No core file names a stack, framework, library, platform or
-//    vendor, in code or in comments. STACK_WORDS (./stack-words.mjs) is a tripwire, not a proof:
-//    a finite list catches the names ZDD has met, and it lives here because
-//    the core may not hold it. Third-party code vendored into a viewer
-//    (`vendor/`) is outside both rules: it is not ours to word.
+//    vendor, in code or in comments; nor do the engine's own test-only
+//    adapters and test fixture. STACK_WORDS (./stack-words.mjs) is a
+//    tripwire, not a proof: a finite list catches the names ZDD has met,
+//    and it lives here because the core may not hold it. Third-party code
+//    vendored into a viewer (`vendor/`) is outside both rules: it is not
+//    ours to word.
+// 3. No adapter in the package. The engine ships no adapter folder and its
+//    published files hold none.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
-import { catalogue, readCatalogue, splitBundleOptions } from "../src/core/lib/catalogue.mjs";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { readAdapterFolder, folderModules } from "../src/core/lib/adapter-folder.mjs";
+import { ioProblems, moduleReach } from "../src/core/lib/suite.mjs";
 import { WORD_RE as WORD_RE_OF } from "./stack-words.mjs";
 
 const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const CORE = join(PKG, "src", "core");
-const ADAPTERS = join(PKG, "src", "adapters");
 
 const WORD_RE = WORD_RE_OF();
 const SOURCE_RE = /\.(mjs|cjs|js|jsx|ts|mts|cts|tsx|css|html|md|json)$/;
-const LOADERS = new Set(["src/core/derive.mjs", "src/core/viewers/index.mjs"]);
-const BRIDGE = "src/core/lib/catalogue.mjs";
+const LOADERS = new Set(["src/core/derive.mjs", "src/core/lib/adapter-folder.mjs", "src/core/viewers/index.mjs"]);
 
 function files(dir) {
   const out = [];
@@ -80,11 +87,11 @@ export function borderProblems(path, text) {
       if (!(target === CORE || target.startsWith(CORE + sep))) problems.push(`${path}: imports ${i.spec}, outside src/core`);
     }
   }
-  if (path !== BRIDGE && /adapters[\\/]/.test(text)) problems.push(`${path}: names a path into the adapters folder`);
+  if (/\.\.[\\/](?:[^"'`\s]*[\\/])?adapters[\\/]/.test(text)) problems.push(`${path}: names a path into an adapters folder beside the core`);
   return problems;
 }
 
-test("core files import only node: built-ins and other core files; the adapters folder is reached only through lib/catalogue.mjs", () => {
+test("core files import only node: built-ins and other core files, and spell no path into an adapters folder beside them", () => {
   const problems = [];
   for (const p of files(CORE)) problems.push(...borderProblems(rel(p), readFileSync(p, "utf8")));
   assert.deepEqual(problems, []);
@@ -102,14 +109,16 @@ test("the import guard catches the bypasses (CR-003)", () => {
   assert.ok(caught(`import { x } from "/abs/path.mjs";`), "absolute");
   assert.ok(caught(`const r = createRequire(import.meta.url);`), "createRequire");
   assert.ok(caught(`const m = require("../adapters/x");`), "require");
-  assert.ok(caught(`const where = "adapters\\\\fastapi";`), "backslash path");
+  assert.ok(caught(`const where = "..\\\\adapters\\\\fastapi";`), "backslash path");
   assert.ok(!caught(`import { join } from "node:path";\nimport { a } from "./lib/paths.mjs";\nconst t = "a from 'x'";`), "the allowed forms pass");
   assert.ok(!borderProblems("src/core/derive.mjs", `return import(pathToFileURL(p).href);`).length, "the adapter loader may compute");
+  assert.ok(!borderProblems("src/core/lib/adapter-folder.mjs", `await import(pathToFileURL(entry).href)`).length, "so may the folder reader");
+  assert.ok(!caught(`// the starter library's adapters/, or zdd/extractors in an app`), "naming an app's adapters folder is no path out of the core");
 });
 
-test("no core file names a stack, in code or in comments", () => {
+test("no core file names a stack, in code or in comments; nor do the engine's test-only adapters and fixture", () => {
   const offenders = [];
-  for (const p of files(CORE)) {
+  for (const p of [...files(CORE), ...files(join(PKG, "test", "adapters")), ...files(join(PKG, "test", "fixture"))]) {
     readFileSync(p, "utf8").split(/\r?\n/).forEach((line, i) => {
       for (const m of line.matchAll(WORD_RE)) offenders.push(`${rel(p)}:${i + 1}: ${m[2]}`);
     });
@@ -125,117 +134,150 @@ test("the word tripwire catches joined spellings and spares ordinary words (CR-0
   assert.deepEqual(hits("expressive, reaction, supabased, external-services, springs"), []);
 });
 
-// ---- the catalogue itself (CR-001, CR-002) ----
+// ---- the reach a copy is made from (decision 0048 point 4) ----
 
-function fixtureCatalogue(build) {
-  const dir = mkdtempSync(join(tmpdir(), "zdd-catalogue-"));
+test("the reach guard catches a reach into another adapter or past the folder", () => {
+  const dir = mkdtempSync(join(tmpdir(), "zdd-reach-"));
+  try {
+    mkdirSync(join(dir, "a"));
+    mkdirSync(join(dir, "b"));
+    mkdirSync(join(dir, "_shared"));
+    writeFileSync(join(dir, "a", "index.mjs"), `import { x } from "../_shared/x.mjs";\nimport { y } from "../b/y.mjs";\nimport { z } from "../../z.mjs";\nimport { w } from "./gone.mjs";\n// import { v } from "../b/v.mjs";\n`);
+    writeFileSync(join(dir, "_shared", "x.mjs"), `export const x = 1;\n`);
+    writeFileSync(join(dir, "b", "y.mjs"), `export const y = 1;\n`);
+    const r = moduleReach(join(dir, "a", "index.mjs"), dir);
+    assert.deepEqual(r.files.map((f) => relative(dir, f).split(sep).join("/")), ["_shared/x.mjs", "a/index.mjs", "b/y.mjs"]);
+    assert.deepEqual(r.outside, ["a/index.mjs imports ../../z.mjs"]);
+    assert.deepEqual(r.missing, ["a/gone.mjs"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("reach resolves an import as Node does: a query, a fragment and an escaped name reach the file Node loads (CR-284)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "zdd-reach-url-"));
+  try {
+    mkdirSync(join(dir, "a"));
+    mkdirSync(join(dir, "_shared"));
+    writeFileSync(join(dir, "a", "index.mjs"), `import { x } from "../_shared/x.mjs?v=1";\nimport { y } from "../_shared/y.mjs#part";\nimport { z } from "../_shared/a%20b.mjs";\nimport { "odd-name" as o } from "../_shared/odd.mjs";\nexport const hint = 'from "./never.mjs"';\nexport const all = x + y + z + o;\n`);
+    writeFileSync(join(dir, "_shared", "odd.mjs"), `const o = 4;\nexport { o as "odd-name" };\n`);
+    writeFileSync(join(dir, "_shared", "x.mjs"), `export const x = 1;\n`);
+    writeFileSync(join(dir, "_shared", "y.mjs"), `export const y = 2;\n`);
+    writeFileSync(join(dir, "_shared", "a b.mjs"), `export const z = 3;\n`);
+    const r = moduleReach(join(dir, "a", "index.mjs"), dir);
+    assert.deepEqual(r.files.map((f) => relative(dir, f).split(sep).join("/")), ["_shared/a b.mjs", "_shared/odd.mjs", "_shared/x.mjs", "_shared/y.mjs", "a/index.mjs"]);
+    assert.deepEqual([r.outside, r.missing, r.limit], [[], [], null], "a string holding `from \"./x\"` is not an import; a quoted name before `from` is (CR-289)");
+    assert.equal((await import(pathToFileURL(join(dir, "a", "index.mjs")).href)).all, 10, "Node loads the same files");
+    writeFileSync(join(dir, "a", "fs.mjs"), `import { "readFileSync" as r } from "node:fs";\nexport const x = r;\n`);
+    assert.deepEqual(ioProblems(join(dir, "a", "fs.mjs"), dir), ["a/fs.mjs imports node:fs"], "check 5 reads the same imports");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("reach never goes through a link, and stops at its limits (CR-278, CR-279)", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "zdd-reach-link-"));
+  const away = mkdtempSync(join(tmpdir(), "zdd-reach-away-"));
+  try {
+    mkdirSync(join(dir, "a"));
+    mkdirSync(join(dir, "_shared"));
+    writeFileSync(join(away, "h.mjs"), `export const h = 1;\n`);
+    writeFileSync(join(dir, "a", "index.mjs"), `import { h } from "../_shared/link/h.mjs";\n`);
+    let linked = true;
+    try {
+      symlinkSync(away, join(dir, "_shared", "link"), "junction");
+    } catch {
+      linked = false;
+    }
+    if (linked) {
+      const r = moduleReach(join(dir, "a", "index.mjs"), dir);
+      assert.deepEqual(r.files.map((f) => relative(dir, f).split(sep).join("/")), ["a/index.mjs"], "nothing behind the link is read");
+      assert.deepEqual(r.outside, ["a/index.mjs imports ../_shared/link/h.mjs, through a link"]);
+    } else t.diagnostic("this machine cannot create links: the link case is not run");
+    writeFileSync(join(dir, "a", "index.mjs"), `import { big } from "../_shared/big.mjs";\n`);
+    writeFileSync(join(dir, "_shared", "big.mjs"), `export const big = "${"x".repeat(1024 * 1024)}";\n`);
+    const r = moduleReach(join(dir, "a", "index.mjs"), dir);
+    assert.match(r.limit, /_shared\/big\.mjs is over 1048576 bytes/);
+    // A long chain is walked without recursion: no stack to overflow.
+    for (let i = 0; i < 3000; i++) writeFileSync(join(dir, "_shared", `c${i}.mjs`), i < 2999 ? `import "./c${i + 1}.mjs";\n` : `export {};\n`);
+    writeFileSync(join(dir, "a", "index.mjs"), `import "../_shared/c0.mjs";\n`);
+    assert.equal(moduleReach(join(dir, "a", "index.mjs"), dir).files.length, 3001);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(away, { recursive: true, force: true });
+  }
+});
+
+// ---- the folder of adapters (CR-001, CR-002) ----
+
+const inside = (abs, dir) => abs === dir || abs.startsWith(dir + sep);
+
+function fixtureFolder(t, build) {
+  const dir = mkdtempSync(join(tmpdir(), "zdd-adapters-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
   const adapter = (name) => {
     mkdirSync(join(dir, name), { recursive: true });
     writeFileSync(join(dir, name, "index.mjs"), "export function derive() { return { records: [], diagnostics: [] }; }\n");
   };
   adapter("alpha");
   adapter("beta");
-  writeFileSync(join(dir, "catalogue.json"), JSON.stringify({ aliases: {}, bundles: {} }));
   build(dir, adapter);
   return dir;
 }
 
-function readFixture(build) {
-  const dir = fixtureCatalogue(build);
-  try {
-    return readCatalogue(dir);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-}
-
-test("the shipped catalogue: every adapter folder is a name, and catalogue.json names only real adapters", () => {
-  const { names, aliases, bundles } = catalogue();
-  const adapters = readdirSync(ADAPTERS).filter((n) => statSync(join(ADAPTERS, n)).isDirectory() && readdirSync(join(ADAPTERS, n)).includes("index.mjs"));
-  assert.deepEqual([...names.keys()].sort(), adapters.sort());
-  for (const now of Object.values(aliases)) assert.ok(names.has(now));
-  for (const b of Object.values(bundles)) for (const n of b.extractors) assert.ok(names.has(n));
+test("the engine ships no adapter: no adapters folder, none in its published files (decision 0048)", () => {
+  assert.ok(!statSync(join(PKG, "src"), { throwIfNoEntry: false }) || !readdirSync(join(PKG, "src")).includes("adapters"), "src/adapters is gone");
+  const manifest = JSON.parse(readFileSync(join(PKG, "package.json"), "utf8"));
+  const published = manifest.files.flatMap((f) => (statSync(join(PKG, f)).isDirectory() ? files(join(PKG, f)) : [join(PKG, f)]));
+  assert.ok(!published.some((p) => /[\\/](?:index|detect)\.mjs$/.test(p) && !inside(p, CORE) && !inside(p, join(PKG, "bin"))), "no adapter module outside the core and the bin");
+  assert.ok(!published.some((p) => /catalogue\.(?:mjs|json)$/.test(p)), "no catalogue");
 });
 
-test("a helpers folder with no index.mjs is not an adapter", () => {
-  const { names } = readFixture((dir) => mkdirSync(join(dir, "shared")));
-  assert.deepEqual([...names.keys()], ["alpha", "beta"]);
+test("a folder of adapters: a name with an index.mjs is an adapter; a helpers folder, _shared/ and a name config could never select are not", (t) => {
+  const dir = fixtureFolder(t, (dir, adapter) => {
+    mkdirSync(join(dir, "shared"));
+    adapter("_shared");
+    adapter("Foo.bar");
+    writeFileSync(join(dir, "loose.mjs"), "export {};\n");
+  });
+  assert.deepEqual([...readAdapterFolder(dir).keys()], ["alpha", "beta"]);
+  assert.ok(!/^[a-z][a-z0-9-]*$/.test("_shared"), "derive's NAME_RE refuses it, so it can never be an adapter");
 });
 
-test("CR-002: catalogue.json naming an adapter that is not there fails loudly, never falls through", () => {
-  const bad = (data) =>
-    assert.throws(() => readFixture((dir) => writeFileSync(join(dir, "catalogue.json"), JSON.stringify(data))), /catalogue is broken/, JSON.stringify(data));
-  bad({ aliases: { old: "gone" } });
-  bad({ aliases: { "..": "alpha" } });
-  bad({ aliases: { __proto__x: "alpha" } });
-  bad({ aliases: { beta: "alpha" } });
-  bad({ bundles: { legacy: { extractors: ["alpha", "gone"] } } });
-  bad({ bundles: { legacy: { extractors: [] } } });
-  bad({ bundles: { legacy: { extractors: ["alpha"], options: { gone: {} } } } });
-  bad({ bundles: { legacy: { extractors: ["alpha"], rest: "gone" } } });
-  assert.throws(() => readFixture((dir) => writeFileSync(join(dir, "catalogue.json"), "{not json")), /catalogue is broken/);
-  const ok = readFixture((dir) => writeFileSync(join(dir, "catalogue.json"), JSON.stringify({ aliases: { old: "alpha" }, bundles: { legacy: { extractors: ["alpha", "beta"], options: { alpha: { k: [] } }, rest: "beta" } } })));
-  assert.equal(ok.aliases.old, "alpha");
+test("a folder of adapters that is not there, or not a folder, is said plainly", (t) => {
+  const dir = fixtureFolder(t, () => {});
+  assert.throws(() => readAdapterFolder(join(dir, "missing")), /the adapter folder .* does not exist/);
+  assert.throws(() => readAdapterFolder(join(dir, "alpha", "index.mjs")), /is a link or not a folder/);
 });
 
-test("CR-002: an adapter folder whose name config could never select fails loudly", () => {
-  assert.throws(() => readFixture((dir, adapter) => adapter("Foo.bar")), /not a selectable adapter name/);
-});
-
-test("CR-001: a symlinked adapter folder or index.mjs is refused", (t) => {
-  let made = true;
+test("CR-001: a linked adapter folder or index.mjs is refused, never followed", (t) => {
   const outside = mkdtempSync(join(tmpdir(), "zdd-outside-"));
+  t.after(() => rmSync(outside, { recursive: true, force: true }));
   writeFileSync(join(outside, "index.mjs"), "export function derive() {}\n");
-  try {
-    assert.throws(
-      () =>
-        readFixture((dir) => {
-          try {
-            symlinkSync(outside, join(dir, "gamma"), "junction");
-          } catch {
-            made = false;
-          }
-        }),
-      /is a symlink/,
-    );
-  } catch (e) {
-    if (made) throw e;
-  }
+  let made = true;
+  const linked = fixtureFolder(t, (dir) => {
+    try {
+      symlinkSync(outside, join(dir, "gamma"), "junction");
+    } catch {
+      made = false;
+    }
+  });
+  if (made) assert.throws(() => readAdapterFolder(linked), /gamma in the adapter folder .* is a link/);
   let fileLink = true;
-  try {
-    assert.throws(
-      () =>
-        readFixture((dir) => {
-          mkdirSync(join(dir, "delta"));
-          try {
-            symlinkSync(join(outside, "index.mjs"), join(dir, "delta", "index.mjs"), "file");
-          } catch {
-            fileLink = false;
-          }
-        }),
-      /not a regular file/,
-    );
-  } catch (e) {
-    if (fileLink) throw e;
-  }
-  rmSync(outside, { recursive: true, force: true });
+  const fileLinked = fixtureFolder(t, (dir) => {
+    mkdirSync(join(dir, "delta"));
+    try {
+      symlinkSync(join(outside, "index.mjs"), join(dir, "delta", "index.mjs"), "file");
+    } catch {
+      fileLink = false;
+    }
+  });
+  if (fileLink) assert.throws(() => readAdapterFolder(fileLinked), /delta\/index\.mjs in the adapter folder .* is not a regular file/);
   if (!made && !fileLink) t.skip("this machine cannot create symlinks");
 });
 
-// ---- the pre-1.0 bundle split (CR-008) ----
-
-test("CR-008: the bundle split takes defaults exactly as the old destructuring did, and never shares the catalogue's arrays", () => {
-  const { bundles } = catalogue();
-  const b = bundles["nextjs-supabase"];
-  const owner = Object.keys(b.options)[0];
-  const ownedKeys = Object.keys(b.options[owner]);
-  const empty = Object.fromEntries(ownedKeys.map((k) => [k, []]));
-  assert.deepEqual(splitBundleOptions(b, undefined), { [owner]: empty, [b.rest]: {} }, "no adapterOptions at all");
-  assert.deepEqual(splitBundleOptions(b, {}), { [owner]: empty, [b.rest]: {} }, "empty adapterOptions");
-  const one = splitBundleOptions(b, { [ownedKeys[0]]: ["x"], appDir: "src/app" });
-  assert.deepEqual(one, { [owner]: { ...empty, [ownedKeys[0]]: ["x"] }, [b.rest]: { appDir: "src/app" } }, "one owned key omitted");
-  assert.deepEqual(splitBundleOptions(b, { [ownedKeys[0]]: undefined })[owner], empty, "explicit undefined takes the default");
-  const first = splitBundleOptions(b, {});
-  first[owner][ownedKeys[0]].push("mutated");
-  assert.deepEqual(splitBundleOptions(b, {})[owner][ownedKeys[0]], [], "a returned default is a copy");
+test("folderModules loads every adapter of the folder it is given, in name order, with its entry", async (t) => {
+  const dir = fixtureFolder(t, () => {});
+  const got = await folderModules(dir);
+  assert.deepEqual(got.map((m) => [m.name, m.entry, typeof m.mod.derive]), [["alpha", join(dir, "alpha", "index.mjs"), "function"], ["beta", join(dir, "beta", "index.mjs"), "function"]]);
 });

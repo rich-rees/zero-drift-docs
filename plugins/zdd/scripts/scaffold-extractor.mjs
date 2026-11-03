@@ -20,9 +20,9 @@
 //
 // Answer set:
 //   {
-//     "name": "aspnet-routes",                     // ^[a-z][a-z0-9-]*$, not a built-in
+//     "name": "aspnet-routes",                     // ^[a-z][a-z0-9-]*$
 //     "evidence": "[Route]/[HttpGet] attributes on controller classes",
-//     "shapedLike": "<adapter>",                   // a catalogue adapter whose template fits, or generic
+//     "shapedLike": "<adapter>",                   // a starter whose template fits, or generic
 //     "kinds": ["route"],                          // record kinds it emits
 //     "idExample": "route:/api/orders/{id}",       // optional, shown in comments
 //     "refs": ["?table:"],                         // unresolved refs it may emit (optional)
@@ -47,19 +47,14 @@ const TEMPLATES = join(PLUGIN_ROOT, "templates", "extractor");
 // The old line's engine version that first hands extractors `io` (decision
 // 0010); every release of the new line does (decision 0042).
 export const IO_SINCE = "1.3.0";
-// border: names a stack (a mirror of the engine's catalogue, held equal by a test)
-// Mirror of the engine's catalogue (the adapter folders in
-// packages/zdd-engine/src/adapters/) — a local name may not shadow one. A test
-// holds the two together.
+// border: names a stack (a mirror of the starter library, held equal by a test)
+// Mirror of the starter library's adapters (packages/zdd-starter-adapters/adapters/),
+// the names `shapedLike` may take. Since 0.14 a repo's adapter may take any
+// of them as its own name (decision 0048): the engine runs only the repo's
+// own, so a copy of a starter keeps the starter's name. A test holds the two
+// together.
 export const BUILT_INS = ["supabase", "nextjs", "fastapi", "react-router", "components", "expo-router", "background-vercel", "background-railway", "background-cloudflare", "background-procfile", "background-compose", "background-pg-cron", "background-bullmq", "background-inngest", "background-trigger-dev", "background-sqs", "background-github-actions", "background-declared", "external-services", "supabase-js", "supabase-py", "sqlalchemy", "generic"];
 // border: end
-// Names a release retired but the engine still answers to (2.3: `services`
-// is `external-services`, 2.3.0, pick 3) — a local one may not take them.
-export const RETIRED_BUILT_INS = { services: "external-services" };
-// Names the engine retired outright, mirroring catalogue.json's `retired`
-// (CR-080): `jobs`, split into the background-* readers in 0.9 (decision
-// 0038). The engine stops on the name, so a local extractor may not take it.
-export const REMOVED_BUILT_INS = ["jobs"];
 const NAME_RE = /^[a-z][a-z0-9-]*$/; // the engine's NAME_RE
 const KIND_RE = /^[a-z][a-z0-9_-]*$/; // the engine's KIND_RE
 const EXT_RE = /^\.[A-Za-z0-9][A-Za-z0-9._-]*$/;
@@ -98,14 +93,10 @@ export function validateAnswers(raw) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) fail("must be a JSON object");
   const a = {};
   if (typeof raw.name !== "string" || !NAME_RE.test(raw.name)) fail("name must match ^[a-z][a-z0-9-]*$ (lowercase, digits, hyphens)");
-  if (BUILT_INS.includes(raw.name)) fail(`name '${raw.name}' is a built-in extractor — a local one may not shadow it; pick another name`);
-  if (Object.hasOwn(RETIRED_BUILT_INS, raw.name)) fail(`name '${raw.name}' is the old name of the built-in '${RETIRED_BUILT_INS[raw.name]}' extractor, which the engine still answers to — pick another name`);
-  if (REMOVED_BUILT_INS.includes(raw.name)) fail(`name '${raw.name}' is a retired built-in name the engine stops on (0.9 split it into the background-* readers) — pick another name`);
   if (WINDOWS_RESERVED.test(raw.name)) fail(`name '${raw.name}' is a device name Windows cannot create as a folder — pick another`);
   a.name = raw.name;
   if (typeof raw.evidence !== "string" || !flat(raw.evidence)) fail("evidence must say what file layout or code shape declares the thing");
   a.evidence = flat(raw.evidence);
-  if (Object.hasOwn(RETIRED_BUILT_INS, raw.shapedLike)) raw = { ...raw, shapedLike: RETIRED_BUILT_INS[raw.shapedLike] };
   if (!BUILT_INS.includes(raw.shapedLike)) fail(`shapedLike must be one of ${BUILT_INS.join(", ")}`);
   a.shapedLike = raw.shapedLike;
   if (!Array.isArray(raw.kinds) || !raw.kinds.length || !raw.kinds.every((k) => typeof k === "string" && KIND_RE.test(k))) fail("kinds must be a non-empty array of lowercase kind names (route, table, surface, …)");

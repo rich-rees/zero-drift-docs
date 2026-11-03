@@ -2,8 +2,9 @@
 // ZDD standard suite (decision 0040) — runs the suite's checks on the
 // adapters this repo wrote itself (the ones config selects from
 // `localExtractorDir`), each on its own `fixture/`, copied into temporary
-// folders outside the repo. Catalogue adapters pass the same suite in ZDD's
-// own CI, so they are never run here.
+// folders outside the repo. Since 0.14 every adapter a repo runs is its own
+// (decision 0048), a copied starter too: the starters pass the same suite
+// in the starter library's CI, and a copy is checked here as the repo's.
 //
 //   zdd-engine suite [--extractors=<a,b>] [--json] [--root=<dir>] [--config=<file>]
 //
@@ -18,7 +19,6 @@
 import { basename, dirname, join, resolve } from "node:path";
 import { lstatSync } from "node:fs";
 import { loadConfig, resolveExtractors } from "./lib/config.mjs";
-import { catalogue } from "./lib/catalogue.mjs";
 import { importLocal, localExtractors } from "./derive.mjs";
 import { CONTRACT, CONTRACT_TABLE, judgeContract } from "./lib/contract.mjs";
 import { SUITE_CHECKS, SUITE_CHECK_COUNT, runSuite } from "./lib/suite.mjs";
@@ -51,9 +51,11 @@ function plainData(v, budget = { entries: 10_000 }, depth = 0) {
   return Object.entries(Object.getOwnPropertyDescriptors(v)).every(([, d]) => "value" in d && plainData(d.value, budget, depth + 1));
 }
 
-// The SUITE export: { options?, companions? } — the options its fixture is
-// read with, and the catalogue adapters that run beside it.
-function suiteSpec(name, mod) {
+// The SUITE export: { options?, companions?, allowEmpty? } — the options its
+// fixture is read with, the adapters beside it in the repo that run beside
+// it, and, for an adapter that emits nothing by design (a map-only repo's),
+// that an empty answer is no failure.
+function suiteSpec(name, mod, local) {
   const spec = mod.SUITE;
   if (spec === undefined) return { missing: true };
   if (!spec || typeof spec !== "object" || Array.isArray(spec)) return { error: `SUITE must be an object { options, companions }` };
@@ -61,13 +63,13 @@ function suiteSpec(name, mod) {
   if (!options || typeof options !== "object" || Array.isArray(options)) return { error: `SUITE.options must be an object` };
   if (!plainData(options)) return { error: "SUITE.options must be plain data (strings, numbers, booleans, null, arrays and plain objects — no functions, getters or cycles)" };
   const companions = spec.companions ?? {};
-  if (!companions || typeof companions !== "object" || Array.isArray(companions)) return { error: `SUITE.companions must be an object { "<catalogue adapter>": { options } }` };
-  const { names } = catalogue();
+  if (!companions || typeof companions !== "object" || Array.isArray(companions)) return { error: `SUITE.companions must be an object { "<adapter>": { options } }` };
   for (const [c, o] of Object.entries(companions)) {
-    if (!names.has(c)) return { error: `SUITE.companions names '${c}', which is not a catalogue adapter (a companion is one of ZDD's own)` };
+    if (c === name || typeof local.get(c) !== "string" || basename(local.get(c)) !== "index.mjs") return { error: `SUITE.companions names '${c}', which is not another adapter folder in localExtractorDir (a companion runs beside it, copied with it)` };
     if (!o || typeof o !== "object" || Array.isArray(o) || !plainData(o)) return { error: `SUITE.companions['${c}'] must be an options object of plain data` };
   }
-  return { options, companions };
+  if (spec.allowEmpty !== undefined && typeof spec.allowEmpty !== "boolean") return { error: "SUITE.allowEmpty must be true or false" };
+  return { options, companions, allowEmpty: spec.allowEmpty === true };
 }
 
 export async function suiteReport({ repoRoot, config, only = null }) {
@@ -75,7 +77,6 @@ export async function suiteReport({ repoRoot, config, only = null }) {
   if (lvl.error) return { error: lvl.error };
   const selection = resolveExtractors(config);
   if (selection.error) return { error: selection.error };
-  const { names, aliases, retired } = catalogue();
   const localDir = config.localExtractorDir;
   const local = localExtractors(repoRoot, localDir);
   const configured = selection.extractors.map((e) => e.name);
@@ -84,22 +85,17 @@ export async function suiteReport({ repoRoot, config, only = null }) {
   const unknown = [];
   const adapters = [];
   for (const name of wanted) {
-    // A catalogue name (or its alias) is checked in ZDD's CI; a retired name
-    // or one localExtractorDir does not hold is not found, and fails the run
+    // A name localExtractorDir does not hold is not found, and fails the run
     // (CR-123): a suite that checked nothing must not pass.
-    if (names.has(name) || Object.hasOwn(aliases, name)) {
-      skipped.push(name);
-      continue;
-    }
-    if (Object.hasOwn(retired, name)) {
-      unknown.push(name);
-      continue;
-    }
     if (!local.has(name)) {
       unknown.push(name);
       continue;
     }
     const entry = local.get(name);
+    if (typeof entry === "object") {
+      adapters.push({ name, loadError: `is a link (${entry.link}) — an adapter is a real folder or file in localExtractorDir`, checks: [] });
+      continue;
+    }
     // `<dir>/<name>/index.mjs` is a folder adapter (its fixture beside it);
     // `<dir>/<name>.mjs` a single module, which has nowhere to keep one.
     const folder = basename(entry) === "index.mjs" && basename(dirname(entry)) === name ? dirname(entry) : null;
@@ -111,7 +107,7 @@ export async function suiteReport({ repoRoot, config, only = null }) {
       continue;
     }
     const judged = judgeContract(name, mod);
-    const spec = suiteSpec(name, mod);
+    const spec = suiteSpec(name, mod, local);
     const fixtureDir = folder && !spec.missing && !spec.error ? join(folder, "fixture") : null;
     let r;
     if (spec.error) {
@@ -127,6 +123,8 @@ export async function suiteReport({ repoRoot, config, only = null }) {
         local: { path: folder ?? entry },
         entry,
         within: resolve(repoRoot, localDir),
+        companionPaths: Object.fromEntries(Object.keys(spec.companions ?? {}).map((c) => [c, { path: dirname(local.get(c)), entry: local.get(c) }])),
+        allowEmpty: spec.allowEmpty ?? false,
       });
       if (spec.missing && folder) for (const c of r.checks) if (!c.ok && /^no fixture/.test(c.detail ?? "")) c.detail = "no SUITE export: add `export const SUITE = { options }`, the options its fixture/ is read with — the suite runs on the fixture, never on your repo";
     }
@@ -148,7 +146,7 @@ export function narrateSuite(r) {
   const lines = [];
   const held = r.suiteChecks ? `held to checks 1–${r.suiteChecks} (suiteChecks: ${r.suiteChecks})` : r.suiteChecksSet ? "no check blocks (suiteChecks: 0 — every check warns)" : "no check blocks yet (suiteChecks is not set: every check warns)";
   if (!r.adapters.length) {
-    lines.push(`No adapters of this repo's own are configured${r.unknown.length ? " and found" : ""} — nothing to check. (Catalogue adapters pass the standard suite in ZDD's own CI.)${r.suiteChecksSet && !r.suiteChecks ? " suiteChecks: 0." : ""}`);
+    lines.push(`No adapters of this repo's own are configured${r.unknown.length ? " and found" : ""} — nothing to check.${r.suiteChecksSet && !r.suiteChecks ? " suiteChecks: 0." : ""}`);
   } else {
     lines.push(`The standard suite (decision 0040) on this repo's own adapters, ${held}:`);
     for (const a of r.adapters) {
@@ -172,8 +170,7 @@ export function narrateSuite(r) {
       }
     }
   }
-  if (r.skipped.length) lines.push("", `Catalogue adapters, checked in ZDD's own CI: ${r.skipped.join(", ")}`);
-  if (r.unknown.length) lines.push("", `FAIL: not found in localExtractorDir, or a retired name: ${r.unknown.join(", ")} — the suite cannot check an adapter it cannot find`);
+  if (r.unknown.length) lines.push("", `FAIL: not found in localExtractorDir: ${r.unknown.join(", ")} — the suite cannot check an adapter it cannot find`);
   lines.push("", r.blocking ? "The suite FAILS: fix what is marked FAIL (the extractor skill walks it red to green)." : "The suite passes.");
   return lines.join("\n");
 }

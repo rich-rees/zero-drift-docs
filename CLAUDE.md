@@ -23,7 +23,10 @@ Supersession points both ways; never edit an accepted decision into a new truth.
 - **Branch off `main`**, never commit on it. Conventional commits (`feat:`,
   `fix:`, `docs:`, `test:`, `chore:`), one logical change each. One PR per change,
   merged with a merge commit.
-- **Tests are the contract.** Engine: `cd packages/zdd-engine && node --test "test/*.test.mjs"`.
+- **Tests are the contract.** Engine (the core alone): `cd packages/zdd-engine && node --test "test/*.test.mjs"`.
+  Starter library (every golden, the core with the starters, and each
+  starter's own tests as an app runs them, decision 0048):
+  `cd packages/zdd-starter-adapters && node --test "test/*.test.mjs" && node ../zdd-engine/bin/zdd-engine.mjs test --adapters=adapters`.
   Plugin (the runbook and hooks at the file/process seam):
   `node --test "plugins/zdd/test/*.test.mjs"`. The human index, clicked
   (`test/browser/`, its own Playwright, outside the published package —
@@ -77,9 +80,10 @@ already holds, so a red suite names what was forgotten.
       status. *(test)*
 - [ ] Adopter impact stated in the Versioning entry: what moves in their
       `derive --check` / `render --check` on the bump.
-- [ ] Both suites green on CI (ubuntu + windows × Node 20/22), and
-      `browser-smoke` green: the tag workflow and `pre-tag` run only the
-      two suites, so this line is the browser's release gate (decision 0044).
+- [ ] Every suite green on CI (ubuntu + windows × Node 20/22), and
+      `browser-smoke` green: the tag workflows and `pre-tag` run the
+      engine, starter library and plugin suites but not the browser's, so
+      this line is the browser's release gate (decision 0044).
 
 **Once, for 0.9.0** (the new line's first release; ZDD-4 does the rest)
 
@@ -89,27 +93,65 @@ already holds, so a red suite names what was forgotten.
 - [ ] Each adopter's lock moves to `v0.9.0` by hand (README, "Upgrading"):
       an old-line release's check never offers a lower number.
 
+**Once, for 0.14.0** (the starter library's first release, decision 0048).
+After step 2 below and before step 3, in this order, within one sitting:
+
+- [ ] `@rich-rees/zdd-starter-adapters@0.1.0` (the baseline) is published by
+      hand from a fresh stage of the merge commit (`node
+      packages/zdd-starter-adapters/scripts/stage.mjs 0.1.0 <empty dir>`, then
+      `npm publish --access public` in it): npm's trusted publishing needs
+      the package to exist, and a new package's first publish is staged by
+      npm (a `0.0.0-stage` placeholder; check the registry, not the website).
+      Then `npm view @rich-rees/zdd-starter-adapters@0.1.0 dist.integrity`
+      equals `npm pack --dry-run --json`'s `integrity` in that stage dir.
+- [ ] Its trusted publisher (GitHub Actions, `rich-rees/zero-drift-docs`,
+      `release-starter-adapters.yml`) is created on npmjs.com, then 0.2.0 is
+      published through it by its tag (step 3) the same day: a pending
+      publisher expires after about two days unless a publish through it
+      succeeds.
+
 **Release order** (since 2.3.0 the tag does the publishing —
 `.github/workflows/release.yml`; before it, the engine was published by hand
-first, which that workflow now refuses)
+first, which that workflow now refuses). Two version lines: the ZDD release
+`vX.Y.Z` (engine and plugin), and the starter library's own `A.B.C`.
 
 1. Merge the PR (merge commit).
 2. On `main` at the merge commit, `node scripts/pre-tag.mjs vX.Y.Z [adopter
-   checkouts…]`: the pins, both suites, and a dry run of the upgrade on each
-   real adopter given (a throwaway copy; never pushed).
-3. Tag the merge commit `vX.Y.Z` and push the tag. The workflow refuses a tag
-   that is not on `main`, proves the pins, runs both suites, publishes the
-   engine (no secret: npm trusts this workflow by name, set up once on the
-   package's npmjs.com settings — `@rich-rees/zdd` needs it set up before its
-   first tag, decision 0042), waits until the version is fetchable, and
-   creates the GitHub release marked **Latest** with the Versioning entry as
-   its notes. A failed run after the publish is rerun as it is: a version
-   already on npm from this commit is resumed, not refused.
-4. Check from **outside** this repo: `npx -y @rich-rees/zdd@X.Y.Z`
+   checkouts…]`, **before anything is published**: the pins, the engine,
+   starter library and plugin suites, the starters' own tests, and a dry run
+   of the upgrade on each real adopter given (a throwaway copy; never
+   pushed). It runs this checkout's engine and the library beside it, so it
+   needs neither on npm.
+3. **The starter library, when the plugin's pin moved**
+   (`plugins/zdd/starter-adapters.json`; decision 0048). An installed plugin
+   fetches the library version it pins from npm (bootstrap, the upgrade,
+   preflight), so that version is on npm **before** the ZDD tag. Tag the
+   merge commit `starter-adapters-vA.B.C` and push it:
+   `.github/workflows/release-starter-adapters.yml` refuses a tag not on
+   `main`, runs the engine and starter library suites and the staged
+   version's own tests in a read-only job, then stages it fresh, publishes it
+   by trusted publishing, waits until it is fetchable and makes a GitHub
+   release never marked Latest. Check `npm view
+   @rich-rees/zdd-starter-adapters@A.B.C version` from outside the repo
+   before step 4. A library-only fix (a starter changed, the plugin's pin
+   not) is this step alone, after the library's own suites, with no ZDD
+   release.
+4. Tag the merge commit `vX.Y.Z` and push the tag. The workflow refuses a tag
+   that is not on `main`, proves the pins, runs the engine, starter library
+   and plugin suites, publishes the engine (no secret: npm trusts this
+   workflow by name, set up once on the package's npmjs.com settings —
+   `@rich-rees/zdd` needs it set up before its first tag, decision 0042; the
+   library's trusted publisher names `release-starter-adapters.yml`), waits
+   until the version is fetchable, and creates the GitHub release marked
+   **Latest** with the Versioning entry as its notes. A failed run after the
+   publish is rerun as it is: a version already on npm from this commit is
+   resumed, not refused. The tag is fetchable before the engine is: adopters
+   take a release only by moving their lock, after this step and step 5.
+5. Check from **outside** this repo: `npx -y @rich-rees/zdd@X.Y.Z`
    prints the engine's usage, and `npm view @rich-rees/zdd version`
    names X.Y.Z (inside the repo, npm finds the workspace copy and installs
    nothing).
-5. Move this machine's install: the route the release check prints.
+6. Move this machine's install: the route the release check prints.
 
 **After**
 

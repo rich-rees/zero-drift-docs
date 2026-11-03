@@ -122,13 +122,15 @@ test("CR-128 / CR-136: check 5 names every banned route — child_process, netwo
   assert.equal(scan('import { posix } from "node:path";\nimport { fileURLToPath } from "node:url";'), "");
 });
 
-test("CR-123: an unknown or retired adapter, named or configured, fails the suite; a catalogue name is skipped", (t) => {
+// Since 0.14 every adapter a repo runs is its own (decision 0048): a name
+// the folder does not hold is unknown, whatever an older ZDD shipped.
+test("CR-123: an adapter localExtractorDir does not hold, named or configured, fails the suite; none is skipped as ZDD's own", (t) => {
   const repo = scratch(t);
   assert.equal(suite(repo, "--extractors=acme-typo").status, 1);
   assert.equal(suite(repo, "--extractors=jobs").status, 1);
-  const skipped = suite(repo, "--extractors=supabase");
-  assert.equal(skipped.status, 0);
-  assert.deepEqual(skipped.json.skipped, ["supabase"]);
+  const former = suite(repo, "--extractors=supabase");
+  assert.equal(former.status, 1);
+  assert.deepEqual([former.json.skipped, former.json.unknown], [[], ["supabase"]]);
   const gone = suite(scratch(t, { extractors: ["acme-routes", "acme-gone"] }));
   assert.equal(gone.status, 1);
   assert.deepEqual(gone.json.unknown, ["acme-gone"]);
@@ -142,9 +144,20 @@ test("CR-124: commenting and blanking keep CRLF and CR line endings whole, and a
   assert.equal(blankOut("a\nb"), "\n");
 });
 
-test("CR-125: a companion's records from config alone are not the adapter's in check 3", (t) => {
-  const adapter = GOOD.replace('export const SUITE = { options: { roots: ["routes"] } };', 'export const SUITE = { options: { roots: ["routes"] }, companions: { supabase: { migrationNamespaces: [{ name: "db", dir: "supabase/migrations" }], externalBuckets: [{ name: "cdn", namespace: "db" }] } } };');
-  const r = suite(scratch(t, { adapter }));
+// A companion that makes a record from its options alone (as a schema
+// adapter's declared bucket does), beside the adapter in the repo's folder.
+const COMPANION = `export const CONTRACT = 1;
+export const COMMENT = {};
+export function derive({ options }) {
+  return { records: (options.declared ?? []).map((n) => ({ kind: "bucket", id: "bucket:" + n, title: n, description: "", resource: [], refs: [], facts: {}, filename: n + ".json" })), diagnostics: [] };
+}
+`;
+test("CR-125: a companion's records from config alone are not the adapter's in check 3; the companion is the repo's own, copied beside it", (t) => {
+  const adapter = GOOD.replace('export const SUITE = { options: { roots: ["routes"] } };', 'export const SUITE = { options: { roots: ["routes"] }, companions: { "acme-db": { declared: ["cdn"] } } };');
+  const repo = scratch(t, { adapter });
+  mkdirSync(join(repo, "zdd", "extractors", "acme-db"), { recursive: true });
+  writeFileSync(join(repo, "zdd", "extractors", "acme-db", "index.mjs"), COMPANION);
+  const r = suite(repo, "--extractors=acme-routes");
   assert.equal(r.status, 0, JSON.stringify(r.json?.adapters));
   assert.equal(check(r.json, 3).ok, true);
 });

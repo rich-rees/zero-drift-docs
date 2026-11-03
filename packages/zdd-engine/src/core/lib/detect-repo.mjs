@@ -35,6 +35,8 @@
 //     proposal:  { evidence: [plain words], options }   (absent: not proposed)
 //     apps:      [{ name, evidence, extractor }]         Application concepts
 //     questions: [{ topic, ask, records }]               what evidence cannot answer
+//     declined:  [plain words]                           looked, tried, and turned it
+//                down (decision 0048 point 6): why its parts stay uncovered
 //   }
 //
 // The scan: `files` (every regular file, sorted, at most DETECT_DEPTH folders
@@ -55,7 +57,7 @@ export const DETECT_DEPTH = 6;
 const BUNDLE = "zdd"; // ZDD's own folder is never evidence of a stack
 
 function broken(name, msg) {
-  throw new Error(`ZDD's adapter catalogue is broken (a packaging defect, not your repo): adapter '${name}' ${msg}`);
+  throw new Error(`adapter '${name}' cannot take part in detection (a defect in the adapter, not your repo): it ${msg}`);
 }
 
 export function makeScan(io, skipDirs = new Set()) {
@@ -111,16 +113,23 @@ function checkAdapter(name, D) {
   if (!Number.isFinite(D.order)) broken(name, "has no detection order");
 }
 
-// modules: [{ name, mod }] in name order (derive.mjs catalogueModules).
+// The one scan every detecting adapter in `modules` is handed: the walk
+// skips the union of their skipDirs. detectRepo builds it here, and so does
+// an adapter's own test, so a test sees what detection sees (CR-286).
+export function detectScan(repoRoot, modules, caps = {}) {
+  const ignored = gitIgnoredPredicate(repoRoot);
+  if (ignored.error) throw new Error(ignored.error);
+  const io = makeExtractorIo(repoRoot, "detect", { ignored, maxDepth: DETECT_DEPTH, ...caps });
+  const skipDirs = new Set(modules.filter(({ mod }) => mod.DETECTION).flatMap(({ mod }) => mod.DETECTION.skipDirs ?? []));
+  return makeScan(io, skipDirs);
+}
+
+// modules: [{ name, mod }] in name order (lib/adapter-folder.mjs folderModules).
 // `caps` lowers the io's limits, for the tests that reach them.
 export function detectRepo(repoRoot, modules, caps = {}) {
   const adapters = modules.filter(({ mod }) => mod.DETECTION);
   for (const { name, mod } of adapters) checkAdapter(name, mod.DETECTION);
-  const ignored = gitIgnoredPredicate(repoRoot);
-  if (ignored.error) throw new Error(ignored.error);
-  const io = makeExtractorIo(repoRoot, "detect", { ignored, maxDepth: DETECT_DEPTH, ...caps });
-  const skipDirs = new Set(adapters.flatMap(({ mod }) => mod.DETECTION.skipDirs ?? []));
-  const scan = makeScan(io, skipDirs);
+  const scan = detectScan(repoRoot, adapters, caps);
 
   const sourceRes = adapters.map(({ mod }) => mod.DETECTION.sourceFile).filter(Boolean);
   const sourceFiles = scan.files.filter((f) => sourceRes.some((re) => re.test(f.name))).length;
@@ -144,15 +153,17 @@ export function detectRepo(repoRoot, modules, caps = {}) {
   const proposals = found.filter((f) => f.proposal).map((f) => ({ name: f.name, parts: f.parts, evidence: f.proposal.evidence, options: f.proposal.options ?? {} }));
   const apps = found.flatMap((f) => f.apps ?? []).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   const questions = found.flatMap((f) => f.questions ?? []);
+  const declined = found.filter((f) => f.declined?.length).map((f) => ({ name: f.name, parts: f.parts, reasons: f.declined }));
   const coverage = PARTS.map((part) => ({ part, adapters: proposals.filter((p) => p.parts.includes(part)).map((p) => p.name) }));
 
   // What a greenfield answer can select, and the neutral list of stacks the
-  // catalogue has adapters for (0039 point 6): adapter data, never core text.
+  // folder asked has adapters for (0039 point 6): adapter data, never core
+  // text: `starters`, the adapters a greenfield stack can take, by part.
   const stacks = adapters
     .flatMap(({ name, mod }) => (mod.DETECTION.stack ?? []).map((r) => ({ adapter: r.app && !r.options ? null : name, rank: r.rank, match: r.match, options: r.options ?? null, path: r.path ?? null, app: r.app ?? null })))
     .sort((a, b) => a.rank - b.rank);
   const companions = adapters.filter(({ mod }) => mod.DETECTION.companion).map(({ name, mod }) => ({ adapter: name, all: mod.DETECTION.companion.all, any: mod.DETECTION.companion.any }));
-  const catalogue = PARTS.map((part) => ({ part, adapters: adapters.filter(({ mod }) => mod.DETECTION.parts.includes(part) && (mod.DETECTION.stack ?? []).some((r) => r.options)).map(({ name }) => name) }));
+  const starters = PARTS.map((part) => ({ part, adapters: adapters.filter(({ mod }) => mod.DETECTION.parts.includes(part) && (mod.DETECTION.stack ?? []).some((r) => r.options)).map(({ name }) => name) }));
 
   // What bootstrap needs to write a config without naming a stack: each
   // adapter's option shape (the keys that hold repo-relative paths, lists of
@@ -171,11 +182,12 @@ export function detectRepo(repoRoot, modules, caps = {}) {
     proposals,
     apps,
     questions,
+    declined,
     coverage,
     uncovered: coverage.filter((c) => !c.adapters.length).map((c) => c.part),
     stacks,
     companions,
-    catalogue,
+    starters,
     adapters: shapes,
     limits: { walkTruncated: scan.truncated, readBudgetSpent: scan.overBudget, depth: DETECT_DEPTH, refused: scan.refused.length, refusedFirst: scan.refused.slice(0, 5) },
   };

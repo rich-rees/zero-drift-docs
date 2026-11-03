@@ -1,5 +1,5 @@
-# The plugin repo's own CI: the engine and plugin test suites, and the human
-# index clicked in a browser, on every PR. Determinism is the contract (same
+# The plugin repo's own CI: the engine, starter library and plugin test
+# suites, and the human index clicked in a browser, on every PR. Determinism is the contract (same
 # source bytes in ⇒ byte-identical artifacts out), and the golden diffs that
 # prove it only mean something if they run on every change. No LLM, no
 # secrets, a read-only token, actions pinned by commit as release.yml pins
@@ -32,10 +32,20 @@ jobs:
           node-version: ${{ matrix.node }}
       # bash on both runners: Node 20's --test takes file paths, not glob
       # patterns (22 accepts either), so the shell expands the glob.
-      - name: Engine tests (determinism, goldens, extractors, viewers)
+      - name: Engine tests (the core alone, on its own test-only adapters)
         working-directory: packages/zdd-engine
         shell: bash
         run: node --test test/*.test.mjs
+      # The starters with the core (decision 0048): every golden, the
+      # fixtures, the standard suite on each starter, the two versions.
+      - name: Starter library tests (goldens, extractors, viewers, the standard suite)
+        working-directory: packages/zdd-starter-adapters
+        shell: bash
+        run: node --test test/*.test.mjs
+      - name: The starters' own tests, as an app runs them (zdd-engine test)
+        working-directory: packages/zdd-starter-adapters
+        shell: bash
+        run: node ../zdd-engine/bin/zdd-engine.mjs test --adapters=adapters
       - name: Plugin tests (runbook, hooks, skew, manifests)
         shell: bash
         run: node --test plugins/zdd/test/*.test.mjs

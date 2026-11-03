@@ -243,6 +243,12 @@ main {
   font: inherit;
   font-size: 13px;
 }
+/* Unread (decision 0048): an open item is the header's one loud button. */
+#btn-unread.unread-open { border-color: #b45309; color: #b45309; }
+.unread-item { display: block; padding: 6px 0; }
+.unread-item b { display: block; font-family: ui-monospace, monospace; font-size: 12px; overflow-wrap: anywhere; }
+.unread-why { display: block; margin-top: 2px; }
+
 /* Blessings: importance, kind and app are chips beside the exemplar, never
    headings; a high blessing is pinned first by the engine's order (0045). */
 .blessing-meta { margin-top: 2px; }

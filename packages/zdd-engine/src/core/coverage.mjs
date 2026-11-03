@@ -13,23 +13,16 @@
 
 import { loadConfig } from "./lib/config.mjs";
 import { deriveRecords } from "./derive.mjs";
+import { outLinks } from "./lib/gaps.mjs";
 
 export const NAMED_MAX = 20; // the unlinked items named per kind; the rest are counted
 
 export function coverageOf(records) {
   const byId = new Map(records.map((r) => [r.id, r]));
-  const outOf = (r) => {
-    const ids = new Set(r.refs ?? []);
-    for (const list of Object.values(r.facts?.edges ?? {})) if (Array.isArray(list)) for (const id of list) ids.add(id);
-    return [...ids].filter((id) => byId.has(id) && id !== r.id);
-  };
+  // One rule for what a record links to, shared with the gap list (decision 0049).
+  const outs = outLinks(records);
   const reached = new Set();
-  const outs = new Map();
-  for (const r of records) {
-    const out = outOf(r);
-    outs.set(r.id, out);
-    for (const id of out) reached.add(id);
-  }
+  for (const out of outs.values()) for (const id of out) reached.add(id);
   const kinds = [...new Set(records.map((r) => r.kind))].sort();
   return kinds.map((kind) => {
     const of = records.filter((r) => r.kind === kind);

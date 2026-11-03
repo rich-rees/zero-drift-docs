@@ -15,9 +15,11 @@ import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { addSuiteStep, SUITE_CHECK_COUNT, narrateAdapters } from "../scripts/bootstrap.mjs";
+import { copyFixture } from "../../../packages/zdd-starter-adapters/test/starters.mjs";
 
 const PLUGIN = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const ENGINE = resolve(PLUGIN, "..", "..", "packages", "zdd-engine");
+const STARTERS = resolve(PLUGIN, "..", "..", "packages", "zdd-starter-adapters");
 const ENGINE_BIN = join(ENGINE, "bin", "zdd-engine.mjs");
 const BOOTSTRAP = join(PLUGIN, "scripts", "bootstrap.mjs");
 const TEMPLATE = readFileSync(join(PLUGIN, "templates", "zdd.yml"), "utf8");
@@ -69,7 +71,7 @@ function withOwnAdapter(repo, text = ADAPTER) {
 
 function adopted(t) {
   const repo = tmp(t, "zdd-suite-plugin-");
-  cpSync(join(ENGINE, "test", "fixture-fastapi"), repo, { recursive: true });
+  copyFixture(join(STARTERS, "test", "fixture-fastapi"), repo);
   rmSync(join(repo, "zdd"), { recursive: true });
   const answers = join(tmp(t, "zdd-ans-"), "a.json");
   writeFileSync(answers, JSON.stringify({ name: "Suite" }));
@@ -87,20 +89,20 @@ test("writer to reader: a fresh install writes suiteChecks, and the engine's sui
   const repo = adopted(t);
   assert.equal(config(repo).suiteChecks, SUITE_CHECK_COUNT);
   const s = engineSuite(repo);
-  assert.equal(s.status, 0);
+  assert.equal(s.status, 0, JSON.stringify(s.json.adapters.map((a) => [a.name, a.loadError, a.contractFail, a.checks.filter((c) => !c.ok)])));
   assert.equal(s.json.suiteChecks, SUITE_CHECK_COUNT);
   // The workflow bootstrap wrote runs it.
   assert.match(readFileSync(join(repo, ".github", "workflows", "zdd.yml"), "utf8"), /run: npx -y "\$ZDD_ENGINE" suite\n/);
 });
 
-test("upgrade: with no adapter of the repo's own, suiteChecks is raised at once; with one, it stays (absent: every check warns) and the note names it", (t) => {
+test("upgrade: with no adapter the repo wrote or changed (every one an untouched starter copy), suiteChecks is raised at once; with one, it stays (absent: every check warns) and the note names it", (t) => {
   const repo = adopted(t);
   const c = config(repo);
   delete c.suiteChecks;
   writeConfig(repo, c);
   const up = run(repo, ["upgrade"]);
   assert.equal(up.status, 0, up.stderr);
-  assert.match(up.stdout, /suiteChecks \(none\) → 5: no adapter of this repo's own/);
+  assert.match(up.stdout, /suiteChecks \(none\) → 5: every adapter here is a starter copy no one has changed/);
   assert.equal(config(repo).suiteChecks, SUITE_CHECK_COUNT);
 
   const own = adopted(t);
@@ -122,6 +124,7 @@ test("adapters: a failing check is named with its fix and --raise refuses; once 
   const c = config(repo);
   delete c.suiteChecks;
   writeConfig(repo, c);
+  // The starters bootstrap copied are the repo's own, and pass the suite on their own fixtures.
   const r = run(repo, ["adapters"]);
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /acme-routes — written for contract 1/);
@@ -141,14 +144,14 @@ test("adapters: a failing check is named with its fix and --raise refuses; once 
   writeFileSync(join(repo, "zdd", "extractors", "acme-routes", "index.mjs"), ADAPTER.replace('line.replace(/#.*$/, "").trim()', 'line.replace(/^#\\s*/, "").trim()'));
   const s = engineSuite(repo);
   assert.equal(s.status, 1);
-  assert.ok(s.json.adapters[0].checks.find((x) => x.n === 4).blocking);
+  assert.ok(s.json.adapters.find((a) => a.name === "acme-routes").checks.find((x) => x.n === 4).blocking);
 });
 
 test("adapters: no CONTRACT line is a question from the core's table, and --raise waits for it", (t) => {
   const repo = adopted(t);
   withOwnAdapter(repo, ADAPTER.replace("export const CONTRACT = 1;\n", ""));
   const r = run(repo, ["adapters", "--json"]);
-  const a = JSON.parse(r.stdout).adapters[0];
+  const a = JSON.parse(r.stdout).adapters.find((x) => x.name === "acme-routes");
   assert.equal(a.declared, null);
   assert.equal(a.ask[0].step, "CONTRACT");
   assert.match(a.ask[0].ask, /Add `export const CONTRACT = 1`/);

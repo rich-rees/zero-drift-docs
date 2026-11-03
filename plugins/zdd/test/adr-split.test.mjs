@@ -14,10 +14,12 @@ import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { scopeTag, repointLinks, linksToMoved } from "../scripts/lib/adr-split.mjs";
+import { copyFixture } from "../../../packages/zdd-starter-adapters/test/starters.mjs";
 
 const PLUGIN = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SCRIPT = join(PLUGIN, "scripts", "bootstrap.mjs");
 const ENGINE = resolve(PLUGIN, "..", "..", "packages", "zdd-engine");
+const STARTERS = resolve(PLUGIN, "..", "..", "packages", "zdd-starter-adapters");
 const ENGINE_BIN = join(ENGINE, "bin", "zdd-engine.mjs");
 
 let scratch;
@@ -47,7 +49,7 @@ const tree = (dir) => {
 // third ADR tagged harness.
 const adopter = (name) => {
   const repo = join(scratch, name);
-  cpSync(join(ENGINE, "test", "fixture"), repo, { recursive: true });
+  copyFixture(join(STARTERS, "test", "fixture"), repo);
   const glossary = join(repo, "zdd", "glossary.md");
   writeFileSync(glossary, readFileSync(glossary, "utf8") + "\nSee [the old entity](adr/0001-widgets-are-the-core-entity.md).\n");
   writeFileSync(join(repo, "README.md"), "# App\n\nWhy widgets: [ADR-0001](zdd/adr/0001-widgets-are-the-core-entity.md).\n");

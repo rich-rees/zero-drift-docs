@@ -42,12 +42,33 @@ try {
   } catch {
     /* advisory */
   }
+  // Fixes the starter library notes for the repo's copies (decision 0048
+  // point 7): said where the session starts, whether or not the auto-load is
+  // on, so the session reads the notes and recommends. Offline it is silent.
+  // Imported when it runs, not above, and run last, after the index: the
+  // check reaches the whole bootstrap script, and nothing in it may cost the
+  // session its index (CR-354, CR-367).
+  const starterNotice = async () => {
+    try {
+      const { inspect: inspectStarters, narrate: narrateStarters } = await import("./check-starters.mjs");
+      const lines = narrateStarters(inspectStarters(root));
+      if (lines.length) process.stdout.write(lines.join("\n") + "\n");
+    } catch {
+      /* advisory */
+    }
+  };
   const { state, config } = readConfig(root);
-  if (state !== "valid" || config.hooks?.autoLoad === false) process.exit(0);
+  if (state !== "valid" || config.hooks?.autoLoad === false) {
+    await starterNotice();
+    process.exit(0);
+  }
 
   const rel = artifactPaths(config, { lenient: true }).agentIndex;
   const read = readInside(root, rel, MAX_INDEX_BYTES, "paths.agentIndex", { truncate: true });
-  if (read === null) process.exit(0);
+  if (read === null) {
+    await starterNotice();
+    process.exit(0);
+  }
 
   // An index over the cap is injected up to the cap and cut at a line, with
   // one marker line saying so (CR-086) — a session with the first 64 KiB is
@@ -74,6 +95,7 @@ try {
   } catch {
     /* advisory */
   }
+  await starterNotice();
 } catch {
   process.exitCode = 0;
 }

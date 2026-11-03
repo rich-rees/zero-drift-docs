@@ -1,6 +1,6 @@
 // The adapter contract (decision 0040): a number of its own, separate from
 // ZDD's version, raised only when what the core asks of an adapter changes.
-// Every adapter — the catalogue's and an adopter's own — declares the
+// Every adapter — a starter's and one an adopter built — declares the
 // contract it was written for:
 //
 //   export const CONTRACT = 1;
@@ -65,7 +65,7 @@ export const CONTRACT_TABLE = [
     step: "SUITE",
     since: 1,
     required: true,
-    what: "a `fixture/` folder beside the adapter (a miniature repo in its convention) and `export const SUITE = { options }`, the options to read it with — what the standard suite runs on",
+    what: "a `fixture/` folder beside the adapter (a miniature repo in its convention) and `export const SUITE = { options }`, the options to read it with — what the standard suite runs on; optionally `companions` (adapters beside it in the repo that run beside it) and `allowEmpty: true` (it emits nothing by design)",
     ask: "Which small sample of your code shows this convention? It becomes the adapter's `fixture/`, and the standard suite runs on a copy of it, never on your repo.",
   },
   {
@@ -86,7 +86,7 @@ export const CONTRACT_TABLE = [
     step: "data access",
     since: 1,
     required: false,
-    what: "`?code:<file>#<function>` refs from a route or screen, and `data-access` records naming the tables a function reaches; the core joins them on file and function",
+    what: "`?code:<file>#<function>` refs from a route or screen, and `data-access` records naming the tables a function reaches; the core joins them on the record's file (`resource[0]`) and `facts.function`, and drops one marked `requireRefs` that nothing reaches",
     ask: "Does the code this adapter reads call functions that reach the database? ZDD can link those routes or screens to their tables through a data-access adapter.",
   },
   {
@@ -104,10 +104,24 @@ export const CONTRACT_TABLE = [
     ask: null,
   },
   {
+    step: "unread",
+    since: 1,
+    required: false,
+    what: "an optional `unread` list of `{ file, what }`: what the adapter saw and could not read. Each item prints on every derive and shows in the human index, and lint holds it until the adapter is fixed or the item is marked fine (decision 0048); `file` is repo-relative POSIX, and an item with no line number keeps its answer when the code around it moves",
+    ask: "What does this adapter's source hold that it recognises and cannot read? Return those as `unread`, so a gap is said rather than silent.",
+  },
+  {
+    step: "gaps",
+    since: 1,
+    required: false,
+    what: "`GAPS = { reachNothing: [kinds], reachedByNothing: [kinds] }` — further kinds of the adapter's own records that must link, beside the core's (a route, surface or background task that reaches nothing; a table nothing reaches). Every update and lint list a record of those kinds that does not link, until an adapter reads its link or it is answered once as fine or a known gap (decision 0049)",
+    ask: "Do this adapter's records include a kind that is wrong when it links to nothing, or when nothing links to it? Name the kind in `GAPS`, and ZDD will say when one goes dark.",
+  },
+  {
     step: "detection",
     since: 1,
     required: false,
-    what: "`DETECTION` and `detect({ scan, proposed })`, so bootstrap can propose the adapter (a catalogue adapter has it; a local one may)",
+    what: "`DETECTION` and `detect({ scan, proposed })`, so bootstrap can propose the adapter (a starter has it; an adapter built for one repo may)",
     ask: null,
   },
   {

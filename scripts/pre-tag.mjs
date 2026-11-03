@@ -10,9 +10,10 @@
 // For each adopter: a throwaway copy (no node_modules, no .git history
 // beyond a fresh init), a fake `.claude/worktrees/` folder planted, then
 // this checkout's plugin runs `upgrade --plan` and this checkout's engine
-// runs derive, render and lint — exactly what the adopter's upgrade PR will
+// runs derive, render and lint (after `starters --prove` and, as on a yes
+// to the fixes, `starters --move`) — exactly what the adopter's upgrade PR will
 // do. Any failure names the adopter and the step. The repo's own pins are
-// checked first (scripts/release-check.mjs), then both suites.
+// checked first (scripts/release-check.mjs), then the engine, starter library and plugin suites and the starters' own tests.
 //
 // Since 2.5 the upgrade PR also moves the blessings out of the map
 // (decision 0032): the dry run takes the plan's token and moves them with
@@ -22,10 +23,11 @@
 // the mechanics only; which set an untagged ADR belongs in is the team's
 // call, never the dry run's.
 import { execFileSync, spawnSync } from "node:child_process";
-import { cpSync, mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { cpSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { join, dirname, resolve, basename } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { dryRunEnv, answerCounts, pinnedOnOldLine } from "./lib/pre-tag-report.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const PLUGIN = join(ROOT, "plugins", "zdd", "scripts", "bootstrap.mjs");
@@ -37,8 +39,10 @@ if (!/^v\d+\.\d+\.\d+$/.test(tag ?? "")) {
   console.error("usage: pre-tag.mjs vX.Y.Z [--split] <adopter checkout> …");
   process.exit(2);
 }
+// Every step runs this checkout's engine (scripts/lib/pre-tag-report.mjs says why).
+const ENV = dryRunEnv(ENGINE);
 const run = (label, cmd, args, cwd) => {
-  const r = spawnSync(cmd, args, { cwd, encoding: "utf8", shell: process.platform === "win32" && /\.cmd$|^npx$|^npm$/.test(cmd) });
+  const r = spawnSync(cmd, args, { cwd, encoding: "utf8", env: ENV, shell: process.platform === "win32" && /\.cmd$|^npx$|^npm$/.test(cmd) });
   const ok = r.status === 0;
   console.log(`${ok ? "ok     " : "FAILED "} ${label}`);
   if (!ok) {
@@ -48,6 +52,8 @@ const run = (label, cmd, args, cwd) => {
 };
 let allOk = run("every pin names the tag", process.execPath, [join(ROOT, "scripts", "release-check.mjs"), tag], ROOT);
 allOk = run("engine suite", process.execPath, ["--test", "test/*.test.mjs"], join(ROOT, "packages", "zdd-engine")) && allOk;
+allOk = run("starter library suite", process.execPath, ["--test", "test/*.test.mjs"], join(ROOT, "packages", "zdd-starter-adapters")) && allOk;
+allOk = run("the starters' own tests", process.execPath, [ENGINE, "test", "--adapters=adapters"], join(ROOT, "packages", "zdd-starter-adapters")) && allOk;
 allOk = run("plugin suite", process.execPath, ["--test", "plugins/zdd/test/*.test.mjs"], ROOT) && allOk;
 
 for (const adopter of adopters) {
@@ -67,14 +73,52 @@ for (const adopter of adopters) {
     writeFileSync(join(copy, ".claude", "worktrees", "pretag", "src", "planted.ts"), "process.env.STRIPE_SECRET; // must never reach a record\n");
     writeFileSync(join(copy, ".gitignore"), (existsSync(join(copy, ".gitignore")) ? "" : "") + "\n.claude/worktrees/\n", { flag: "a" });
     const label = basename(src);
+    const oldLine = pinnedOnOldLine(readFileSync(join(copy, "zdd", "config.json"), "utf8"));
     let ok = run(`${label}: upgrade --plan`, process.execPath, [PLUGIN, "upgrade", "--plan", `--root=${copy}`], copy);
-    const plan = JSON.parse(spawnSync(process.execPath, [PLUGIN, "upgrade", "--plan", `--root=${copy}`, "--json"], { cwd: copy, encoding: "utf8" }).stdout || "{}");
+    const plan = JSON.parse(spawnSync(process.execPath, [PLUGIN, "upgrade", "--plan", `--root=${copy}`, "--json"], { cwd: copy, encoding: "utf8", env: ENV }).stdout || "{}");
     const moves = plan.blessingMoves?.proposals ?? [];
     const moving = moves.length ? [`--move-blessings=${plan.blessingMoves.token}`] : [];
     ok = run(`${label}: upgrade${moves.length ? ` (moving ${moves.filter((p) => !p.problem).length} of ${moves.length} blessings; ${moves.filter((p) => p.problem).length} stay, named)` : ""}`, process.execPath, [PLUGIN, "upgrade", ...moving, `--root=${copy}`], copy) && ok;
     for (const p of moves.filter((m) => m.problem)) console.log(`        ${label}: ${p.from} stays on the map — ${p.problem}`);
+    // Since 0.14 the upgrade copies every adapter in (decision 0048 point
+    // 8): first proof, the records unchanged with the copies in place; then
+    // the fixes, as the adopter's run takes them on a yes — the copies move,
+    // their tests run, derive, the map is repointed, lint.
+    // A status that fails is a failed adopter, never "nothing to prove" (CR-326).
+    const st = spawnSync(process.execPath, [PLUGIN, "starters", `--root=${copy}`, "--json"], { cwd: copy, encoding: "utf8", env: ENV });
+    let status = null;
+    try {
+      status = st.status === 0 ? JSON.parse(st.stdout) : null;
+    } catch {
+      status = null;
+    }
+    if (!status || !Array.isArray(status.copies) || !Array.isArray(status.behind)) {
+      console.log(`FAILED  ${label}: starters (the copies' status) — exit ${st.status}\n${(st.stdout + st.stderr).split("\n").slice(-20).join("\n")}`);
+      ok = false;
+      status = { copies: [], behind: [] };
+    }
+    if (status.copies.length) {
+      // From the old line, 0.9's own changes move records: derive them
+      // first, as the upgrade's note says, then prove (CR-371, CR-385).
+      if (oldLine) ok = run(`${label}: derive 0.9's own changes first (the repo was on the old line)`, process.execPath, [ENGINE, "derive", `--root=${copy}`], copy) && ok;
+      ok = run(`${label}: starters --prove (${status.copies.length} adapters copied in; the records unchanged)`, process.execPath, [PLUGIN, "starters", "--prove", `--root=${copy}`], copy) && ok;
+      if (status.behind?.length) {
+        const m = spawnSync(process.execPath, [PLUGIN, "starters", "--move", `--root=${copy}`, "--json"], { cwd: copy, encoding: "utf8", env: ENV });
+        let moved = null;
+        try {
+          moved = JSON.parse(m.stdout);
+        } catch {
+          moved = null;
+        }
+        const good = m.status === 0 && moved?.lint?.ok;
+        console.log(`${good ? "ok     " : "FAILED "} ${label}: starters --move (${status.behind.length} copies to ${status.version}${moved ? `; records ${moved.records.before} → ${moved.records.after}, ${moved.records.changed.length} changed, ${moved.records.added.length} new, ${moved.moves.length} ids moved, ${moved.repointed.length} files repointed` : ""})`);
+        if (!good) console.log((m.stdout + m.stderr).split("\n").slice(-40).join("\n"));
+        for (const x of moved?.moves ?? []) console.log(`        ${label}: ${x.from} → ${x.to}`);
+        ok = good && ok;
+      }
+    }
     if (split) {
-      const sp = JSON.parse(spawnSync(process.execPath, [PLUGIN, "split-adrs", "--plan", `--root=${copy}`, "--json"], { cwd: copy, encoding: "utf8" }).stdout || "{}");
+      const sp = JSON.parse(spawnSync(process.execPath, [PLUGIN, "split-adrs", "--plan", `--root=${copy}`, "--json"], { cwd: copy, encoding: "utf8", env: ENV }).stdout || "{}");
       const untagged = (sp.proposals ?? []).filter((p) => !p.tag).map((p) => p.num);
       const tagged = (sp.proposals ?? []).filter((p) => p.tag === "harness").length;
       ok = run(`${label}: split-adrs (${tagged} to harness by their tag, ${untagged.length} untagged kept in the application set)`, process.execPath, [PLUGIN, "split-adrs", `--token=${sp.token}`, `--application=${untagged.join(",")}`, `--root=${copy}`], copy) && ok;
@@ -82,19 +126,30 @@ for (const adopter of adopters) {
     ok = run(`${label}: derive`, process.execPath, [ENGINE, "derive", `--root=${copy}`], copy) && ok;
     ok = run(`${label}: render`, process.execPath, [ENGINE, "render", `--root=${copy}`], copy) && ok;
     ok = run(`${label}: lint`, process.execPath, [ENGINE, "lint", `--root=${copy}`], copy) && ok;
+    // What the upgrade asks the developer to answer (decisions 0048 and
+    // 0049): its steps 4c and 4d, counted, so the adopter's task can say how
+    // many to expect. A list that cannot be read fails the adopter.
+    for (const which of ["unread", "gaps"]) {
+      const r = spawnSync(process.execPath, [PLUGIN, which, `--root=${copy}`, "--json"], { cwd: copy, encoding: "utf8", env: ENV, maxBuffer: 256 * 1024 * 1024 });
+      const counted = answerCounts(which, r);
+      if (!counted.ok) {
+        console.log(`FAILED  ${label}: ${counted.line}`);
+        ok = false;
+      } else console.log(`        ${label}: ${counted.line}`);
+    }
     // --untracked: a record the derive just minted is not yet in the index (CR-515).
-    const leaked = spawnSync("git", ["grep", "-l", "--untracked", "planted.ts", "--", "zdd"], { cwd: copy, encoding: "utf8" });
+    const leaked = spawnSync("git", ["grep", "-l", "--untracked", "planted.ts", "--", "zdd"], { cwd: copy, encoding: "utf8", env: ENV });
     if (leaked.status === 0) {
       console.log(`FAILED  ${label}: the planted worktree file reached a generated artifact:\n${leaked.stdout}`);
       ok = false;
     } else console.log(`ok      ${label}: nothing from .claude/worktrees/ reached the artifacts`);
-    const diff = spawnSync("git", ["status", "--short"], { cwd: copy, encoding: "utf8" }).stdout.trim().split("\n").filter(Boolean);
+    const diff = spawnSync("git", ["status", "--short"], { cwd: copy, encoding: "utf8", env: ENV }).stdout.trim().split("\n").filter(Boolean);
     console.log(`        ${label}: ${diff.length} files would move in the upgrade PR${diff.length ? ":\n" + diff.map((l) => "          " + l).join("\n") : ""}`);
     allOk = ok && allOk;
   } finally {
     rmSync(copy, { recursive: true, force: true });
   }
 }
-if (!adopters.length) console.log("\n(no adopter checkout was given: the pins and both suites were checked, no real repo was upgraded — CI's dry run on the three scenario fixtures is the only adopter proof)");
+if (!adopters.length) console.log("\n(no adopter checkout was given: the pins, the engine, starter library and plugin suites and the starters' own tests were checked, no real repo was upgraded — CI's dry run on the three scenario fixtures is the only adopter proof)");
 console.log(allOk ? `\nready to tag ${tag}` : `\nNOT ready to tag ${tag}: fix the FAILED steps above`);
 process.exit(allOk ? 0 : 1);

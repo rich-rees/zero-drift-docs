@@ -26,6 +26,14 @@ const FIXTURE_OPTIONS = __FIXTURE_OPTIONS__;
 // stays red until fromSource() finds exactly these, and no others.
 const EXPECTED_IDS = null; // e.g. __EXPECTED_EXAMPLE__
 
+// What the fixture holds that this extractor recognises and cannot read:
+// each item derive's `unread` list returns, `{ file, what }` exactly as
+// returned (decision 0048), e.g. { file: "src/a.cs", what: "an [HttpPatch]
+// action, which this adapter does not read" }. The core keeps each as a
+// record of kind `unread`, which EXPECTED_IDS leaves out (its id is a hash).
+// Empty when the extractor reads all of it.
+const EXPECTED_UNREAD = [];
+
 // ---------------------------------------------------------------------------
 // Plumbing
 // ---------------------------------------------------------------------------
@@ -137,7 +145,21 @@ function metadata(repo) {
   return out;
 }
 const records = (repo) => [...metadata(repo).values()].map((text) => JSON.parse(text));
-const ids = (repo) => records(repo).map((r) => r.id).sort();
+// The core's unread records are not this extractor's records: they are
+// checked against EXPECTED_UNREAD instead.
+const ids = (repo) => records(repo).filter((r) => r.kind !== "unread").map((r) => r.id).sort();
+// An unread record holds its item's file and its `what` as the core shows
+// it: one line, every control and line-separator character a space, cut to
+// 300 characters with an ellipsis. The expected items are shown the same
+// way, so the raw `what` is what you write above.
+const shown = (what) => {
+  const line = String(what).replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]+/gu, " ").replace(/\s+/g, " ").trim();
+  const chars = Array.from(line);
+  return chars.length > 300 ? `${chars.slice(0, 299).join("")}…` : line;
+};
+const pair = (file, what) => `${file}\n${what}`;
+const unreadItems = (repo) => records(repo).filter((r) => r.kind === "unread").map((r) => pair(r.resource[0], r.title)).sort();
+const expectedUnread = () => EXPECTED_UNREAD.map((u) => pair(u.file, shown(u.what))).sort();
 const resources = (repo) => records(repo).flatMap((r) => r.resource);
 
 // The first fixture file this extractor reads, for the hardening tests: a
@@ -160,6 +182,7 @@ test("the fixture yields exactly the expected records", (t) => {
   const repo = scratchRepo(t);
   engineOk(repo, ["derive"]);
   assert.deepEqual(ids(repo), [...EXPECTED_IDS].sort());
+  assert.deepEqual(unreadItems(repo), expectedUnread(), "what derive reported unread differs from EXPECTED_UNREAD");
 });
 
 test("determinism: two fresh copies, and a second run on one copy, write byte-identical metadata; derive --check passes", (t) => {

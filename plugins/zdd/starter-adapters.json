@@ -1,0 +1,7 @@
+{
+  "_comment": "The starter library this ZDD release offers and copies from (decision 0048): its npm package, the version a new repo takes, the baseline an upgrade copies first (every starter as the engine ran it before the app owned its adapters, so the records are proved unchanged), and the ZDD release from which a repo owns its adapters. A test holds version and baseline equal to packages/zdd-starter-adapters.",
+  "package": "@rich-rees/zdd-starter-adapters",
+  "version": "0.2.0",
+  "baseline": "0.1.0",
+  "ownedSince": "0.14.0"
+}
