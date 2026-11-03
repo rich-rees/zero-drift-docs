@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// ZDD engine CLI — one bin, twelve subcommands. Every command but detect,
-// preview, test and contract reads the adopter repo's zdd/config.json (detect and test read only its
+// ZDD engine CLI — one bin, thirteen subcommands. Every command but detect,
+// copy-set, preview, test and contract reads the adopter repo's zdd/config.json (detect and test read only its
 // localExtractorDir; located by walking up from cwd; override with
 // --root=<dir> and/or --config=<file>) and runs deterministically: same source
 // bytes in, byte-identical artifacts out. No LLM anywhere — the agent-side
@@ -12,6 +12,7 @@
 //   zdd-engine freshness [--base <ref>]       advisory semantic-map staleness nudge
 //   zdd-engine tally [--since <ref|date>] [--json]  the ZDD record, counted over git history
 //   zdd-engine detect --adapters=<dir> [--root=<dir>]  which adapters in a folder fit a repo, as JSON (bootstrap asks this)
+//   zdd-engine copy-set --adapters=<dir> [--extractors=<a,b>]  what a copy of each adapter in a folder holds, as JSON (bootstrap asks this)
 //   zdd-engine coverage [--json]               what the derived records link to, and what links to nothing
 //   zdd-engine unread [--json]                 what the adapters saw and could not read, and each item's answer
 //   zdd-engine preview --adapters=<dir> --extractors=<a,b>  the chosen adapters' examples rendered outside the repo
@@ -26,6 +27,7 @@ const COMMANDS = {
   freshness: () => import("../src/core/check-freshness.mjs"),
   tally: () => import("../src/core/tally.mjs"),
   detect: () => import("../src/core/detect.mjs"),
+  "copy-set": () => import("../src/core/copy-set.mjs"),
   coverage: () => import("../src/core/coverage.mjs"),
   unread: () => import("../src/core/unread.mjs"),
   preview: () => import("../src/core/preview.mjs"),
@@ -45,6 +47,8 @@ if (!cmd || !(cmd in COMMANDS)) {
       `  freshness  advisory semantic-map staleness report (--base <ref>)\n` +
       `  tally      the ZDD record counted over git history (--since <ref|date>, --json)\n` +
       `  detect     which adapters in a folder fit this repo, with evidence and the parts they cover (--adapters=<dir>, JSON)\n` +
+      `  copy-set   what a copy of each adapter in a folder holds: its files and its SUITE (--adapters=<dir> --extractors=<a,b>, JSON)
+` +
       `  coverage   per record kind: what it links to, and what links to nothing (--json)\n` +
       `  unread     what the adapters saw and could not read, and each item's answer (--json)\n` +
       `  preview    render the chosen adapters' examples outside the repo (--adapters=<dir> --extractors=<a,b>)\n` +

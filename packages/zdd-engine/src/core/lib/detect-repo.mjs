@@ -158,12 +158,12 @@ export function detectRepo(repoRoot, modules, caps = {}) {
 
   // What a greenfield answer can select, and the neutral list of stacks the
   // folder asked has adapters for (0039 point 6): adapter data, never core
-  // text. The key keeps its pre-0.14 name, `catalogue`, which bootstrap reads.
+  // text: `starters`, the adapters a greenfield stack can take, by part.
   const stacks = adapters
     .flatMap(({ name, mod }) => (mod.DETECTION.stack ?? []).map((r) => ({ adapter: r.app && !r.options ? null : name, rank: r.rank, match: r.match, options: r.options ?? null, path: r.path ?? null, app: r.app ?? null })))
     .sort((a, b) => a.rank - b.rank);
   const companions = adapters.filter(({ mod }) => mod.DETECTION.companion).map(({ name, mod }) => ({ adapter: name, all: mod.DETECTION.companion.all, any: mod.DETECTION.companion.any }));
-  const catalogue = PARTS.map((part) => ({ part, adapters: adapters.filter(({ mod }) => mod.DETECTION.parts.includes(part) && (mod.DETECTION.stack ?? []).some((r) => r.options)).map(({ name }) => name) }));
+  const starters = PARTS.map((part) => ({ part, adapters: adapters.filter(({ mod }) => mod.DETECTION.parts.includes(part) && (mod.DETECTION.stack ?? []).some((r) => r.options)).map(({ name }) => name) }));
 
   // What bootstrap needs to write a config without naming a stack: each
   // adapter's option shape (the keys that hold repo-relative paths, lists of
@@ -187,7 +187,7 @@ export function detectRepo(repoRoot, modules, caps = {}) {
     uncovered: coverage.filter((c) => !c.adapters.length).map((c) => c.part),
     stacks,
     companions,
-    catalogue,
+    starters,
     adapters: shapes,
     limits: { walkTruncated: scan.truncated, readBudgetSpent: scan.overBudget, depth: DETECT_DEPTH, refused: scan.refused.length, refusedFirst: scan.refused.slice(0, 5) },
   };

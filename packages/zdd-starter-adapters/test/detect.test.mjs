@@ -201,7 +201,7 @@ test("coverage part by part: what is covered and by which adapter, and the parts
   assert.deepEqual(d.coverage.find((c) => c.part === "queries").adapters, ["supabase-py"]);
   assert.deepEqual(d.uncovered, ["screens", "components", "background tasks", "external services"]);
   // The neutral greenfield list: adapters a stated stack can select, by part — catalogue data, no recommendation.
-  assert.deepEqual(d.catalogue.find((c) => c.part === "routes").adapters, ["fastapi", "nextjs"]);
+  assert.deepEqual(d.starters.find((c) => c.part === "routes").adapters, ["fastapi", "nextjs"]);
   assert.ok(d.stacks.every((r, i, a) => i === 0 || a[i - 1].rank <= r.rank), "stack rules in rank order");
   assert.deepEqual(d.companions, [{ adapter: "supabase-js", all: ["supabase"], any: ["nextjs", "react-router", "components", "expo-router"] }]);
 });
