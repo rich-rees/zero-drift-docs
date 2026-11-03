@@ -755,7 +755,7 @@ test("CR-267: what follows an INSERT's tuples decides what a bucket already ther
   assert.equal(add("on conflict (id) do update set public = true").buckets.get("p").facts.public, true);
   assert.equal(add("").skipped.length, 1, "Postgres refuses a duplicate");
   assert.equal(add("on conflict (name) do nothing", "('other', 'p', false)").buckets.size, 1, "the conflict is on the name");
-  assert.equal(add("on conflict (id) do nothing", "('other', 'p', false)").buckets.size, 2);
+  assert.equal(add("on conflict (id) do nothing", "('other', 'p', false)").skipped.length, 1, "the name is taken, and only the id is covered");
   assert.equal(add("on conflict (id) do update set public = (select true)").skipped.length, 1);
   assert.equal(add("returning id").skipped.length, 1);
   assert.equal(add("on conflict (id) do update set public = excluded.public", "('new', 'new', false)").buckets.get("new").facts.public, false, "no conflict: an insert");
@@ -783,4 +783,43 @@ test("CR-273: a renamed function is found in the other spelling", () => {
   assert.equal(functions.size, 0);
   const kept = replayMigrations([{ name: "1.sql", text: "create function public.f() returns void language sql as $$ select 1 $$;\nalter function f() rename to g;" }]).functions;
   assert.equal(kept.get("g").name, "public.g");
+});
+
+test("CR-261: a guard is one EXISTS and nothing beside it, and an ELSE beside a followed key reports", () => {
+  const first = "create table a (id int);\ncreate table b (x int);";
+  const fk = "alter table b add constraint k foreign key (x) references a(id)";
+  const exists = "exists (select 1 from pg_constraint where conname = 'k')";
+  for (const block of [
+    "do $$ begin if not " + exists + " and flag then " + fk + "; end if; end $$;",
+    "do $$ begin if not " + exists + " or (flag) then " + fk + "; end if; end $$;",
+    "do $$ begin if not " + exists + " then " + fk + "; else perform 1; end if; end $$;",
+    "do $$ begin if not " + exists + " then " + fk + "; elsif flag then perform 1; end if; end $$;",
+  ]) {
+    assert.equal(replayMigrations([{ name: "1.sql", text: first + block }]).skipped.length, 1, block);
+  }
+});
+
+test("CR-267: a row that meets a bucket on the column ON CONFLICT does not cover reports", () => {
+  const made = "insert into storage.buckets (id, name, public) values ('p', 'label', true);";
+  const add = (row, tail) => replayMigrations([{ name: "1.sql", text: made + "insert into storage.buckets (id, name, public) values " + row + " " + tail + ";" }]);
+  assert.equal(add("('other', 'label', false)", "").skipped.length, 1, "a name that is taken, no ON CONFLICT");
+  assert.equal(add("('other', 'label', false)", "on conflict (id) do nothing").skipped.length, 1);
+  assert.equal(add("('p', 'other', false)", "on conflict (name) do nothing").skipped.length, 1);
+  assert.equal(add("('other', 'label', false)", "on conflict do nothing").buckets.size, 1, "no target covers both");
+  assert.equal(add("('p', 'other', false)", "on conflict do nothing").buckets.get("p").name, "label");
+});
+
+test("CR-276: ON CONFLICT (name) never replaces a bucket by its id", () => {
+  const { buckets, skipped } = replayMigrations([{ name: "1.sql", text: "insert into storage.buckets (id, name, public) values ('p', 'label', true);\ninsert into storage.buckets (id, name, public) values ('p', 'new', false) on conflict (name) do update set public = excluded.public;" }]);
+  assert.equal(buckets.get("p").name, "label");
+  assert.equal(buckets.get("p").facts.public, true);
+  assert.equal(skipped.length, 1);
+});
+
+test("CR-277: a key repeating a reference keeps it when the first is dropped, and the last one out takes it", () => {
+  const made = "create table a (id int);\ncreate table b (x int constraint one references a(id));\nalter table b add constraint two foreign key (x) references a(id);";
+  const after = (drops) => replayMigrations([{ name: "1.sql", text: made + drops }]).tables.get("b").columns[0].references;
+  assert.equal(after("alter table b drop constraint one;"), "a(id)");
+  assert.equal(after("alter table b drop constraint two;"), "a(id)");
+  assert.equal(after("alter table b drop constraint one, drop constraint two;"), undefined);
 });

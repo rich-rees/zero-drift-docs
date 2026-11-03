@@ -407,7 +407,7 @@ const WHOLE_NAME = new RegExp(`^${QNAME}$`);
 // is text, so it is blanked first: only an EXECUTE gives one effect. Foreign
 // keys are the exception that is applied, where the condition is known: they
 // are what such a block is usually for, and the model holds them.
-const DO_GUARD = /^if\s+(not\s+)?exists\s*\([\s\S]*\)\s*then$/i;
+const DO_GUARD = /^if\s+(not\s+)?exists\s*(?=\()/i;
 const FOLLOWED_IN_DO = new Set(["ignored", "add-foreign-key", "drop-constraint", "rename-constraint"]);
 const DO_DDL = /\b(?:alter\s+(?:foreign\s+)?table|alter\s+(?:function|procedure|routine|schema)|create\s+table|create\s+(?:(?:global|local)\s+)?(?:unlogged\s+|foreign\s+)table|create\s+(?:or\s+replace\s+)?(?:function|procedure)|create\s+(?:or\s+replace\s+)?(?:constraint\s+)?trigger|drop\s+(?:foreign\s+)?table|drop\s+(?:function|procedure|routine|schema|trigger)|drop\s+(?:type|domain)\b(?=[\s\S]*\bcascade\b)|rename\s+table|sp_rename)\b[\s\S]*/i;
 const DO_EXECUTE = /(?<!\bgrant\s+)(?<!\brevoke\s+)(?<!\ball\s+)\bexecute\b(?!\s+(?:function|procedure)\b)/i;
@@ -423,6 +423,7 @@ function judgeDo(sql) {
     if (!ddl) {
       if (DO_EXECUTE.test(inner)) return { unread: true };
       if (/^\s*end\s+(?:if|loop|case)\s*$/i.test(inner)) open = false;
+      else if (keys.length && open && /\b(?:else|elsif|elseif)\b/i.test(inner)) return { unread: true };
       else if (/\b(?:then|else|loop)\b/i.test(inner)) open = true;
       continue;
     }
@@ -453,7 +454,8 @@ function judgeDo(sql) {
       continue;
     }
     const asked = DO_GUARD.exec(guard);
-    if (!asked || followed.length !== 1 || open) return { unread: true };
+    const exists = asked && parenBody(guard, asked[0].length);
+    if (!exists || !/^\s*then\s*$/i.test(guard.slice(exists.end + 1)) || followed.length !== 1 || open) return { unread: true };
     const constraint = /\bconname\s*=\s*'([^']*)'/i.exec(written)?.[1];
     const named = /\btable_name\s*=\s*'([^']*)'/i.exec(written)?.[1];
     const wanted = followed[0].fk?.name ?? followed[0].name ?? followed[0].from;
@@ -601,8 +603,7 @@ export function replayMigrations(files) {
     const gave = [];
     columns.forEach((col, i) => {
       const ref = refTo(fk.target, fk.targetColumns[i]);
-      if (refsOf(col).includes(ref)) return;
-      setRefs(col, [...refsOf(col), ref]);
+      if (!refsOf(col).includes(ref)) setRefs(col, [...refsOf(col), ref]);
       gave.push({ column: col.name, ref });
     });
     table.keys.set(fk.name ?? defaultKey(table, fk.columns), { columns: fk.columns, gave });
@@ -611,11 +612,13 @@ export function replayMigrations(files) {
   const dropConstraint = (table, name) => {
     const key = table.keys.get(name);
     if (!key) return false;
+    table.keys.delete(name);
+    // A reference stays while another key still gives it.
+    const held = (column, ref) => [...table.keys.values()].some((k) => k.gave.some((g) => g.column === column && g.ref === ref));
     for (const { column, ref } of key.gave) {
       const col = table.columns.find((c) => c.name === column);
-      if (col) setRefs(col, refsOf(col).filter((r) => r !== ref));
+      if (col && !held(column, ref)) setRefs(col, refsOf(col).filter((r) => r !== ref));
     }
-    table.keys.delete(name);
     return true;
   };
   const renameConstraint = (table, from, to) => {
@@ -973,16 +976,22 @@ export function replayMigrations(files) {
         for (const raw of rows) {
           const id = literal(raw.id) ?? literal(raw.name);
           const named = literal(raw.name) ?? id;
-          const there = onTarget === "name" ? findBucket("name", named) : buckets.get(id);
-          // Over a bucket that is there with no ON CONFLICT, Postgres refuses.
-          if (there && !conflict[2]) {
+          // A row that meets a bucket on the id or the name, unless ON CONFLICT
+          // covers that one, is refused by Postgres. No target covers both.
+          const byId = buckets.get(id);
+          const byName = findBucket("name", named);
+          const there = onTarget === "name" ? byName : byId;
+          const covered = conflict[2] && (!onTarget || !(onTarget === "name" ? byId : byName) || byId === byName);
+          if ((byId || byName) && !covered) {
+            unread();
+          } else if (!onTarget && (byId || byName) && update) {
             unread();
           } else if (there && update) {
             const set = {};
             for (const [column, value] of Object.entries(update)) set[column] = EXCLUDED.exec(value) ? raw[foldIdent(EXCLUDED.exec(value)[1])] : value;
             if (!setBucket(there, set)) unread();
             else if (!there.resource.includes(file.name)) there.resource.push(file.name);
-          } else if (!there) {
+          } else if (!byId && !byName) {
             const bucket = { id, name: named, resource: [file.name], description: commentsToDescription(leadingComments), facts: {} };
             setBucketFacts(bucket, raw);
             buckets.set(id, bucket);
