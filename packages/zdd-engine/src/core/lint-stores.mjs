@@ -59,6 +59,14 @@
 //    the item is marked fine once in `unread.fine`. A mark nothing answers any
 //    more is a WARNING. New in a release, so it starts as a warning (0035,
 //    0040 point 7).
+// 4e. The map's gaps (decision 0049): a route, surface or background task
+//    that reaches nothing, a table nothing reaches, and any kind an adapter
+//    names in its GAPS — over every record derive wrote, never a diff. A gap
+//    with no answer is a WARNING until `gaps.strict`, then a FAILURE: an
+//    adapter is fixed to read its link, or the gap is answered once in
+//    `gaps.fine` (nothing to map) or `gaps.known` (cannot be mapped). A
+//    fresh install writes strict; an upgraded repo warns until
+//    `bootstrap.mjs gaps --raise`. A mark nothing answers is a WARNING.
 // 5. Stray root glossary (1.3.1): a root GLOSSARY.md or CONTEXT.md beside
 //    paths.glossary — the file Matt Pocock's skills read and create when
 //    docs/agents/domain.md does not redirect them — is a WARNING, never a
@@ -76,6 +84,8 @@ import { walkMarkdown, readBounded, MAX_STORE_FILE_BYTES } from "./lib/walk-mark
 import { unclaimedRecords, CLAIMABLE_KINDS, OPT_IN_CLAIMABLE_KINDS } from "./lib/claims.mjs";
 import { recordsInLog, LOG_FORMAT, printable as printableAll } from "./lib/zdd-record.mjs";
 import { unreadConfig, unreadReport, MARK_ROUTE, MAX_PRINTED } from "./lib/unread.mjs";
+import { gapsConfig, gapsOf, gapReport, GAP_ROUTE } from "./lib/gaps.mjs";
+import { selectedGapKinds } from "./derive.mjs";
 
 // The commits this branch adds over the base (origin/<baseBranch>, then
 // <baseBranch>), each with its ZDD record parsed: { commits } or { note }.
@@ -105,7 +115,7 @@ export function recordCheck(repoRoot, baseBranch) {
   }
 }
 
-export function run(args) {
+export async function run(args) {
   const { repoRoot: REPO, config, paths, bundleDir, baseBranch } = loadConfig(args);
   // `claims` (1.3.0, decision 0012): opt-in strict mode. Checked before
   // any lint runs, so a malformed block is the one thing reported.
@@ -143,6 +153,11 @@ export function run(args) {
   const unreadCfg = unreadConfig(config);
   if (unreadCfg.error) {
     console.error(unreadCfg.error);
+    process.exit(1);
+  }
+  const gapsCfg = gapsConfig(config);
+  if (gapsCfg.error) {
+    console.error(gapsCfg.error);
     process.exit(1);
   }
   const STRICT = claimsCfg.strict === true;
@@ -428,7 +443,7 @@ if (args.includes("--merge")) {
 // Read after the blocking lints so a failure above is not buried under the
 // list. Absent metadata (greenfield, or derive not yet run) is an empty
 // inventory: nothing to claim, no line printed.
-const { total, records, unclaimed, doubleClaimed, skipped, unplaced, unknownTasks, unread } = unclaimedRecords({ metadataDir: METADATA_DIR, mapDir: MAP_DIR, bundleDir });
+const { total, records, unclaimed, doubleClaimed, skipped, unplaced, unknownTasks, unread, all } = unclaimedRecords({ metadataDir: METADATA_DIR, mapDir: MAP_DIR, bundleDir });
 // Every adopter-controlled path is printable before it reaches the log — a
 // control character in a filename cannot forge a line (1.3.0 CR-032).
 const files = (list) => list.map(printable).join(", ");
@@ -511,6 +526,31 @@ if (unknownTasks.length) {
   }
   if (report.stale.length) {
     console.error(`WARNING: ${report.stale.length} unread.fine mark${report.stale.length === 1 ? "" : "s"} no item answers any more — the adapter was fixed or the item changed; remove with \`bootstrap.mjs unread --forget=<id>\`: ${report.stale.slice(0, 10).map(printable).join(", ")}${report.stale.length > 10 ? `, +${report.stale.length - 10} more` : ""}`);
+  }
+}
+
+// ---- 4e. The map's gaps (decision 0049) ----
+// Read from the records derive wrote, as every check above; the kinds come
+// from the core and the adapters' GAPS, read without running an adapter.
+{
+  const found = await selectedGapKinds(REPO, config);
+  if (found.error) problems.push(`${printable(found.error)} — derive stops on it too`);
+  for (const n of found.notes) console.error(`WARNING: ${printable(n)}`);
+  const report = gapReport(gapsOf(all, found.kinds ?? { reachNothing: [], reachedByNothing: [] }), gapsCfg);
+  const said = (i) => `${printable(i.id)} ${printable(i.what)}${i.file ? ` (${printable(i.file)})` : ""}`;
+  if (gapsCfg.strict) {
+    // A strict pass means every record was read (as claims.strict does).
+    for (const s of skipped.filter((f) => f.record)) problems.push(`gaps.strict: ${printable(s.file)} could not be read (${s.reason}) — what links there is unknown`);
+    // The route once, above the list, so a long list stays readable.
+    if (report.open.length) console.error(`${report.open.length} gap${report.open.length === 1 ? "" : "s"} in the map with no answer — ${GAP_ROUTE}`);
+    for (const i of report.open) problems.push(`${said(i)} — gaps.strict: no answer yet`);
+  } else if (report.open.length) {
+    console.error(`WARNING: ${report.open.length} gap${report.open.length === 1 ? "" : "s"} in the map with no answer yet — ${GAP_ROUTE}; a failure once gaps.strict is on (\`bootstrap.mjs gaps --raise\`, once every gap has an answer):`);
+    for (const i of report.open.slice(0, MAX_PRINTED)) console.error(`  ${said(i)}`);
+    if (report.open.length > MAX_PRINTED) console.error(`  … and ${report.open.length - MAX_PRINTED} more`);
+  }
+  if (report.stale.length) {
+    console.error(`WARNING: ${report.stale.length} gap mark${report.stale.length === 1 ? "" : "s"} in zdd/config.json no gap answers any more — the record links now, or it is gone; remove with \`bootstrap.mjs gaps --forget=<id>\`: ${report.stale.slice(0, 10).map(printable).join(", ")}${report.stale.length > 10 ? `, +${report.stale.length - 10} more` : ""}`);
   }
 }
 

@@ -35,6 +35,7 @@ import { makeExtractorIo } from "./lib/extractor-io.mjs";
 import { gitIgnoredPredicate } from "./lib/ignored.mjs";
 import { judgeContract } from "./lib/contract.mjs";
 import { UNREAD_KIND, unreadRecords, unreadConfig, unreadReport, unreadLines, itemOf } from "./lib/unread.mjs";
+import { checkGaps, gapKinds } from "./lib/gaps.mjs";
 
 import { NAME_RE } from "./lib/adapter-folder.mjs";
 
@@ -226,6 +227,32 @@ export async function selectedModules(repoRoot, config) {
   return out;
 }
 
+// The kinds the gap list counts (decision 0049): the core's, plus what each
+// adapter the config selects names in its GAPS. For lint and render, which
+// read records and never run an adapter: a selection derive would refuse is
+// derive's to report, and a module that will not load is said as a note,
+// with the core's kinds standing for it. A malformed GAPS is { error }.
+export async function selectedGapKinds(repoRoot, config) {
+  const selection = resolveExtractors(config);
+  const notes = [];
+  const adapters = [];
+  if (!selection.error) {
+    const local = localExtractors(repoRoot, config.localExtractorDir);
+    for (const { name } of selection.extractors) {
+      // Not held, or a link: derive refuses it and says so, every run.
+      const found = NAME_RE.test(name) ? local.get(name) : undefined;
+      if (typeof found !== "string") continue;
+      try {
+        adapters.push({ name, mod: await import(pathToFileURL(found).href) });
+      } catch (e) {
+        notes.push(`adapter '${name}' did not load (${String(e.message).split(/\r?\n/)[0].slice(0, 200)}), so the gap list counts only the core's kinds for it`);
+      }
+    }
+  }
+  const kinds = gapKinds(adapters);
+  return kinds.error ? { error: kinds.error, notes } : { kinds, notes };
+}
+
 // The lexical check above is the braces; this is the belt (CR-060). A
 // metadataDir that is itself a symlink, or that sits under one, would carry
 // every write and the prune wherever the link points — a sibling checkout,
@@ -310,6 +337,7 @@ export async function deriveRecords({ repoRoot, config, contract }) {
   let records = [];
   const unread = []; // the core's own records: kept apart from what adapters minted
   const factsOrder = {};
+  const adapterModules = []; // for the gap list's kinds (decision 0049)
   // What git ignores is never source (pick 1): asked once, shared by every
   // extractor's io.
   const ignored = gitIgnoredPredicate(repoRoot);
@@ -331,6 +359,11 @@ export async function deriveRecords({ repoRoot, config, contract }) {
     // warns; optional steps it is behind on are said under --verbose only.
     const judged = judgeContract(name, extractor, contract);
     if (judged.fail) fail(judged.fail);
+    // The kinds of its own records it says must link (decision 0049), an
+    // optional step: a malformed one is a contract fault, said here first.
+    const gaps = checkGaps(name, extractor.GAPS);
+    if (gaps.error) fail(gaps.error);
+    adapterModules.push({ name, mod: extractor });
     if (judged.warning) warnings.push(`WARNING [contract]: ${judged.warning}`);
     for (const r of judged.behind) diagnostics.push(`[contract] ${name} was written for contract ${judged.declared}; it does not have "${r.step}" (contract ${r.since}, optional): ${r.what}`);
     let out;
@@ -382,7 +415,7 @@ export async function deriveRecords({ repoRoot, config, contract }) {
   validateRecords(records);
   records.sort((a, b) => (a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : a.id < b.id ? -1 : 1));
   unread.sort((a, b) => (a.id < b.id ? -1 : 1));
-  return { records, unread, factsOrder, diagnostics, configDiagnostics, warnings };
+  return { records, unread, factsOrder, diagnostics, configDiagnostics, warnings, gapKinds: gapKinds(adapterModules) };
 }
 
 export async function run(args) {

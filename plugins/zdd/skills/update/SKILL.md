@@ -1,6 +1,6 @@
 ---
 name: update
-description: "\"update ZDD\" — the Zero-Drift Docs finish ritual. Curate the changed artifacts (glossary, ADRs, code comments, semantic map, blessings), reconcile the branch's pattern plan (mint the blessings that survived, record the rest, delete the plan), regenerate the codebase metadata and the indexes, write the ZDD record (what each artifact turned, confirmed, supplied for reuse, or stored) into the commit's message, and commit everything in the PR so docs and code merge atomically. Use before finishing any unit of work (a PR is one instantiation) in a repo that uses ZDD; triggers on \"update ZDD\"."
+description: "\"update ZDD\" — the Zero-Drift Docs finish ritual. Curate the changed artifacts (glossary, ADRs, code comments, semantic map, blessings), reconcile the branch's pattern plan (mint the blessings that survived, record the rest, delete the plan), regenerate the codebase metadata and the indexes, answer every gap in the map (it does not finish while one is open) and ask the starter library what fits now, write the ZDD record (what each artifact turned, confirmed, supplied for reuse, or stored) into the commit's message, and commit everything in the PR so docs and code merge atomically. Use before finishing any unit of work (a PR is one instantiation) in a repo that uses ZDD; triggers on \"update ZDD\"."
 ---
 
 # zdd:update — the finish ritual
@@ -27,7 +27,7 @@ Run this as the definition of done for every unit of work — the spoken form is
      that adds or changes user-facing behaviour adds a feature slice or
      extends one** (`zdd/map/features/<feature>.md`): the slice claims the
      routes, tables, functions and surfaces it owns by linking them. The
-     lint's *unclaimed* list (step 4) is the checklist — every record on it
+     lint's *unclaimed* list (step 5) is the checklist — every record on it
      is one no slice has placed yet.
    - **Blessings** — one file each in the blessing store (`zdd/blessings/`,
      `paths.blessingsDir`). A blessing's `where:` names the code to copy or
@@ -42,7 +42,7 @@ Run this as the definition of done for every unit of work — the spoken form is
    written by "choose patterns" before the build. Judge it against the code
    *as it will merge*, mint the blessings that survived, and write the
    `blessings` section of the **ZDD record** you will put in the commit
-   message (step 6); then `git rm` the plan, so lint in step 5 runs without
+   message (step 8); then `git rm` the plan, so lint in step 5 runs without
    it. No plan on the branch: say so in one line, and still read the diff
    for a new pattern or a copied precedent worth a blessing.
 3. **Run the deriver.** Regenerates the codebase metadata from source:
@@ -106,7 +106,64 @@ Run this as the definition of done for every unit of work — the spoken form is
    ```
    npx -y @rich-rees/zdd@0.13.0 lint
    ```
-6. **Write the ZDD record and commit all of it in the PR.** Code and docs
+6. **The map's gaps — this update does not finish while one is open**
+   (decision 0049). Over the whole repo, every run, never only the diff:
+   ```
+   node "$PLUGIN/scripts/bootstrap.mjs" gaps
+   ```
+   (`$PLUGIN` is this plugin's root, two directories up from this SKILL.md,
+   as the `load` skill sets it.) It lists every route, screen and background
+   task that reaches nothing, every table nothing reaches, and any kind an
+   adapter names in its `GAPS`. A gap usually means a reader is missing:
+   the classic one is a library this work added that no adapter reads, so
+   the routes that use it reach no table. Take each open gap **one at a
+   time**, in plain words, with your recommendation, and answer it in one
+   of three ways:
+   - **fixed** — an adapter now reads the link: build or extend it through
+     the **extractor** skill (its tests red, then green), derive, and the
+     gap is gone. The pressure is towards this.
+   - **fine**, with a reason — there is nothing to map (a health check
+     touches no table): `gaps --fine=<id> --why="…"`.
+   - **a known gap**, with a reason — it cannot be mapped (table names built
+     at runtime): `gaps --known=<id> --why="…"`. It stays in the agent index
+     and the human index as a part of the map not to trust. Never use
+     `fine` to get past something that is really unmappable.
+
+   Never answer one without asking the developer. Ids may be comma
+   separated when one reason covers several. A gap answered before is not
+   asked again; one a skipped update left behind is asked now. When every
+   gap has an answer, this exits 0, and only then go on:
+   ```
+   node "$PLUGIN/scripts/bootstrap.mjs" gaps --check
+   ```
+   Under `gaps.strict` (a fresh install's default) lint also fails on an
+   open gap; on an upgraded repo it warns until `gaps --raise`, which you
+   offer once every gap has an answer.
+7. **Ask the starter library, and judge what this work added** (decision
+   0049 point 4):
+   ```
+   node "$PLUGIN/scripts/bootstrap.mjs" library
+   ```
+   It asks every starter in the library this ZDD release pins whether it fits
+   the repo now, and names the ones that fit and are not among the repo's
+   adapters, with their evidence and options. Offer each **once**, in plain
+   words, as bootstrap did: on a yes, a repair `bootstrap.mjs apply` whose
+   answer set lists `extractors` (the current list plus the starter) and
+   that starter's `extractorOptions` copies it in with its tests — then
+   derive and run the gaps again; on a no, `library --decline=<name>`, kept
+   so it is not offered again. When the library is unreachable, or the
+   developer declined it for this repo, it prints one line: say it, and go
+   on — the gaps above hold without it.
+   Then judge, yourself, the **libraries this unit of work added** — new
+   dependencies in the package manifests the diff touches (a database
+   client, a queue, an API client, a framework): for each, does any adapter
+   read it? Open the adapters in `localExtractorDir` and check. One that no
+   adapter reads, where its code reaches tables, routes or tasks the map
+   should show, is a gap the list above may not catch (a route that keeps
+   one link and quietly loses another): say so, and offer to extend or build
+   the adapter through the extractor skill. Say plainly, in one line, when
+   nothing was added.
+8. **Write the ZDD record and commit all of it in the PR.** Code and docs
    merge atomically; the doc delta is reviewed alongside the code delta.
    **This commit carries the plan file's deletion** (staged in step 2) **and
    the ZDD record in its message** — see [below](#the-zdd-record). CI's

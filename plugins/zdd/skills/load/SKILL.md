@@ -77,6 +77,23 @@ it is owed and derive now finds records. **Relay it as the next line of your
 reply** and offer to run it — the bootstrap skill's step 5, "Check it
 together". Silent otherwise; do not mention it then.
 
+Then, the same way:
+
+```
+node "$PLUGIN/scripts/check-starters.mjs"
+```
+
+The adapters a repo copied from ZDD's starter library record the library
+version each came from (decision 0048 point 7). When the version this ZDD
+release pins notes fixes for a copy that the developer has neither taken
+nor declined, this prints one line naming the copies. **Relay it as the next
+line of your reply**, then read the fixes against this repo
+(`node "$PLUGIN/scripts/bootstrap.mjs" starters` lists what each changes and
+who it affects) and recommend, once: on a yes `starters --move`, on a no
+`starters --decline`, which is kept so it is not asked again. Offline it
+says nothing, and it is silent when nothing is on offer; do not mention it
+then. (The session-start hook prints the same line.)
+
 ## Steps
 
 The paths below are the defaults. The repo's `zdd/config.json` may move any of

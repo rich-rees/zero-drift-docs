@@ -42,8 +42,8 @@ const MARK_KEYS = ["id", "what", "why"];
 // One line of plain text, whatever the source held. Every control, format and
 // line-separator character goes, so nothing can forge a line in a CI log or
 // reorder one with a bidi mark.
-const oneLine = (s) => s.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]+/gu, " ").replace(/\s+/g, " ").trim();
-const cut = (s, n) => {
+export const oneLine = (s) => s.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]+/gu, " ").replace(/\s+/g, " ").trim();
+export const cut = (s, n) => {
   const chars = Array.from(s); // never through a surrogate pair
   return chars.length > n ? `${chars.slice(0, n - 1).join("")}…` : s;
 };
@@ -89,31 +89,50 @@ export function itemOf(record) {
   return { id: oneLine(String(record.id)), adapter: oneLine(String(record.facts?.adapter ?? "")), file: oneLine(file), what: oneLine(String(record.title ?? "")) };
 }
 
+// A block of one-time marks in the config: `strict`, plus one list of
+// `{ id, what, why }` per answer it takes. The unread items' block is one
+// (`unread`, answered `fine`); the map's gaps are another (`gaps`, answered
+// `fine` or `known`, decision 0049), read by the same rules so a mark means
+// the same thing in both. Returns { strict, <answer>: Map(id -> { what, why }) }
+// or { error }. An id is in one list at most.
+export function marksConfig(config, key, { lists, idRe, idShape, itemName, reason }) {
+  const u = config[key] === undefined ? {} : config[key];
+  const keys = ["strict", ...lists];
+  const fail = (msg) => ({ error: `zdd/config.json: ${msg}` });
+  if (u === null || typeof u !== "object" || Array.isArray(u)) return fail(`'${key}' must be an object`);
+  const unknown = Object.keys(u).find((k) => !keys.includes(k));
+  if (unknown !== undefined) return fail(`'${key}' has an unknown key '${brief(unknown)}' (known: ${keys.join(", ")})`);
+  if (u.strict !== undefined && typeof u.strict !== "boolean") return fail(`'${key}.strict' must be true or false`);
+  const out = { strict: u.strict === true };
+  const seen = new Map();
+  for (const answer of lists) {
+    const at = `${key}.${answer}`;
+    const list = u[answer] === undefined ? [] : u[answer];
+    if (!Array.isArray(list)) return fail(`'${at}' must be an array of { id, what, why }`);
+    if (list.length > MAX_MARKS) return fail(`'${at}' lists more than ${MAX_MARKS} marks`);
+    const marks = new Map();
+    for (const m of list) {
+      if (!m || typeof m !== "object" || Array.isArray(m)) return fail(`every '${at}' entry must be an object { id, what, why }`);
+      const extra = Object.keys(m).find((k) => !MARK_KEYS.includes(k));
+      if (extra !== undefined) return fail(`an '${at}' entry has an unknown key '${brief(extra)}' (known: ${MARK_KEYS.join(", ")})`);
+      if (typeof m.id !== "string" || !idRe.test(m.id)) return fail(`'${at}' id ${JSON.stringify(brief(m.id))} is not ${itemName}'s id ("${idShape}")`);
+      if (m.what !== undefined && typeof m.what !== "string") return fail(`'${at}' entry '${brief(m.id)}': 'what' must be a string`);
+      if (typeof m.why !== "string" || !m.why.trim()) return fail(`'${at}' entry '${brief(m.id)}' gives no 'why' — ${reason(answer)}, for whoever reads it next`);
+      if (m.why.length > MAX_WHY) return fail(`'${at}' entry '${brief(m.id)}': 'why' is over ${MAX_WHY} characters`);
+      if (marks.has(m.id)) return fail(`'${at}' lists '${brief(m.id)}' twice`);
+      if (seen.has(m.id)) return fail(`'${brief(m.id)}' is in both '${seen.get(m.id)}' and '${at}' — one answer per item`);
+      seen.set(m.id, at);
+      marks.set(m.id, { what: m.what ?? "", why: m.why });
+    }
+    out[answer] = marks;
+  }
+  return out;
+}
+
 // The `unread` block of the config: { strict, fine: Map(id -> { what, why }) }
 // or { error }. Every command that reads the block reads it through here.
 export function unreadConfig(config) {
-  const u = config.unread === undefined ? {} : config.unread;
-  const fail = (msg) => ({ error: `zdd/config.json: ${msg}` });
-  if (u === null || typeof u !== "object" || Array.isArray(u)) return fail("'unread' must be an object");
-  const unknown = Object.keys(u).find((k) => !UNREAD_KEYS.includes(k));
-  if (unknown !== undefined) return fail(`'unread' has an unknown key '${brief(unknown)}' (known: ${UNREAD_KEYS.join(", ")})`);
-  if (u.strict !== undefined && typeof u.strict !== "boolean") return fail("'unread.strict' must be true or false");
-  const list = u.fine === undefined ? [] : u.fine;
-  if (!Array.isArray(list)) return fail("'unread.fine' must be an array of { id, what, why }");
-  if (list.length > MAX_MARKS) return fail(`'unread.fine' lists more than ${MAX_MARKS} marks`);
-  const fine = new Map();
-  for (const m of list) {
-    if (!m || typeof m !== "object" || Array.isArray(m)) return fail("every 'unread.fine' entry must be an object { id, what, why }");
-    const extra = Object.keys(m).find((k) => !MARK_KEYS.includes(k));
-    if (extra !== undefined) return fail(`an 'unread.fine' entry has an unknown key '${brief(extra)}' (known: ${MARK_KEYS.join(", ")})`);
-    if (typeof m.id !== "string" || !UNREAD_ID.test(m.id)) return fail(`'unread.fine' id ${JSON.stringify(brief(m.id))} is not an unread item's id ("${UNREAD_KIND}:<adapter>/<hash>")`);
-    if (m.what !== undefined && typeof m.what !== "string") return fail(`'unread.fine' entry '${brief(m.id)}': 'what' must be a string`);
-    if (typeof m.why !== "string" || !m.why.trim()) return fail(`'unread.fine' entry '${brief(m.id)}' gives no 'why' — a mark says why the item is fine, for whoever reads it next`);
-    if (m.why.length > MAX_WHY) return fail(`'unread.fine' entry '${brief(m.id)}': 'why' is over ${MAX_WHY} characters`);
-    if (fine.has(m.id)) return fail(`'unread.fine' lists '${brief(m.id)}' twice`);
-    fine.set(m.id, { what: m.what ?? "", why: m.why });
-  }
-  return { strict: u.strict === true, fine };
+  return marksConfig(config, "unread", { lists: UNREAD_KEYS.slice(1), idRe: UNREAD_ID, idShape: `${UNREAD_KIND}:<adapter>/<hash>`, itemName: "an unread item", reason: () => "a mark says why the item is fine" });
 }
 
 const byPlace = (a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : a.what < b.what ? -1 : a.what > b.what ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0);

@@ -88,16 +88,18 @@ export function npmCommand(execPath = process.execPath, platform = process.platf
   return { cmd: "npm.cmd", pre: [], shell: true };
 }
 
-export function npmFetch(version, { exec = execFileSync, execPath = process.execPath, platform = process.platform, out = tempDir() } = {}) {
+// `offline`: npm's cache only, never the network, and quickly — the
+// session-start notice (decision 0048 point 7) says nothing rather than wait.
+export function npmFetch(version, { exec = execFileSync, execPath = process.execPath, platform = process.platform, out = tempDir(), offline = false } = {}) {
   const npm = npmCommand(execPath, platform);
-  let args = [...npm.pre, "install", "--prefix", out, "--no-save", "--no-package-lock", "--ignore-scripts", "--no-audit", "--no-fund", "--loglevel=error", `${STARTERS.package}@${version}`];
+  let args = [...npm.pre, "install", "--prefix", out, "--no-save", "--no-package-lock", "--ignore-scripts", "--no-audit", "--no-fund", "--loglevel=error", ...(offline ? ["--offline"] : []), `${STARTERS.package}@${version}`];
   // Through cmd.exe each argument is quoted, and one it would read differently is refused (as engineArgv does).
   if (npm.shell) {
     const bad = args.find((a) => /["%^!&|<>\r\n]/.test(a));
     if (bad !== undefined) throw new Error(`cannot run npm through cmd.exe with ${JSON.stringify(bad)} — install npm's npm-cli.js beside node`);
     args = args.map((a) => `"${a}"`);
   }
-  exec(npm.cmd, args, { stdio: ["ignore", "pipe", "pipe"], encoding: "utf8", timeout: 300_000, shell: npm.shell, cwd: out });
+  exec(npm.cmd, args, { stdio: ["ignore", "pipe", "pipe"], encoding: "utf8", timeout: offline ? 15_000 : 300_000, shell: npm.shell, cwd: out });
   return join(out, "node_modules", ...STARTERS.package.split("/"));
 }
 
@@ -190,6 +192,10 @@ export function parseRecord(text, where) {
   if (!obj(r) || r.starters !== 1 || !obj(r.adapters) || !obj(r.files)) bad('not a record ZDD wrote ("starters": 1, with adapters and files)');
   if (r.package !== undefined && r.package !== STARTERS.package) bad(`it records copies from ${JSON.stringify(String(r.package).slice(0, 80))}, not ${STARTERS.package}`);
   if (Object.keys(r.adapters).length > MAX_RECORD_ADAPTERS || Object.keys(r.files).length > MAX_RECORD_FILES) bad("it lists more adapters or files than any copy holds");
+  // A no to the library, kept (decision 0049 point 4): the whole of it, or
+  // the starters an update offered and the developer turned down.
+  if (r.library !== undefined && r.library !== "declined") bad('library must be "declined" when it is there');
+  if (r.declinedOffers !== undefined && !(Array.isArray(r.declinedOffers) && r.declinedOffers.length <= MAX_RECORD_ADAPTERS && r.declinedOffers.every((n) => typeof n === "string" && NAME.test(n)))) bad("declinedOffers must list adapter names");
   for (const [name, a] of Object.entries(r.adapters)) {
     if (!NAME.test(name)) bad(`${JSON.stringify(name.slice(0, 80))} is not an adapter name`);
     if (!obj(a) || !SEMVER.test(String(a.version))) bad(`adapters.${name} must carry the version it came from`);

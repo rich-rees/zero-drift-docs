@@ -93,7 +93,7 @@ function walkJson(dir, out = [], state = { depth: 0, entries: 0 }) {
 
 // The claimable records under metadataDir, each with the node id a map link
 // resolves to (bundle-relative path minus extension), sorted by id.
-export function claimableRecords(metadataDir, bundleDir, skipped, unplaced, unknownTasks, unread) {
+export function claimableRecords(metadataDir, bundleDir, skipped, unplaced, unknownTasks, unread, all) {
   const out = [];
   const why = (p) => {
     try {
@@ -131,6 +131,9 @@ export function claimableRecords(metadataDir, bundleDir, skipped, unplaced, unkn
     // What an adapter could not read (decision 0048): lint's to hold, in this
     // same walk. Never claimable.
     if (unread && record.kind === UNREAD_KIND) unread.push(itemOf(record));
+    // Every other record, as the gap list reads it (decision 0049): its
+    // links, and nothing it does not need.
+    if (all && record.kind !== UNREAD_KIND && typeof record.id === "string" && typeof record.kind === "string") all.push({ id: record.id, kind: record.kind, title: record.title, resource: record.resource, refs: record.refs, facts: { edges: record.facts?.edges } });
     if (!claimable(record)) continue;
     out.push({ kind: record.kind, id: String(record.id ?? nodeId), title: String(record.title ?? record.id ?? nodeId), nodeId, file, optIn: OPT_IN_CLAIMABLE_KINDS.includes(record.kind) });
   }
@@ -179,7 +182,8 @@ export function unclaimedRecords({ metadataDir, mapDir, bundleDir }) {
   const unplaced = [];
   const unknownTasks = [];
   const unread = [];
-  const records = claimableRecords(metadataDir, bundleDir, raw, unplaced, unknownTasks, unread);
+  const all = [];
+  const records = claimableRecords(metadataDir, bundleDir, raw, unplaced, unknownTasks, unread, all);
   unplaced.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   unknownTasks.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   const skipped = raw
@@ -198,6 +202,7 @@ export function unclaimedRecords({ metadataDir, mapDir, bundleDir }) {
     unplaced,
     unknownTasks,
     unread,
+    all,
     total: records.length,
     records,
     unclaimed: records.filter((r) => !claimed.has(r.nodeId)),

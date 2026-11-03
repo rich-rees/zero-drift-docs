@@ -358,6 +358,37 @@ human index shows them: run `derive`, then `render`, before the commit.
 Done when `--raise` has run, or the developer has chosen to leave items for
 later (say so in the commit's record).
 
+## Step 4d — the map's gaps (decision 0049)
+
+Skip this step when the plan has no note about it (`gaps.strict` is already
+on). Otherwise, after `derive`:
+
+```
+node "$PLUGIN/scripts/bootstrap.mjs" gaps
+```
+
+It lists every route, screen and background task that reaches nothing,
+and every table nothing reaches, over the whole repo. Lint only warns about
+these for now, so nothing turns red by surprise. Take them **one at a
+time**, in plain words, with your recommendation: an adapter is fixed to
+read the link through the **extractor** skill (tests red, then green); or
+the gap is answered once, with the reason — `gaps --fine=<id> --why="…"`
+when there is nothing to map, `gaps --known=<id> --why="…"` when it cannot be
+mapped (it then shows in both indexes as a part of the map not to trust).
+Ids may be comma separated when one reason covers several. Then:
+
+```
+node "$PLUGIN/scripts/bootstrap.mjs" gaps --raise
+```
+
+`--raise` writes `gaps.strict`, so a new gap fails lint from now on; it
+refuses while any gap has no answer. Run `render` before the commit, so a
+known gap is in the indexes.
+
+Done when `--raise` has run, or the developer has chosen to leave gaps for
+later (say so in the commit's record) — the next "update ZDD" asks about
+every one still open.
+
 ## Step 5 — regenerate, check, and list the commit
 
 Run the preflight once more — the engine pin may have moved, and a new pin is

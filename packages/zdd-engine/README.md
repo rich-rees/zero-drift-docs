@@ -30,6 +30,7 @@ npx @rich-rees/zdd detect --adapters=<dir> [--root=<dir>]
 npx @rich-rees/zdd copy-set --adapters=<dir> [--extractors=<a,b>]
 npx @rich-rees/zdd coverage [--json]
 npx @rich-rees/zdd unread [--json]
+npx @rich-rees/zdd gaps [--json]
 npx @rich-rees/zdd preview --adapters=<dir> --extractors=<a,b,…> [--out=<empty dir>] [--json]
 npx @rich-rees/zdd suite [--extractors=<a,b>] [--json]
 npx @rich-rees/zdd test [--adapters=<dir>]
@@ -129,6 +130,12 @@ npx @rich-rees/zdd contract [--json]
   `unread` under the metadata folder, which is what `lint` and the human index
   read. An item with no answer warns in `lint`, and fails it under
   `unread.strict`.
+- **gaps** — the map's gaps (decision 0049): derives in memory (writes
+  nothing) and lists every route, surface and background task that links to
+  nothing, every table nothing links to, and any kind an adapter names in
+  its `GAPS`, each with its answer. `lint` reads the same list from the
+  written records: an open gap warns, and fails under `gaps.strict`. A gap
+  answered as known shows in the agent index and the human index.
 - **preview** — for a repo with no code yet: copies the named adapters'
   `example/` folders into a new temporary folder outside the repo, derives
   and renders there, and prints where the human index landed.
@@ -170,6 +177,9 @@ version:
 | `suiteChecks` | absent (every check warns) | How many of the standard suite's checks block for the repo's own adapters, 0 to 5 (decision 0040). Bootstrap writes 5 at a fresh install; "upgrade ZDD" raises it at once only where every adapter is a starter copy no one has changed, and otherwise `bootstrap.mjs adapters --raise` does, once they pass |
 | `unread.strict` | `false` | `true`: `lint` fails on anything an adapter saw and could not read that has no answer; off, it warns (decision 0048). Bootstrap writes `true` at a fresh install; `bootstrap.mjs unread --raise` does on an upgraded repo, once every item has an answer |
 | `unread.fine` | `[]` | Items marked fine once, each `{ id, what, why }` (`bootstrap.mjs unread --mark` writes them). A mark survives the code around the item moving and lapses when the item changes; a mark no item answers warns |
+| `gaps.strict` | `false` | `true`: `lint` fails on a gap in the map with no answer; off, it warns (decision 0049). Bootstrap writes `true` at a fresh install; `bootstrap.mjs gaps --raise` does on an upgraded repo, once every gap has an answer |
+| `gaps.fine` | `[]` | Gaps with nothing to map, each `{ id, what, why }` (`bootstrap.mjs gaps --fine` writes them). An id is the record's id and the direction: a mark lapses when the record is renamed; a mark no gap answers warns |
+| `gaps.known` | `[]` | Gaps that cannot be mapped, each `{ id, what, why }` (`bootstrap.mjs gaps --known` writes them): shown in both indexes as parts of the map not to trust |
 | `adapter` / `adapterOptions` | *(retired)* | The pre-1.0 single adapter, a bundle the engine shipped: refused since 0.14, naming "upgrade ZDD", which rewrites it |
 | `name` | `"Codebase"` | Display name for the indexes |
 | `repoBase` | `""` | GitHub `/tree/<branch>/` URL prefix for source links in the human index — http(s) only, refused otherwise |
@@ -250,6 +260,7 @@ own adapters are behind on.
 | typed edges | 1 | no | `facts.edges`, a verb for a ref (decision 0016) |
 | `warnings` | 1 | no | a list printed on every derive |
 | `unread` | 1 | no | a list of `{ file, what }`, what it saw and could not read (decision 0048) |
+| gaps | 1 | no | `GAPS`: `{ reachNothing: [kinds], reachedByNothing: [kinds] }`, further kinds of its own records that must link, beside the core's (decision 0049) |
 | detection | 1 | no | `DETECTION` and `detect({ scan, proposed })` (decision 0039; every starter has it) |
 
 ## Viewers

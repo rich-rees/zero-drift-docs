@@ -46,6 +46,22 @@
 //       takes a mark away; `--raise` writes `unread.strict` once every item
 //       has an answer — from then on an unanswered item fails lint.
 //
+//   bootstrap.mjs gaps [--fine=<id,id> | --known=<id,id> --why=<reason>] [--forget=<id,id>] [--raise] [--check] [--root=<dir>] [--json]
+//       The map's gaps (decision 0049), from the engine's `gaps`: a route,
+//       screen or background task that reaches nothing, a table nothing
+//       reaches, and any kind an adapter names. Each is fixed in an adapter
+//       or answered once in zdd/config.json's `gaps`: `--fine` (nothing to
+//       map) or `--known` (cannot be mapped; both indexes show it).
+//       `--raise` writes `gaps.strict` once every gap has an answer;
+//       `--check` exits 1 while one is open ("update ZDD" waits on it).
+//
+//   bootstrap.mjs library [--decline[=<names>]] [--root=<dir>] [--json]
+//       Every update asks the starter library (decision 0049 point 4):
+//       which starters fit this repo now and are not among its adapters,
+//       with the options to take one by `apply`. Unreachable, or declined
+//       for this repo, it is one line. `--decline` keeps "no" for the named
+//       starters, or for the whole library with no names.
+//
 //   bootstrap.mjs starters [--prove | --move | --decline] [--root=<dir>] [--json]
 //       The adapters this repo copied from the starter library (decision
 //       0048): the version each came from, what changed since, and the fixes
@@ -94,7 +110,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, lstatSync, chmodSync, openSync, writeSync, closeSync, rmSync, opendirSync } from "node:fs";
 import { findMapBlessings, proposeMove, blessingSlug, blessingFileText, removeMoved } from "./lib/blessing-move.mjs";
 import { scopeTag, repointLinks, linksToMoved } from "./lib/adr-split.mjs";
-import { STARTERS, RECORD, DEFAULT_DIR, MAX_RECORD_BYTES, starterLibrary, fileHash, emptyRecord, parseRecord, isRecordPath, fixesFor, movedIds, cmpVersions } from "./lib/starters.mjs";
+import { STARTERS, RECORD, DEFAULT_DIR, MAX_RECORD_BYTES, starterLibrary, npmFetch, fileHash, emptyRecord, parseRecord, isRecordPath, fixesFor, movedIds, cmpVersions } from "./lib/starters.mjs";
 import { join, dirname, basename, relative, resolve, posix } from "node:path";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -1212,6 +1228,10 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
       // 0048): a fresh install has nothing a new check could turn red by
       // surprise. An upgraded repo gets this from `unread --raise`.
       unread: { strict: true, fine: [] },
+      // The map's gaps fail lint from day one too (decision 0049 point 5):
+      // the check together answers each before the install is done. An
+      // upgraded repo gets this from `gaps --raise`.
+      gaps: { strict: true, fine: [], known: [] },
     };
     if (!hasGit(root)) config.render = { storeChanges: false };
     // A fresh install never writes a retired name (the alias is for configs
@@ -1221,6 +1241,13 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
     migrateJobs(config, [], root);
     finalOptions(config.extractorOptions, detection.adapters);
     brought = bringStarters(ledger, config, { version: STARTERS.version });
+    // The no is kept (decision 0049 point 4): every update says in one line
+    // that the library was not asked, instead of offering it again.
+    if (answers.starters === false && brought.dir) {
+      const record = readRecordAt(ledger, brought.dir);
+      record.library = "declined";
+      ledger.overwrite(`${brought.dir}/${RECORD}`, JSON.stringify(record, null, 2) + "\n");
+    }
     ledger.create("zdd/config.json", JSON.stringify(config, null, 2) + "\n");
   } else {
     // Repair: only an explicit answer changes the config. A pre-1.0 config's
@@ -1908,6 +1935,7 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
   // New checks start as warnings (decision 0040 point 7): `strict` waits for
   // every item to be answered, and the upgrade never writes it itself.
   if (config.unread?.strict !== true) ledger.notes.push("what the adapters could not read (decision 0048): after `derive`, run `bootstrap.mjs unread` — each item is fixed in the adapter or marked fine once (`--mark=<id> --why=…`); then `bootstrap.mjs unread --raise`. lint only warns until then");
+  if (config.gaps?.strict !== true) ledger.notes.push("the map's gaps (decision 0049): after `derive`, run `bootstrap.mjs gaps` — each route, screen or background task that reaches nothing, and each table nothing reaches, is fixed in an adapter or answered once (`--fine=<id> --why=…` when there is nothing to map, `--known=<id> --why=…` when it cannot be mapped); then `bootstrap.mjs gaps --raise`. lint only warns until then, and every \"update ZDD\" asks");
   ledger.notes.push("curated artifacts (glossary, ADRs, map pages, metadata) untouched — upgrade never writes them, save two mechanical moves named above: a map link to a record whose kind a release renamed, and blessings moved out of the map on --move-blessings");
   ledger.notes.push("if the engine pin moved: run `derive` and `render`, then `lint`, and commit the regenerated artifacts in the same PR");
   return { version, plan, ...ledgerOut(ledger), duplicates, blessingMoves, starters: brought };
@@ -3296,7 +3324,9 @@ const tail = (text, n = 12) => String(text).trim().split(/\r?\n/).slice(-n);
 // inside one (CR-328). A link in inline code it does read, so it moves too.
 const outsideComments = (text, fn) => text.split(/(<!--[\s\S]*?-->)/).map((part, i) => (i % 2 ? part : fn(part))).join("");
 
-export function starters(root, { prove = false, move = null, decline = false } = {}) {
+// `offline` reads the library only from a local route or npm's cache, for
+// the session-start notice, which must never wait on the network.
+export function starters(root, { prove = false, move = null, decline = false, offline = false } = {}) {
   if ([prove, move !== null && move !== false, decline].filter(Boolean).length > 1) throw new Error("starters takes one of --prove, --move, --decline at a time");
   const cfg = readConfig(root);
   if (cfg.state !== "valid") throw new Error(cfg.state === "invalid" ? `${cfg.error} — fix it first` : "no zdd/config.json here — bootstrap first");
@@ -3310,7 +3340,7 @@ export function starters(root, { prove = false, move = null, decline = false } =
   const changes = dir && names.length ? copyChanges(ledger, dir, record, names) : new Map();
   const copies = Object.entries(record.adapters).map(([name, a]) => ({ name, version: a.version, companionOf: a.companionOf ?? null, listed: listed.has(name), declined: a.declined ?? null, changed: changes.get(name) ?? [] }));
   const behind = copies.filter((c) => cmpVersions(c.version, pin) < 0);
-  const lib = behind.length ? starterLibrary(pin) : null;
+  const lib = behind.length ? starterLibrary(pin, offline ? { fetch: (v) => npmFetch(v, { offline: true }) } : {}) : null;
   // What is on offer, and what was declined: a move applies both (CR-323).
   const group = (list, fixesOf) => {
     const out = [];
@@ -3507,6 +3537,69 @@ export function narrateStarters(r) {
   return out.map(printable).join("\n");
 }
 
+// Every update asks the starter library (decision 0049 point 4): each
+// starter's "do you fit this repo now?", over the pinned version, and the
+// ones that fit and are not among the config's extractors are offered, as at
+// bootstrap. Never required: the library unreachable, or declined for this
+// repo, is one line (`skipped`), and the gap list holds without it. A no is
+// kept in the record beside the copies (`--decline`): for named starters
+// (`declinedOffers`, not offered again) or the whole library (`library`).
+// Taking an offer is a repair `apply` naming the starter, which copies it.
+export function library(root, { decline = null } = {}) {
+  const cfg = readConfig(root);
+  if (cfg.state !== "valid") throw new Error(cfg.state === "invalid" ? `${cfg.error} — fix it first` : "no zdd/config.json here — bootstrap first");
+  const config = cfg.config;
+  const ledger = new Ledger(root);
+  const dir = copyDir(config);
+  const record = readRecordAt(ledger, dir);
+  const base = { package: STARTERS.package, version: STARTERS.version, dir };
+  if (decline !== null && decline !== false) {
+    if (decline === true) record.library = "declined";
+    else {
+      const names = idList(decline, "--decline").filter((n) => /^[a-z][a-z0-9-]*$/.test(n));
+      if (!names.length) throw new Error("--decline names starters (comma separated), or none to decline the whole library");
+      record.declinedOffers = [...new Set([...(record.declinedOffers ?? []), ...names])].sort();
+    }
+    ledger.overwrite(`${dir}/${RECORD}`, JSON.stringify(record, null, 2) + "\n");
+    ledger.notes.push(decline === true ? `${dir}/${RECORD}: the starter library declined for this repo — "update ZDD" says so in one line and asks it no more; remove "library" from the record to be asked again` : `${dir}/${RECORD}: ${record.declinedOffers.join(", ")} declined — not offered again; remove a name from "declinedOffers" to be asked again`);
+    return { ...base, skipped: null, offers: [], declinedOffers: record.declinedOffers ?? [], ...ledgerOut(ledger) };
+  }
+  if (record.library === "declined") return { ...base, skipped: "declined", line: `The starter library was declined for this repo (${dir}/${RECORD}), so it was not asked this time.`, offers: [], declinedOffers: record.declinedOffers ?? [] };
+  let lib;
+  try {
+    lib = starterLibrary(STARTERS.version);
+  } catch (e) {
+    return { ...base, skipped: "unreachable", line: `The starter library (${STARTERS.package} ${STARTERS.version}) could not be reached, so it was not asked this time: ${String(e.message).split(/\r?\n/)[0].slice(0, 300)}`, offers: [], declinedOffers: record.declinedOffers ?? [] };
+  }
+  let d;
+  try {
+    d = JSON.parse(runEngine(["detect", `--adapters=${lib.adapters}`, `--root=${root}`]));
+  } catch (e) {
+    return { ...base, skipped: "detection", line: `The starter library was reached, but detection could not run, so it was not asked this time — the engine said: ${String(e.stderr || e.message).trim().split(/\r?\n/).slice(-2).join(" ").slice(0, 300)}`, offers: [], declinedOffers: record.declinedOffers ?? [] };
+  }
+  const listed = new Set(Array.isArray(config.extractors) ? config.extractors : []);
+  const declined = new Set(record.declinedOffers ?? []);
+  const offers = (d.proposals ?? []).filter((p) => !listed.has(p.name) && !declined.has(p.name)).map((p) => ({ name: p.name, parts: p.parts, evidence: p.evidence, options: p.options, held: adapterHeld(ledger, dir, p.name) }));
+  return { ...base, skipped: null, offers, declinedOffers: [...declined].sort() };
+}
+
+export function narrateLibrary(r) {
+  if (r.skipped) return printable(r.line);
+  const out = [];
+  if (r.notes?.length) return r.notes.map(printable).join("\n");
+  if (!r.offers.length) out.push(`The starter library (${r.package} ${r.version}) has no starter that fits this repo and is not already one of its adapters.`);
+  else {
+    out.push(`The starter library (${r.package} ${r.version}) has ${r.offers.length === 1 ? "a starter that fits" : "starters that fit"} this repo and ${r.offers.length === 1 ? "is" : "are"} not among its adapters. Offer each once, in plain words, as at bootstrap: on a yes, a repair \`apply\` with the answer set's "extractors" (the current list plus the name) and "extractorOptions" (the options below) copies it in with its tests; on a no, \`library --decline=<name>\`.`);
+    for (const o of r.offers) {
+      out.push(`  ${o.name} (${(o.parts ?? []).join(", ") || "no part"})${o.held ? ` — already in ${r.dir}/, not listed in "extractors"` : ""}`);
+      for (const e of (o.evidence ?? []).slice(0, 3)) out.push(`    ${typeof e === "string" ? e : JSON.stringify(e)}`);
+      out.push(`    options: ${JSON.stringify(o.options ?? {})}`);
+    }
+  }
+  if (r.declinedOffers?.length) out.push(`Declined before, not offered: ${r.declinedOffers.join(", ")}.`);
+  return out.map(printable).join("\n");
+}
+
 // The interview's material: the engine's suite report, turned into what to
 // ask and what to fix, per adapter. `raise` writes suiteChecks up to the
 // engine's count, and only when every check of every adapter passes.
@@ -3573,40 +3666,75 @@ export function narrateAdapters(r) {
   return out.map(printable).join("\n");
 }
 
-// What the adapters saw and could not read (decision 0048 point 5): the
-// engine's report, and the one writer of the marks and of `unread.strict`.
-// A mark is taken only for an item the adapters report right now, so a typed
-// id cannot excuse nothing, and it carries the item's text, so whoever reviews
-// the commit reads what was accepted.
+/// One-time marks in zdd/config.json (decisions 0048 point 5 and 0049): the
+// engine's report, and the one writer of a block's marks and of its
+// `strict`. A mark is taken only for an item the engine reports right now, so
+// a typed id cannot excuse nothing, and it carries the item's text, so
+// whoever reviews the commit reads what was accepted. Two blocks share it:
+// `unread` (what an adapter saw and could not read, answered `fine`) and
+// `gaps` (what should link and does not, answered `fine` or `known`).
 const MARK_ID = /^unread:[a-z][a-z0-9-]*\/[0-9a-f]{16}$/;
+const GAP_MARK_ID = /^gap:[a-z][a-z0-9_-]*\/[0-9a-f]{16}$/;
 const idList = (v, flag) => {
   const ids = (typeof v === "string" ? v : "").split(",").map((s) => s.trim()).filter(Boolean);
   if (!ids.length) throw new Error(`${flag} needs at least one item id`);
   return [...new Set(ids)];
 };
-export function unreadItems(root, { mark = null, why = null, forget = null, raise = false } = {}) {
+const MARKS = {
+  unread: {
+    idRe: MARK_ID,
+    answers: { fine: "--mark" },
+    notId: "an unread item's id",
+    notNow: (id) => `no adapter reports ${id} now — run \`bootstrap.mjs unread\` for the list`,
+    needWhy: () => "a mark says why the item is fine",
+    marked: (id, item) => `zdd/config.json: ${id} marked fine — ${item.file}`,
+    stays: (n, ids) => `unread.strict stays off: ${n} item${n === 1 ? " has" : "s have"} no answer yet (${ids}) — fix the adapter or mark each one fine, then --raise again`,
+    raised: "zdd/config.json: unread.strict on — lint now fails on anything an adapter could not read that has no answer",
+    shows: "run `derive`, then `render`, and commit them with zdd/config.json: the human index shows each item's answer",
+  },
+  gaps: {
+    idRe: GAP_MARK_ID,
+    answers: { fine: "--fine", known: "--known" },
+    notId: "a gap's id",
+    notNow: (id) => `no record has the gap ${id} now — run \`bootstrap.mjs gaps\` for the list`,
+    needWhy: (answer) => (answer === "known" ? "a known gap says why it cannot be mapped" : "a fine mark says why there is nothing to map"),
+    marked: (id, item, answer) => `zdd/config.json: ${id} answered ${answer === "known" ? "as a known gap (it shows in both indexes as a part of the map not to trust)" : "fine"} — ${item.what}`,
+    stays: (n, ids) => `gaps.strict stays off: ${n} gap${n === 1 ? " has" : "s have"} no answer yet (${ids}) — fix the adapter that should read it, or answer each one fine or known, then --raise again`,
+    raised: "zdd/config.json: gaps.strict on — lint now fails on a gap in the map with no answer",
+    shows: "run `render` and commit it with zdd/config.json: a known gap shows in the agent index and the human index",
+  },
+};
+function answerItems(root, key, { answers = {}, why = null, forget = null, raise = false } = {}) {
+  const spec = MARKS[key];
   const cfg = readConfig(root);
   if (cfg.state !== "valid") throw new Error(cfg.state === "invalid" ? `${cfg.error} — fix it first` : "no zdd/config.json here — bootstrap first");
   let r;
   try {
-    r = JSON.parse(runEngine(["unread", "--json", `--root=${root}`]));
+    r = JSON.parse(runEngine([key, "--json", `--root=${root}`]));
   } catch (e) {
-    throw new Error(`the unread report could not run — the engine said: ${String(e.stderr || e.message).trim().split(/\r?\n/).slice(-3).join(" ")}`);
+    throw new Error(`the ${key} report could not run — the engine said: ${String(e.stderr || e.message).trim().split(/\r?\n/).slice(-3).join(" ")}`);
   }
-  const block = { ...(cfg.config.unread ?? {}) };
-  const marks = new Map((Array.isArray(block.fine) ? block.fine : []).map((m) => [m.id, m]));
+  const lists = Object.keys(spec.answers);
+  const block = { ...(cfg.config[key] ?? {}) };
+  // id -> { answer, mark }: one answer per item, as the engine reads it.
+  const marks = new Map();
+  for (const a of lists) for (const m of Array.isArray(block[a]) ? block[a] : []) marks.set(m.id, { answer: a, mark: m });
+  const items = [...r.open, ...lists.flatMap((a) => r[a] ?? [])];
+  const byId = new Map(items.map((i) => [i.id, i]));
   const notes = [];
-  if (mark !== null) {
+  const asked = lists.filter((a) => answers[a] !== undefined && answers[a] !== null);
+  if (asked.length > 1) throw new Error(`answer with one of ${lists.map((a) => spec.answers[a]).join(", ")} at a time: each takes its own reason`);
+  for (const a of asked) {
+    const flag = spec.answers[a];
     const reason = typeof why === "string" ? why.replace(/\s+/g, " ").trim() : "";
-    if (!reason) throw new Error('--mark needs --why="<reason>": a mark says why the item is fine, for whoever reads it next');
+    if (!reason) throw new Error(`${flag} needs --why="<reason>": ${spec.needWhy(a)}, for whoever reads it next`);
     if (reason.length > 500) throw new Error("--why is over 500 characters");
-    const open = new Map([...r.open, ...r.fine].map((i) => [i.id, i]));
-    for (const id of idList(mark, "--mark")) {
-      if (!MARK_ID.test(id)) throw new Error(`'${printable(id).slice(0, 80)}' is not an unread item's id`);
-      const item = open.get(id);
-      if (!item) throw new Error(`no adapter reports ${id} now — run \`bootstrap.mjs unread\` for the list`);
-      marks.set(id, { id, what: item.what, why: reason });
-      notes.push(`zdd/config.json: ${id} marked fine — ${item.file}`);
+    for (const id of idList(answers[a], flag)) {
+      if (!spec.idRe.test(id)) throw new Error(`'${printable(id).slice(0, 80)}' is not ${spec.notId}`);
+      const item = byId.get(id);
+      if (!item) throw new Error(spec.notNow(id));
+      marks.set(id, { answer: a, mark: { id, what: item.what, why: reason } });
+      notes.push(spec.marked(id, item, a));
     }
   }
   if (forget !== null) {
@@ -3615,30 +3743,64 @@ export function unreadItems(root, { mark = null, why = null, forget = null, rais
       notes.push(`zdd/config.json: the mark on ${id} removed`);
     }
   }
-  if (mark !== null || forget !== null) block.fine = [...marks.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-  const answered = (i) => marks.has(i.id);
-  const open = [...r.open, ...r.fine].filter((i) => !answered(i));
-  const stale = [...marks.keys()].filter((id) => ![...r.open, ...r.fine].some((i) => i.id === id));
+  const byAnswer = (a) => [...marks.values()].filter((m) => m.answer === a).map((m) => m.mark).sort((x, y) => (x.id < y.id ? -1 : x.id > y.id ? 1 : 0));
+  if (asked.length || forget !== null) for (const a of lists) if (block[a] !== undefined || byAnswer(a).length || a === lists[0]) block[a] = byAnswer(a);
+  const open = items.filter((i) => !marks.has(i.id));
+  const stale = [...marks.keys()].filter((id) => !byId.has(id));
   let raised = false;
   if (raise) {
-    if (open.length) throw new Error(`unread.strict stays off: ${open.length} item${open.length === 1 ? " has" : "s have"} no answer yet (${open.slice(0, 5).map((i) => i.id).join(", ")}${open.length > 5 ? ", …" : ""}) — fix the adapter or mark each one fine, then --raise again`);
+    if (open.length) throw new Error(spec.stays(open.length, `${open.slice(0, 5).map((i) => i.id).join(", ")}${open.length > 5 ? ", …" : ""}`));
     if (block.strict !== true) {
       block.strict = true;
-      if (block.fine === undefined) block.fine = [];
+      if (block[lists[0]] === undefined) block[lists[0]] = [];
       raised = true;
-      notes.push("zdd/config.json: unread.strict on — lint now fails on anything an adapter could not read that has no answer");
+      notes.push(spec.raised);
     }
   }
   const ledger = new Ledger(root);
   if (notes.length) {
-    ledger.overwrite("zdd/config.json", JSON.stringify({ ...cfg.config, unread: block }, null, 2) + "\n");
+    ledger.overwrite("zdd/config.json", JSON.stringify({ ...cfg.config, [key]: block }, null, 2) + "\n");
     ledger.notes.push(...notes);
     // The list came from the source as it is now, and render reads what
     // derive last wrote: both run, and the human index shows each answer.
-    if (mark !== null || forget !== null) ledger.notes.push("run `derive`, then `render`, and commit them with zdd/config.json: the human index shows each item's answer");
+    if (asked.length || forget !== null) ledger.notes.push(spec.shows);
   } else if (raise) ledger.kept.push("zdd/config.json");
-  const fine = [...r.open, ...r.fine].filter(answered).map((i) => ({ ...i, why: marks.get(i.id).why }));
-  return { strict: block.strict === true, open, fine, stale, raised, ...ledgerOut(ledger) };
+  const out = { strict: block.strict === true, open };
+  for (const a of lists) out[a] = items.filter((i) => marks.get(i.id)?.answer === a).map((i) => ({ ...i, why: marks.get(i.id).mark.why }));
+  return { ...out, ...(r.kinds ? { kinds: r.kinds } : {}), stale, raised, ...ledgerOut(ledger) };
+}
+export function unreadItems(root, { mark = null, why = null, forget = null, raise = false } = {}) {
+  return answerItems(root, "unread", { answers: { fine: mark }, why, forget, raise });
+}
+
+// The map's gaps (decision 0049): what should link and does not, over the
+// whole repo. `--fine` and `--known` answer a gap once; `--raise` writes
+// `gaps.strict` once every gap has an answer (a fresh install writes it);
+// `--check` exits 1 while any gap is open, which "update ZDD" waits on.
+export function gapItems(root, { fine = null, known = null, why = null, forget = null, raise = false } = {}) {
+  return answerItems(root, "gaps", { answers: { fine, known }, why, forget, raise });
+}
+
+export function narrateGaps(r) {
+  const out = [];
+  const line = (i) => [`  ${i.id}`, `    ${i.what}${i.file ? ` (${i.file})` : ""}`];
+  if (!r.open.length && !r.fine.length && !r.known.length && !r.stale.length) out.push("No gaps: every record that should link does.");
+  if (r.open.length) {
+    out.push(`${r.open.length} gap${r.open.length === 1 ? "" : "s"} in the map with no answer yet. Ask about them one at a time, in plain words, with your recommendation: the fix is an adapter that reads the link (through the extractor skill, its tests red then green); or the gap is answered once, with why — fine when there is nothing to map (\`--fine=<id> --why="…"\`), a known gap when it cannot be mapped (\`--known=<id> --why="…"\`; it stays in both indexes as a part of the map not to trust):`);
+    for (const i of r.open) out.push(...line(i));
+  }
+  if (r.known.length) {
+    out.push(`${r.known.length} known gap${r.known.length === 1 ? "" : "s"}:`);
+    for (const i of r.known) out.push(...line(i), `    why: ${i.why}`);
+  }
+  if (r.fine.length) {
+    out.push(`${r.fine.length} marked fine:`);
+    for (const i of r.fine) out.push(...line(i), `    why: ${i.why}`);
+  }
+  if (r.stale.length) out.push(`${r.stale.length} mark${r.stale.length === 1 ? "" : "s"} no gap answers any more — remove with --forget=<id>: ${r.stale.join(", ")}`);
+  out.push(r.strict ? "gaps.strict is on: lint fails on a gap with no answer." : r.open.length ? "gaps.strict is off: lint only warns. Once every gap has an answer, --raise turns it on." : "Every gap has an answer: run `bootstrap.mjs gaps --raise` so that lint fails on the next one.");
+  if (r.notes?.length) out.push(...r.notes);
+  return out.map(printable).join("\n");
 }
 
 export function narrateUnread(r) {
@@ -4195,6 +4357,14 @@ if (process.argv[1] && posixify(process.argv[1]).endsWith("/scripts/bootstrap.mj
     } else if (cmd === "unread") {
       const r = unreadItems(root, { mark: flags.mark === undefined ? null : flags.mark, why: flags.why ?? null, forget: flags.forget === undefined ? null : flags.forget, raise: flags.raise === true });
       process.stdout.write(flags.json ? JSON.stringify(r, null, 2) + "\n" : narrateUnread(r) + "\n");
+    } else if (cmd === "gaps") {
+      const r = gapItems(root, { fine: flags.fine === undefined ? null : flags.fine, known: flags.known === undefined ? null : flags.known, why: flags.why ?? null, forget: flags.forget === undefined ? null : flags.forget, raise: flags.raise === true });
+      process.stdout.write(flags.json ? JSON.stringify(r, null, 2) + "\n" : narrateGaps(r) + "\n");
+      // "update ZDD" waits on this: it does not finish while a gap is open.
+      if (flags.check === true && r.open.length) process.exit(1);
+    } else if (cmd === "library") {
+      const r = library(root, { decline: flags.decline === undefined ? null : flags.decline === true ? true : String(flags.decline) });
+      process.stdout.write(flags.json ? JSON.stringify(r, null, 2) + "\n" : narrateLibrary(r) + "\n");
     } else if (cmd === "starters") {
       const r = starters(root, { prove: flags.prove === true, move: flags.move === undefined ? null : flags.move === true ? true : String(flags.move), decline: flags.decline === true });
       process.stdout.write(flags.json ? JSON.stringify(r, null, 2) + "\n" : narrateStarters(r) + "\n");
@@ -4209,7 +4379,7 @@ if (process.argv[1] && posixify(process.argv[1]).endsWith("/scripts/bootstrap.mj
       const s = releaseStatus(root, typeof flags.remote === "string" ? flags.remote : undefined, flags.home);
       process.stdout.write(flags.json ? JSON.stringify(s) + "\n" : printable(narrateReleaseStatus(s)) + "\n");
     } else {
-      process.stderr.write("Usage: bootstrap.mjs <preflight [--registry=<url>] [--github=<url>]|detect|estimate|apply --answers=<file>|check [--status|--done]|adapters [--raise]|unread [--mark=<ids> --why=<reason>] [--forget=<ids>] [--raise]|starters [--prove|--move|--decline]|preview --extractors=<a,b>|upgrade [--plan] [--lock] [--drop=<ids>] [--move-blessings=<token> [--kinds=<name>:<copy|extend>,…]] [--to=vX.Y.Z]|split-adrs [--plan] [--token=<token> --harness=<nums> --application=<nums>] [--dir=<rel> --index=<rel>]|release-status [--remote=<url>]> [--root=<dir>] [--date=YYYY-MM-DD] [--home=<dir>] [--json]\n");
+      process.stderr.write("Usage: bootstrap.mjs <preflight [--registry=<url>] [--github=<url>]|detect|estimate|apply --answers=<file>|check [--status|--done]|adapters [--raise]|unread [--mark=<ids> --why=<reason>] [--forget=<ids>] [--raise]|gaps [--fine=<ids>|--known=<ids> --why=<reason>] [--forget=<ids>] [--raise] [--check]|library [--decline[=<names>]]|starters [--prove|--move|--decline]|preview --extractors=<a,b>|upgrade [--plan] [--lock] [--drop=<ids>] [--move-blessings=<token> [--kinds=<name>:<copy|extend>,…]] [--to=vX.Y.Z]|split-adrs [--plan] [--token=<token> --harness=<nums> --application=<nums>] [--dir=<rel> --index=<rel>]|release-status [--remote=<url>]> [--root=<dir>] [--date=YYYY-MM-DD] [--home=<dir>] [--json]\n");
       process.exit(2);
     }
   } catch (e) {

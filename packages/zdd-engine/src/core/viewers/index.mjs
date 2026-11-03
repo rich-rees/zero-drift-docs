@@ -13,7 +13,10 @@
 // ready-read, decision 0043; `unread`, present only when an adapter reported
 // something, is { id, adapter, file, what, why } with `why` null on an item
 // with no answer, unanswered first, and every viewer shows it: decision
-// 0048), `changed` is the latest-store-
+// 0048; `gaps`, present only when a gap is answered as known, is { id,
+// node, kind, title, file, direction, what, why }, `node` the graph node or
+// null, the parts of the map not to trust, and every viewer shows it:
+// decision 0049), `changed` is the latest-store-
 // change highlight ({ adrs, glossaryTerms }), and `options` is the adopter's
 // viewer object minus `name`, plus `nonAreaTags` (the resolved top-level list)
 // whenever it is non-empty — a viewer's area model must exclude the same tags

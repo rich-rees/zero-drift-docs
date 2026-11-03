@@ -111,6 +111,13 @@ export const CONTRACT_TABLE = [
     ask: "What does this adapter's source hold that it recognises and cannot read? Return those as `unread`, so a gap is said rather than silent.",
   },
   {
+    step: "gaps",
+    since: 1,
+    required: false,
+    what: "`GAPS = { reachNothing: [kinds], reachedByNothing: [kinds] }` — further kinds of the adapter's own records that must link, beside the core's (a route, surface or background task that reaches nothing; a table nothing reaches). Every update and lint list a record of those kinds that does not link, until an adapter reads its link or it is answered once as fine or a known gap (decision 0049)",
+    ask: "Do this adapter's records include a kind that is wrong when it links to nothing, or when nothing links to it? Name the kind in `GAPS`, and ZDD will say when one goes dark.",
+  },
+  {
     step: "detection",
     since: 1,
     required: false,

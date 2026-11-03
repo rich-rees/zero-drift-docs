@@ -402,7 +402,9 @@ is written into the host's settings.
    and **by name** the ones that link to nothing and the ones nothing links
    to ("2 routes; 1 links to a table; 1 links to nothing: `/health`").
    Go through it with the person: which gaps are fine (`/health` touches no
-   table) and which are wrong. Then open the human index and ask: **"does
+   table) and which are wrong. The ones lint holds — routes, screens and
+   background tasks that reach nothing, tables nothing reaches — are
+   answered once each (see "The map's gaps" below). Then open the human index and ask: **"does
    this all look right, and is any link missing?"** Every "that's wrong"
    becomes a **fixture test in the adapter before it is fixed** — in a local
    adapter, with the `extractor` skill — a starter copied in is the repo's
@@ -458,6 +460,28 @@ node "$PLUGIN/scripts/bootstrap.mjs" unread --mark=<id> --why="<why this is fine
 
 The mark is kept in `zdd/config.json`; run `derive`, then `render`, and
 commit it all.
+
+### The map's gaps
+
+The check together (step 4 above) is where the map's gaps are first
+answered (decision 0049). A fresh install writes `gaps.strict`, so lint
+fails on any gap with no answer:
+
+```
+node "$PLUGIN/scripts/bootstrap.mjs" gaps
+```
+
+It names every route, screen and background task that reaches nothing,
+and every table nothing reaches: where a gap usually means a reader is
+missing. Take them **one at a time**, in plain words, with your
+recommendation. Each is fixed (an adapter reads the link, through the
+extractor skill), marked fine with a reason when there is nothing to map
+(`gaps --fine=<id> --why="…"`: a health check touches no table), or marked a
+known gap with a reason when it cannot be mapped (`gaps --known=<id>
+--why="…"`: table names built at runtime). A known gap stays in the agent
+index and the human index as a part of the map not to trust. Every later
+"update ZDD" asks about new ones, over the whole repo. Run `render` after,
+and commit the marks with it.
 
 ## Step 6 — the backfill, offered once (never default)
 

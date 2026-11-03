@@ -133,6 +133,13 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
   not in a diagnostic: a diagnostic is what nobody reads. An adapter that
   cannot tell what it missed has nothing to report; `coverage` stays the
   second net.
+- **The core holds the map's gaps**
+  ([decision 0049](docs/decisions/0049-every-update-checks-the-map-still-reaches-what-it-should.md)):
+  a route, surface or background task that links to nothing, and a table
+  nothing links to, are listed by every update and by `lint` until an
+  adapter reads the link or the gap is answered once (fine, or a known gap
+  that both indexes show). An adapter may add kinds of its own records with
+  an optional `GAPS` export; the core names record kinds, never a stack.
 - **Missing source is "nothing to inventory."** A configured root that does not
   exist yields no records and a diagnostic, never an error — greenfield repos
   adopt ZDD before any code exists. The one exception is a single named file
@@ -196,6 +203,7 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
   | typed edges | 1 | no | `facts.edges`, a verb for a ref (decision 0016) |
   | `warnings` | 1 | no | a list printed on every derive |
   | `unread` | 1 | no | a list of `{ file, what }`, what it saw and could not read (decision 0048) |
+  | gaps | 1 | no | `GAPS`: `{ reachNothing: [kinds], reachedByNothing: [kinds] }`, further kinds of its own records that must link, beside the core's (decision 0049) |
   | detection | 1 | no | `DETECTION` and `detect({ scan, proposed })` (decision 0039; every starter has it) |
   | import reader | 1 | no | `IMPORTS`: `{ label, extensions, skipDirs, isTest(rel), resolver(io, files) }`, the repo files one file imports, read at render for an `extend` blessing's users (decision 0046; the JavaScript and Python adapters share `adapters/_shared/js/imports.mjs` and `adapters/_shared/python/imports.mjs`) |
 
@@ -259,13 +267,17 @@ purely on the visualization.
 A viewer is one module exporting
 `render({ graph, docs, changed, options, bundleName, repoBase })` and returning
 the page as a string. `graph` is exactly what was written to `graph.json`; `docs`
-is `{ glossary, adrs, blessings, unread }` (the store text, for viewers that embed it;
+is `{ glossary, adrs, blessings, unread, gaps }` (the store text, for viewers that embed it;
 `blessings` comes ready-read — exemplar, app, users, cited ADRs, and
 `importance` (`"high"` or null, high entries first) — so no viewer
 parses the store, [decision 0043](docs/decisions/0043-viewers-get-the-blessing-store-ready-read.md), [0045](docs/decisions/0045-blessings-carry-an-importance-high-or-nothing-kept-scarce.md);
 `unread` is there only when an adapter reported something: a list of
 `{ id, adapter, file, what, why }`, unanswered first with `why` null, and
-**every viewer shows it**, [decision 0048](docs/decisions/0048-the-app-owns-its-adapters-zdd-ships-starters-not-readers.md)); `changed` is
+**every viewer shows it**, [decision 0048](docs/decisions/0048-the-app-owns-its-adapters-zdd-ships-starters-not-readers.md);
+`gaps` is there only when a gap is answered as known: a list of
+`{ id, node, kind, title, file, direction, what, why }`, `node` the graph node
+or null — the parts of the map not to trust, and **every viewer shows it**,
+[decision 0049](docs/decisions/0049-every-update-checks-the-map-still-reaches-what-it-should.md)); `changed` is
 the latest-store-change highlight; `options` is whatever the adopter put in
 `viewer` besides `name`, plus the resolved top-level `nonAreaTags` whenever it
 is non-empty (your area model should exclude the same tags the graph did). A viewer is a good contribution when it honours the

@@ -42,6 +42,18 @@ try {
   } catch {
     /* advisory */
   }
+  // Fixes the starter library notes for the repo's copies (decision 0048
+  // point 7): said where the session starts, whether or not the auto-load is
+  // on, so the session reads the notes and recommends. Offline it is silent.
+  // Imported here, not above: the check reaches the whole bootstrap script,
+  // and nothing in it may cost the session its index.
+  try {
+    const { inspect: inspectStarters, narrate: narrateStarters } = await import("./check-starters.mjs");
+    const lines = narrateStarters(inspectStarters(root));
+    if (lines.length) process.stdout.write(lines.join("\n") + "\n");
+  } catch {
+    /* advisory */
+  }
   const { state, config } = readConfig(root);
   if (state !== "valid" || config.hooks?.autoLoad === false) process.exit(0);
 

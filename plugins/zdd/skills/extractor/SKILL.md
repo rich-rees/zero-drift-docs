@@ -259,7 +259,14 @@ to Step 5 with a new fixture case; an intended skip stays. What the adapter
 recognises and cannot read belongs in the `unread` list it returns
 (`[{ file, what }]`, decision 0048), never only in a diagnostic: each item
 prints on every derive as an `UNREAD` line and, under `unread.strict`, fails
-lint until the adapter is fixed or the item is marked fine. Open three
+lint until the adapter is fixed or the item is marked fine. When the
+adapter mints a kind of record that is wrong when it links to nothing, or
+when nothing links to it, beside the core's (a route, screen or background
+task that reaches nothing; a table nothing reaches), name it in `export
+const GAPS = { reachNothing: ["<kind>"], reachedByNothing: ["<kind>"] }`
+(decision 0049): every update then lists one that goes dark. When this
+adapter was built to close a gap from `bootstrap.mjs gaps`, run that again
+and confirm the gap is gone. Open three
 records against their source lines and confirm them with the user. Then
 commit the extractor, its fixture, its tests, the config change and the
 metadata together, and link the new records from the map in the next

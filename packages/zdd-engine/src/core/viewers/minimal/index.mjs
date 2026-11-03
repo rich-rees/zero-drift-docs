@@ -67,6 +67,16 @@ export function render({ graph, docs, bundleName, repoBase }) {
     }
     lines.push("</ul>");
   }
+  // Known gaps (decision 0049): parts of the map not to trust, above the rest.
+  const gaps = docs?.gaps ?? [];
+  if (gaps.length) {
+    lines.push(`<h2>Known gaps <span class="muted">(${gaps.length} — parts of the map not to trust)</span></h2>`, "<ul>");
+    for (const g of gaps) {
+      const name = g.node ? `<a href="#${esc(g.node)}">${esc(g.title)}</a>` : esc(g.title);
+      lines.push(`<li>${esc(g.kind)} <b>${name}</b> — ${g.direction === "reachNothing" ? "reaches nothing" : "nothing reaches it"} <span class="muted">${esc(g.why)}</span></li>`);
+    }
+    lines.push("</ul>");
+  }
   for (const [type, nodes] of [...byType.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
     lines.push(`<h2>${esc(type)} <span class="muted">(${nodes.length})</span></h2>`, "<ul>");
     for (const n of [...nodes].sort((a, b) => (a.title < b.title ? -1 : a.title > b.title ? 1 : 0))) {

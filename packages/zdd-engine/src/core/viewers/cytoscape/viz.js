@@ -659,6 +659,7 @@
   }
   const BLESSINGS = (bundle.docs && bundle.docs.blessings) || [];
   const UNREAD = (bundle.docs && bundle.docs.unread) || [];
+  const GAPS = (bundle.docs && bundle.docs.gaps) || [];
   const BLESSING_BY_ID = dict();
   for (const b of BLESSINGS) BLESSING_BY_ID[b.id] = b;
   // Latest store change: which entries the most recent
@@ -737,11 +738,12 @@
     if (entry.kind === "adrs") return "All ADRs";
     if (entry.kind === "blessings") return "All blessings";
     if (entry.kind === "unread") return "Unread";
+    if (entry.kind === "gaps") return "Known gaps";
     if (entry.kind === "adr") return `ADR-${entry.num}`;
     const b = BLESSING_BY_ID[entry.id];
     return (b && b.question) || entry.id;
   };
-  const LIST_KINDS = new Set(["glossary", "adrs", "blessings", "unread"]);
+  const LIST_KINDS = new Set(["glossary", "adrs", "blessings", "unread", "gaps"]);
   // A header button starts a fresh history; a link followed inside the open
   // peek pushes onto it; a page opened from outside the peek (an ADR cited in
   // a node's body) gets its list behind it, as the ADR back always had.
@@ -767,6 +769,7 @@
     else if (entry.kind === "adr") renderAdr(entry.num);
     else if (entry.kind === "blessings") renderBlessingIndex();
     else if (entry.kind === "unread") renderUnread();
+    else if (entry.kind === "gaps") renderGaps();
     else renderBlessing(entry.id);
     if (isList) applyFilter();
     docsEl.scrollTop = 0;
@@ -969,6 +972,40 @@
       filterEntries.push({ els: [row], text: norm([i.what, i.file, i.adapter, i.id, i.why].join(" ")) });
     }
   }
+  // ---------- known gaps (decision 0049) ----------
+  // Records that should link and do not, which no adapter maps yet: the
+  // parts of the map not to trust. Each opens its node, with the way back.
+  function renderGaps() {
+    docsTitle.textContent = "Known gaps";
+    docsSource.textContent = "Parts of the map not to trust: each should link and does not, and no adapter maps it yet — answered once in zdd/config.json; rendered from the repo, never edited here";
+    docsBody.innerHTML = "";
+    filterEntries = [];
+    const entry = peekHistory[peekHistory.length - 1];
+    for (const g of GAPS) {
+      const row = document.createElement("div");
+      row.className = "unread-item gap-item";
+      const title = document.createElement("b");
+      title.append(nodeLink(g.node, g.title, entry));
+      row.append(title);
+      const meta = document.createElement("span");
+      meta.className = "muted blessing-meta";
+      meta.append(chip(g.kind, "kind-chip"), chip(g.direction === "reachNothing" ? "reaches nothing" : "nothing reaches it", "high-chip", "The map is missing this record's links: read the code here"));
+      if (g.file) {
+        const file = Object.assign(document.createElement("code"), { textContent: g.file });
+        const href = githubHref(g.file, true);
+        if (href === null) meta.append(file);
+        else {
+          const link = Object.assign(document.createElement("a"), { href, title: "Open the file on GitHub", target: "_blank", rel: "noopener", className: "external" });
+          link.append(file);
+          meta.append(link);
+        }
+      }
+      row.append(meta);
+      row.append(Object.assign(document.createElement("span"), { className: "muted unread-why", textContent: g.why }));
+      docsBody.appendChild(row);
+      filterEntries.push({ els: [row], text: norm([g.title, g.kind, g.file, g.id, g.why].join(" ")) });
+    }
+  }
   // A map page or record a blessing names: a link that opens its node, with
   // the way back to this blessing; plain text when no node has it.
   function nodeLink(node, text, entry) {
@@ -1062,6 +1099,9 @@
   // Only there when an adapter reported something (the viewer's index.mjs).
   const btnUnread = document.getElementById("btn-unread");
   if (btnUnread) btnUnread.addEventListener("click", () => peekGo({ kind: "unread", filter: "" }, true));
+  // Only there when a gap is answered as known (decision 0049).
+  const btnGaps = document.getElementById("btn-gaps");
+  if (btnGaps) btnGaps.addEventListener("click", () => peekGo({ kind: "gaps", filter: "" }, true));
 
   // Bare ADR-NNNN citations in any rendered markdown become in-page links —
   // the 15 formerly-dead references this panel exists to resurrect. Text-node
