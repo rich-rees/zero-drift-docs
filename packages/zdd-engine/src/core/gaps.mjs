@@ -12,6 +12,7 @@
 import { loadConfig } from "./lib/config.mjs";
 import { deriveRecords } from "./derive.mjs";
 import { gapsOf, gapsConfig, gapReport, GAP_ROUTE } from "./lib/gaps.mjs";
+import { MAX_PRINTED } from "./lib/unread.mjs";
 
 export function narrateGaps(r) {
   const out = [];
@@ -19,7 +20,8 @@ export function narrateGaps(r) {
   const line = (i) => `  ${i.id}  ${i.what}${i.file ? ` (${i.file})` : ""}`;
   if (r.open.length) {
     out.push(`${r.open.length} gap${r.open.length === 1 ? "" : "s"} with no answer yet — ${GAP_ROUTE}:`);
-    for (const i of r.open) out.push(line(i));
+    for (const i of r.open.slice(0, MAX_PRINTED)) out.push(line(i));
+    if (r.open.length > MAX_PRINTED) out.push(`  … and ${r.open.length - MAX_PRINTED} more (\`--json\` lists them all)`);
   }
   if (r.known.length) {
     out.push(`${r.known.length} known gap${r.known.length === 1 ? "" : "s"} — parts of the map not to trust:`);
@@ -45,6 +47,13 @@ export async function run(args) {
     process.exit(1);
   }
   const { records, gapKinds: kinds } = await deriveRecords({ repoRoot, config });
-  const report = { kinds, ...gapReport(gapsOf(records, kinds), cfg) };
+  let listed;
+  try {
+    listed = gapsOf(records, kinds);
+  } catch (e) {
+    console.error(e.message); // more gaps than can be answered (CR-360)
+    process.exit(1);
+  }
+  const report = { kinds, ...gapReport(listed, cfg) };
   process.stdout.write(args.includes("--json") ? JSON.stringify(report, null, 2) + "\n" : narrateGaps(report) + "\n");
 }

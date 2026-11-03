@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CONTRACT_TABLE } from "../src/core/lib/contract.mjs";
-import { DEFAULT_GAP_KINDS, GAP_ID, checkGaps, gapKinds, gapsConfig, gapsOf, gapReport, outLinks } from "../src/core/lib/gaps.mjs";
+import { DEFAULT_GAP_KINDS, GAP_ID, MAX_GAPS, checkGaps, gapKinds, gapsConfig, gapsOf, gapReport, outLinks } from "../src/core/lib/gaps.mjs";
 import { coverageOf } from "../src/core/coverage.mjs";
 
 const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -170,10 +170,11 @@ test("under strict, a record lint cannot read fails: what links there is unknown
   assert.match(r.stderr, /gaps\.strict: zdd\/metadata\/table\/t\.json could not be read \(not JSON\)/);
 });
 
-test("a malformed gaps block stops lint, render and the report before they run", (t) => {
-  const repo = repoWith(t, SHAPE, { config: { gaps: { strict: "on" } } });
+test("a malformed gaps block stops derive, lint, render and the report before they run", (t) => {
+  const repo = repoWith(t, SHAPE);
   derived(repo);
-  for (const cmd of ["lint", "render", "gaps"]) {
+  setConfig(repo, { ...readConfig(repo), gaps: { strict: "on" } });
+  for (const cmd of ["derive", "lint", "render", "gaps"]) {
     const r = run(repo, cmd);
     assert.equal(r.status, 1, cmd);
     assert.match(r.stderr, /'gaps.strict' must be true or false/, cmd);
@@ -197,7 +198,7 @@ test("a known gap shows in the agent index and the human index; with none, both 
   assert.equal(run(repo, "render").status, 0);
   const text = readFileSync(index, "utf8");
   assert.match(text, /## Known gaps\n\nParts of the map not to trust/);
-  assert.match(text, /^- surface \[home\]\(metadata\/surface\/home\.json\) \(`src\/home\.txt`\): reaches nothing — screens built from a runtime list$/m);
+  assert.match(text, /^- surface \[home\]\(metadata\/surface\/home\.json\) \(src\/home\.txt\): reaches nothing — screens built from a runtime list$/m);
   assert.equal(run(repo, "render", "--check").status, 0, "the index holds the answer, so --check keeps the two together");
   const page = readFileSync(html, "utf8");
   assert.match(page, /<button id="btn-gaps" class="unread-open"[^>]*>Known gaps: 1<\/button>/);
@@ -215,4 +216,77 @@ test("the engine's `gaps` writes nothing and says how to answer", (t) => {
   assert.match(r.stdout, /3 gaps with no answer yet — fix the adapter that should read it \(the extractor skill\), or answer it once/);
   assert.match(r.stdout, /gaps\.strict is off: lint only warns\./);
   assert.throws(() => readFileSync(join(repo, "zdd", "metadata", "route", "health.json")));
+});
+
+test("CR-362: an adapter's GAPS reaches lint and render: a custom kind warns, fails strict, and a known one shows in both indexes", (t) => {
+  const repo = repoWith(t, [rec("widget", "w"), rec("route", "r", ["widget:x/w"])], { gaps: { reachNothing: ["widget"] } });
+  derived(repo);
+  const [g] = report(repo).open;
+  assert.equal(g.kind, "widget");
+  assert.match(run(repo, "lint").stderr, /WARNING: 1 gap in the map with no answer yet/);
+  setConfig(repo, { ...readConfig(repo), gaps: { strict: true } });
+  const red = run(repo, "lint");
+  assert.equal(red.status, 1);
+  assert.ok(red.stderr.includes(g.id));
+  setConfig(repo, { ...readConfig(repo), gaps: { strict: true, known: [{ id: g.id, why: "widgets wire up at runtime" }] } });
+  assert.equal(run(repo, "lint").status, 0);
+  assert.equal(run(repo, "render").status, 0);
+  assert.match(readFileSync(join(repo, "zdd", "agent-index.md"), "utf8"), /^- widget \[w\]\(metadata\/widget\/w\.json\) \(src\/w\.txt\): reaches nothing — widgets wire up at runtime$/m);
+  assert.match(readFileSync(join(repo, "zdd", "human-index.html"), "utf8"), />Known gaps: 1</);
+});
+
+test("CR-358, CR-361: an adapter that will not load, whatever it throws: the core's kinds stand with a one-line note; strict lint fails, render warns", (t) => {
+  for (const thrown of ["new Error('boom' + String.fromCharCode(10) + 'FORGED line')", "null"]) {
+    const repo = repoWith(t, [rec("route", "health")]);
+    derived(repo);
+    const file = join(repo, "zdd", "extractors", "acme.mjs");
+    writeFileSync(file, `${readFileSync(file, "utf8")}\nthrow ${thrown};\n`);
+    const warn = run(repo, "lint");
+    assert.equal(warn.status, 0, warn.stderr);
+    assert.match(warn.stderr, /WARNING: adapter 'acme' did not load \((boom FORGED line|null)\), so the gap list counts only the core's kinds for it/);
+    assert.doesNotMatch(warn.stderr, /^FORGED/m);
+    assert.match(warn.stderr, /1 gap in the map with no answer yet/, "the core's kinds still count");
+    setConfig(repo, { ...readConfig(repo), gaps: { strict: true, fine: [{ id: gapsOf([rec("route", "health")])[0].id, why: "x" }] } });
+    const red = run(repo, "lint");
+    assert.equal(red.status, 1);
+    assert.match(red.stderr, /gaps\.strict: adapter 'acme' did not load, so which of its kinds must link is unknown/);
+    setConfig(repo, { ...readConfig(repo), gaps: { known: [{ id: gapsOf([rec("route", "health")])[0].id, why: "x" }] } });
+    const r = run(repo, "render");
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stderr, /WARNING: adapter 'acme' did not load/);
+  }
+});
+
+test("CR-364: a known gap with a two-level agent index is in the root index, and render --check holds it", (t) => {
+  const repo = repoWith(t, SHAPE, { config: { agentIndex: { levels: 2 } } });
+  derived(repo);
+  const [a] = report(repo).open;
+  setConfig(repo, { ...readConfig(repo), gaps: { known: [{ id: a.id, why: "probed by a sidecar" }] } });
+  assert.equal(run(repo, "render").status, 0);
+  assert.match(readFileSync(join(repo, "zdd", "agent-index.md"), "utf8"), /## Known gaps[\s\S]*health[\s\S]*probed by a sidecar/);
+  assert.equal(run(repo, "render", "--check").status, 0);
+  setConfig(repo, { ...readConfig(repo), gaps: { fine: [{ id: a.id, why: "nothing to map" }] } });
+  assert.equal(run(repo, "render", "--check").status, 1, "the answer moved, so the index is stale");
+});
+
+test("CR-359: record and config text in the Known gaps section is escaped markdown: no forged link, code span or raw HTML", (t) => {
+  const evil = rec("route", "evil", [], { title: "x](https://attacker.invalid/)[y `tick` <b>", resource: ["src/a`b <i>.txt"] });
+  const repo = repoWith(t, [evil, rec("route", "(paren)"), rec("table", "t", [], { refs: [] }), rec("route", "ok", ["table:x/t"])]);
+  derived(repo);
+  const open = report(repo).open;
+  setConfig(repo, { ...readConfig(repo), gaps: { known: open.map((g) => ({ id: g.id, why: "<script>alert(1)</script> [z](javascript:x)" })) } });
+  assert.equal(run(repo, "render").status, 0);
+  const section = readFileSync(join(repo, "zdd", "agent-index.md"), "utf8").split("## Known gaps")[1].split("---")[0];
+  assert.doesNotMatch(section, /\]\(https:\/\/attacker/, "no second link");
+  assert.doesNotMatch(section, /<script>|<b>|<i>/, "no raw HTML");
+  assert.doesNotMatch(section, /\]\(javascript:/);
+  assert.ok(section.includes("\\[z\\]\\(javascript:x\\)"), "the reason's link syntax is text");
+  assert.match(section, /\(<metadata\/route\/\(paren\)\.json>\)/, "a destination with a parenthesis is written in <…>");
+});
+
+test("CR-360: the gap list is bounded by what can be answered, and stops past it before it is sorted or printed", (t) => {
+  assert.equal(MAX_GAPS, 10_000);
+  const many = Array.from({ length: MAX_GAPS + 1 }, (_, i) => rec("route", `r${i}`));
+  assert.throws(() => gapsOf(many), /more than 10000 gaps — more than can be answered/);
+  assert.equal(gapsOf(many.slice(0, MAX_GAPS)).length, MAX_GAPS);
 });

@@ -103,7 +103,7 @@ export function npmFetch(version, { exec = execFileSync, execPath = process.exec
   return join(out, "node_modules", ...STARTERS.package.split("/"));
 }
 
-function siblingStage(sibling, version) {
+function siblingStage(sibling, version, timeout = 120_000) {
   const stager = join(sibling, "scripts", "stage.mjs");
   if (!existsSync(stager) || !existsSync(join(sibling, "package.json"))) return null;
   let own;
@@ -114,16 +114,19 @@ function siblingStage(sibling, version) {
   }
   if (own?.name !== STARTERS.package || (version !== STARTERS.baseline && version !== own.version)) return null;
   const out = join(tempDir(), "library");
-  execFileSync(process.execPath, [stager, version, out], { stdio: ["ignore", "pipe", "pipe"], encoding: "utf8", timeout: 120_000 });
+  execFileSync(process.execPath, [stager, version, out], { stdio: ["ignore", "pipe", "pipe"], encoding: "utf8", timeout });
   return out;
 }
 
 const found = new Map();
 // The library at `version`: { version, dir, adapters, notes }. Throws, in
 // plain words, when no route has it.
-export function starterLibrary(version = STARTERS.version, { env = process.env, sibling = SIBLING_LIBRARY, fetch = npmFetch } = {}) {
+// `quick` is the session-start notice (decision 0048 point 7, CR-354): every
+// route bounded to 15 seconds, and npm read from its cache only, never the
+// network.
+export function starterLibrary(version = STARTERS.version, { env = process.env, sibling = SIBLING_LIBRARY, fetch = npmFetch, quick = false } = {}) {
   if (!SEMVER.test(String(version))) throw new Error(`'${version}' is not a starter library version (X.Y.Z)`);
-  const key = `${env.ZDD_STARTER_ADAPTERS_DIR ?? ""}\0${sibling}\0${version}`;
+  const key = `${env.ZDD_STARTER_ADAPTERS_DIR ?? ""}\0${sibling}\0${version}\0${quick}`;
   if (found.has(key)) return found.get(key);
   let dir;
   let how;
@@ -134,7 +137,7 @@ export function starterLibrary(version = STARTERS.version, { env = process.env, 
     if (why) throw new Error(`${how} holds no starter library ${version} at ${dir}: ${why} — stage one there (node packages/zdd-starter-adapters/scripts/stage.mjs ${version} <dir>/${version}), or unset it to fetch ${STARTERS.package}@${version} from npm`);
   } else {
     try {
-      dir = siblingStage(sibling, version);
+      dir = siblingStage(sibling, version, quick ? 15_000 : 120_000);
       how = "the library beside this plugin";
     } catch (e) {
       throw new Error(`the starter library beside this plugin could not stage ${version}: ${String(e.stderr || e.message).trim().split(/\r?\n/).slice(-2).join(" ")}`);
@@ -142,7 +145,7 @@ export function starterLibrary(version = STARTERS.version, { env = process.env, 
     if (!dir) {
       how = `npm (${STARTERS.package}@${version})`;
       try {
-        dir = fetch(version);
+        dir = quick ? fetch(version, { offline: true }) : fetch(version);
       } catch (e) {
         throw new Error(`the starter library (${STARTERS.package}@${version}) could not be fetched from npm: ${String(e.stderr || e.message).trim().split(/\r?\n/).slice(-2).join(" ")} — check this machine reaches the npm registry (bootstrap.mjs preflight), or set ZDD_STARTER_ADAPTERS_DIR to a folder of staged versions`);
       }
@@ -195,7 +198,7 @@ export function parseRecord(text, where) {
   // A no to the library, kept (decision 0049 point 4): the whole of it, or
   // the starters an update offered and the developer turned down.
   if (r.library !== undefined && r.library !== "declined") bad('library must be "declined" when it is there');
-  if (r.declinedOffers !== undefined && !(Array.isArray(r.declinedOffers) && r.declinedOffers.length <= MAX_RECORD_ADAPTERS && r.declinedOffers.every((n) => typeof n === "string" && NAME.test(n)))) bad("declinedOffers must list adapter names");
+  if (r.declinedOffers !== undefined && !(Array.isArray(r.declinedOffers) && r.declinedOffers.length <= MAX_RECORD_ADAPTERS && r.declinedOffers.every((n) => typeof n === "string" && n.length <= 64 && NAME.test(n)))) bad(`declinedOffers must list at most ${MAX_RECORD_ADAPTERS} adapter names`);
   for (const [name, a] of Object.entries(r.adapters)) {
     if (!NAME.test(name)) bad(`${JSON.stringify(name.slice(0, 80))} is not an adapter name`);
     if (!obj(a) || !SEMVER.test(String(a.version))) bad(`adapters.${name} must carry the version it came from`);

@@ -724,9 +724,14 @@ function buildAgentIndex(concepts, features, adrs, { levels = 1, areaDir = "", r
   // none keeps its bytes.
   if (knownGaps.length) {
     lines.push("## Known gaps", "", `Parts of the map not to trust: each of these should link and does not, and no adapter maps it yet (answered in \`zdd/config.json\`'s \`gaps.known\`). Read the code, not the map, here.`, "");
+    // Record and config text is escaped as markdown, so a title cannot forge
+    // a link, close a code span or open raw HTML (CR-359); a destination
+    // with a bracket or a space is written in <…>, which no file name holds.
+    const md = (s) => String(s).replace(/[\\`*_[\]()<>#!|~&]/g, (c) => `\\${c}`);
+    const dest = (h) => (/[\s()[\]]/.test(h) ? `<${h}>` : h);
     for (const g of knownGaps) {
-      const label = g.node ? `[${g.title}](${hrefOf(g.node)})` : `\`${g.record}\``;
-      lines.push(`- ${g.kind} ${label}${g.file ? ` (\`${g.file}\`)` : ""}: ${g.direction === "reachNothing" ? "reaches nothing" : "nothing reaches it"} — ${g.why}`);
+      const label = g.node ? `[${md(g.title)}](${dest(hrefOf(g.node))})` : md(g.record);
+      lines.push(`- ${g.kind} ${label}${g.file ? ` (${md(g.file)})` : ""}: ${g.direction === "reachNothing" ? "reaches nothing" : "nothing reaches it"} — ${md(g.why)}`);
     }
     lines.push("");
   }

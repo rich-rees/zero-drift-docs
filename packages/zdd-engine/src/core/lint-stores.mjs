@@ -536,7 +536,19 @@ if (unknownTasks.length) {
   const found = await selectedGapKinds(REPO, config);
   if (found.error) problems.push(`${printable(found.error)} — derive stops on it too`);
   for (const n of found.notes) console.error(`WARNING: ${printable(n)}`);
-  const report = gapReport(gapsOf(all, found.kinds ?? { reachNothing: [], reachedByNothing: [] }), gapsCfg);
+  // A strict pass means every adapter's kinds were read (CR-358).
+  if (gapsCfg.strict) for (const name of found.failed) problems.push(`gaps.strict: adapter '${printable(name)}' did not load, so which of its kinds must link is unknown — fix it (derive says why)`);
+  let listed;
+  let overflow = false;
+  try {
+    listed = gapsOf(all, found.kinds ?? { reachNothing: [], reachedByNothing: [] });
+  } catch (e) {
+    // More gaps than can be answered (CR-360): a failure under strict.
+    (gapsCfg.strict ? (m) => problems.push(m) : (m) => console.error(`WARNING: ${m}`))(printable(e.message));
+    listed = [];
+    overflow = true;
+  }
+  const report = gapReport(listed, gapsCfg);
   const said = (i) => `${printable(i.id)} ${printable(i.what)}${i.file ? ` (${printable(i.file)})` : ""}`;
   if (gapsCfg.strict) {
     // A strict pass means every record was read (as claims.strict does).
@@ -549,7 +561,7 @@ if (unknownTasks.length) {
     for (const i of report.open.slice(0, MAX_PRINTED)) console.error(`  ${said(i)}`);
     if (report.open.length > MAX_PRINTED) console.error(`  … and ${report.open.length - MAX_PRINTED} more`);
   }
-  if (report.stale.length) {
+  if (report.stale.length && !overflow) {
     console.error(`WARNING: ${report.stale.length} gap mark${report.stale.length === 1 ? "" : "s"} in zdd/config.json no gap answers any more — the record links now, or it is gone; remove with \`bootstrap.mjs gaps --forget=<id>\`: ${report.stale.slice(0, 10).map(printable).join(", ")}${report.stale.length > 10 ? `, +${report.stale.length - 10} more` : ""}`);
   }
 }

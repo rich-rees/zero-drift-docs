@@ -69,9 +69,17 @@ Measured read-only on two adopters, the coverage report finds about 130 and
   kinds a direction, never `unread`. A kind is counted for every record of
   it, whichever adapter minted it: the core keeps no owner per record (a
   background task merges two readers' records). A malformed `GAPS` stops
-  derive, naming the adapter; lint and render read the same export without
-  running an adapter, and a module that will not load is a note, with the
-  core's kinds standing. No starter declares one yet.
+  derive, naming the adapter. lint and render read the same export by
+  importing the module and never running its derive: the repo's own code,
+  which derive runs in full in the same CI step before lint (CR-358). A
+  module that will not load, whatever it throws, is a one-line note with
+  the core's kinds standing; under `gaps.strict` it also fails lint, since
+  its kinds are unknown, and render warns (CR-358, CR-361). No starter
+  declares one yet.
+- **A bound** (CR-360): at most 10,000 gaps, what the answer lists can
+  hold. Past it the list stops before it is sorted or printed: the kinds
+  or the readers are wrong. Every narrator prints at most 500 open gaps;
+  `--json` holds them all.
 - **An id** is `gap:<kind>/<16 hex>`, a SHA-256 of the direction and the
   record's id. A mark survives the record's title, file and description
   changing, and lapses when the record is renamed. A kind in both
@@ -80,7 +88,9 @@ Measured read-only on two adopters, the coverage report finds about 130 and
   `unread`, `"gaps": { "strict", "fine": [{ id, what, why }], "known": [...] }`,
   read by the same parser: `marksConfig` in `lib/unread.mjs` now reads both
   blocks, so a misspelt key, an id of the wrong shape, a mark with no `why`
-  and an id in both lists are errors, never enforcement off. A block of its
+  and an id in both lists are errors, never enforcement off; `derive`
+  refuses such a block too, so CI stops before lint could read it, and the
+  plugin's config schema describes it (CR-356). A block of its
   own, because an upgraded repo raises the two checks at different times:
   `unread.strict` may already be on when the gaps arrive. The writer is
   shared too: `bootstrap.mjs gaps --fine=<ids> | --known=<ids> --why=…`,
@@ -94,8 +104,13 @@ Measured read-only on two adopters, the coverage report finds about 130 and
   and a filterable peek whose rows open the record's node with the way
   back; `minimal` a list above the rest. Viewers get `docs.gaps`, ready-read.
   All of it only when a gap is answered `known`, and render reads the
-  adapters' `GAPS` only then, so a repo with none renders the same bytes.
-  A `fine` mark changes neither index. The one golden that moved is the
+  adapters' `GAPS` only then, so a repo with none gets the same agent
+  index and the same viewer data; its human index moves only by the
+  viewer's script, inlined in the page, as every viewer change does on a
+  pin move (CR-355), which the upgrade's render step regenerates. A `fine`
+  mark changes neither index. The section's text is escaped as markdown,
+  so a record's title or a reason cannot forge a link, a code span or
+  raw HTML in the index every session loads (CR-359). The one golden that moved is the
   full-page human index, by viz.js lines only (its README says so); no
   graph, metadata, agent-index or BUNDLE byte moved.
 - **lint** reads the list from the records derive wrote, in the walk it
@@ -117,7 +132,10 @@ Measured read-only on two adopters, the coverage report finds about 130 and
   Taking one is a repair `apply` naming it, which copies it. A no is kept
   in the record beside the copies, the one file the plugin keeps about
   them: `declinedOffers` for named starters, `library: "declined"` for all
-  of it, which `apply` with `"starters": false` now writes too. Unreachable,
+  of it, which `apply` with `"starters": false` now writes too. A no by
+  name is validated whole before anything is written (CR-357): every name a
+  starter on offer now, so a typo cannot hide a later starter, and the
+  record as the next read takes it. Unreachable,
   declined, or a detection that cannot run is one line, `skipped`, and never
   a failure. The update skill's step 7 runs it, then judges the
   dependencies the diff added against the adapters, in the session.
@@ -125,11 +143,13 @@ Measured read-only on two adopters, the coverage report finds about 130 and
   printed by the SessionStart hook (whether or not the auto-load is on)
   and run by `load`'s step 0. It reads `starters --json` and says one line
   when the pinned library notes fixes for a copy not yet taken or declined.
-  It reads the library only offline (a local route, or npm's cache with
-  `--offline`, 15 seconds at most), so a session start never waits on the
-  network, and it is silent offline, after a no, and when every copy is
-  level. The hook imports it lazily, so nothing in it can cost the session
-  its agent index.
+  It runs no engine (which files of a copy changed is the move's question,
+  so `changed` is empty), and every route to the library is bounded to 15
+  seconds, npm read from its cache with `--offline` (CR-354), so a session
+  start never waits on the network; it is silent offline, after a no, and
+  when every copy is level. The hook imports it only when it runs, and runs
+  it after the agent index, so nothing in it can cost the session its index
+  (CR-367).
 - **Proved** on read-only `git archive` copies of the two adopters, after
   the 0048 upgrade (copy, prove, move): the counts above; the notice named
   the baseline copies' fixes before the move (6 and 5) and was silent

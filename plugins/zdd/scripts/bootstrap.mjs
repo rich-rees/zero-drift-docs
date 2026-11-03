@@ -110,7 +110,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, lstatSync, chmodSync, openSync, writeSync, closeSync, rmSync, opendirSync } from "node:fs";
 import { findMapBlessings, proposeMove, blessingSlug, blessingFileText, removeMoved } from "./lib/blessing-move.mjs";
 import { scopeTag, repointLinks, linksToMoved } from "./lib/adr-split.mjs";
-import { STARTERS, RECORD, DEFAULT_DIR, MAX_RECORD_BYTES, starterLibrary, npmFetch, fileHash, emptyRecord, parseRecord, isRecordPath, fixesFor, movedIds, cmpVersions } from "./lib/starters.mjs";
+import { STARTERS, RECORD, DEFAULT_DIR, MAX_RECORD_BYTES, starterLibrary, fileHash, emptyRecord, parseRecord, isRecordPath, fixesFor, movedIds, cmpVersions } from "./lib/starters.mjs";
 import { join, dirname, basename, relative, resolve, posix } from "node:path";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -3324,8 +3324,10 @@ const tail = (text, n = 12) => String(text).trim().split(/\r?\n/).slice(-n);
 // inside one (CR-328). A link in inline code it does read, so it moves too.
 const outsideComments = (text, fn) => text.split(/(<!--[\s\S]*?-->)/).map((part, i) => (i % 2 ? part : fn(part))).join("");
 
-// `offline` reads the library only from a local route or npm's cache, for
-// the session-start notice, which must never wait on the network.
+// `offline` is the session-start notice: the library read only from a local
+// route or npm's cache, every route bounded, and no engine run, so a session
+// start never waits on the network or on hashing the copies; each copy's
+// `changed` is then empty (CR-354).
 export function starters(root, { prove = false, move = null, decline = false, offline = false } = {}) {
   if ([prove, move !== null && move !== false, decline].filter(Boolean).length > 1) throw new Error("starters takes one of --prove, --move, --decline at a time");
   const cfg = readConfig(root);
@@ -3337,10 +3339,12 @@ export function starters(root, { prove = false, move = null, decline = false, of
   const pin = STARTERS.version;
   const listed = new Set(Array.isArray(config.extractors) ? config.extractors : []);
   const names = Object.keys(record.adapters);
-  const changes = dir && names.length ? copyChanges(ledger, dir, record, names) : new Map();
+  // Offline (the session-start notice) never runs the engine: which files
+  // changed is the move's question, not the notice's (CR-354).
+  const changes = dir && names.length && !offline ? copyChanges(ledger, dir, record, names) : new Map();
   const copies = Object.entries(record.adapters).map(([name, a]) => ({ name, version: a.version, companionOf: a.companionOf ?? null, listed: listed.has(name), declined: a.declined ?? null, changed: changes.get(name) ?? [] }));
   const behind = copies.filter((c) => cmpVersions(c.version, pin) < 0);
-  const lib = behind.length ? starterLibrary(pin, offline ? { fetch: (v) => npmFetch(v, { offline: true }) } : {}) : null;
+  const lib = behind.length ? starterLibrary(pin, { quick: offline }) : null;
   // What is on offer, and what was declined: a move applies both (CR-323).
   const group = (list, fixesOf) => {
     const out = [];
@@ -3553,34 +3557,47 @@ export function library(root, { decline = null } = {}) {
   const dir = copyDir(config);
   const record = readRecordAt(ledger, dir);
   const base = { package: STARTERS.package, version: STARTERS.version, dir };
-  if (decline !== null && decline !== false) {
-    if (decline === true) record.library = "declined";
-    else {
-      const names = idList(decline, "--decline").filter((n) => /^[a-z][a-z0-9-]*$/.test(n));
-      if (!names.length) throw new Error("--decline names starters (comma separated), or none to decline the whole library");
-      record.declinedOffers = [...new Set([...(record.declinedOffers ?? []), ...names])].sort();
+  const said = (skipped, line) => ({ ...base, skipped, line, offers: [], declinedOffers: record.declinedOffers ?? [] });
+  // What the library offers now, or why it was not asked.
+  const ask = () => {
+    if (record.library === "declined") return said("declined", `The starter library was declined for this repo (${dir}/${RECORD}), so it was not asked this time.`);
+    let lib;
+    try {
+      lib = starterLibrary(STARTERS.version);
+    } catch (e) {
+      return said("unreachable", `The starter library (${STARTERS.package} ${STARTERS.version}) could not be reached, so it was not asked this time: ${String(e?.message ?? e).split(/\r?\n/)[0].slice(0, 300)}`);
     }
-    ledger.overwrite(`${dir}/${RECORD}`, JSON.stringify(record, null, 2) + "\n");
-    ledger.notes.push(decline === true ? `${dir}/${RECORD}: the starter library declined for this repo — "update ZDD" says so in one line and asks it no more; remove "library" from the record to be asked again` : `${dir}/${RECORD}: ${record.declinedOffers.join(", ")} declined — not offered again; remove a name from "declinedOffers" to be asked again`);
-    return { ...base, skipped: null, offers: [], declinedOffers: record.declinedOffers ?? [], ...ledgerOut(ledger) };
+    let d;
+    try {
+      d = JSON.parse(runEngine(["detect", `--adapters=${lib.adapters}`, `--root=${root}`]));
+    } catch (e) {
+      return said("detection", `The starter library was reached, but detection could not run, so it was not asked this time — the engine said: ${String(e?.stderr || e?.message || e).trim().split(/\r?\n/).slice(-2).join(" ").slice(0, 300)}`);
+    }
+    const listed = new Set(Array.isArray(config.extractors) ? config.extractors : []);
+    const declined = new Set(record.declinedOffers ?? []);
+    const offers = (d.proposals ?? []).filter((p) => !listed.has(p.name) && !declined.has(p.name)).map((p) => ({ name: p.name, parts: p.parts, evidence: p.evidence, options: p.options, held: adapterHeld(ledger, dir, p.name) }));
+    return { ...base, skipped: null, offers, declinedOffers: [...declined].sort() };
+  };
+  if (decline === null || decline === false) return ask();
+  if (decline === true) record.library = "declined";
+  else {
+    // Validated whole before the write (CR-357): every name a starter the
+    // library offers this repo now, so a typo cannot hide a later starter.
+    const names = idList(decline, "--decline");
+    const bad = names.find((n) => n.length > 64 || !/^[a-z][a-z0-9-]*$/.test(n));
+    if (bad !== undefined) throw new Error(`'${printable(bad).slice(0, 80)}' is not a starter's name — nothing was written`);
+    const now = ask();
+    if (now.skipped) throw new Error(`${now.line} A starter can be declined by name only when it is on offer; \`library --decline\` alone declines the whole library. Nothing was written`);
+    const offered = new Set(now.offers.map((o) => o.name));
+    const notOffered = names.filter((n) => !offered.has(n));
+    if (notOffered.length) throw new Error(`${notOffered.join(", ")} ${notOffered.length === 1 ? "is" : "are"} not on offer now (${[...offered].join(", ") || "nothing is"}) — nothing was written`);
+    record.declinedOffers = [...new Set([...(record.declinedOffers ?? []), ...names])].sort();
   }
-  if (record.library === "declined") return { ...base, skipped: "declined", line: `The starter library was declined for this repo (${dir}/${RECORD}), so it was not asked this time.`, offers: [], declinedOffers: record.declinedOffers ?? [] };
-  let lib;
-  try {
-    lib = starterLibrary(STARTERS.version);
-  } catch (e) {
-    return { ...base, skipped: "unreachable", line: `The starter library (${STARTERS.package} ${STARTERS.version}) could not be reached, so it was not asked this time: ${String(e.message).split(/\r?\n/)[0].slice(0, 300)}`, offers: [], declinedOffers: record.declinedOffers ?? [] };
-  }
-  let d;
-  try {
-    d = JSON.parse(runEngine(["detect", `--adapters=${lib.adapters}`, `--root=${root}`]));
-  } catch (e) {
-    return { ...base, skipped: "detection", line: `The starter library was reached, but detection could not run, so it was not asked this time — the engine said: ${String(e.stderr || e.message).trim().split(/\r?\n/).slice(-2).join(" ").slice(0, 300)}`, offers: [], declinedOffers: record.declinedOffers ?? [] };
-  }
-  const listed = new Set(Array.isArray(config.extractors) ? config.extractors : []);
-  const declined = new Set(record.declinedOffers ?? []);
-  const offers = (d.proposals ?? []).filter((p) => !listed.has(p.name) && !declined.has(p.name)).map((p) => ({ name: p.name, parts: p.parts, evidence: p.evidence, options: p.options, held: adapterHeld(ledger, dir, p.name) }));
-  return { ...base, skipped: null, offers, declinedOffers: [...declined].sort() };
+  const text = JSON.stringify(record, null, 2) + "\n";
+  parseRecord(text, `${dir}/${RECORD}`); // the record as the next read takes it, or the write does not happen
+  ledger.overwrite(`${dir}/${RECORD}`, text);
+  ledger.notes.push(decline === true ? `${dir}/${RECORD}: the starter library declined for this repo — "update ZDD" says so in one line and asks it no more; remove "library" from the record to be asked again` : `${dir}/${RECORD}: ${record.declinedOffers.join(", ")} declined — not offered again; remove a name from "declinedOffers" to be asked again`);
+  return { ...base, skipped: null, offers: [], declinedOffers: record.declinedOffers ?? [], ...ledgerOut(ledger) };
 }
 
 export function narrateLibrary(r) {
@@ -3666,7 +3683,7 @@ export function narrateAdapters(r) {
   return out.map(printable).join("\n");
 }
 
-/// One-time marks in zdd/config.json (decisions 0048 point 5 and 0049): the
+// One-time marks in zdd/config.json (decisions 0048 point 5 and 0049): the
 // engine's report, and the one writer of a block's marks and of its
 // `strict`. A mark is taken only for an item the engine reports right now, so
 // a typed id cannot excuse nothing, and it carries the item's text, so
@@ -3787,7 +3804,9 @@ export function narrateGaps(r) {
   if (!r.open.length && !r.fine.length && !r.known.length && !r.stale.length) out.push("No gaps: every record that should link does.");
   if (r.open.length) {
     out.push(`${r.open.length} gap${r.open.length === 1 ? "" : "s"} in the map with no answer yet. Ask about them one at a time, in plain words, with your recommendation: the fix is an adapter that reads the link (through the extractor skill, its tests red then green); or the gap is answered once, with why — fine when there is nothing to map (\`--fine=<id> --why="…"\`), a known gap when it cannot be mapped (\`--known=<id> --why="…"\`; it stays in both indexes as a part of the map not to trust):`);
-    for (const i of r.open) out.push(...line(i));
+    // Bounded, as lint's list is (CR-360): `--json` holds them all.
+    for (const i of r.open.slice(0, 500)) out.push(...line(i));
+    if (r.open.length > 500) out.push(`  … and ${r.open.length - 500} more (\`--json\` lists them all)`);
   }
   if (r.known.length) {
     out.push(`${r.known.length} known gap${r.known.length === 1 ? "" : "s"}:`);

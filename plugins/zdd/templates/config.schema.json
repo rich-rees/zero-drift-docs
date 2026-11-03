@@ -47,6 +47,78 @@
         }
       }
     },
+    "gaps": {
+      "type": "object",
+      "description": "The map's gaps (decision 0049): routes, surfaces and background tasks that link to nothing, tables nothing links to, and any kind an adapter names in its GAPS. Written by bootstrap: `gaps.strict` at a fresh install or by `bootstrap.mjs gaps --raise`, the answers by `bootstrap.mjs gaps --fine` and `--known`. Unknown keys are refused, so a misspelt 'strict' never leaves enforcement silently off. An id is in one list at most.",
+      "additionalProperties": false,
+      "properties": {
+        "strict": {
+          "type": "boolean",
+          "default": false,
+          "description": "true: `lint` fails on a gap with no answer. Absent or false: it warns. Written true at a fresh install; an upgraded repo turns it on once every gap has an answer."
+        },
+        "fine": {
+          "type": "array",
+          "maxItems": 10000,
+          "description": "Gaps with nothing to map, answered once (a health check touches no table).",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "why"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^gap:[a-z][a-z0-9_-]*/[0-9a-f]{16}$",
+                "description": "The gap's id, as `gaps` and `lint` print it."
+              },
+              "what": {
+                "type": "string",
+                "description": "The gap's text when it was answered, for whoever reviews the answer. Not compared."
+              },
+              "why": {
+                "type": "string",
+                "pattern": "\\S",
+                "maxLength": 500,
+                "description": "Why: nothing to map (fine), or why it cannot be mapped (known)."
+              }
+            }
+          }
+        },
+        "known": {
+          "type": "array",
+          "maxItems": 10000,
+          "description": "Gaps that cannot be mapped, answered once (table names built at runtime). Both indexes show them as parts of the map not to trust.",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "why"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^gap:[a-z][a-z0-9_-]*/[0-9a-f]{16}$",
+                "description": "The gap's id, as `gaps` and `lint` print it."
+              },
+              "what": {
+                "type": "string",
+                "description": "The gap's text when it was answered, for whoever reviews the answer. Not compared."
+              },
+              "why": {
+                "type": "string",
+                "pattern": "\\S",
+                "maxLength": 500,
+                "description": "Why: nothing to map (fine), or why it cannot be mapped (known)."
+              }
+            }
+          }
+        }
+      }
+    },
     "extractors": {
       "type": "array",
       "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },

@@ -36,6 +36,10 @@ export const GAP_ID = /^gap:[a-z][a-z0-9_-]*\/[0-9a-f]{16}$/;
 export const GAP_ANSWERS = ["fine", "known"];
 // Kinds one adapter may name per direction: a short list, never a stack's catalogue.
 export const MAX_GAP_KINDS = 50;
+// Gaps in all (CR-360): no more than the answer lists can hold, so every gap
+// can be answered. Past it the kinds or the readers are wrong, and the list
+// stops before it is sorted or printed.
+export const MAX_GAPS = 10_000;
 // A kind as a record carries it (derive's KIND_RE); `unread` is the core's.
 const KIND_RE = /^[a-z][a-z0-9_-]*$/;
 
@@ -97,6 +101,7 @@ export function gapsOf(records, kinds = DEFAULT_GAP_KINDS) {
   for (const to of outs.values()) for (const id of to) reached.add(id);
   const items = [];
   const add = (r, dir) => {
+    if (items.length >= MAX_GAPS) throw new Error(`the map has more than ${MAX_GAPS} gaps — more than can be answered; an adapter's GAPS names a kind that should not link, or a reader is missing for most of the repo (decision 0049)`);
     const title = cut(oneLine(String(r.title || r.id)), 200);
     const file = Array.isArray(r.resource) && typeof r.resource[0] === "string" ? oneLine(r.resource[0]) : "";
     items.push({ id: gapId(r.kind, dir, r.id), record: oneLine(r.id), kind: r.kind, title, file, direction: dir, what: `${r.kind} ${title}: ${DIRECTIONS[dir]}` });

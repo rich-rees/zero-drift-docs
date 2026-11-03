@@ -140,6 +140,33 @@ test("unread: the schema and the engine accept and refuse the same blocks (CR-23
   }
 });
 
+test("gaps: the schema and the engine accept and refuse the same blocks, and a fresh install's block is valid (decision 0049, CR-356)", () => {
+  const id = `gap:route/${"0".repeat(16)}`;
+  const cfg = (gaps) => ({ extractors: ["generic"], gaps });
+  for (const ok of [{}, { strict: true, fine: [], known: [] }, { fine: [{ id, why: "x" }] }, { known: [{ id, what: "y", why: "x" }] }]) {
+    assert.deepEqual(validate(SCHEMA, cfg(ok)), [], JSON.stringify(ok));
+    assert.equal(engineRejects(cfg(ok)), null, JSON.stringify(ok));
+  }
+  for (const bad of [
+    { strickt: true },
+    { strict: "yes" },
+    { known: {} },
+    { fine: [{ id }] },
+    { known: [{ id, why: "   " }] },
+    { fine: [{ id, why: "x".repeat(501) }] },
+    { known: [{ id, why: "x", because: "y" }] },
+    { fine: [{ id: "unread:acme/0000000000000000", why: "x" }] },
+    { known: [{ id: `${id}\nFORGED`, why: "x" }] },
+    { fine: Array.from({ length: 10_001 }, () => ({ id, why: "x" })) },
+  ]) {
+    const shown = JSON.stringify(bad).slice(0, 60);
+    assert.notDeepEqual(validate(SCHEMA, cfg(bad)), [], `schema: ${shown}`);
+    assert.match(engineRejects(cfg(bad)) ?? "", /gaps/, `engine: ${shown}`);
+  }
+  // One answer per id: the engine refuses it; the schema cannot say it.
+  assert.match(engineRejects(cfg({ fine: [{ id, why: "a" }], known: [{ id, why: "b" }] })) ?? "", /one answer per item/);
+});
+
 test("repoBase: the schema pattern refuses internal whitespace exactly as the engine does (CR-103)", () => {
   // repoBase is the renderer's concern (source links), so the engine probe is `render`.
   const cfg = (repoBase) => ({ extractors: ["generic"], repoBase, render: { storeChanges: false } });

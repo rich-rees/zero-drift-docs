@@ -34,8 +34,8 @@ import { insideRepo } from "./lib/paths.mjs";
 import { makeExtractorIo } from "./lib/extractor-io.mjs";
 import { gitIgnoredPredicate } from "./lib/ignored.mjs";
 import { judgeContract } from "./lib/contract.mjs";
-import { UNREAD_KIND, unreadRecords, unreadConfig, unreadReport, unreadLines, itemOf } from "./lib/unread.mjs";
-import { checkGaps, gapKinds } from "./lib/gaps.mjs";
+import { UNREAD_KIND, unreadRecords, unreadConfig, unreadReport, unreadLines, itemOf, oneLine, cut } from "./lib/unread.mjs";
+import { checkGaps, gapKinds, gapsConfig } from "./lib/gaps.mjs";
 
 import { NAME_RE } from "./lib/adapter-folder.mjs";
 
@@ -229,12 +229,16 @@ export async function selectedModules(repoRoot, config) {
 
 // The kinds the gap list counts (decision 0049): the core's, plus what each
 // adapter the config selects names in its GAPS. For lint and render, which
-// read records and never run an adapter: a selection derive would refuse is
-// derive's to report, and a module that will not load is said as a note,
-// with the core's kinds standing for it. A malformed GAPS is { error }.
+// read records and run no adapter's derive. The modules are the repo's own
+// code, which derive imports and runs in full in the same CI step before
+// lint (CR-358). A selection derive would refuse is derive's to report; a
+// module that will not load is named in `failed`, with a note, and the
+// core's kinds stand for it: lint fails on it under `gaps.strict` (the kinds
+// are unknown), render warns. A malformed GAPS is { error }.
 export async function selectedGapKinds(repoRoot, config) {
   const selection = resolveExtractors(config);
   const notes = [];
+  const failed = [];
   const adapters = [];
   if (!selection.error) {
     const local = localExtractors(repoRoot, config.localExtractorDir);
@@ -245,12 +249,15 @@ export async function selectedGapKinds(repoRoot, config) {
       try {
         adapters.push({ name, mod: await import(pathToFileURL(found).href) });
       } catch (e) {
-        notes.push(`adapter '${name}' did not load (${String(e.message).split(/\r?\n/)[0].slice(0, 200)}), so the gap list counts only the core's kinds for it`);
+        // Whatever was thrown, as one plain line (CR-361).
+        const why = cut(oneLine(String(e instanceof Error ? e.message : e)), 200);
+        failed.push(name);
+        notes.push(`adapter '${name}' did not load (${why}), so the gap list counts only the core's kinds for it`);
       }
     }
   }
   const kinds = gapKinds(adapters);
-  return kinds.error ? { error: kinds.error, notes } : { kinds, notes };
+  return kinds.error ? { error: kinds.error, notes, failed } : { kinds, notes, failed };
 }
 
 // The lexical check above is the braces; this is the belt (CR-060). A
@@ -433,6 +440,10 @@ export async function run(args) {
   // Before an adapter runs: a malformed block is the one thing said.
   const unreadCfg = unreadConfig(config);
   if (unreadCfg.error) fail(unreadCfg.error);
+  // The gaps block too: CI runs derive first, so a misspelt key stops it
+  // before lint could read the block as enforcement off (decision 0049).
+  const gapsCfg = gapsConfig(config);
+  if (gapsCfg.error) fail(gapsCfg.error);
   const { records, unread, factsOrder, diagnostics, configDiagnostics, warnings } = await deriveRecords({ repoRoot: REPO, config });
   // Config-level notes (deprecations) and extractor warnings always print;
   // extractor diagnostics are opt-in noise.
