@@ -2,7 +2,7 @@
 // (page/route/layout files under an `app` folder), or `next` in the root
 // package.json with no tree yet (proposed at the convention's default).
 
-import { JS_SKIP_DIRS, packageDeps } from "../js/detect.mjs";
+import { JS_SKIP_DIRS, packageDeps } from "../_shared/js/detect.mjs";
 
 export const DETECTION = {
   parts: ["routes", "screens"],

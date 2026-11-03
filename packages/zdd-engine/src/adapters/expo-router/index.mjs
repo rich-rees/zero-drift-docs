@@ -26,10 +26,10 @@
 // Every file is read through `io` (decision 0010). A missing appDir is
 // "nothing to inventory". Deterministic: same bytes in, same records out.
 
-import { leadingComment } from "../js/source.mjs";
-import { scanApiCalls } from "../js/source.mjs";
-import { repoRelative } from "../../core/lib/paths.mjs";
-import { slugify } from "../../core/lib/slug.mjs";
+import { leadingComment } from "../_shared/js/source.mjs";
+import { scanApiCalls } from "../_shared/js/source.mjs";
+import { repoRelative } from "../_shared/paths.mjs";
+import { slugify } from "../_shared/slug.mjs";
 
 export const FACTS_KEY_ORDER = {
   surface: ["file", "routeGroups", "dynamicSegments", "layouts", "platforms", "edges"],
@@ -142,4 +142,4 @@ export const CONTRACT = 1;
 export const COMMENT = { ".ts": "//", ".tsx": "//", ".js": "//", ".jsx": "//", ".mjs": "//", ".cjs": "//" };
 
 // Who imports what, for an extend blessing's users (decision 0046).
-export { IMPORTS } from "../js/imports.mjs";
+export { IMPORTS } from "../_shared/js/imports.mjs";

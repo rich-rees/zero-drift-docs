@@ -107,6 +107,25 @@ for (const n of [1, 2, 3, 4, 5]) {
   });
 }
 
+// Decision 0048 point 4: an app keeps code its adapters share once, in
+// `_shared/` beside them. The suite's scratch repos get what the adapter's
+// imports reach there, and nothing else of the folder.
+test("a local adapter that imports from _shared/ beside it passes every check; only the reached shared files travel", (t) => {
+  const shared = GOOD.replace('const code = line.replace(/#.*$/, "").trim();', "const code = uncomment(line);");
+  const repo = scratch(t, {
+    adapter: `import { uncomment } from "../_shared/lines.mjs";\n${shared}`,
+    extra: {
+      "zdd/extractors/_shared/lines.mjs": `import { trimmed } from "./text/trim.mjs";\nexport const uncomment = (line) => trimmed(line.replace(/#.*$/, ""));\n`,
+      "zdd/extractors/_shared/text/trim.mjs": `export const trimmed = (s) => s.trim();\n`,
+      "zdd/extractors/_shared/unused.mjs": `import { readFileSync } from "node:fs";\nexport const x = readFileSync;\n`,
+    },
+  });
+  const r = suite(repo);
+  assert.equal(r.status, 0, r.err);
+  assert.deepEqual(failing(r.json), [], "the unused shared file that reads the filesystem is neither copied nor judged");
+  assert.equal(r.json.adapters[0].records, 3);
+});
+
 test("suiteChecks: a failing check above the number warns and the run passes; absent, nothing blocks", (t) => {
   const below = suite(scratch(t, { adapter: BROKEN[4], suiteChecks: 3 }));
   assert.equal(below.status, 0, below.err);

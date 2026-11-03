@@ -10,7 +10,7 @@ import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, syml
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { closeOver, dataAccessRecord, defs, imports, masked, moduleFiles, resolveModule, strings } from "../src/adapters/python/source.mjs";
+import { closeOver, dataAccessRecord, defs, imports, masked, moduleFiles, resolveModule, strings } from "../src/adapters/_shared/python/source.mjs";
 import { sqlTables } from "../src/adapters/sqlalchemy/index.mjs";
 import { derive as supabasePy, scanCalls } from "../src/adapters/supabase-py/index.mjs";
 import { derive as fastapi, handlerRefs, parseFile, MAX_REACH } from "../src/adapters/fastapi/index.mjs";

@@ -2,11 +2,11 @@
 // wrangler.toml (decision 0038): `[triggers] crons`, running the worker's
 // `main` module's `scheduled()`.
 // Options (extractorOptions["background-cloudflare"]): roots, exclude, modes — see
-// adapters/background/shared.mjs (backgroundReader).
+// _shared/background/tasks.mjs (backgroundReader).
 
 import { posix } from "node:path";
-import { FACTS_KEY_ORDER, backgroundReader, parseToml, slug, SOURCE_COMMENT } from "../background/shared.mjs";
-import { DETECTION_BASE, backgroundProposal, manifests } from "../background/detect.mjs";
+import { FACTS_KEY_ORDER, backgroundReader, parseToml, slug, SOURCE_COMMENT } from "../_shared/background/tasks.mjs";
+import { DETECTION_BASE, backgroundProposal, manifests } from "../_shared/background/detect.mjs";
 
 export { FACTS_KEY_ORDER };
 

@@ -86,7 +86,7 @@ export const CONTRACT_TABLE = [
     step: "data access",
     since: 1,
     required: false,
-    what: "`?code:<file>#<function>` refs from a route or screen, and `data-access` records naming the tables a function reaches; the core joins them on file and function",
+    what: "`?code:<file>#<function>` refs from a route or screen, and `data-access` records naming the tables a function reaches; the core joins them on the record's file (`resource[0]`) and `facts.function`, and drops one marked `requireRefs` that nothing reaches",
     ask: "Does the code this adapter reads call functions that reach the database? ZDD can link those routes or screens to their tables through a data-access adapter.",
   },
   {

@@ -6,11 +6,11 @@
 // pg_cron, queue declarations in source), and the reader that turns a
 // platform's candidates into `background-task` records. The core never sees
 // a platform: it merges two readers' records of one task by the code it runs
-// (src/core/lib/background-tasks.mjs). Every file is read through `io`
+// (the core's merge of background tasks). Every file is read through `io`
 // (decision 0010). Deterministic: same bytes in, same records out.
 
 import { posix } from "node:path";
-import { repoRelative } from "../../core/lib/paths.mjs";
+import { repoRelative } from "../paths.mjs";
 import { leadingComment } from "../js/source.mjs";
 
 export const MAX_SOURCE_BYTES = 1024 * 1024;
@@ -275,7 +275,7 @@ export const slug = (s) => String(s).replace(/[^A-Za-z0-9._-]+/g, "-").replace(/
 // trigger?, target?, queue?, producers?, consumers?, mode?, modeHint?,
 // description?, housekeeping?, routeRef?, functionRef?, scriptCommand?,
 // deploys? }. Two transient keys go on each record for the core's merge
-// (src/core/lib/background-tasks.mjs), never written: `runs` (the code
+// (the core's merge of background tasks), never written: `runs` (the code
 // files it runs — a queue's every consumer) and `processKeys` (the command
 // it runs and the folder it runs it from), and `deploys: true` on a record that says how a task is deployed
 // rather than what it is (a Railway file). A process whose command names no

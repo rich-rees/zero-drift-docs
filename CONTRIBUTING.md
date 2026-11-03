@@ -95,14 +95,14 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
   `?route:<url>` (`*` = one segment the scan could not read; it matches a
   route parameter only, never a fixed word, and a template hole typed as a
   union of literals is expanded before emission — [decision 0019](docs/decisions/0019-a-variable-segment-matches-a-parameter-never-a-fixed-word.md),
-  `src/core/lib/template-paths.mjs`), and `?code:<file>#<function>` — the
+  `src/adapters/_shared/template-paths.mjs`), and `?code:<file>#<function>` — the
   code a route or screen runs, which a data-access adapter's `data-access`
   records answer ([decision 0037](docs/decisions/0037-routes-reach-tables-through-a-data-access-record-joined-on-file-and-function.md):
   the referrer takes their tables; one in the referrer's own file is
   absorbed; a miss is silent). `?code:<file>#*` is every data-access record
   in the file, for a referrer whose unit is the whole file. A JS unit is a
   top-level declaration by its local name, or `<module>` for the module's
-  own top-level code (`src/adapters/js/source.mjs`). Put the `?code:` ref
+  own top-level code (`src/adapters/_shared/js/source.mjs`). Put the `?code:` ref
   under a verb (`edges.reads`) and the tables the data-access record leaves
   untyped take that verb. The deriver resolves them after the
   merge, drops misses with a diagnostic, and drops a record flagged
@@ -148,6 +148,14 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
   local names may not shadow built-ins). Try a convention there first, with the
   skill's scaffold; propose it for the catalogue once it has run against a real
   repo.
+- **It is self-contained** ([decision 0048](docs/decisions/0048-the-app-owns-its-adapters-zdd-ships-starters-not-readers.md)
+  point 4). Its one link to ZDD is the contract: the `io` it is handed and what
+  it returns. It imports nothing from the core. Code several adapters share
+  lives once in `_shared/` beside them (`_shared/js/`, `_shared/python/`,
+  `_shared/background/` and the small helpers at its top), by a static relative
+  import, so the files one adapter needs are the ones its imports reach, and
+  copying it into an app brings exactly those. An adapter imports no other
+  adapter's folder. A test holds both rules.
 - **It declares the contract it was written for and passes the standard
   suite** ([decision 0040](docs/decisions/0040-adapters-declare-a-contract-number-and-pass-one-standard-suite.md)).
   `export const CONTRACT = 1`, a number of its own that moves only when the
@@ -178,12 +186,12 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
   | `SUITE` | 1 | yes (an adopter's own) | a `fixture/` folder beside the adapter and `export const SUITE = { options, companions? }`; a catalogue adapter's fixture lives in ZDD's tests |
   | `FACTS_KEY_ORDER` | 1 | no | facts in a stable order, per kind |
   | unresolved refs | 1 | no | `?table:<name>`, `?route:<url>`, … for another adapter's records; the core resolves them |
-  | data access | 1 | no | `?code:<file>#<function>` refs, and `data-access` records naming the tables a function reaches (decision 0037) |
+  | data access | 1 | no | `?code:<file>#<function>` refs, and `data-access` records naming the tables a function reaches, joined on `resource[0]` and `facts.function` (decision 0037) |
   | typed edges | 1 | no | `facts.edges`, a verb for a ref (decision 0016) |
   | `warnings` | 1 | no | a list printed on every derive |
   | `unread` | 1 | no | a list of `{ file, what }`, what it saw and could not read (decision 0048) |
   | detection | 1 | no | `DETECTION` and `detect({ scan, proposed })` (decision 0039; every catalogue adapter has it) |
-  | import reader | 1 | no | `IMPORTS`: `{ label, extensions, skipDirs, isTest(rel), resolver(io, files) }`, the repo files one file imports, read at render for an `extend` blessing's users (decision 0046; the JavaScript and Python adapters share `adapters/js/imports.mjs` and `adapters/python/imports.mjs`) |
+  | import reader | 1 | no | `IMPORTS`: `{ label, extensions, skipDirs, isTest(rel), resolver(io, files) }`, the repo files one file imports, read at render for an `extend` blessing's users (decision 0046; the JavaScript and Python adapters share `adapters/_shared/js/imports.mjs` and `adapters/_shared/python/imports.mjs`) |
 
   Before 1.0 the contract is open (it stays at 1 and may change without
   interviews). From 1.0 a change is a new row with `since` one higher and

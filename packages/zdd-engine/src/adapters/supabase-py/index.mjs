@@ -2,7 +2,7 @@
 // (decision 0037). One convention: `.table("x")` and `.from_("x")` (a table,
 // else a bucket) and `.rpc("x")` (a database function) inside a Python
 // function. One `data-access` record per function that makes such a call,
-// keyed by file + function name (adapters/python/source.mjs cuts the
+// keyed by file + function name (_shared/python/source.mjs cuts the
 // functions, so a route adapter's `?code:<file>#<name>` names the same
 // text), with the calls as UNRESOLVED refs (`?from:x`, `?function:x`) for
 // the deriver to resolve against the schema adapter's records. A route
@@ -17,9 +17,9 @@
 // matched them in a handler body before this adapter existed: a call spelled
 // inside a docstring is read as a call (accepted, and visible in the diff).
 
-import { repoRelative } from "../../core/lib/paths.mjs";
-import { MAX_CLOSED } from "../../core/lib/data-access.mjs";
-import { DEFAULT_EXCLUDE_DIRS, closeOver, dataAccessRecord, defs, pythonFiles } from "../python/source.mjs";
+import { repoRelative } from "../_shared/paths.mjs";
+import { MAX_CLOSED } from "../_shared/data-access.mjs";
+import { DEFAULT_EXCLUDE_DIRS, closeOver, dataAccessRecord, defs, pythonFiles } from "../_shared/python/source.mjs";
 
 export const FACTS_KEY_ORDER = {
   "data-access": ["function"],
@@ -83,4 +83,4 @@ export const CONTRACT = 1;
 export const COMMENT = { ".py": "#" };
 
 // Who imports what, for an extend blessing's users (decision 0046).
-export { IMPORTS } from "../python/imports.mjs";
+export { IMPORTS } from "../_shared/python/imports.mjs";

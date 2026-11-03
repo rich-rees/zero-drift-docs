@@ -7,7 +7,8 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { parseFile, joinPath, derive } from "../src/adapters/fastapi/index.mjs";
-import { slugify } from "../src/core/lib/slug.mjs";
+import { slugify } from "../src/adapters/_shared/slug.mjs";
+import { ioFor } from "./adapter-kit.mjs";
 
 test("parseFile: routers with prefix, api_route methods, stacked decorators, docstring, TRACE (CR-011)", () => {
   const { routers, handlers } = parseFile(`
@@ -76,7 +77,7 @@ test("include_router: prefixes propagate transitively and a router mounted twice
     "api.py": `router = APIRouter(prefix="/v1")\nrouter.include_router(jobs.router)\n`,
     "jobs.py": `router = APIRouter(prefix="/jobs")\n\n@router.get("/{id}")\ndef read(id): pass\n`,
   });
-  const { records, diagnostics } = derive({ repoRoot: root, options: { roots: ["."] } });
+  const { records, diagnostics } = derive({ repoRoot: root, options: { roots: ["."] }, io: ioFor(root, "fastapi") });
   assert.deepEqual(records.map((r) => r.id).sort(), ["route:/api/v1/jobs/{id}", "route:/v2/jobs/{id}"]);
   assert.deepEqual(diagnostics, []);
   rmSync(root, { recursive: true, force: true });
@@ -88,7 +89,7 @@ test("CR-066: a package-qualified include_router target resolves against the fil
     "a/routes.py": `router = APIRouter(prefix="/r")\n\n@router.get("/x")\ndef x(): pass\n`,
     "b/routes.py": `router = APIRouter(prefix="/r")\n\n@router.get("/y")\ndef y(): pass\n`,
   });
-  const { records, diagnostics } = derive({ repoRoot: root, options: { roots: ["."] } });
+  const { records, diagnostics } = derive({ repoRoot: root, options: { roots: ["."] }, io: ioFor(root, "fastapi") });
   // a/ is mounted under /api; b/ is an ordinary unmounted root router.
   assert.deepEqual(records.map((r) => r.id).sort(), ["route:/api/r/x", "route:/r/y"]);
   assert.deepEqual(diagnostics, []);
@@ -102,7 +103,7 @@ test("CR-066: a still-ambiguous include_router target roots neither candidate â€
     "b/routes.py": `router = APIRouter(prefix="/r")\n\n@router.get("/y")\ndef y(): pass\n`,
     "health.py": `router = APIRouter()\n\n@router.get("/health")\ndef health(): pass\n`,
   });
-  const { records, diagnostics } = derive({ repoRoot: root, options: { roots: ["."] } });
+  const { records, diagnostics } = derive({ repoRoot: root, options: { roots: ["."] }, io: ioFor(root, "fastapi") });
   // Before: both candidates were emitted as if mounted at the root (/r/x, /r/y)
   // â€” a wrong prefix presented as fact. Now neither is emitted.
   assert.deepEqual(records.map((r) => r.id), ["route:/health"]);
@@ -114,7 +115,7 @@ test("CR-066: a still-ambiguous include_router target roots neither candidate â€
 
 test("missing configured roots produce a diagnostic, never an error (CR-002)", () => {
   const root = scratch({ "keep.txt": "" });
-  const { records, diagnostics } = derive({ repoRoot: root, options: { roots: ["api", "main.py"] } });
+  const { records, diagnostics } = derive({ repoRoot: root, options: { roots: ["api", "main.py"] }, io: ioFor(root, "fastapi") });
   assert.deepEqual(records, []);
   assert.equal(diagnostics.length, 2);
   assert.match(diagnostics[0], /api not found â€” nothing to inventory/);
@@ -122,5 +123,5 @@ test("missing configured roots produce a diagnostic, never an error (CR-002)", (
 });
 
 test("option shape is checked: roots must be an array (CR-021)", () => {
-  assert.throws(() => derive({ repoRoot: ".", options: { roots: "api" } }), /fastapi: 'roots' must be an array/);
+  assert.throws(() => derive({ repoRoot: ".", options: { roots: "api" }, io: ioFor(".", "fastapi") }), /fastapi: 'roots' must be an array/);
 });

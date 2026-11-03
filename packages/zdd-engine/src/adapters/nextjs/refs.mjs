@@ -7,8 +7,8 @@
 // own module record rather than propagating to callers: mechanically true,
 // boring, and honest about what a grep can know.
 
-import { expandTemplatePath } from "../../core/lib/template-paths.mjs";
-import { lex } from "../js/source.mjs";
+import { expandTemplatePath } from "../_shared/template-paths.mjs";
+import { lex } from "../_shared/js/source.mjs";
 
 const posixify = (p) => p.split(/[\\/]/).join("/");
 

@@ -69,7 +69,7 @@ test("CR-062: fastapi and nextjs — a dangling link under a scanned root is ski
   });
   if (!dangle(t, root, "api/ghost.py")) return;
   symlinkSync(join(root, "nowhere"), join(root, "src", "app", "ghost"), "junction");
-  const fast = fastapi({ repoRoot: root, options: { roots: ["api"] } });
+  const fast = fastapi({ repoRoot: root, options: { roots: ["api"] }, io: makeExtractorIo(root, "fastapi") });
   assert.deepEqual(fast.records.map((r) => r.id), ["route:/jobs/"]);
   // FastAPI reads through io (CR-015), which never follows a symlink, dangling or not.
   assert.ok(fast.diagnostics.some((d) => /api\/ghost\.py.*(dangling symlink|symlink — not followed)/.test(d)), JSON.stringify(fast.diagnostics));

@@ -3,11 +3,11 @@
 // A cron is named by its route's last segment; two routes that end alike
 // (`/api/a/run`, `/api/b/run`) are named by the whole route (CR-510).
 // Options (extractorOptions["background-vercel"]): roots, exclude, modes — see
-// adapters/background/shared.mjs (backgroundReader).
+// _shared/background/tasks.mjs (backgroundReader).
 
 import { posix } from "node:path";
-import { FACTS_KEY_ORDER, backgroundReader, slug, SOURCE_COMMENT } from "../background/shared.mjs";
-import { DETECTION_BASE, backgroundProposal, manifests } from "../background/detect.mjs";
+import { FACTS_KEY_ORDER, backgroundReader, slug, SOURCE_COMMENT } from "../_shared/background/tasks.mjs";
+import { DETECTION_BASE, backgroundProposal, manifests } from "../_shared/background/detect.mjs";
 
 export { FACTS_KEY_ORDER };
 

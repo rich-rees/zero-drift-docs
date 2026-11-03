@@ -11,7 +11,7 @@
 // structure, not data access. Purely textual — no TypeScript parser — and
 // deterministic: same bytes in, same answers out.
 
-import { expandTemplatePath } from "../../core/lib/template-paths.mjs";
+import { expandTemplatePath } from "../template-paths.mjs";
 
 export const RESOLVE_EXTS = [".tsx", ".ts", ".jsx", ".js", "/index.tsx", "/index.ts", "/index.jsx", "/index.js"];
 export const MAX_SOURCE_BYTES = 1024 * 1024;

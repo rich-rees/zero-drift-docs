@@ -2,7 +2,7 @@
 // `FastAPI()` app or an `APIRouter`; the scan roots are their top-level files
 // or first path segments.
 
-import { PY_SKIP_DIRS } from "../python/detect.mjs";
+import { PY_SKIP_DIRS } from "../_shared/python/detect.mjs";
 
 export const DETECTION = {
   parts: ["routes"],

@@ -17,7 +17,7 @@ import { readFileSync, writeFileSync, rmSync, mkdtempSync, cpSync } from "node:f
 import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { parseCommand, describe, parseCompose, scanPgCron, scanQueues, scanWorkflow } from "../src/adapters/background/shared.mjs";
+import { parseCommand, describe, parseCompose, scanPgCron, scanQueues, scanWorkflow } from "../src/adapters/_shared/background/tasks.mjs";
 import { runReaders } from "./background-run.mjs";
 
 const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "..");

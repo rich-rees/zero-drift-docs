@@ -4,13 +4,13 @@
 // how a task is DEPLOYED: when another reader names the same task (a
 // Procfile line, a declared entry, the same code or the same command from
 // the same folder), the core joins the schedule and the file onto that
-// record instead of minting a second (src/core/lib/background-tasks.mjs).
+// record instead of minting a second (the core's merge of background tasks).
 // Options (extractorOptions["background-railway"]): roots, exclude, modes — see
-// adapters/background/shared.mjs (backgroundReader).
+// _shared/background/tasks.mjs (backgroundReader).
 
 import { posix } from "node:path";
-import { FACTS_KEY_ORDER, backgroundReader, parseCommand, parseToml, SOURCE_COMMENT } from "../background/shared.mjs";
-import { DETECTION_BASE, backgroundProposal, manifests } from "../background/detect.mjs";
+import { FACTS_KEY_ORDER, backgroundReader, parseCommand, parseToml, SOURCE_COMMENT } from "../_shared/background/tasks.mjs";
+import { DETECTION_BASE, backgroundProposal, manifests } from "../_shared/background/detect.mjs";
 
 export { FACTS_KEY_ORDER };
 

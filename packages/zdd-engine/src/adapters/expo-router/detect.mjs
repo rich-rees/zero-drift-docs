@@ -2,7 +2,7 @@
 // under an `app/` folder (Next.js's is `layout`). An `expo` dependency with
 // no tree yet names the Mobile application and proposes nothing.
 
-import { JS_SKIP_DIRS, packageDeps } from "../js/detect.mjs";
+import { JS_SKIP_DIRS, packageDeps } from "../_shared/js/detect.mjs";
 
 export const DETECTION = {
   parts: ["screens"],

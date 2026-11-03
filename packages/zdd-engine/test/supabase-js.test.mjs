@@ -16,8 +16,8 @@ import { derive as supabaseJs, scanDataCalls, scanSubscriptions } from "../src/a
 import { derive as supabase } from "../src/adapters/supabase/index.mjs";
 import { derive as reactRouter } from "../src/adapters/react-router/index.mjs";
 import { derive as components } from "../src/adapters/components/index.mjs";
-import { codeUnits, topLevel, narrowModule, MODULE_UNIT } from "../src/adapters/js/source.mjs";
-import { closeOver } from "../src/core/lib/data-access.mjs";
+import { codeUnits, topLevel, narrowModule, MODULE_UNIT } from "../src/adapters/_shared/js/source.mjs";
+import { closeOver } from "../src/adapters/_shared/data-access.mjs";
 import { makeExtractorIo } from "../src/core/lib/extractor-io.mjs";
 import { resolveRefs } from "../src/core/lib/resolve-refs.mjs";
 

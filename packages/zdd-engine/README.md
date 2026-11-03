@@ -212,7 +212,7 @@ own adapters are behind on.
 | `SUITE` | 1 | yes (an adopter's own) | a `fixture/` folder beside the adapter and `export const SUITE = { options, companions? }`; a catalogue adapter's fixture lives in ZDD's tests |
 | `FACTS_KEY_ORDER` | 1 | no | facts in a stable order, per kind |
 | unresolved refs | 1 | no | `?table:<name>`, `?route:<url>`, … for another adapter's records; the core resolves them |
-| data access | 1 | no | `?code:<file>#<function>` refs, and `data-access` records naming the tables a function reaches (decision 0037) |
+| data access | 1 | no | `?code:<file>#<function>` refs, and `data-access` records naming the tables a function reaches, joined on `resource[0]` and `facts.function` (decision 0037) |
 | typed edges | 1 | no | `facts.edges`, a verb for a ref (decision 0016) |
 | `warnings` | 1 | no | a list printed on every derive |
 | `unread` | 1 | no | a list of `{ file, what }`, what it saw and could not read (decision 0048) |

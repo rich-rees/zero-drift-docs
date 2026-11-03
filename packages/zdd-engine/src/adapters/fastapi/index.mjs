@@ -5,7 +5,7 @@
 // transitively (app -> api router -> jobs router) and for every mount (one
 // router included under both /v1 and /v2 yields both route sets). Textual,
 // no Python parsing; functions, strings and imports are read by the shared
-// helper (adapters/python/source.mjs). `<mod>.router` resolves through the
+// helper (_shared/python/source.mjs). `<mod>.router` resolves through the
 // file's imports (`from app.routes import jobs` names app/routes/jobs.py
 // though a repository module shares the basename); with no import of `<mod>`
 // the old rule runs: the one scanned file called <mod>.py (a package-qualified
@@ -38,10 +38,9 @@
 // never an error.
 
 import { basename } from "node:path";
-import { slugify } from "../../core/lib/slug.mjs";
-import { repoRelative } from "../../core/lib/paths.mjs";
-import { makeExtractorIo } from "../../core/lib/extractor-io.mjs";
-import { DEFAULT_EXCLUDE_DIRS, defs, defsByLine, imports, moduleFiles, pythonFiles, resolveModule } from "../python/source.mjs";
+import { slugify } from "../_shared/slug.mjs";
+import { repoRelative } from "../_shared/paths.mjs";
+import { DEFAULT_EXCLUDE_DIRS, defs, defsByLine, imports, moduleFiles, pythonFiles, resolveModule } from "../_shared/python/source.mjs";
 
 // The most same-file functions one handler's walk visits: a bound, so a
 // generated file of thousands of chained helpers stays cheap (CR-018).
@@ -171,7 +170,7 @@ export function handlerRefs(handler, file, byModule) {
   return refs;
 }
 
-export function derive({ repoRoot, options, io = makeExtractorIo(repoRoot, "fastapi") }) {
+export function derive({ repoRoot, options, io }) {
   const diagnostics = [];
   const { roots = ["."], excludeDirs = DEFAULT_EXCLUDE_DIRS, appVar = "app" } = options;
   if (!Array.isArray(roots)) throw new Error(`fastapi: 'roots' must be an array of repo-relative paths`);
@@ -340,4 +339,4 @@ export const CONTRACT = 1;
 export const COMMENT = { ".py": "#" };
 
 // Who imports what, for an extend blessing's users (decision 0046).
-export { IMPORTS } from "../python/imports.mjs";
+export { IMPORTS } from "../_shared/python/imports.mjs";

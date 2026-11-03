@@ -14,8 +14,8 @@ import { readFileSync, writeFileSync, rmSync, mkdtempSync, cpSync, mkdirSync } f
 import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { IMPORTS as JS } from "../src/adapters/js/imports.mjs";
-import { IMPORTS as PY } from "../src/adapters/python/imports.mjs";
+import { IMPORTS as JS } from "../src/adapters/_shared/js/imports.mjs";
+import { IMPORTS as PY } from "../src/adapters/_shared/python/imports.mjs";
 import { makeExtractorIo } from "../src/core/lib/extractor-io.mjs";
 import { importersOf, importReaders } from "../src/core/lib/importers.mjs";
 import { buildBlessingIndex } from "../src/core/lib/blessing-index.mjs";

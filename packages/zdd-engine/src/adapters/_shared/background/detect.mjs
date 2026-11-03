@@ -2,7 +2,7 @@
 // proposal's shape and the caveat every reader carries, the command shape
 // that counts as background work, and the queue declarations in source.
 
-import { SOURCE_EXT, TEST_FILE, scanQueues } from "./shared.mjs";
+import { SOURCE_EXT, TEST_FILE, scanQueues } from "./tasks.mjs";
 
 // A command that runs code: `python -m pkg`, `node file.js`, `npm run x`.
 // A package.json script on its own is a hand-run tool, not background work,

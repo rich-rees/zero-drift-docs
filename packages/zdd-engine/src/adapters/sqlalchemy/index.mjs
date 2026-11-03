@@ -2,7 +2,7 @@
 // 0037), the shape SQLAlchemy's `text("…")` takes, and any driver's SQL
 // string. One `data-access` record per Python function whose string literals
 // hold SQL — its own, and those of the same-file functions it uses — keyed by
-// file + function name (adapters/python/source.mjs cuts the functions), with
+// file + function name (_shared/python/source.mjs cuts the functions), with
 // each table the SQL names as an UNRESOLVED ref.
 //
 // A string literal is SQL when it holds one of the statement words SELECT,
@@ -25,9 +25,9 @@
 //   excludeDirs  directory names skipped during the walk
 // A missing root is "nothing to inventory" with a diagnostic, never an error.
 
-import { repoRelative } from "../../core/lib/paths.mjs";
-import { MAX_CLOSED } from "../../core/lib/data-access.mjs";
-import { DEFAULT_EXCLUDE_DIRS, closeOver, dataAccessRecord, defs, pythonFiles, strings } from "../python/source.mjs";
+import { repoRelative } from "../_shared/paths.mjs";
+import { MAX_CLOSED } from "../_shared/data-access.mjs";
+import { DEFAULT_EXCLUDE_DIRS, closeOver, dataAccessRecord, defs, pythonFiles, strings } from "../_shared/python/source.mjs";
 
 export const FACTS_KEY_ORDER = {
   "data-access": ["function"],
@@ -240,4 +240,4 @@ export const CONTRACT = 1;
 export const COMMENT = { ".py": "#" };
 
 // Who imports what, for an extend blessing's users (decision 0046).
-export { IMPORTS } from "../python/imports.mjs";
+export { IMPORTS } from "../_shared/python/imports.mjs";

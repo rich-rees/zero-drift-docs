@@ -4,7 +4,7 @@
 // client is built in another module and handed in. Its calls are read
 // wherever they are (the default roots), so no option is proposed.
 
-import { PY_SKIP_DIRS, pythonLibraryEvidence } from "../python/detect.mjs";
+import { PY_SKIP_DIRS, pythonLibraryEvidence } from "../_shared/python/detect.mjs";
 
 // upgradeAdds: before 0.9 `fastapi` read these calls itself (decision 0037).
 export const DETECTION = { parts: ["queries"], order: 12, upgradeAdds: "0.9.0", optionShape: { pathLists: ["roots"] }, skipDirs: PY_SKIP_DIRS };

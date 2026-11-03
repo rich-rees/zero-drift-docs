@@ -3,7 +3,7 @@
 // nearest folder holding a package.json (a workspace app); without that, the
 // top-level folder (or the repo root for a root-level file).
 
-import { JS_SKIP_DIRS, packageDeps } from "../js/detect.mjs";
+import { JS_SKIP_DIRS, packageDeps } from "../_shared/js/detect.mjs";
 
 export const DETECTION = { parts: ["components"], order: 50, optIn: true, optionShape: { pathLists: ["roots"], paths: ["srcAliasRoot"] }, skipDirs: JS_SKIP_DIRS };
 

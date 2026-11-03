@@ -115,8 +115,10 @@ export function readFixture(dir) {
 }
 
 // An adopter's own adapter, as rel -> bytes under zdd/extractors/: a folder
-// without its fixtures and tests, or a single module.
-function readLocalAdapter(name, path) {
+// without its fixtures and tests, or a single module, and every other file
+// its imports reach inside `within` (localExtractorDir: the shared folder
+// beside the adapters, decision 0048 point 4), at the same place.
+function readLocalAdapter(name, path, entry, within) {
   const out = new Map();
   const budget = { bytes: 0 };
   if (lstatSync(path).isDirectory()) {
@@ -125,7 +127,49 @@ function readLocalAdapter(name, path) {
       skip: (rel, n) => /^fixture(?:-deep|-trap)?$/.test(rel) || n === "node_modules" || n === ".git" || n.endsWith(".test.mjs"),
     });
   } else out.set(`${name}.mjs`, readCapped(path, budget));
+  if (entry && within) {
+    const root = resolve(within);
+    const own = resolve(path);
+    for (const abs of moduleReach(entry, root).files) {
+      if (abs === own || abs.startsWith(own + sep)) continue;
+      out.set(relative(root, abs).split(sep).join("/"), readCapped(abs, budget));
+    }
+  }
   return out;
+}
+
+// The JS files a module reaches by its static relative imports, itself
+// included, that stay inside `within`: what copying it elsewhere must bring
+// (decision 0048 point 4). `outside` names each import that leaves `within`,
+// and `missing` each reached file that is not there. Read as check 5 reads
+// an import: comments and strings blanked, so an import written in either is
+// not one. Sorted, so a copy is the same every time.
+export function moduleReach(entry, within) {
+  const root = resolve(within);
+  const seen = new Set();
+  const outside = [];
+  const missing = [];
+  const visit = (abs) => {
+    if (seen.has(abs)) return;
+    let text;
+    try {
+      if (!lstatSync(abs).isFile()) throw new Error("not a file");
+      text = readFileSync(abs, "utf8");
+    } catch {
+      missing.push(relative(root, abs).split(sep).join("/"));
+      return;
+    }
+    seen.add(abs);
+    for (const m of lexJs(text).code.matchAll(IMPORT_RE)) {
+      const spec = m[1] ?? m[2];
+      if (!spec.startsWith(".")) continue;
+      const target = resolve(dirname(abs), spec);
+      if (target.startsWith(root + sep)) visit(target);
+      else outside.push(`${relative(root, abs).split(sep).join("/")} imports ${spec}`);
+    }
+  };
+  visit(resolve(entry));
+  return { files: [...seen].sort(), outside, missing };
 }
 
 function makeRepo(files, opts) {
@@ -441,7 +485,7 @@ export function runSuite({ name, fixtureDir, options = {}, comment, trapDir = nu
   const result = (n, ok, detail = null) => results.push({ n, id: SUITE_CHECKS[n - 1].id, ok, detail });
   let localFiles = null;
   try {
-    if (local) localFiles = readLocalAdapter(name, local.path);
+    if (local) localFiles = readLocalAdapter(name, local.path, entry, within);
     let fixture = null;
     let precondition = null;
     if (!fixtureDir || !existsSync(fixtureDir) || !lstatSync(fixtureDir).isDirectory()) {

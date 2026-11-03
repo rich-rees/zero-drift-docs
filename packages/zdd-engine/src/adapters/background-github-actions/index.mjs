@@ -4,10 +4,10 @@
 // work. Listing this adapter in `extractors` is the opt-in (it was
 // `jobs.includeGithubActions` before 0.9).
 // Options (extractorOptions["background-github-actions"]): roots, exclude, modes — see
-// adapters/background/shared.mjs (backgroundReader).
+// _shared/background/tasks.mjs (backgroundReader).
 
 import { posix } from "node:path";
-import { FACTS_KEY_ORDER, backgroundReader, scanWorkflow, slug, SOURCE_COMMENT } from "../background/shared.mjs";
+import { FACTS_KEY_ORDER, backgroundReader, scanWorkflow, slug, SOURCE_COMMENT } from "../_shared/background/tasks.mjs";
 
 export { FACTS_KEY_ORDER };
 
@@ -25,7 +25,7 @@ export function derive({ options, io }) {
 
 // Detection (decision 0039): none — this reader is chosen by listing it; its
 // options are shaped like every background reader's.
-export { DETECTION_BASE as DETECTION } from "../background/detect.mjs";
+export { DETECTION_BASE as DETECTION } from "../_shared/background/detect.mjs";
 
 // The adapter contract this adapter was written for, and how to comment
 // out a line of each kind of file it reads: what the standard suite needs

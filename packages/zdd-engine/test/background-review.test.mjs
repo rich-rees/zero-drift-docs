@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import { writeFileSync, rmSync, mkdtempSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { maskComments, scanPgCron, scanQueues, scanWorkflow } from "../src/adapters/background/shared.mjs";
+import { maskComments, scanPgCron, scanQueues, scanWorkflow } from "../src/adapters/_shared/background/tasks.mjs";
 import { runReaders } from "./background-run.mjs";
 
 const scratch = (t, files) => {

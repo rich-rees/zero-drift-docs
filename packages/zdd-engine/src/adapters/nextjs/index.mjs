@@ -15,14 +15,14 @@
 // and each scanned file's code as `?code:<file>#*` (decision 0037): its
 // `.from('x')` / `.rpc('x')` are a data-access adapter's (supabase-js) to
 // read; the deriver resolves and folds both after the merge
-// (src/core/lib/resolve-refs.mjs). A missing appDir or middleware
+// (the core's ref resolution). A missing appDir or middleware
 // file is "nothing to inventory" (greenfield), never an error.
 
 import { join } from "node:path";
 import { walkSourceFiles, scanFiles, DEFAULT_REFS } from "./refs.mjs";
-import { slugify } from "../../core/lib/slug.mjs";
-import { repoRelative } from "../../core/lib/paths.mjs";
-import { leadingComment, lex } from "../js/source.mjs";
+import { slugify } from "../_shared/slug.mjs";
+import { repoRelative } from "../_shared/paths.mjs";
+import { leadingComment, lex } from "../_shared/js/source.mjs";
 
 export { slugify };
 
@@ -396,4 +396,4 @@ export const CONTRACT = 1;
 export const COMMENT = { ".ts": "//", ".tsx": "//", ".js": "//", ".jsx": "//", ".mjs": "//", ".cjs": "//" };
 
 // Who imports what, for an extend blessing's users (decision 0046).
-export { IMPORTS } from "../js/imports.mjs";
+export { IMPORTS } from "../_shared/js/imports.mjs";

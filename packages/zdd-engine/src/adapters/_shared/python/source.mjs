@@ -55,7 +55,7 @@
 // def line alone after HEADER_MAX_LINES lines, and an import list that never
 // closes stops joining after LOGICAL_MAX_LINES.
 
-export { closeOver, dataAccessRecord } from "../../core/lib/data-access.mjs";
+export { closeOver, dataAccessRecord } from "../data-access.mjs";
 
 // The directories a Python walk skips unless the adopter says otherwise.
 export const DEFAULT_EXCLUDE_DIRS = ["node_modules", ".venv", "venv", "__pycache__", ".git", "tests", "test"];

@@ -2,11 +2,11 @@
 // 0038): one task per service with a job-shaped command and no published
 // ports (a service that publishes ports is the web process), a worker.
 // Options (extractorOptions["background-compose"]): roots, exclude, modes — see
-// adapters/background/shared.mjs (backgroundReader).
+// _shared/background/tasks.mjs (backgroundReader).
 
 import { posix } from "node:path";
-import { FACTS_KEY_ORDER, backgroundReader, parseCommand, parseCompose, SOURCE_COMMENT } from "../background/shared.mjs";
-import { DETECTION_BASE, backgroundProposal, manifests } from "../background/detect.mjs";
+import { FACTS_KEY_ORDER, backgroundReader, parseCommand, parseCompose, SOURCE_COMMENT } from "../_shared/background/tasks.mjs";
+import { DETECTION_BASE, backgroundProposal, manifests } from "../_shared/background/detect.mjs";
 
 export { FACTS_KEY_ORDER };
 

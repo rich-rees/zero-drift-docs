@@ -4,11 +4,11 @@
 // runs one). The mode is the reader's `modes` option, else unknown — a
 // Procfile does not say whether a process is a worker or scheduled.
 // Options (extractorOptions["background-procfile"]): roots, exclude, modes — see
-// adapters/background/shared.mjs (backgroundReader).
+// _shared/background/tasks.mjs (backgroundReader).
 
 import { posix } from "node:path";
-import { FACTS_KEY_ORDER, backgroundReader, parseCommand, SOURCE_COMMENT } from "../background/shared.mjs";
-import { DETECTION_BASE, backgroundProposal, jobShaped, manifests } from "../background/detect.mjs";
+import { FACTS_KEY_ORDER, backgroundReader, parseCommand, SOURCE_COMMENT } from "../_shared/background/tasks.mjs";
+import { DETECTION_BASE, backgroundProposal, jobShaped, manifests } from "../_shared/background/detect.mjs";
 
 export { FACTS_KEY_ORDER };
 

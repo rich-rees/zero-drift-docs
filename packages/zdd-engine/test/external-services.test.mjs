@@ -54,7 +54,7 @@ test("fixture: Sentry from an import and an env prefix across Python and TS, res
 });
 
 test("after the merge: usedBy resolves to the route in main.py and never to another service; a file that is nobody's resource is a quiet drop", () => {
-  const api = fastapi({ repoRoot: FIXTURE, options: { roots: ["apps/api"] } });
+  const api = fastapi({ repoRoot: FIXTURE, options: { roots: ["apps/api"] }, io: makeExtractorIo(FIXTURE, "fastapi") });
   const svc = derive({ repoRoot: FIXTURE, options: { services: [{ name: "Sentry", imports: ["sentry_sdk"], env: ["SENTRY_"] }, { name: "Resend", env: ["RESEND_"] }] }, io: makeExtractorIo(FIXTURE, "external-services") });
   const { records, diagnostics } = resolveRefs([...api.records, ...svc.records]);
   const sentry = records.find((r) => r.id === "external-service:sentry");

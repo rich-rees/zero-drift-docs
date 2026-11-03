@@ -150,7 +150,7 @@ test("the schema's documented refs defaults are the engine's defaults (CR-116)",
 });
 
 test("the schema's documented supabase-js defaults are the engine's (ZDD-3 slice 2b, CR-073)", async () => {
-  const js = await import(pathToFileURL(resolve(PLUGIN, "..", "..", "packages", "zdd-engine", "src", "adapters", "js", "source.mjs")).href);
+  const js = await import(pathToFileURL(resolve(PLUGIN, "..", "..", "packages", "zdd-engine", "src", "adapters", "_shared", "js", "source.mjs")).href);
   const doc = SCHEMA.properties.extractorOptions.properties["supabase-js"].properties;
   assert.deepEqual(doc.extensions.default, js.DEFAULT_EXTENSIONS);
   assert.deepEqual(doc.excludeDirs.default, js.DEFAULT_EXCLUDE_DIRS);

@@ -3,8 +3,8 @@
 // react-router), or the dependency alone, proposed at the convention's
 // default path inside the workspace package that declares it (CR-021).
 
-import { repoRelative } from "../../core/lib/paths.mjs";
-import { JS_NOT_SOURCE, JS_SKIP_DIRS, packageDeps } from "../js/detect.mjs";
+import { repoRelative } from "../_shared/paths.mjs";
+import { JS_NOT_SOURCE, JS_SKIP_DIRS, packageDeps } from "../_shared/js/detect.mjs";
 
 export const DETECTION = {
   parts: ["screens"],

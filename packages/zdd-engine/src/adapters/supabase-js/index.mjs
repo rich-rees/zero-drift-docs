@@ -27,9 +27,9 @@
 // or a string is not one. Every file is read through `io` (decision 0010).
 // Deterministic: same bytes in, same records out.
 
-import { repoRelative } from "../../core/lib/paths.mjs";
-import { MAX_CLOSED, closeOver, dataAccessRecord } from "../../core/lib/data-access.mjs";
-import { codeUnits, jsFiles, model, stringAt, topLevel, DEFAULT_EXCLUDE_DIRS, DEFAULT_EXCLUDE_SUFFIXES, DEFAULT_EXTENSIONS } from "../js/source.mjs";
+import { repoRelative } from "../_shared/paths.mjs";
+import { MAX_CLOSED, closeOver, dataAccessRecord } from "../_shared/data-access.mjs";
+import { codeUnits, jsFiles, model, stringAt, topLevel, DEFAULT_EXCLUDE_DIRS, DEFAULT_EXCLUDE_SUFFIXES, DEFAULT_EXTENSIONS } from "../_shared/js/source.mjs";
 
 export const FACTS_KEY_ORDER = {
   "data-access": ["function", "edges"],
@@ -329,4 +329,4 @@ export const CONTRACT = 1;
 export const COMMENT = { ".ts": "//", ".tsx": "//", ".js": "//", ".jsx": "//", ".mjs": "//", ".cjs": "//" };
 
 // Who imports what, for an extend blessing's users (decision 0046).
-export { IMPORTS } from "../js/imports.mjs";
+export { IMPORTS } from "../_shared/js/imports.mjs";

@@ -44,9 +44,9 @@
 //   extensions default [".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"]
 // Every file is read through `io` (decision 0010). Deterministic.
 
-import { repoRelative } from "../../core/lib/paths.mjs";
-import { lex as jsLex } from "../js/source.mjs";
-import { commentFree as pyCommentFree } from "../python/source.mjs";
+import { repoRelative } from "../_shared/paths.mjs";
+import { lex as jsLex } from "../_shared/js/source.mjs";
+import { commentFree as pyCommentFree } from "../_shared/python/source.mjs";
 
 export const FACTS_KEY_ORDER = {
   "external-service": ["markers", "usedBy", "edges"],

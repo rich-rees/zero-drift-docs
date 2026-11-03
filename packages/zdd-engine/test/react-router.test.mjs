@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { makeExtractorIo } from "../src/core/lib/extractor-io.mjs";
 import { derive, parseRouteTree, joinRoutePath } from "../src/adapters/react-router/index.mjs";
-import { scanApiCalls, normalizeApiPath, importMap, lex, topLevel, narrowModule, MAX_SOURCE_BYTES } from "../src/adapters/js/source.mjs";
+import { scanApiCalls, normalizeApiPath, importMap, lex, topLevel, narrowModule, MAX_SOURCE_BYTES } from "../src/adapters/_shared/js/source.mjs";
 import { derive as fastapi } from "../src/adapters/fastapi/index.mjs";
 import { resolveRefs } from "../src/core/lib/resolve-refs.mjs";
 import { dataAccessOf, reach, withoutCode } from "./code-reach.mjs";
@@ -72,7 +72,7 @@ test("refs: a screen's own API calls and those of the names it imports resolve t
   // Unresolved before the merge; the screen's own file and the unit it
   // imports are named as code (decision 0037), for a data-access adapter.
   assert.deepEqual(web.records.find((r) => r.id === "surface:/activity").refs, ["?code:apps/web/src/pages/ActivityPage.tsx#*", "?code:apps/web/src/services.ts#useServices", "?route:/activity"]);
-  const api = fastapi({ repoRoot: FIXTURE, options: { roots: ["apps/api"] } });
+  const api = fastapi({ repoRoot: FIXTURE, options: { roots: ["apps/api"] }, io: makeExtractorIo(FIXTURE, "fastapi") });
   const { records } = resolveRefs([...api.records, ...web.records]);
   const by = (id) => records.find((r) => r.id === id);
   assert.deepEqual(by("surface:/activity").refs, ["route:/activity"]);
@@ -591,7 +591,7 @@ test("1.3.0 (the second adopter's 1.3.0 review, finding 1) under decision 0019: 
     "web/src/data.ts": "export function useVerb() {\n  return (id: string, verb: \"a\" | \"b\") => api.post(`/things/${id}/${verb}`, {});\n}\n",
   });
   try {
-    const api = fastapi({ repoRoot: root, options: { roots: ["api"] } });
+    const api = fastapi({ repoRoot: root, options: { roots: ["api"] }, io: makeExtractorIo(root, "fastapi") });
     const web = derive({ repoRoot: root, io: makeExtractorIo(root, "react-router"), options: { routesFile: "web/src/routes.tsx" } });
     const { records, diagnostics } = resolveRefs([...api.records, ...web.records]);
     assert.deepEqual(records.find((r) => r.id === "surface:/things").refs, ["route:/things/{id}/a", "route:/things/{id}/b"]);

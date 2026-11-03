@@ -39,7 +39,6 @@ import { importReaders, importersOf } from "./lib/importers.mjs";
 import { selectedModules } from "./derive.mjs";
 import { MAX_STORE_FILE_BYTES } from "./lib/walk-markdown.mjs";
 import { UNREAD_KIND, itemOf, unreadConfig, unreadReport } from "./lib/unread.mjs";
-import { slugify } from "./lib/slug.mjs";
 import { loadConfig, resolveViewer, resolveNonAreaTags, validateRepoBase, absentStoreNotes } from "./lib/config.mjs";
 import { loadViewer, DEFAULT_VIEWER } from "./viewers/index.mjs";
 

@@ -12,7 +12,7 @@
 // "nothing to inventory" (greenfield), never an error.
 
 import { replayMigrations, appliedMigrations, tableKey, fileNamed } from "./sql-replay.mjs";
-import { repoRelative } from "../../core/lib/paths.mjs";
+import { repoRelative } from "../_shared/paths.mjs";
 
 const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 

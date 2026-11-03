@@ -4,11 +4,11 @@
 // queue named like the process that consumes it joins that process's
 // record (the core merges them: the same code file).
 // Options (extractorOptions["background-inngest"]): roots, exclude, modes — see
-// adapters/background/shared.mjs (backgroundReader).
+// _shared/background/tasks.mjs (backgroundReader).
 
 import { posix } from "node:path";
-import { FACTS_KEY_ORDER, backgroundReader, SOURCE_EXT, TEST_FILE, scanQueues, slug, SOURCE_COMMENT } from "../background/shared.mjs";
-import { DETECTION_BASE, backgroundProposal, queueHits } from "../background/detect.mjs";
+import { FACTS_KEY_ORDER, backgroundReader, SOURCE_EXT, TEST_FILE, scanQueues, slug, SOURCE_COMMENT } from "../_shared/background/tasks.mjs";
+import { DETECTION_BASE, backgroundProposal, queueHits } from "../_shared/background/detect.mjs";
 
 export { FACTS_KEY_ORDER };
 

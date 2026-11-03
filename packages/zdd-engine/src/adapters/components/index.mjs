@@ -41,8 +41,8 @@
 // through a link. Deterministic: same bytes in, same records out.
 
 import { posix } from "node:path";
-import { lex, model, localImports, scanApiCalls } from "../js/source.mjs";
-import { repoRelative } from "../../core/lib/paths.mjs";
+import { lex, model, localImports, scanApiCalls } from "../_shared/js/source.mjs";
+import { repoRelative } from "../_shared/paths.mjs";
 
 export const FACTS_KEY_ORDER = {
   component: ["name", "export", "props", "propsType", "propsFrom", "shared", "sharedBy", "usedBy", "platforms", "edges"],
@@ -468,4 +468,4 @@ export const CONTRACT = 1;
 export const COMMENT = { ".ts": "//", ".tsx": "//", ".js": "//", ".jsx": "//", ".mjs": "//", ".cjs": "//" };
 
 // Who imports what, for an extend blessing's users (decision 0046).
-export { IMPORTS } from "../js/imports.mjs";
+export { IMPORTS } from "../_shared/js/imports.mjs";

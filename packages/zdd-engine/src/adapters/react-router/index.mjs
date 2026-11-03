@@ -52,9 +52,9 @@
 // else a diagnostic (CR-001). Deterministic: same bytes in, same records out.
 
 import { posix } from "node:path";
-import { slugify } from "../../core/lib/slug.mjs";
-import { repoRelative } from "../../core/lib/paths.mjs";
-import { MAX_SOURCE_BYTES, RESOLVE_EXTS, codeUnits, firstNonSpace, importMap, localImports, matchBracket, model, narrowModule, scanApiCalls, skipJsx, stringAt, topLevel } from "../js/source.mjs";
+import { slugify } from "../_shared/slug.mjs";
+import { repoRelative } from "../_shared/paths.mjs";
+import { MAX_SOURCE_BYTES, RESOLVE_EXTS, codeUnits, firstNonSpace, importMap, localImports, matchBracket, model, narrowModule, scanApiCalls, skipJsx, stringAt, topLevel } from "../_shared/js/source.mjs";
 
 // Route-tree nesting the parser will follow; deeper is a diagnostic, never a
 // stack overflow (CR-004). Real trees are three or four deep.
@@ -511,4 +511,4 @@ export const CONTRACT = 1;
 export const COMMENT = { ".ts": "//", ".tsx": "//", ".js": "//", ".jsx": "//", ".mjs": "//", ".cjs": "//" };
 
 // Who imports what, for an extend blessing's users (decision 0046).
-export { IMPORTS } from "../js/imports.mjs";
+export { IMPORTS } from "../_shared/js/imports.mjs";

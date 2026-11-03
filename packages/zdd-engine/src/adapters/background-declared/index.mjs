@@ -7,8 +7,8 @@
 // reader's task is joined with it by the core.
 // Options (extractorOptions["background-declared"]): entries.
 
-import { repoRelative } from "../../core/lib/paths.mjs";
-import { FACTS_KEY_ORDER, backgroundReader, SOURCE_COMMENT } from "../background/shared.mjs";
+import { repoRelative } from "../_shared/paths.mjs";
+import { FACTS_KEY_ORDER, backgroundReader, SOURCE_COMMENT } from "../_shared/background/tasks.mjs";
 
 export { FACTS_KEY_ORDER };
 
@@ -28,7 +28,7 @@ export function derive({ options, io }) {
 
 // Detection (decision 0039): none — this reader is chosen by listing it. Its
 // option shape adds the entries' path keys (CR-101).
-import { DETECTION_BASE } from "../background/detect.mjs";
+import { DETECTION_BASE } from "../_shared/background/detect.mjs";
 export const DETECTION = { ...DETECTION_BASE, optionShape: { ...DETECTION_BASE.optionShape, objectLists: { entries: { optional: ["file", "cwd"] } } } };
 
 // The adapter contract this adapter was written for, and how to comment

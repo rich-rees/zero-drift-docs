@@ -2,19 +2,19 @@
 // its replay of the repo's migrations makes sense. Each sample below is
 // hand-written in that tool's real shape, and each must come out read
 // correctly or declined: never silently wrong. A decline leaves `schema`
-// uncovered, which is what makes bootstrap offer to build.
+// uncovered, which is what makes bootstrap offer to build: that is the
+// core's, in schema-coverage.test.mjs. This file is the adapter's own, and
+// reaches ZDD only through ./adapter-kit.mjs, so it travels with the adapter.
 // Run: node --test "test/*.test.mjs"
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { detectRepo } from "../src/core/lib/detect-repo.mjs";
-import { catalogueModules } from "../src/core/derive.mjs";
-import { makeExtractorIo } from "../src/core/lib/extractor-io.mjs";
-import { derive, FACTS_KEY_ORDER } from "../src/adapters/supabase/index.mjs";
+import { ioFor, trialRead } from "./adapter-kit.mjs";
+import * as supabase from "../src/adapters/supabase/index.mjs";
 
-const modules = await catalogueModules();
+const { derive, FACTS_KEY_ORDER, DETECTION } = supabase;
 
 const repo = (t, files) => {
   const root = mkdtempSync(join(tmpdir(), "zdd-formats-"));
@@ -28,25 +28,25 @@ const repo = (t, files) => {
 
 // The proposal's own options through the adapter: what the repo would get.
 function tablesRead(root, proposal) {
-  const out = derive({ repoRoot: root, options: proposal.options, io: makeExtractorIo(root, "supabase") });
+  const out = derive({ repoRoot: root, options: proposal.options, io: ioFor(root, "supabase") });
   assert.deepEqual(out.unread, [], "a claim made by the trial read reads clean");
   return Object.fromEntries(out.records.filter((r) => r.kind === "table").map((r) => [r.title.replace(/ \(.*$/, ""), r.facts.columns.map((c) => c.name)]));
 }
+// The claim is on `schema`, the part the core then counts as covered.
+const trial = (root) => trialRead(supabase, root);
 function read(t, files) {
   const root = repo(t, files);
-  const d = detectRepo(root, modules);
-  const proposal = d.proposals.find((p) => p.name === "supabase");
-  assert.ok(proposal, `expected a claim, got ${JSON.stringify(d.declined)}`);
-  assert.deepEqual(d.coverage.find((c) => c.part === "schema").adapters, ["supabase"]);
-  return tablesRead(root, proposal);
+  const d = trial(root);
+  assert.ok(d?.proposal, `expected a claim, got ${JSON.stringify(d?.declined)}`);
+  assert.deepEqual(d.declined ?? [], []);
+  assert.deepEqual(DETECTION.parts, ["schema"]);
+  return tablesRead(root, d.proposal);
 }
 function declined(t, files, why) {
-  const d = detectRepo(repo(t, files), modules);
-  assert.ok(!d.proposals.some((p) => p.name === "supabase"), "no claim");
-  assert.ok(d.uncovered.includes("schema"), "`schema` stays uncovered, so bootstrap offers to build");
-  const said = d.declined.find((x) => x.name === "supabase");
-  assert.deepEqual(said.parts, ["schema"]);
-  assert.match(said.reasons.join(" | "), why);
+  const d = trial(repo(t, files));
+  assert.ok(d && !d.proposal, "no claim");
+  assert.ok(d.declined?.length, "declined, so the part stays uncovered");
+  assert.match(d.declined.join(" | "), why);
 }
 
 // ---- Read ----
@@ -116,9 +116,9 @@ test("Flyway is read: `V10` after `V9`, undo files never, repeatable ones last",
 });
 
 test("Flyway's own folder, `db/migration`, is not a migrations folder here: nothing claimed, nothing wrong", (t) => {
-  const d = detectRepo(repo(t, { "src/main/resources/db/migration/V1__init.sql": "CREATE TABLE orders (id INT PRIMARY KEY);\n" }), modules);
-  assert.ok(d.uncovered.includes("schema"));
-  assert.deepEqual(d.declined, []);
+  const d = trial(repo(t, { "src/main/resources/db/migration/V1__init.sql": "CREATE TABLE orders (id INT PRIMARY KEY);\n" }));
+  assert.ok(!d?.proposal, "no claim");
+  assert.deepEqual(d?.declined ?? [], []);
 });
 
 test("MySQL with no quoting and no MySQL-only statement is read", (t) => {
@@ -228,14 +228,14 @@ test("a nested folder of files beside a history is a second database, as it was"
 });
 
 test("the evidence counts the files applied", (t) => {
-  const d = detectRepo(repo(t, { "migrations/1.up.sql": "create table a (id int);\n", "migrations/1.down.sql": "drop table a;\n" }), modules);
-  assert.deepEqual(d.proposals.find((p) => p.name === "supabase").evidence, ["SQL migrations under `migrations` (1 file)"]);
+  const d = trial(repo(t, { "migrations/1.up.sql": "create table a (id int);\n", "migrations/1.down.sql": "drop table a;\n" }));
+  assert.deepEqual(d.proposal.evidence, ["SQL migrations under `migrations` (1 file)"]);
 });
 
 test("a folder holding only undo steps is no history: nothing claimed, nothing declined", (t) => {
-  const d = detectRepo(repo(t, { "migrations/1.down.sql": "drop table a;\n" }), modules);
-  assert.ok(!d.proposals.some((p) => p.name === "supabase"));
-  assert.deepEqual(d.declined, []);
+  const d = trial(repo(t, { "migrations/1.down.sql": "drop table a;\n" }));
+  assert.ok(!d?.proposal);
+  assert.deepEqual(d?.declined ?? [], []);
 });
 
 test("CR-247: migrations that yield nothing a schema reader holds claim nothing", (t) => {
@@ -247,8 +247,8 @@ test("CR-247: migrations that yield nothing a schema reader holds claim nothing"
 
 test("CR-241: an odd quoted name reaches the record store: the filename is encoded, the id and title stay as written, safe names do not move", (t) => {
   const root = repo(t, { "migrations/001.sql": 'create table "My Table" ("First Name" text);\ncreate table plain (id int);\ncreate procedure "Do It"() language sql as $$ select 1 $$;\n' });
-  const proposal = detectRepo(root, modules).proposals.find((p) => p.name === "supabase");
-  const { records } = derive({ repoRoot: root, options: proposal.options, io: makeExtractorIo(root, "supabase") });
+  const { proposal } = trial(root);
+  const { records } = derive({ repoRoot: root, options: proposal.options, io: ioFor(root, "supabase") });
   const by = Object.fromEntries(records.map((r) => [r.id, r.filename]));
   assert.equal(by["table:db/plain"], "db--plain.json");
   assert.equal(by["table:db/My Table"], "db--My~20Table.json");
@@ -278,7 +278,7 @@ test("CR-252: a decline over a function says so, not a table", (t) => {
 
 test("the record: a key added by ALTER is an edge, a function in two spellings is one record with its trigger", (t) => {
   const root = repo(t, { "migrations/001.sql": "create table a (id int);\ncreate table b (a_id int);\nalter table b add foreign key (a_id) references a(id);\ncreate function public.f() returns trigger language plpgsql as $$ begin return new; end; $$;\ncreate trigger tr before update on a for each row execute function f();\n" });
-  const { records } = derive({ repoRoot: root, options: { migrationNamespaces: [{ name: "db", dir: "migrations" }] }, io: makeExtractorIo(root, "supabase") });
+  const { records } = derive({ repoRoot: root, options: { migrationNamespaces: [{ name: "db", dir: "migrations" }] }, io: ioFor(root, "supabase") });
   assert.deepEqual(records.find((r) => r.id === "table:db/b").refs, ["table:db/a"]);
   assert.deepEqual(records.find((r) => r.id === "function:db/public.f").refs, ["table:db/a"]);
   assert.equal(records.filter((r) => r.kind === "function").length, 1);
@@ -286,7 +286,7 @@ test("the record: a key added by ALTER is an edge, a function in two spellings i
 
 test("CR-274: Prisma's own foreign keys are read, in a folder of files", (t) => {
   const root = repo(t, { "db/migrations/001.sql": 'CREATE TABLE "public"."User" ("id" SERIAL NOT NULL, CONSTRAINT "User_pkey" PRIMARY KEY ("id"));\nCREATE TABLE "public"."Post" ("id" SERIAL NOT NULL, "authorId" INTEGER NOT NULL);\nALTER TABLE "public"."Post" ADD CONSTRAINT "Post_authorId_fkey" FOREIGN KEY ("authorId") REFERENCES "public"."User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;\n' });
-  const { records } = derive({ repoRoot: root, options: { migrationNamespaces: [{ name: "db", dir: "db/migrations" }] }, io: makeExtractorIo(root, "supabase") });
+  const { records } = derive({ repoRoot: root, options: { migrationNamespaces: [{ name: "db", dir: "db/migrations" }] }, io: ioFor(root, "supabase") });
   const post = records.find((r) => r.id === "table:db/public.Post");
   assert.deepEqual(post.refs, ["table:db/public.User"]);
   assert.equal(post.facts.columns.find((c) => c.name === "authorId").references, "public.User(id)");
@@ -294,38 +294,17 @@ test("CR-274: Prisma's own foreign keys are read, in a folder of files", (t) => 
 
 test("a second key's table is an edge too", (t) => {
   const root = repo(t, { "migrations/001.sql": "create table a (id int);\ncreate table z (id int);\ncreate table b (x int references a(id));\nalter table b add constraint two foreign key (x) references z(id);\n" });
-  const { records } = derive({ repoRoot: root, options: { migrationNamespaces: [{ name: "db", dir: "migrations" }] }, io: makeExtractorIo(root, "supabase") });
+  const { records } = derive({ repoRoot: root, options: { migrationNamespaces: [{ name: "db", dir: "migrations" }] }, io: ioFor(root, "supabase") });
   assert.deepEqual(records.find((r) => r.id === "table:db/b").refs, ["table:db/a", "table:db/z"]);
 });
 
 test("CR-253: a renamed function's record carries its new id and its history, after what was there", (t) => {
   const root = repo(t, { "migrations/001.sql": "create table a (id int);\ncreate function f() returns trigger language plpgsql as $$ begin return new; end; $$;\ncreate trigger tr before update on a for each row execute function f();\n", "migrations/002.sql": "alter function f() rename to g;\n" });
-  const { records } = derive({ repoRoot: root, options: { migrationNamespaces: [{ name: "db", dir: "migrations" }] }, io: makeExtractorIo(root, "supabase") });
+  const { records } = derive({ repoRoot: root, options: { migrationNamespaces: [{ name: "db", dir: "migrations" }] }, io: ioFor(root, "supabase") });
   const g = records.find((r) => r.id === "function:db/g");
   assert.deepEqual(g.facts.renamedFrom, ["f"]);
   assert.deepEqual(g.resource, ["migrations/001.sql", "migrations/002.sql"]);
   assert.deepEqual(g.refs, ["table:db/a"]);
   assert.ok(FACTS_KEY_ORDER.function.indexOf("renamedFrom") > FACTS_KEY_ORDER.function.indexOf("triggers"));
   assert.ok(!records.some((r) => r.id === "function:db/f"));
-});
-
-// ---- Other claimers ----
-
-test("SQLAlchemy with no schema reader: `queries` covered, `schema` uncovered", (t) => {
-  const d = detectRepo(repo(t, { "requirements.txt": "sqlalchemy==2.0\n", "app/db.py": "from sqlalchemy import text\nrows = session.execute(text('select * from things'))\n" }), modules);
-  assert.deepEqual(d.coverage.find((c) => c.part === "queries").adapters, ["sqlalchemy"]);
-  assert.deepEqual(d.coverage.find((c) => c.part === "schema").adapters, []);
-  assert.ok(d.uncovered.includes("schema"));
-});
-
-test("SQLAlchemy beside migrations the trial declines: `schema` is uncovered there too", (t) => {
-  const d = detectRepo(repo(t, { "requirements.txt": "sqlalchemy==2.0\n", "migrations/001.sql": "CREATE TABLE `users` (`id` int);\n" }), modules);
-  assert.deepEqual(d.coverage.find((c) => c.part === "schema").adapters, []);
-});
-
-test("no adapter that reads queries also claims schema", () => {
-  const both = modules.filter(({ mod }) => mod.DETECTION?.parts.includes("queries") && mod.DETECTION.parts.includes("schema"));
-  assert.deepEqual(both.map((m) => m.name), []);
-  const schema = modules.filter(({ mod }) => mod.DETECTION?.parts.includes("schema")).map((m) => m.name);
-  assert.deepEqual(schema, ["supabase"]);
 });

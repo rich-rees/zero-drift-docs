@@ -2,7 +2,7 @@
 // dependency or imported. The adapter reads raw SQL strings in Python
 // functions; the ORM is not read, and the evidence says so.
 
-import { PY_SKIP_DIRS, pythonLibraryEvidence } from "../python/detect.mjs";
+import { PY_SKIP_DIRS, pythonLibraryEvidence } from "../_shared/python/detect.mjs";
 
 // upgradeAdds: new in 0.9, and the only reader of a Python repo's raw SQL
 // once `jobs` stopped reading it (decision 0037).
