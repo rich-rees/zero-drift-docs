@@ -337,23 +337,31 @@ export. A hand-written local adapter is the only route that works today.
   starter is the same in both. `scripts/stage.mjs <version> <dir>` writes a
   version's published files into a folder; it stages the baseline and the
   tree's own version and refuses any other, because a later version is
-  staged from the tree at its own commit. The overlay is kept, unpublished,
-  so slice 5's upgrade tests can stage both versions and prove the move
-  against the first.
+  staged from the tree at its own commit. 0.1.0 is frozen:
+  `baseline/manifest-0.1.0.json` pins the hash of every file it stages, so a
+  later change to any starter makes staging 0.1.0 fail instead of changing
+  it (CR-291). Re-pinning is a narrated step, and only before 0.1.0 is
+  published. The overlay is kept, unpublished, so slice 5's upgrade tests
+  can stage both versions and prove the move against the first.
 - **The fix note** (the slice's call; slice 5 reads it). `notes.json` lists
   every version, oldest first: `{ "notes": 1, "versions": [{ version,
   summary, starters: { <name>: { fixes: [{ what, who, moves }] } } }] }`.
   `what` says what changed, `who` which repos it affects, in words a session
   can test against a repo, and `moves` how record ids move, so the upgrade
   knows what to repoint. 0.1.0 has an empty `starters`. A staged version
-  carries only the notes up to it.
+  carries only the notes up to it. The stager checks the notes whole before
+  it stages anything (CR-297): `notes: 1`, versions oldest first and each
+  once, the baseline first, the package's version last, every starter named
+  a starter of the library, every fix three non-empty strings.
 - **Release.** A tag `starter-adapters-vX.Y.Z` on `main` runs
-  `release-starter-adapters.yml`: stage, both suites, the staged version's
-  own tests, publish the staged folder by trusted publishing, wait until it
-  can be fetched, and make a GitHub release that is never marked Latest. The
-  stage folder sits inside the checkout, so npm records the commit and a
-  rerun resumes. Nothing is published yet: the package's first publish and
-  its trusted publisher are Rich's release-time steps.
+  `release-starter-adapters.yml`, in two jobs so no adapter code runs where
+  a publish can (CR-290). `prove` has a read-only token: it stages a
+  throwaway copy and runs both suites and that copy's own tests. `publish`
+  stages the version again, fresh, publishes it by trusted publishing, waits
+  until it can be fetched, and makes a GitHub release that is never marked
+  Latest. A rerun resumes only when npm's tarball integrity equals the fresh
+  stage's (CR-296). Nothing is published yet: the package's first publish
+  and its trusted publisher are Rich's release-time steps.
 - **The core runs only the repo's own adapters.** `catalogue.json`,
   `lib/catalogue.mjs`, the aliases, the retired names and the bundles are
   gone. A name `localExtractorDir` does not hold stops derive with one plain
@@ -377,7 +385,13 @@ export. A hand-written local adapter is the only route that works today.
   app, so an adapter that walks the whole repo read the fixtures as the
   app's code. The io takes `notSource`, and derive and detect pass the
   repo's `localExtractorDir`: a walk never enters it, and a read refuses it
-  as absent, with its own reason.
+  as absent, with its own reason. The kit's io and scan apply the same rule
+  (CR-292), and so does detection for a folder of adapters it is given
+  inside the repo (CR-293). Paths compare case-folded where the filesystem
+  folds, and config refuses `.` as `localExtractorDir`, because then nothing
+  would be source (CR-294). An adapter that is a link is refused by derive
+  and the suite, and a folder of adapters is checked for imports that leave
+  it, or pass through a link, before any of its code runs (CR-295).
 - **The suite.** A companion is another adapter in the same folder, copied
   into the scratch repos with the adapter. Nothing is skipped as ZDD's own.
   `SUITE` gains an optional `allowEmpty: true`, for an adapter that emits
@@ -393,8 +407,12 @@ export. A hand-written local adapter is the only route that works today.
   skips what every adapter in it names. A travelling test finds that
   folder as `new URL("../../", import.meta.url)`, which is right in the
   library and in an app. `zdd-engine test [--adapters=<dir>]` runs
-  `<name>/test/*.test.mjs` with `@rich-rees/zdd` resolved to the running
-  engine by a module hook, so an app with no `node_modules` runs them. It
+  `<name>/test/*.test.mjs`, and a scaffolded adapter's `<name>/*.test.mjs`
+  (CR-305), with `@rich-rees/zdd` resolved to the running engine by a
+  module hook, so an app with no `node_modules` runs them. The hook needs
+  Node 20.6, so both packages now say `>=20.6` (CR-299). `--config` names
+  the config whose `localExtractorDir` it reads (CR-298), and a config that
+  cannot be read is said, never taken for no folder (CR-303). The kit
   freezes with the contract at 1.0.
 - **Tests.** The engine keeps the tests of the core alone, a small
   stack-free fixture for its store lints, and two test-only adapters in

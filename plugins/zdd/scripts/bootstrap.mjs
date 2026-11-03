@@ -145,9 +145,9 @@ const MAX_NAME = 120;
 const MAX_SCAN_BYTES = 1024 * 1024; // the plugin never reads a repo file larger than this (CR-091)
 
 // border: names a stack (the pre-1.0 bundle an upgrade migrates)
-// Mirror of the engine catalogue's bundles (src/adapters/catalogue.json): the one legacy
-// adapter and how its options split. The engine expands it at derive time;
-// this is the migration that makes the expansion unnecessary.
+// The one pre-1.0 bundle and how its options split, the engine catalogue's
+// once. Since 0.14 the engine refuses the `adapter` key (decision 0048), so
+// this migration is the only route from it.
 const LEGACY_ADAPTERS = {
   "nextjs-supabase": {
     extractors: ["supabase", "supabase-js", "nextjs"],
@@ -3080,9 +3080,9 @@ export function adapters(root, { raise = false } = {}) {
 }
 
 export function narrateAdapters(r) {
-  const missing = (r.unknown ?? []).map((n) => `${n}: not found in localExtractorDir (or a retired name) — the suite checked nothing for it. Restore the module, or take the name out of zdd/config.json's extractors.`);
+  const missing = (r.unknown ?? []).map((n) => `${n}: not found in localExtractorDir — the suite checked nothing for it. Restore the module (or copy the starter in), or take the name out of zdd/config.json's extractors.`);
   if (!r.adapters.length && missing.length) return [...missing, ...(r.notes ?? [])].map(printable).join("\n");
-  if (!r.adapters.length) return printable(`No adapter of this repo's own is configured: nothing to interview. (ZDD's own adapters are updated by the release and pass the standard suite in ZDD's CI.)${r.notes?.length ? `\n${r.notes.join("\n")}` : ""}`);
+  if (!r.adapters.length) return printable(`No adapter of this repo's own is configured: nothing to interview. (Since 0.14 every adapter a repo runs is its own, in localExtractorDir: copied in, each is checked here.)${r.notes?.length ? `\n${r.notes.join("\n")}` : ""}`);
   const out = [`This engine speaks adapter contract ${r.contract}; the standard suite has ${r.count} checks, and ${r.suiteChecks ? `checks 1–${r.suiteChecks} block in CI` : "none blocks in CI yet"}.`, ...missing];
   for (const a of r.adapters) {
     out.push("", `${a.name} — written for contract ${a.declared ?? "(not declared)"}`);

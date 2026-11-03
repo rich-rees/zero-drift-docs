@@ -9,12 +9,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ioFor, scanFor, trialRead } from "../src/core/kit.mjs";
 import { makeExtractorIo } from "../src/core/lib/extractor-io.mjs";
+import { folderModules } from "../src/core/lib/adapter-folder.mjs";
 import * as notes from "./adapters/notes/index.mjs";
 
 const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -120,7 +121,7 @@ test("zdd-engine test runs the tests that travel with a folder's adapters, the k
   cpSync(join(ADAPTERS, "lists"), join(empty, "lists"), { recursive: true });
   const none = run(["test", `--adapters=${empty}`]);
   assert.equal(none.status, 1);
-  assert.match(none.stderr, /test: no adapter in .* has a test\/ folder of \*\.test\.mjs files — nothing to run/);
+  assert.match(none.stderr, /test: no adapter in .* has a \*\.test\.mjs file, beside it or in its test\/ folder — nothing to run/);
   // A failing test fails the command.
   const red = scratch(t);
   cpSync(ADAPTERS, red, { recursive: true });
@@ -157,11 +158,113 @@ test("the repo's adapter folder is never source: an adapter walking the whole re
   assert.equal(d.status, 0, d.stderr);
   assert.ok(existsSync(join(repo, "zdd", "metadata", "item", "real.json")));
   assert.ok(!existsSync(join(repo, "zdd", "metadata", "item", "sample.json")), "a fixture in the adapter folder is no record");
+  // The kit's io is derive's: the repo's adapter folder is no source in it (CR-292).
   const io = ioFor(repo, "x");
-  assert.equal(io.read("zdd/extractors/lists/fixture/data/sample.list").ok, true, "the kit's io knows no config: a test's own repo reads as it is");
-  const det = run(["detect", `--root=${repo}`]);
-  assert.equal(det.status, 0, det.stderr);
-  assert.ok(!JSON.parse(det.stdout).limits.refusedFirst.some((f) => f.startsWith("zdd/")), "detection skips it too");
+  assert.deepEqual([io.read("zdd/extractors/lists/fixture/data/sample.list").code, io.read("data/real.list").ok], ["ignored", true]);
+});
+
+// A folder outside zdd/ (which detection skips by name anyway), so only the
+// adapter-folder rule can keep its fixtures out (CR-306). Each assertion was
+// seen red with the rule taken out of detect.mjs and kit.mjs.
+test("detection and the kit's scan never see an adapter folder's fixtures as the app's evidence, wherever the folder is (CR-293, CR-306)", async (t) => {
+  const repo = scratch(t);
+  cpSync(join(FIXTURE, "zdd"), join(repo, "zdd"), { recursive: true });
+  cpSync(ADAPTERS, join(repo, "tools", "extractors"), { recursive: true });
+  put(repo, { "tools/extractors/notes/fixture/more/x.note": "GET /x\n", "app/readme.md": "no notes here\n" });
+  const p = join(repo, "zdd", "config.json");
+  writeFileSync(p, JSON.stringify({ ...JSON.parse(readFileSync(p, "utf8")), localExtractorDir: "tools/extractors" }));
+  const own = run(["detect", `--root=${repo}`]);
+  assert.equal(own.status, 0, own.stderr);
+  assert.deepEqual(JSON.parse(own.stdout).proposals.map((x) => x.name), [], "the repo's own folder: its fixtures are no notes");
+  // The folder given, inside a repo whose config names none.
+  writeFileSync(p, JSON.stringify({ ...JSON.parse(readFileSync(p, "utf8")), localExtractorDir: undefined }));
+  const given = run(["detect", `--adapters=${join(repo, "tools", "extractors")}`, `--root=${repo}`]);
+  assert.equal(given.status, 0, given.stderr);
+  assert.deepEqual(JSON.parse(given.stdout).proposals.map((x) => x.name), [], "a folder given inside the repo is no source either");
+  const scan = await scanFor(repo, join(repo, "tools", "extractors"));
+  assert.ok(!scan.files.some((f) => f.rel.startsWith("tools/")), scan.files.map((f) => f.rel).join(", "));
+  assert.equal(await trialRead(notes, repo, join(repo, "tools", "extractors")), null);
+  const self = run(["detect", `--adapters=${repo}`, `--root=${repo}`]);
+  assert.equal(self.status, 1);
+  assert.match(self.stderr, /is the repo itself — adapters are a folder of their own/);
+});
+
+test("detect without --adapters says what is wrong with a config it cannot read, never 'no adapters' (CR-303); --config names another (CR-298)", (t) => {
+  const repo = scratch(t);
+  put(repo, { "zdd/config.json": "{ not json" });
+  const r = run(["detect", `--root=${repo}`]);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /config\.json cannot be read for its localExtractorDir/);
+  put(repo, { "zdd/config.json": JSON.stringify({ localExtractorDir: "." }) });
+  assert.match(run(["detect", `--root=${repo}`]).stderr, /localExtractorDir is the repo itself/);
+  put(repo, { "zdd/config.json": JSON.stringify({ localExtractorDir: "../x" }) });
+  assert.match(run(["detect", `--root=${repo}`]).stderr, /must be repo-relative|outside the repo/);
+  // Given --adapters, a broken config is bootstrap's to name: detection runs.
+  assert.equal(run(["detect", `--adapters=${ADAPTERS}`, `--root=${repo}`]).status, 0);
+  // --config: the adapters a config elsewhere names, for detect and test.
+  cpSync(ADAPTERS, join(repo, "own"), { recursive: true });
+  put(repo, { "elsewhere/zdd.json": JSON.stringify({ localExtractorDir: "own" }), "notes/a.note": "GET /a\n" });
+  const d = run(["detect", `--root=${repo}`, `--config=${join(repo, "elsewhere", "zdd.json")}`]);
+  assert.equal(d.status, 0, d.stderr);
+  assert.deepEqual(JSON.parse(d.stdout).proposals.map((x) => x.name), ["notes"]);
+  assert.equal(run(["test", `--root=${repo}`, `--config=${join(repo, "elsewhere", "zdd.json")}`]).status, 0);
+});
+
+test("zdd-engine test runs a scaffolded adapter's test beside its index.mjs too (CR-305)", (t) => {
+  const dir = scratch(t);
+  cpSync(join(ADAPTERS, "lists"), join(dir, "lists"), { recursive: true });
+  writeFileSync(join(dir, "lists", "lists.test.mjs"), 'import { test } from "node:test";\nimport { ioFor } from "@rich-rees/zdd";\ntest("beside", () => { if (typeof ioFor !== "function") throw new Error("no kit"); });\n');
+  const r = run(["test", `--adapters=${dir}`]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /^ok 1 - beside$/m);
+});
+
+test("config refuses the repo itself as localExtractorDir: nothing would be source (CR-294)", (t) => {
+  const repo = app(t);
+  const p = join(repo, "zdd", "config.json");
+  writeFileSync(p, JSON.stringify({ ...JSON.parse(readFileSync(p, "utf8")), localExtractorDir: "./" }));
+  const d = run(["derive", `--root=${repo}`]);
+  assert.equal(d.status, 1);
+  assert.match(d.stderr, /localExtractorDir is the repo itself \('\.'\)/);
+});
+
+test("a linked adapter in localExtractorDir is refused by derive and the suite, never run (CR-295)", (t) => {
+  const repo = app(t);
+  const away = scratch(t);
+  cpSync(join(ADAPTERS, "notes"), join(away, "notes"), { recursive: true });
+  rmSync(join(repo, "zdd", "extractors", "notes"), { recursive: true, force: true });
+  try {
+    symlinkSync(join(away, "notes"), join(repo, "zdd", "extractors", "notes"), "junction");
+  } catch {
+    return t.skip("this machine cannot create links");
+  }
+  const d = run(["derive", `--root=${repo}`]);
+  assert.equal(d.status, 1);
+  assert.match(d.stderr, /Extractor 'notes': zdd\/extractors\/notes is a link — an adapter is a real folder or file in localExtractorDir/);
+  const s = run(["suite", "--json", `--root=${repo}`]);
+  assert.match(JSON.parse(s.stdout).adapters.find((a) => a.name === "notes").loadError, /is a link/);
+});
+
+test("a folder of adapters whose adapter reaches through a link, or out of the folder, is refused before any of its code runs (CR-295)", async (t) => {
+  const dir = scratch(t);
+  cpSync(ADAPTERS, dir, { recursive: true });
+  writeFileSync(join(dir, "lists", "index.mjs"), 'import "../../outside.mjs";\nglobalThis.__ran = true;\nexport const DETECTION = { parts: [], order: 1 };\n');
+  writeFileSync(join(dir, "..", "outside.mjs"), "globalThis.__outside = true;\n");
+  t.after(() => rmSync(join(dir, "..", "outside.mjs"), { force: true }));
+  await assert.rejects(() => folderModules(dir), /lists in the adapter folder .* reaches outside it, or through a link: lists\/index\.mjs imports \.\.\/\.\.\/outside\.mjs/);
+  assert.equal(globalThis.__ran, undefined, "never imported");
+  assert.equal(globalThis.__outside, undefined);
+});
+
+test("the not-held message and the options note echo no text a config or a folder entry could forge a log line with (CR-311)", { skip: process.platform === "win32" ? "Windows refuses a newline in a file name" : false }, (t) => {
+  const repo = app(t);
+  writeFileSync(join(repo, "zdd", "extractors", "Odd\nWARNING forged.mjs"), "export {};\n");
+  const p = join(repo, "zdd", "config.json");
+  writeFileSync(p, JSON.stringify({ ...JSON.parse(readFileSync(p, "utf8")), extractors: ["gone"], extractorOptions: { "x\nWARNING forged": {} } }));
+  const d = run(["derive", `--root=${repo}`]);
+  assert.equal(d.status, 1);
+  assert.doesNotMatch(d.stderr, /^WARNING forged/m);
+  assert.match(d.stderr, /holds lists, notes\./);
 });
 
 test("io notSource: a walk never enters the folder, a read is refused as absent, and isIgnored says so", (t) => {

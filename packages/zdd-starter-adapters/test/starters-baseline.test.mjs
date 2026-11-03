@@ -18,13 +18,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative, sep } from "node:path";
 import { moduleReach } from "../../zdd-engine/src/core/lib/suite.mjs";
 import { repoRelative as coreRepoRelative } from "../../zdd-engine/src/core/lib/paths.mjs";
 import { repoRelative as sharedRepoRelative } from "../adapters/_shared/paths.mjs";
-import { BASELINE, stage, stageable } from "../scripts/stage.mjs";
+import { BASELINE, MANIFEST, checkNotes, manifestOf, stage, stageable } from "../scripts/stage.mjs";
 import { ENGINE_BIN, PKG, fixtures } from "./starters.mjs";
 import { copyFixture } from "./starters.mjs";
 
@@ -209,4 +209,41 @@ test("_shared/paths.mjs refuses and normalises exactly what the core's repoRelat
     }
   };
   for (const v of cases) assert.deepEqual(run(sharedRepoRelative, v), run(coreRepoRelative, v), JSON.stringify(v));
+});
+
+test("CR-291: 0.1.0 is frozen by its manifest: what it stages is exactly the pinned bytes, and a change to any starter refuses the stage rather than change 0.1.0", (t) => {
+  const pinned = JSON.parse(readFileSync(join(PKG, MANIFEST), "utf8"));
+  const out = stage(BASELINE, scratch(t, "zdd-frozen-"));
+  assert.deepEqual(manifestOf(out.out), pinned);
+  // A tree whose generic starter has since changed: 0.1.0 can no longer be staged from it.
+  const tree = scratch(t, "zdd-frozen-tree-");
+  for (const part of ["package.json", "notes.json", "README.md", "adapters", "baseline"]) cpSync(join(PKG, part), join(tree, part), { recursive: true });
+  writeFileSync(join(tree, "adapters", "generic", "index.mjs"), readFileSync(join(tree, "adapters", "generic", "index.mjs"), "utf8") + "// later\n");
+  const dest = join(scratch(t, "zdd-frozen-out-"), "v");
+  assert.throws(() => stage(BASELINE, dest, { root: tree }), /0\.1\.0 is frozen by baseline\/manifest-0\.1\.0\.json, and 1 staged file\(s\) differ from it: adapters\/generic\/index\.mjs/);
+  assert.ok(!existsSync(dest), "a refused stage leaves nothing behind");
+  assert.equal(stage(stageable()[1], join(scratch(t, "zdd-frozen-own-"), "v"), { root: tree }).version, stageable()[1], "the tree's own version still stages");
+});
+
+test("CR-297: notes.json is checked whole before anything is staged", () => {
+  const notes = JSON.parse(readFileSync(join(PKG, "notes.json"), "utf8"));
+  const version = stageable()[1];
+  const starters = readdirSync(join(PKG, "adapters")).filter((n) => existsSync(join(PKG, "adapters", n, "index.mjs")));
+  assert.doesNotThrow(() => checkNotes(notes, { version, starters }));
+  const bad = (edit, re) => {
+    const n = structuredClone(notes);
+    edit(n);
+    assert.throws(() => checkNotes(n, { version, starters }), re);
+  };
+  bad((n) => (n.notes = 2), /"notes" must be 1/);
+  bad((n) => n.versions.reverse(), /must come after|first version is 0\.1\.0/);
+  bad((n) => n.versions.push(structuredClone(n.versions.at(-1))), /must come after/);
+  bad((n) => delete n.versions[1].summary, /versions\[1\]\.summary must be a non-empty string/);
+  bad((n) => (n.versions[1].version = "0.2"), /versions\[1\]\.version must be X\.Y\.Z/);
+  bad((n) => (n.versions[1].starters.rails = n.versions[1].starters.supabase), /names 'rails', which is not a starter of this library/);
+  bad((n) => (n.versions[1].starters.supabase.fixes = []), /fixes must be a non-empty list/);
+  bad((n) => delete n.versions[1].starters.supabase.fixes[0].moves, /fixes\[0\]\.moves must be a non-empty string/);
+  bad((n) => (n.versions[1].starters.sqlalchemy.fixes[0].who = " "), /fixes\[0\]\.who must be a non-empty string/);
+  bad((n) => (n.versions[0].starters = { generic: { fixes: [{ what: "x", who: "y", moves: "z" }] } }), /the first version is 0\.1\.0, the baseline, with no starters/);
+  bad((n) => n.versions.pop(), /the last version is 0\.1\.0, but package\.json says/);
 });

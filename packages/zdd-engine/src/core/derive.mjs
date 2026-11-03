@@ -25,7 +25,7 @@
 // no adapter.
 
 import { readFileSync, writeFileSync, readdirSync, statSync, lstatSync, realpathSync, mkdirSync, rmSync, existsSync } from "node:fs";
-import { join, dirname, resolve, sep } from "node:path";
+import { join, dirname, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { loadConfig, resolveExtractors } from "./lib/config.mjs";
 import { resolveRefs } from "./lib/resolve-refs.mjs";
@@ -160,8 +160,19 @@ export function localExtractors(repoRoot, dir) {
   if (!existsSync(abs)) return found;
   for (const name of readdirSync(abs).sort()) {
     const p = join(abs, name);
-    if (statSync(p).isDirectory() && existsSync(join(p, "index.mjs"))) found.set(name, join(p, "index.mjs"));
-    else if (name.endsWith(".mjs")) found.set(name.slice(0, -4), p);
+    const st = lstatSync(p);
+    // A link is never an adapter, as in a folder of adapters (CR-295): it
+    // would run code from wherever it points. Kept, so derive can say so.
+    if (st.isSymbolicLink()) {
+      found.set(name.endsWith(".mjs") ? name.slice(0, -4) : name, { link: p });
+      continue;
+    }
+    if (st.isDirectory()) {
+      const entry = join(p, "index.mjs");
+      const est = lstatSync(entry, { throwIfNoEntry: false });
+      if (est?.isSymbolicLink()) found.set(name, { link: entry });
+      else if (est) found.set(name, entry);
+    } else if (name.endsWith(".mjs")) found.set(name.slice(0, -4), p);
   }
   return found;
 }
@@ -172,7 +183,9 @@ export function localExtractors(repoRoot, dir) {
 // stack, so it cannot tell a former catalogue name from a typo, and the same
 // two routes answer both (decision 0048 points 3 and 8).
 export function notHeld(name, localDir, local) {
-  const where = localDir ? `localExtractorDir (${localDir}) holds ${[...local.keys()].join(", ") || "no adapter"}` : "the config sets no localExtractorDir";
+  // Only the names config could select: a folder entry is no text to echo (CR-311).
+  const held = [...local.keys()].filter((n) => NAME_RE.test(n));
+  const where = localDir ? `localExtractorDir (${localDir}) holds ${held.join(", ") || "no adapter"}` : "the config sets no localExtractorDir";
   return (
     `Extractor '${name}' is not one of this repo's adapters: ${where}. ` +
     `Since ZDD 0.14 a repo owns every adapter it runs and the engine ships none. ` +
@@ -192,7 +205,9 @@ async function loadExtractor(name, repoRoot, config) {
   const local = localExtractors(repoRoot, localDir);
   // A Map: a local extractor called `constructor` must not hit
   // Object.prototype (CR-022).
-  if (local.has(name)) return import(pathToFileURL(local.get(name)).href);
+  const found = local.get(name);
+  if (typeof found === "object") fail(`Extractor '${name}': ${relative(repoRoot, found.link).split(sep).join("/")} is a link — an adapter is a real folder or file in localExtractorDir, never a link to code elsewhere`);
+  if (found) return import(pathToFileURL(found).href);
   fail(notHeld(name, localDir, local));
 }
 

@@ -87,18 +87,27 @@ test("templates/config.example.json validates against templates/config.schema.js
   assert.deepEqual(validate(SCHEMA, example), []);
 });
 
-test("a config with both `extractors` and `adapter` is invalid under the schema, exactly as the engine refuses it (CR-082)", () => {
+test("a config with both `extractors` and `adapter` is invalid under the schema, exactly as the engine refuses it (CR-082); the pre-1.0 tier alone too, since 0.14; no name is reserved (CR-304)", () => {
   const mixed = { extractors: ["generic"], adapter: "nextjs-supabase" };
   assert.notDeepEqual(validate(SCHEMA, mixed), [], "schema must refuse the mixed shape");
   assert.match(engineRejects(mixed) ?? "", /adapter/, "and so does the engine");
   const mixedOptions = { extractors: ["generic"], adapterOptions: {} };
   assert.notDeepEqual(validate(SCHEMA, mixedOptions), []);
   assert.match(engineRejects(mixedOptions) ?? "", /adapter/);
-  // Each tier alone is fine for both.
-  for (const ok of [{ extractors: ["generic"] }, { adapter: "nextjs-supabase" }, { extractors: ["generic"], extractorOptions: { generic: {} } }]) {
+  // `extractors` alone is fine for both; the pre-1.0 tier alone is refused
+  // by both since 0.14, the engine naming the route across (decision 0048).
+  for (const ok of [{ extractors: ["generic"] }, { extractors: ["generic"], extractorOptions: { generic: {} } }]) {
     assert.deepEqual(validate(SCHEMA, ok), [], JSON.stringify(ok));
   }
   assert.equal(engineRejects({ extractors: ["generic"] }), null);
+  assert.notDeepEqual(validate(SCHEMA, { adapter: "nextjs-supabase" }), []);
+  assert.match(engineRejects({ adapter: "nextjs-supabase" }) ?? "", /names 'adapter'.*"upgrade ZDD"/);
+  // Any name is the repo's own: a local `services` beside `external-services`, or `jobs`.
+  const own = { extractors: ["services", "external-services", "jobs"], localExtractorDir: "zdd/extractors" };
+  assert.deepEqual(validate(SCHEMA, own), [], "the schema reserves no name");
+  assert.match(engineRejects(own) ?? "", /Extractor 'services' is not one of this repo's adapters/, "the engine asks only that the repo holds it");
+  assert.notDeepEqual(validate(SCHEMA, { extractors: ["generic"], localExtractorDir: "." }), [], "the repo itself is no adapter folder");
+  assert.match(engineRejects({ extractors: ["generic"], localExtractorDir: "." }) ?? "", /localExtractorDir is the repo itself/);
   // Neither tier is invalid for both.
   assert.notDeepEqual(validate(SCHEMA, { name: "x" }), []);
   assert.notEqual(engineRejects({ name: "x" }), null);

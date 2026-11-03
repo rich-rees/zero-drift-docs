@@ -1,6 +1,6 @@
 ---
 name: extractor
-description: Scaffold an extractor for a stack ZDD does not read yet — a local one in this repo by default (no fork, no publish), a registry contribution only on request. Interviews the convention from a sample of the source, runs a script that writes the module, tests, fixture folder and config wiring, then walks the tests red to green and derive, render, lint. Use when bootstrap reported map-only, or someone asks for an extractor for their stack (MySQL, Rails, C# controllers, Vue Router…).
+description: Scaffold an extractor for a stack ZDD does not read yet — a local one in this repo by default (no fork, no publish), a starter-library contribution only on request. Interviews the convention from a sample of the source, runs a script that writes the module, tests, fixture folder and config wiring, then walks the tests red to green and derive, render, lint. Use when bootstrap reported map-only, or someone asks for an extractor for their stack (MySQL, Rails, C# controllers, Vue Router…).
 ---
 
 # zdd:extractor — teach ZDD one more convention
@@ -241,4 +241,4 @@ Done when derive, render and lint exit 0 and the three records are confirmed.
 ## After
 
 Once it has run against a real repo for a while, offer tier 2 — the same
-module, proposed upstream: [upstream.md](upstream.md).
+module, proposed as a starter for the starter library: [upstream.md](upstream.md).

@@ -134,16 +134,18 @@ npx @rich-rees/zdd contract [--json]
   of the fixture, by the adapter's `COMMENT` marks, which must classify
   every file the adapter reads) and a `fixture-trap/`
   folder never a record; every read through `io`. A failing check numbered
-  at or below `suiteChecks` fails the run, a newer one warns. Catalogue
-  adapters pass the same suite in this package's tests.
+  at or below `suiteChecks` fails the run, a newer one warns. Since 0.14
+  every adapter a repo runs is its own, a copied starter too; the starters
+  pass the same suite in the starter library's tests.
 - **contract** — the adapter contract this engine speaks and its table
   (below). Reads no repo.
 
-Every command but `detect`, `preview` and `contract` locates the repo by walking up from
+Every command but `detect`, `preview`, `test` and `contract` locates the repo by walking up from
 the working directory to the first folder holding `zdd/config.json` (override
-with `--root=<dir>` / `--config=<file>`). `detect` reads the folder `--root`
-names (default: the working directory) and needs no config; `preview` reads
-none, and refuses an output folder inside `--root`.
+with `--root=<dir>` / `--config=<file>`). `detect` and `test` read the folder
+`--root` names (default: the working directory) and, without `--adapters`,
+only the `localExtractorDir` of its config (or `--config`'s); `preview`
+reads none, and refuses an output folder inside `--root`.
 
 ## Config (`zdd/config.json`)
 
@@ -152,16 +154,16 @@ version:
 
 | Key | Default | What it is |
 |---|---|---|
-| `extractors` | *(required, unless legacy `adapter`)* | Extractors to run, composed per convention: `supabase`, `nextjs`, `fastapi`, `react-router`, `components`, `expo-router`, the `background-*` readers (decision 0038), `external-services`, `supabase-js`, `supabase-py`, `sqlalchemy`, `generic` (built-in; `services` is the 2.1–2.2 name of `external-services`, accepted for one more release), or a name from `localExtractorDir`. Names only, never paths |
+| `extractors` | *(required)* | Adapters to run, composed per convention, each by its name in `localExtractorDir`. Since 0.14 a repo owns every adapter it runs (decision 0048): the starters it can copy are `supabase`, `nextjs`, `fastapi`, `react-router`, `components`, `expo-router`, the `background-*` readers (decision 0038), `external-services`, `supabase-js`, `supabase-py`, `sqlalchemy`, `generic`, and a copy keeps its name; a name the repo does not hold stops derive, pointing at the starter library and "upgrade ZDD". Names only, never paths |
 | `extractorOptions` | — | Per-extractor source layout, keyed by name — `supabase`: `migrationNamespaces`, `externalBuckets`; `nextjs`: `appDir`, `apiPrefix`, `middlewarePath`, `authPatterns`, `refs`, `srcAliasRoot`; `supabase-js`: `roots`, `extensions`, `excludeDirs`, `excludeSuffixes`, `subscribeCalls`; `fastapi`: `roots`, `excludeDirs`, `appVar`; `react-router`: `routesFile`, `srcAliasRoot`; `components`: `roots`, `pageDirs`, `sharedDirs`, …; `expo-router`: `appDir`; each `background-*` reader: `roots`, `exclude`, `modes`, and `background-declared`: `entries` (listing `background-github-actions` is its opt-in); `external-services`: `services`, `ignore`, `roots` — all in `config.schema.json` |
 | `agentIndex.budgetTokens` | `2000` | The agent index's size budget in approximate tokens; over it, `render` warns and names the fix (2.3) |
 | `agentIndex.levels` | `1` | `2` lists the areas first and writes one file per area under `zdd/agent-index/`, each feature one hop away — for a repo whose feature list alone does not fit (2.3) |
 | `claims.strictKinds` | `[]` | The opt-in kinds (`component`, `background-task`, `external-service`) that `claims.strict` also fails on; unlisted they warn (decision 0017) |
-| `localExtractorDir` | — | Repo-relative folder of repo-local extractors (`<name>.mjs` or `<name>/index.mjs`) — the one place config may point at code |
+| `localExtractorDir` | — | Repo-relative folder of the repo's adapters (`<name>/index.mjs` or `<name>.mjs`, with `_shared/` beside them) — the one place config may point at code, never read as source, never the repo itself |
 | `suiteChecks` | absent (every check warns) | How many of the standard suite's checks block for the repo's own adapters, 0 to 5 (decision 0040). Bootstrap writes 5 at a fresh install; "upgrade ZDD" raises it at once only where the repo has no adapter of its own, and otherwise `bootstrap.mjs adapters --raise` does, once they pass |
 | `unread.strict` | `false` | `true`: `lint` fails on anything an adapter saw and could not read that has no answer; off, it warns (decision 0048). Bootstrap writes `true` at a fresh install; `bootstrap.mjs unread --raise` does on an upgraded repo, once every item has an answer |
 | `unread.fine` | `[]` | Items marked fine once, each `{ id, what, why }` (`bootstrap.mjs unread --mark` writes them). A mark survives the code around the item moving and lapses when the item changes; a mark no item answers warns |
-| `adapter` / `adapterOptions` | *(deprecated)* | The pre-1.0 single adapter; `nextjs-supabase` still expands to `[supabase, supabase-js, nextjs]` with a deprecation note |
+| `adapter` / `adapterOptions` | *(retired)* | The pre-1.0 single adapter, a bundle the engine shipped: refused since 0.14, naming "upgrade ZDD", which rewrites it |
 | `name` | `"Codebase"` | Display name for the indexes |
 | `repoBase` | `""` | GitHub `/tree/<branch>/` URL prefix for source links in the human index — http(s) only, refused otherwise |
 | `nonAreaTags` | `[]` | Tags that are properties, not product areas (`react-flow`); a record inherits its area from its claiming feature's first tag not listed here. Shapes `graph.json`, so top-level (the old `viewer.nonAreaTags` still works, with a note) |
@@ -262,15 +264,12 @@ free. Contract and schema: the repo's
 npm test        # node --test "test/*.test.mjs"
 ```
 
-Pure-logic units plus end-to-end canaries and determinism checks against
-`test/fixture/` — a miniature Next.js + Supabase repo exercising renames, FK
-sweeps, triggers, wrapper pages, middleware auth, buckets, and module records —
-`test/fixture-fastapi/` (FastAPI + Supabase), `test/fixture-react-router/`
-(FastAPI + a React Router route tree declared in code, one feature claiming
-three of twelve records), `test/fixture-components/` (a web app, an Expo app
-and a shared component kit over one API), `test/fixture-jobs/` (manifests
-that run processes, a Railway file, a Procfile), `test/fixture-services/`
-(Sentry and Resend by marker, Stripe undeclared) and `test/fixture-greenfield/`
-(config only). `test/golden/` pins v0.3.1 output: the composed `[supabase, supabase-js, nextjs]` must
-reproduce the adapter's metadata byte for byte, and the `cytoscape` viewer must
-embed the same `BUNDLE` the pre-registry renderer did.
+This package's tests are the core alone: pure-logic units, the CLI, the
+stores and the viewers' plumbing, over a small stack-free fixture
+(`test/fixture/`, a bundle with no code) and two test-only adapters in
+`test/adapters/` that name no stack. The core with real adapters, every
+golden and the stack fixtures live with the starters, in
+`packages/zdd-starter-adapters/test/` (decision 0048): the composed
+`[supabase, supabase-js, nextjs]` must reproduce v0.3.1's metadata byte for
+byte there, and the `cytoscape` viewer must embed the same `BUNDLE` the
+pre-registry renderer did. CI runs both.

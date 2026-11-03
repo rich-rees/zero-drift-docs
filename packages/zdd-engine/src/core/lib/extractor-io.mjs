@@ -57,6 +57,7 @@
 import { lstatSync, opendirSync, readSync, openSync, fstatSync, closeSync, realpathSync, constants } from "node:fs";
 import { join } from "node:path";
 import { regularFileInside } from "./walk-markdown.mjs";
+import { foldCase } from "./paths.mjs";
 import { gitIgnoredPredicate } from "./ignored.mjs";
 
 export const IO_MAX_READ_BYTES = 1024 * 1024;
@@ -120,9 +121,12 @@ export function makeExtractorIo(repoRoot, label = "extractor", { maxEntries = IO
   let ignoredPredicate = ignored;
   // Repo-relative POSIX path (a file or a directory) that git ignores, or
   // the worktree folder: never source, never walked, never read as source.
-  const tooling = notSource.map((d) => String(d).replace(/^\.\//, "").replace(/\/+$/, "")).filter((d) => d && d !== ".");
+  // Compared case-folded where the filesystem folds, so `ZDD/Extractors`
+  // names the same folder as `zdd/extractors` there (CR-294). The root
+  // itself is never a tooling folder: config refuses it.
+  const tooling = notSource.map((d) => foldCase(String(d).replace(/^\.\//, "").replace(/\/+$/, ""))).filter((d) => d && d !== ".");
   const inTooling = (rel) => {
-    const clean = rel.replace(/^\.\//, "").replace(/\/$/, "");
+    const clean = foldCase(rel.replace(/^\.\//, "").replace(/\/$/, ""));
     return tooling.some((d) => clean === d || clean.startsWith(`${d}/`));
   };
   const isIgnored = (rel) => {

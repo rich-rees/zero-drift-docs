@@ -8,8 +8,9 @@ CI, makes drift in the machine-generated ones **un-mergeable**.
 > and in Codex from this one repo; `bootstrap` detects your stack (or grills
 > for it on a greenfield repo), proposes extractors with evidence, and *writes*
 > the opt-ins; the engine (`packages/zdd-engine`, npm `@rich-rees/zdd`) is a
-> core that knows no stack beside a catalogue of adapters, and carries the
-> graph artifact + viewer registry. Two plug-in points are open for
+> core that knows no stack and ships no adapter (each repo owns its own,
+> copied from the starter library, `@rich-rees/zdd-starter-adapters`), and
+> carries the graph artifact + viewer registry. Two plug-in points are open for
 > contributors: adapters in, viewers out. 0.9.0 starts a new version line:
 > the old one, `@rich-rees/zdd-engine` 0.2.0 to 2.5.0, came before it
 > ([decision 0042](docs/decisions/0042-the-engine-is-a-new-package-on-a-new-version-line.md)).
@@ -183,8 +184,8 @@ Vue, Svelte and Angular are not read: write a local extractor with the
 
 ### Your stack isn't read yet — add your own extractor
 
-The built-in extractors read Supabase/Postgres migrations, the Next.js App
-Router, FastAPI and React Router. For any other convention, bootstrap proposes
+The starter adapters read Supabase/Postgres migrations, the Next.js App
+Router, FastAPI and React Router, among others. For any other convention, bootstrap proposes
 a map-only setup and points at the **`extractor` skill**. Ask your agent for
 an extractor ("give me one for our C# controllers") and it reads a sample of
 your source and interviews you about the convention. A script then writes

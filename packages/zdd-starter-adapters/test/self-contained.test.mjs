@@ -123,6 +123,8 @@ test("an adapter copied alone, with the _shared/ files its imports reach, loads 
   const repo = mkdtempSync(join(tmpdir(), "zdd-copy-repo-"));
   try {
     for (const name of starterNames()) {
+      // Each starter alone in a folder of its own, which plays the app's
+      // localExtractorDir: `<to>/<name>/index.mjs` beside `<to>/_shared/`.
       const to = join(dir, name);
       for (const r of copySet(name)) {
         mkdirSync(dirname(join(to, ...r.split("/"))), { recursive: true });

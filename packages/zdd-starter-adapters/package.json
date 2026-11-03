@@ -13,7 +13,7 @@
     "README.md"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=20.6"
   },
   "scripts": {
     "test": "node --test \"test/*.test.mjs\" && node ../zdd-engine/bin/zdd-engine.mjs test --adapters=adapters"

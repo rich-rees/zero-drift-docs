@@ -28,7 +28,7 @@ test("the pre-1.0 adapter key is refused since 0.14, with the route across, what
 test("a name is what it says: no alias reads another name's options, and options under a name not listed are said, never a failure (CR-424)", () => {
   const r = resolveExtractors({ extractors: ["a"], extractorOptions: { a: { x: 1 }, b: { y: 2 } } });
   assert.deepEqual(r.extractors, [{ name: "a", options: { x: 1 } }]);
-  assert.deepEqual(r.diagnostics, [`[config] extractorOptions has 'b', which no adapter in "extractors" is called — those options are read by nobody; move them under the adapter's name, or delete them`]);
+  assert.deepEqual(r.diagnostics, [`[config] extractorOptions has "b", which no adapter in "extractors" is called — those options are read by nobody; move them under the adapter's name, or delete them`]);
   assert.deepEqual(resolveExtractors({ extractors: ["services"], extractorOptions: { "external-services": {} } }).extractors, [{ name: "services", options: {} }], "a pre-0.14 alias is just a name");
   assert.deepEqual(resolveExtractors({ extractors: ["a"] }).diagnostics, []);
 });

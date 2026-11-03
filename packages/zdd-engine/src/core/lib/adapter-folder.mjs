@@ -10,9 +10,11 @@
 // link, or whose real path leaves the folder, is refused (CR-001): a link
 // would run code from somewhere the folder's owner never put it.
 
-import { lstatSync, readdirSync, realpathSync } from "node:fs";
-import { join, resolve, sep } from "node:path";
+import { lstatSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
+import { insideRepo, repoRelative } from "./paths.mjs";
+import { moduleReach } from "./suite.mjs";
 
 export const NAME_RE = /^[a-z][a-z0-9-]*$/; // derive's NAME_RE: what config may select
 
@@ -51,9 +53,75 @@ export function readAdapterFolder(dir) {
 }
 
 // Every adapter's module in `dir`, in name order: what detection and the
-// preview ask (decision 0039), over whichever folder they are given.
+// preview ask (decision 0039), over whichever folder they are given. Each
+// one's static imports are checked before it is imported (CR-295): they
+// must stay in the folder and never pass through a link, or its top-level
+// code would run from wherever the link points.
 export async function folderModules(dir) {
   const out = [];
-  for (const [name, entry] of readAdapterFolder(dir)) out.push({ name, entry, mod: await import(pathToFileURL(entry).href) });
+  const abs = resolve(dir);
+  for (const [name, entry] of readAdapterFolder(abs)) {
+    const reach = moduleReach(entry, abs);
+    const wrong = [...reach.outside, ...reach.missing.map((m) => `${m} is not there`), ...(reach.limit ? [reach.limit] : [])];
+    if (wrong.length) throw new Error(`${name} in the adapter folder ${abs} reaches outside it, or through a link: ${wrong.slice(0, 3).join("; ")}`);
+    out.push({ name, entry, mod: await import(pathToFileURL(entry).href) });
+  }
   return out;
+}
+
+// The repo's own adapter folder, when its config names one: `{ rel, abs }`,
+// or null when there is no config or no localExtractorDir. Only that key is
+// read, bounded as the config load is. Lenient by default: a config that
+// cannot be read names no folder, because detection runs before bootstrap
+// has written one and bootstrap is what says what is wrong with it. With
+// `strict`, a config that is there and cannot be read, or names a folder
+// outside the repo or the repo itself, throws, saying so (CR-303).
+// `configPath` is a config somewhere other than `<root>/zdd/config.json`.
+export function ownAdapterFolder(root, { strict = false, configPath = null } = {}) {
+  const p = configPath ? resolve(configPath) : join(root, "zdd", "config.json");
+  let st;
+  try {
+    st = statSync(p);
+  } catch {
+    if (strict && configPath) throw new Error(`no config at ${p}`);
+    return null;
+  }
+  try {
+    if (!st.isFile() || st.size > 1024 * 1024) throw new Error("it is not a file of at most 1 MiB");
+    const dir = JSON.parse(readFileSync(p, "utf8"))?.localExtractorDir;
+    if (dir === undefined) return null;
+    const rel = repoRelative(dir, "localExtractorDir");
+    if (rel === ".") throw new Error("localExtractorDir is the repo itself ('.'); the adapters are a folder of their own");
+    return { rel, abs: insideRepo(root, resolve(root, rel), "localExtractorDir") };
+  } catch (e) {
+    if (strict) throw new Error(`${p} cannot be read for its localExtractorDir: ${e.message}`);
+    return null;
+  }
+}
+
+// The repo-relative folders under `root` that are adapters, never source,
+// for a scan or an io (decision 0048): each folder given that lies inside
+// the repo, on real paths. A folder of adapters that is the repo itself is
+// refused: nothing would be source (CR-293).
+export function toolingIn(root, folders) {
+  let realRoot;
+  try {
+    realRoot = realpathSync.native(root);
+  } catch {
+    return [];
+  }
+  const out = new Set();
+  for (const f of folders) {
+    if (!f) continue;
+    let real;
+    try {
+      real = realpathSync.native(resolve(f));
+    } catch {
+      continue;
+    }
+    const rel = relative(realRoot, real);
+    if (rel === "") throw new Error(`the folder of adapters ${resolve(f)} is the repo itself — adapters are a folder of their own, never the app's source`);
+    if (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel)) out.add(rel.split(sep).join("/"));
+  }
+  return [...out].sort();
 }

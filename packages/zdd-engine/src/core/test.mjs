@@ -1,15 +1,20 @@
 #!/usr/bin/env node
 // ZDD adapter tests (decision 0048 points 3 and 4) — runs the tests that
-// travel with a repo's adapters, `<adapters>/<name>/test/*.test.mjs`, with
-// `@rich-rees/zdd` resolving to this engine's test kit (kit.mjs), so a repo
-// with no node_modules runs them too. Node's own test runner does the rest.
+// travel with a repo's adapters, with `@rich-rees/zdd` resolving to this
+// engine's test kit (kit.mjs), so a repo with no node_modules runs them too.
+// Node's own test runner does the rest.
 //
 //   zdd-engine test [--adapters=<dir>] [--root=<dir>] [--config=<file>]
 //
-// `--adapters` is the folder of adapters (the starter library's `adapters/`,
-// or any laid out the same way); without it, the repo's own
-// `localExtractorDir`. Exits with the runner's status; with no test file to
-// run it says so and exits 1, so a check that ran nothing never passes.
+// An adapter's tests are `<name>/test/*.test.mjs` (a starter's), and
+// `<name>/*.test.mjs` beside its index.mjs (where the extractor skill's
+// scaffold writes one, CR-305). `--adapters` is the folder of adapters (the
+// starter library's `adapters/`, or any laid out the same way); without it,
+// the repo's own `localExtractorDir`, from zdd/config.json or `--config`
+// (CR-298). The tests are the repo's own code, run as its CI runs them.
+// Exits with the runner's status; with no test file to run it says so and
+// exits 1, so a check that ran nothing never passes. Needs Node 20.6 or
+// later (node:module register).
 
 import { existsSync, lstatSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -19,18 +24,21 @@ import { adaptersFolder } from "./detect.mjs";
 
 const REGISTER = new URL("./kit-register.mjs", import.meta.url).href;
 
-// Every adapter's own test files, in name order: `<name>/test/*.test.mjs`,
-// read from the folder as derive reads it (never through a link).
+// Every adapter's own test files, in name order, read from the folder as
+// derive reads it (never through a link).
 export function adapterTests(dir) {
   const files = [];
+  const testsIn = (folder) => {
+    const st = existsSync(folder) ? lstatSync(folder) : null;
+    if (!st || st.isSymbolicLink() || !st.isDirectory()) return [];
+    return readdirSync(folder)
+      .sort()
+      .map((f) => join(folder, f))
+      .filter((p) => p.endsWith(".test.mjs") && lstatSync(p).isFile());
+  };
   for (const [name] of readAdapterFolder(dir)) {
-    const tests = join(resolve(dir), name, "test");
-    const st = existsSync(tests) ? lstatSync(tests) : null;
-    if (!st || st.isSymbolicLink() || !st.isDirectory()) continue;
-    for (const f of readdirSync(tests).sort()) {
-      const p = join(tests, f);
-      if (f.endsWith(".test.mjs") && lstatSync(p).isFile()) files.push(p);
-    }
+    const own = join(resolve(dir), name);
+    files.push(...testsIn(own), ...testsIn(join(own, "test")));
   }
   return files;
 }
@@ -40,10 +48,10 @@ export async function run(args) {
   const root = resolve(arg("root") ?? process.cwd());
   let files;
   try {
-    const dir = adaptersFolder(root, arg("adapters"));
+    const dir = adaptersFolder(root, arg("adapters"), { configPath: arg("config") ? resolve(arg("config")) : null });
     if (!dir) throw new Error("no adapters to test — pass --adapters=<folder of adapters>, or set localExtractorDir in zdd/config.json");
     files = adapterTests(dir);
-    if (!files.length) throw new Error(`no adapter in ${dir} has a test/ folder of *.test.mjs files — nothing to run`);
+    if (!files.length) throw new Error(`no adapter in ${dir} has a *.test.mjs file, beside it or in its test/ folder — nothing to run`);
   } catch (e) {
     console.error(`test: ${e.message}`);
     process.exit(1);

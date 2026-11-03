@@ -226,6 +226,12 @@ export function loadConfig(args, cwd = process.cwd()) {
     process.exit(1);
   }
   if (config.localExtractorDir !== undefined) config.localExtractorDir = repoRelative(config.localExtractorDir, "localExtractorDir");
+  // The adapter folder is never source (decision 0048), so it cannot be the
+  // repo itself: every file would stop being source (CR-294).
+  if (config.localExtractorDir === ".") {
+    console.error(`localExtractorDir is the repo itself ('.') — the repo's adapters are a folder of their own, never read as source; move them to one (zdd/extractors, say) and name it`);
+    process.exit(1);
+  }
   const configRel = relative(repoRoot, configPath).split(/[\\/]/).join("/");
   const layoutError = validatePathLayout(paths, configRel);
   if (layoutError) {
@@ -300,7 +306,7 @@ export function resolveExtractors(config) {
     // stale key turns no CI red.
     const diagnostics = Object.keys(options)
       .filter((k) => !list.includes(k))
-      .map((k) => `[config] extractorOptions has '${k}', which no adapter in "extractors" is called — those options are read by nobody; move them under the adapter's name, or delete them`);
+      .map((k) => `[config] extractorOptions has ${JSON.stringify(k)}, which no adapter in "extractors" is called — those options are read by nobody; move them under the adapter's name, or delete them`);
     return { extractors, diagnostics };
   }
   if (config.adapter !== undefined) {

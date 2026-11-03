@@ -12,8 +12,9 @@ graph in the middle.
 > both run, and both contracts below — extractors and viewers — are the ones it
 > executes today. Pull requests are welcome, and bug reports go to the repo's
 > Discussions ("Bug reports"; decision 0041 — the repo has no Issues); the tests are the contract
-> (`node --test` in `packages/zdd-engine` and over `plugins/zdd/test`), and CI
-> runs both suites, and a browser smoke test of the human index, on every PR.
+> (`node --test` in `packages/zdd-engine`, in `packages/zdd-starter-adapters`
+> with the starters' own tests, and over `plugins/zdd/test`), and CI runs all
+> three, and a browser smoke test of the human index, on every PR.
 
 ## The shape of a contribution
 
@@ -25,8 +26,9 @@ Everything here goes through the standard GitHub loop:
 4. **Open a pull request** back here. It's a proposal — we'll review, discuss, and
    merge if it fits. You keep authorship; the maintainer decides what lands.
 
-A merged change ships to everyone via the marketplace on the next version bump
-(a new extractor is backward-compatible, so a **minor** bump).
+A merged change ships to everyone via the marketplace on the next version bump.
+A new or fixed starter ships in the starter library's next release, on its own
+version line, and reaches a repo when it copies it in (decision 0048).
 
 ## The prize: writing an extractor
 

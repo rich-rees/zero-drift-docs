@@ -133,7 +133,7 @@ test("CR-424/CR-425: options under a key no listed adapter has are said on every
   writeFileSync(cfgPath, JSON.stringify({ ...fresh, extractors: ["fastapi", "external-services"], extractorOptions: { fastapi: fresh.extractorOptions.fastapi, services: fresh.extractorOptions["external-services"] } }));
   const d = run(["derive"]);
   assert.equal(d.status, 0, d.stderr);
-  assert.match(d.stderr, /\[config\] extractorOptions has 'services', which no adapter in "extractors" is called — those options are read by nobody/);
+  assert.match(d.stderr, /\[config\] extractorOptions has "services", which no adapter in "extractors" is called — those options are read by nobody/);
   // The old kind end to end: a repo's adapter that still writes `service`
   // records (as the 2.3 alias did), its map links, rendered.
   writeFileSync(join(repo, "zdd", "extractors", "services.mjs"), 'import * as m from "./external-services/index.mjs";\nexport const { CONTRACT, COMMENT, FACTS_KEY_ORDER } = m;\nexport const derive = (a) => m.derive({ ...a, legacyName: "services" });\n');

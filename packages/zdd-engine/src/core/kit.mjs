@@ -8,7 +8,8 @@
 //
 //   import { ioFor, scanFor, trialRead } from "@rich-rees/zdd";
 //
-//   ioFor(root, name)               the io derive hands adapter `name` for repo `root`
+//   ioFor(root, name)               the io derive hands adapter `name` for repo `root`,
+//                                   the repo's adapter folder never source in it
 //   await scanFor(root, adapters)   the scan detection hands every adapter for
 //                                   `root`: one walk, skipping the folders every
 //                                   detecting adapter in the folder `adapters`
@@ -29,21 +30,29 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeExtractorIo } from "./lib/extractor-io.mjs";
 import { detectScan } from "./lib/detect-repo.mjs";
-import { folderModules } from "./lib/adapter-folder.mjs";
+import { folderModules, ownAdapterFolder, toolingIn } from "./lib/adapter-folder.mjs";
 
-const folders = new Map();
-function modulesOf(adapters) {
+const folderOf = (adapters) => {
   if (adapters instanceof URL) adapters = fileURLToPath(adapters);
   if (typeof adapters !== "string" || !adapters) throw new TypeError("the folder of the app's adapters is required (its localExtractorDir): the scan skips the folders they name, as detection's does");
-  const key = resolve(adapters);
-  if (!folders.has(key)) folders.set(key, folderModules(key));
-  return folders.get(key);
+  return resolve(adapters);
+};
+const folders = new Map();
+function modulesOf(dir) {
+  if (!folders.has(dir)) folders.set(dir, folderModules(dir));
+  return folders.get(dir);
 }
 
-export const ioFor = (root, name) => makeExtractorIo(root, name);
+// What derive and detect never read as source, for the same root: the
+// repo's own adapter folder (from its config, when it has one) and the
+// folder of adapters given, when either lies inside it (CR-292).
+const notSourceFor = (root, ...dirs) => toolingIn(root, [ownAdapterFolder(root)?.abs, ...dirs]);
+
+export const ioFor = (root, name) => makeExtractorIo(root, name, { notSource: notSourceFor(root) });
 
 export async function scanFor(root, adapters) {
-  return detectScan(root, await modulesOf(adapters));
+  const dir = folderOf(adapters);
+  return detectScan(root, await modulesOf(dir), { notSource: notSourceFor(root, dir) });
 }
 
 export async function trialRead(mod, root, adapters) {

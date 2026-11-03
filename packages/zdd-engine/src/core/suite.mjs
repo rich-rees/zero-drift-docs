@@ -65,7 +65,7 @@ function suiteSpec(name, mod, local) {
   const companions = spec.companions ?? {};
   if (!companions || typeof companions !== "object" || Array.isArray(companions)) return { error: `SUITE.companions must be an object { "<adapter>": { options } }` };
   for (const [c, o] of Object.entries(companions)) {
-    if (c === name || !local.has(c) || basename(local.get(c)) !== "index.mjs") return { error: `SUITE.companions names '${c}', which is not another adapter folder in localExtractorDir (a companion runs beside it, copied with it)` };
+    if (c === name || typeof local.get(c) !== "string" || basename(local.get(c)) !== "index.mjs") return { error: `SUITE.companions names '${c}', which is not another adapter folder in localExtractorDir (a companion runs beside it, copied with it)` };
     if (!o || typeof o !== "object" || Array.isArray(o) || !plainData(o)) return { error: `SUITE.companions['${c}'] must be an options object of plain data` };
   }
   if (spec.allowEmpty !== undefined && typeof spec.allowEmpty !== "boolean") return { error: "SUITE.allowEmpty must be true or false" };
@@ -92,6 +92,10 @@ export async function suiteReport({ repoRoot, config, only = null }) {
       continue;
     }
     const entry = local.get(name);
+    if (typeof entry === "object") {
+      adapters.push({ name, loadError: `is a link (${entry.link}) — an adapter is a real folder or file in localExtractorDir`, checks: [] });
+      continue;
+    }
     // `<dir>/<name>/index.mjs` is a folder adapter (its fixture beside it);
     // `<dir>/<name>.mjs` a single module, which has nowhere to keep one.
     const folder = basename(entry) === "index.mjs" && basename(dirname(entry)) === name ? dirname(entry) : null;

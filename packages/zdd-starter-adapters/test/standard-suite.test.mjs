@@ -34,6 +34,14 @@ test("every starter declares this engine's CONTRACT, a COMMENT, and a SUITE with
   }
 });
 
+// An empty answer passes only where emptiness is the design: a starter that
+// gained `allowEmpty` would hide a fixture that proves nothing (CR-307).
+test("only generic, which emits nothing by design, may answer empty", async () => {
+  const empty = [];
+  for (const name of starterNames) if ((await load(name)).SUITE.allowEmpty) empty.push(name);
+  assert.deepEqual(empty, ["generic"]);
+});
+
 for (const name of starterNames) {
   test(`the standard suite: ${name}`, async () => {
     const mod = await load(name);

@@ -7,7 +7,8 @@
 // that builds its own repo calls placeStarters on it.
 
 import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve, sep } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
+import { moduleReach } from "../../zdd-engine/src/core/lib/suite.mjs";
 import { fileURLToPath } from "node:url";
 
 export const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -57,7 +58,8 @@ export function copyFixture(from, to) {
 // For the plugin's suite until bootstrap copies starters (ZDD-11 slice 5):
 // what that copy will leave, so a repo bootstrap configured derives. Every
 // adapter the config names that its localExtractorDir does not hold and the
-// library does is copied in, with `_shared/`, and a config with no
+// library does is copied in, with the `_shared/` files its modules reach
+// (the reach rule a copy keeps, decision 0048 As built slice 3), and a config with no
 // localExtractorDir gains this one. A repo with nothing to copy is left
 // byte for byte as it is.
 export function ensureStarters(repo) {
@@ -76,9 +78,34 @@ export function ensureStarters(repo) {
   const wanted = config.extractors.filter((n) => typeof n === "string" && /^[a-z][a-z0-9-]*$/.test(n) && !existsSync(join(to, n)) && !existsSync(join(to, `${n}.mjs`)) && existsSync(join(ADAPTERS, n, "index.mjs")));
   if (!wanted.length) return;
   mkdirSync(to, { recursive: true });
-  for (const n of wanted) copyStarter(n, to);
-  cpSync(join(ADAPTERS, "_shared"), join(to, "_shared"), { recursive: true, force: false });
+  for (const n of wanted) {
+    copyStarter(n, to);
+    for (const f of reachedShared(n)) {
+      const dest = join(to, relative(ADAPTERS, f));
+      mkdirSync(dirname(dest), { recursive: true });
+      cpSync(f, dest, { force: false });
+    }
+  }
   if (config.localExtractorDir === undefined) writeFileSync(p, JSON.stringify({ ...config, localExtractorDir: LOCAL }, null, 2) + "\n");
+}
+
+// The `_shared/` files one starter's code and its own tests reach by their
+// imports (the tests travel with it); never its fixture's or example's,
+// which are sample repos, not code.
+export function reachedShared(name) {
+  const own = join(ADAPTERS, name);
+  const code = [];
+  const walk = (d) => {
+    for (const n of readdirSync(d).sort()) {
+      const p = join(d, n);
+      if (lstatSync(p).isDirectory()) {
+        if (!(d === own && /^(?:example|fixture.*)$/.test(n))) walk(p);
+      } else if (n.endsWith(".mjs")) code.push(p);
+    }
+  };
+  walk(own);
+  const shared = join(ADAPTERS, "_shared") + sep;
+  return [...new Set(code.flatMap((p) => moduleReach(p, ADAPTERS).files).filter((f) => f.startsWith(shared)))].sort();
 }
 
 // Every fixture folder of this suite: a folder under test/ holding a config.

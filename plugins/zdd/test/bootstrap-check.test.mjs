@@ -190,3 +190,25 @@ test("outside this checkout: npx on POSIX, npm's npx-cli.js with node on Windows
   assert.deepEqual(engineArgv(shell, ["detect", "--root=C:\\my repo"]), [`"-y"`, `"${pkg}"`, `"detect"`, `"--root=C:\\my repo"`]);
   for (const bad of ['C:\\x"&whoami&rem "', "C:\\work\\%TEMP%\\repo", "C:\\a^b", "C:\\a&b", "C:\\a!b"]) assert.throws(() => engineArgv(shell, [`--root=${bad}`]), /cannot run the engine through cmd\.exe/, bad);
 });
+
+// Where detection and the preview find the starters (decision 0048 point 3):
+// ZDD_STARTER_ADAPTERS_DIR first, then the library beside this plugin in a
+// checkout, and with neither a plain refusal; slice 5 adds the published
+// library (CR-308).
+test("starterAdapters: the env folder first, else the sibling library, else a plain refusal; detect and preview pass the folder found", async (t) => {
+  const { starterAdapters } = await import(pathToFileURL(BOOTSTRAP).href);
+  const sibling = join(STARTERS, "adapters");
+  assert.equal(starterAdapters({ env: {} }), sibling);
+  const other = tmp(t, "zdd-starters-env-");
+  assert.equal(starterAdapters({ env: { ZDD_STARTER_ADAPTERS_DIR: other } }), resolve(other), "the env wins over the sibling");
+  assert.throws(() => starterAdapters({ env: {}, sibling: join(other, "none") }), /the starter library is not on this machine — set ZDD_STARTER_ADAPTERS_DIR to its adapters\/ folder/);
+  // Through the CLI: the env folder is the one detection reads.
+  cpSync(join(ENGINE, "test", "adapters"), join(other, "a"), { recursive: true });
+  const repo = tmp(t, "zdd-starters-env-repo-");
+  writeFileSync(join(repo, "x.note"), "GET /x\n");
+  const env = { ...process.env, ZDD_STARTER_ADAPTERS_DIR: join(other, "a") };
+  const d = JSON.parse(run(repo, ["detect", "--json"], env));
+  assert.deepEqual(d.proposals.map((p) => p.name), ["notes"], "the test-only adapters, not the library's");
+  const p = JSON.parse(run(repo, ["preview", "--extractors=notes", "--json"], env));
+  assert.deepEqual(p.used, ["notes"]);
+});
