@@ -278,7 +278,10 @@ export. A hand-written local adapter is the only route that works today.
 - **The copy set comes from the imports.** `moduleReach(entry, within)` in
   `core/lib/suite.mjs` returns every file that one module's static relative
   imports reach inside a folder, sorted, and it names any import that leaves
-  the folder or finds no file. Copying an adapter brings its folder (not its
+  the folder or finds no file. It resolves an import as Node does, as a URL,
+  so a query, a fragment or an escaped name reaches the file Node loads. It
+  never reads through a link, and it is bounded like the suite's own copies
+  (1 MiB per file, 64 MiB and 20,000 files in all). Copying an adapter brings its folder (not its
   `example/`) and each `_shared/` file that any of its modules reach. That
   is what the starter library and the upgrade will copy. The standard suite
   now copies a local adapter's reached files into its scratch repos too.
@@ -294,7 +297,9 @@ export. A hand-written local adapter is the only route that works today.
 - **Adapter tests reach ZDD through one file**, `test/adapter-kit.mjs`. It
   exports `ioFor`, `scanFor` and `trialRead`: the `io` and the detection
   `scan` the contract hands an adapter, and the adapter's own answer to
-  detect. A test that travels with its adapter imports node built-ins, its
+  detect. The scan is built by the same `detectScan` that detection uses,
+  over every adapter the repo has, so a test sees the folders another
+  adapter skips skipped too. A test that travels with its adapter imports node built-ins, its
   adapter, `_shared/` and the kit, and nothing else, and the border test
   holds that for `sql-replay`, `supabase-formats`, `supabase`, `fastapi`
   and `wrapper-resolution`. What the core does with the answers (coverage,
@@ -305,10 +310,15 @@ export. A hand-written local adapter is the only route that works today.
   `packages/zdd-engine/test/starters-baseline/`, laid out as an app holds
   it: `supabase/` and `sqlalchemy/` as they were at `419293d`, with only
   their imports rewired; `_shared/`, holding exactly the files those two
-  reach; and `tests/`, their own tests at `419293d`, now going through the
-  kit. The catalogue never runs it. A test builds an engine with the
-  baseline in place of today's two adapters and derives every engine
-  fixture to the same bytes; the baseline's own tests pass on it. Outside
+  reach; and `tests/`, all three of `supabase`'s own tests at `419293d`,
+  now going through the kit (`sqlalchemy`'s live in `data-access.test.mjs`,
+  which reads the core's resolution, and stay in the engine). The kit is the
+  one file that leaves the folder: it is the seam an app provides, and
+  slice 4 supplies it. Every file's bytes are pinned by a hash, so a change
+  is a deliberate step, as a golden's is. The catalogue never runs the
+  baseline. A test builds an engine with it in place of today's two
+  adapters and derives every engine fixture, each run succeeding, to the
+  same bytes; the baseline's own tests pass on it. Outside
   the repo, on both adopters, it reproduces `419293d`'s engine record for
   record.
 

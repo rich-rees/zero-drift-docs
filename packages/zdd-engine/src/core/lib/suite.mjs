@@ -24,7 +24,7 @@ import { spawnSync, execFileSync } from "node:child_process";
 import { closeSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const SUITE_CHECKS = [
   {
@@ -130,7 +130,9 @@ function readLocalAdapter(name, path, entry, within) {
   if (entry && within) {
     const root = resolve(within);
     const own = resolve(path);
-    for (const abs of moduleReach(entry, root).files) {
+    const reach = moduleReach(entry, root);
+    if (reach.limit) throw new Error(`${name}: its imports reach too much to copy (${reach.limit})`);
+    for (const abs of reach.files) {
       if (abs === own || abs.startsWith(own + sep)) continue;
       out.set(relative(root, abs).split(sep).join("/"), readCapped(abs, budget));
     }
@@ -140,36 +142,74 @@ function readLocalAdapter(name, path, entry, within) {
 
 // The JS files a module reaches by its static relative imports, itself
 // included, that stay inside `within`: what copying it elsewhere must bring
-// (decision 0048 point 4). `outside` names each import that leaves `within`,
-// and `missing` each reached file that is not there. Read as check 5 reads
-// an import: comments and strings blanked, so an import written in either is
-// not one. Sorted, so a copy is the same every time.
+// (decision 0048 point 4). An import is resolved as Node resolves it, as a
+// URL against the importing file, so `./x.mjs?v=1`, `./x.mjs#y` and `./a%20b.mjs`
+// name the files Node loads (CR-284). `outside` names each import that
+// leaves `within`, or reaches a file through a link (a link's target is not
+// the folder's own, CR-278); `missing` each reached file that is not a
+// regular file. Read as check 5 reads an import, from the code view (comments
+// and template text blanked). Bounded as the suite's copies are: no file over
+// 1 MiB, 64 MiB and 20,000 files in all, else `limit` says which ran out and
+// the reach stops (CR-279). Sorted, so a copy is the same every time.
 export function moduleReach(entry, within) {
   const root = resolve(within);
   const seen = new Set();
   const outside = [];
   const missing = [];
-  const visit = (abs) => {
-    if (seen.has(abs)) return;
+  let limit = null;
+  let bytes = 0;
+  const show = (abs) => relative(root, abs).split(sep).join("/");
+  // A link on any segment from `within` down: the path's spelling stays
+  // inside while the file it names may not.
+  const linked = (abs) => {
+    let at = root;
+    for (const seg of relative(root, abs).split(sep)) {
+      at = join(at, seg);
+      try {
+        if (lstatSync(at).isSymbolicLink()) return true;
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  };
+  const queue = [resolve(entry)];
+  while (queue.length && !limit) {
+    const abs = queue.pop();
+    if (seen.has(abs)) continue;
     let text;
     try {
-      if (!lstatSync(abs).isFile()) throw new Error("not a file");
+      const st = lstatSync(abs);
+      if (!st.isFile()) throw new Error("not a file");
+      if (st.size > MAX_FILE) {
+        limit = `${show(abs)} is over ${MAX_FILE} bytes`;
+        break;
+      }
       text = readFileSync(abs, "utf8");
     } catch {
-      missing.push(relative(root, abs).split(sep).join("/"));
-      return;
+      missing.push(show(abs));
+      continue;
     }
     seen.add(abs);
+    bytes += Buffer.byteLength(text);
+    if (bytes > MAX_TOTAL) limit = `more than ${MAX_TOTAL} bytes reached`;
+    else if (seen.size > MAX_ENTRIES) limit = `more than ${MAX_ENTRIES} files reached`;
     for (const m of lexJs(text).code.matchAll(IMPORT_RE)) {
       const spec = m[1] ?? m[2];
       if (!spec.startsWith(".")) continue;
-      const target = resolve(dirname(abs), spec);
-      if (target.startsWith(root + sep)) visit(target);
-      else outside.push(`${relative(root, abs).split(sep).join("/")} imports ${spec}`);
+      let target;
+      try {
+        target = fileURLToPath(new URL(spec, pathToFileURL(abs)));
+      } catch {
+        missing.push(`${show(abs)} imports ${spec}`);
+        continue;
+      }
+      if (!target.startsWith(root + sep)) outside.push(`${show(abs)} imports ${spec}`);
+      else if (linked(target)) outside.push(`${show(abs)} imports ${spec}, through a link`);
+      else queue.push(target);
     }
-  };
-  visit(resolve(entry));
-  return { files: [...seen].sort(), outside, missing };
+  }
+  return { files: [...seen].sort(), outside, missing, limit };
 }
 
 function makeRepo(files, opts) {
@@ -287,7 +327,9 @@ const BANNED_CALLS = [
   [/\bprocess\s*\.\s*env\b/, "reads process.env"],
   [call("fetch"), "calls fetch"],
 ];
-const IMPORT_RE = /^\s*(?:import|export)\b[^;]*?\bfrom\s*["']([^"']+)["']|^\s*import\s*["']([^"']+)["']/gm;
+// The clause before `from` holds no quote: `export const s = 'from "./x"'`
+// is a string, not an import (CR-284).
+const IMPORT_RE = /^\s*(?:import|export)\b[^;"'`]*?\bfrom\s*["']([^"']+)["']|^\s*import\s*["']([^"']+)["']/gm;
 
 // The adapter's own source, two views at the same offsets (CR-121, CR-122):
 // `code` has comments, regex literal bodies and template text blanked —

@@ -150,7 +150,7 @@ const mjs = (dir) => files(dir).filter((p) => p.endsWith(".mjs"));
 // require from the view with strings blanked too, so one is caught however
 // its argument is spelt. A bare package is a problem: a copied adapter runs
 // under npx with no packages of its own (check 5 says the same).
-const STATIC_IMPORT = /^\s*(?:import|export)\b[^;]*?\bfrom\s*["']([^"']+)["']|^\s*import\s*["']([^"']+)["']/gm;
+const STATIC_IMPORT = /^\s*(?:import|export)\b[^;"'`]*?\bfrom\s*["']([^"']+)["']|^\s*import\s*["']([^"']+)["']/gm;
 export function adapterImportProblems(path, text) {
   const problems = [];
   const { code, mask } = lexJs(text);
@@ -213,6 +213,57 @@ test("the reach guard catches a reach into another adapter or past the folder", 
     assert.deepEqual(r.missing, ["a/gone.mjs"]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("reach resolves an import as Node does: a query, a fragment and an escaped name reach the file Node loads (CR-284)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "zdd-reach-url-"));
+  try {
+    mkdirSync(join(dir, "a"));
+    mkdirSync(join(dir, "_shared"));
+    writeFileSync(join(dir, "a", "index.mjs"), `import { x } from "../_shared/x.mjs?v=1";\nimport { y } from "../_shared/y.mjs#part";\nimport { z } from "../_shared/a%20b.mjs";\nexport const hint = 'from "./never.mjs"';\nexport const all = x + y + z;\n`);
+    writeFileSync(join(dir, "_shared", "x.mjs"), `export const x = 1;\n`);
+    writeFileSync(join(dir, "_shared", "y.mjs"), `export const y = 2;\n`);
+    writeFileSync(join(dir, "_shared", "a b.mjs"), `export const z = 3;\n`);
+    const r = moduleReach(join(dir, "a", "index.mjs"), dir);
+    assert.deepEqual(r.files.map((f) => relative(dir, f).split(sep).join("/")), ["_shared/a b.mjs", "_shared/x.mjs", "_shared/y.mjs", "a/index.mjs"]);
+    assert.deepEqual([r.outside, r.missing, r.limit], [[], [], null], "a string holding `from \"./x\"` is not an import");
+    assert.equal((await import(pathToFileURL(join(dir, "a", "index.mjs")).href)).all, 6, "Node loads the same files");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("reach never goes through a link, and stops at its limits (CR-278, CR-279)", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "zdd-reach-link-"));
+  const away = mkdtempSync(join(tmpdir(), "zdd-reach-away-"));
+  try {
+    mkdirSync(join(dir, "a"));
+    mkdirSync(join(dir, "_shared"));
+    writeFileSync(join(away, "h.mjs"), `export const h = 1;\n`);
+    writeFileSync(join(dir, "a", "index.mjs"), `import { h } from "../_shared/link/h.mjs";\n`);
+    let linked = true;
+    try {
+      symlinkSync(away, join(dir, "_shared", "link"), "junction");
+    } catch {
+      linked = false;
+    }
+    if (linked) {
+      const r = moduleReach(join(dir, "a", "index.mjs"), dir);
+      assert.deepEqual(r.files.map((f) => relative(dir, f).split(sep).join("/")), ["a/index.mjs"], "nothing behind the link is read");
+      assert.deepEqual(r.outside, ["a/index.mjs imports ../_shared/link/h.mjs, through a link"]);
+    } else t.diagnostic("this machine cannot create links: the link case is not run");
+    writeFileSync(join(dir, "a", "index.mjs"), `import { big } from "../_shared/big.mjs";\n`);
+    writeFileSync(join(dir, "_shared", "big.mjs"), `export const big = "${"x".repeat(1024 * 1024)}";\n`);
+    const r = moduleReach(join(dir, "a", "index.mjs"), dir);
+    assert.match(r.limit, /_shared\/big\.mjs is over 1048576 bytes/);
+    // A long chain is walked without recursion: no stack to overflow.
+    for (let i = 0; i < 3000; i++) writeFileSync(join(dir, "_shared", `c${i}.mjs`), i < 2999 ? `import "./c${i + 1}.mjs";\n` : `export {};\n`);
+    writeFileSync(join(dir, "a", "index.mjs"), `import "../_shared/c0.mjs";\n`);
+    assert.equal(moduleReach(join(dir, "a", "index.mjs"), dir).files.length, 3001);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(away, { recursive: true, force: true });
   }
 });
 

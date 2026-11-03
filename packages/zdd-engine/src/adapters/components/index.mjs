@@ -35,7 +35,7 @@
 //                   (default ["components", "ui"])
 //   srcAliasRoot    where the tsconfig `@/` alias points (default: the first
 //                   root)
-// Purely textual, on the shared JS lexical mask (adapters/js): a component
+// Purely textual, on the shared JS lexical mask (_shared/js): a component
 // spelled inside a comment or a string is not one. Every file is read
 // through `io` (decision 0010): inside the repo, under the cap, never
 // through a link. Deterministic: same bytes in, same records out.

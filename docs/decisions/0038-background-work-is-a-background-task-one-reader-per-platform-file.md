@@ -122,6 +122,13 @@ and the reader that turns candidates into records.
   allow-list, and repairs the map's `metadata/job/` links. The 0.9
   upgrade notes are slice 6's.
 
+## As built (ZDD-11 slice 3: paths moved)
+
+What the background readers share, named here as `adapters/background/`,
+is now `adapters/_shared/background/`, with `shared.mjs` renamed `tasks.mjs`
+([0048](0048-the-app-owns-its-adapters-zdd-ships-starters-not-readers.md)
+point 4). The core's merge of background tasks is unchanged.
+
 ## Rejected
 
 - **Keep one `jobs` adapter.** No work, one config line, but every platform

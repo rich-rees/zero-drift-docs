@@ -11,6 +11,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { detectRepo } from "../src/core/lib/detect-repo.mjs";
 import { catalogueModules } from "../src/core/derive.mjs";
+import { trialRead } from "./adapter-kit.mjs";
+import * as supabase from "../src/adapters/supabase/index.mjs";
 
 const modules = await catalogueModules();
 
@@ -27,12 +29,23 @@ const repo = (t, files) => {
 test("a claim read clean covers `schema`; a declined one leaves it uncovered and is passed on with its reasons", (t) => {
   const ok = detectRepo(repo(t, { "migrations/001.sql": "create table a (id int);\n" }), modules);
   assert.deepEqual(ok.coverage.find((c) => c.part === "schema").adapters, ["supabase"]);
-  const no = detectRepo(repo(t, { "migrations/001.sql": "alter table never_made add column x int;\n" }), modules);
+  const root = repo(t, { "migrations/001.sql": "alter table never_made add column x int;\n" });
+  const no = detectRepo(root, modules);
   assert.ok(!no.proposals.some((p) => p.name === "supabase"));
   assert.ok(no.uncovered.includes("schema"), "`schema` stays uncovered, so bootstrap offers to build");
   const said = no.declined.find((x) => x.name === "supabase");
   assert.deepEqual(said.parts, ["schema"]);
-  assert.ok(said.reasons.length);
+  // Passed on as the adapter said them, every word (CR-283).
+  assert.deepEqual(said.reasons, trialRead(supabase, root).declined);
+  assert.match(said.reasons.join(" "), /never_made/);
+});
+
+test("the adapter kit's trial sees what detection sees: a folder another adapter skips is skipped for both (CR-286)", (t) => {
+  const root = repo(t, { "node_modules/pkg/migrations/001.sql": "create table vendored (id int);\n" });
+  const d = detectRepo(root, modules);
+  const own = trialRead(supabase, root);
+  assert.equal(Boolean(own?.proposal), d.proposals.some((p) => p.name === "supabase"));
+  assert.ok(!own?.proposal, "an installed package's migrations are no claim, in the kit as in detection");
 });
 
 test("Flyway's own folder claims nothing and declines nothing: `schema` is simply uncovered", (t) => {

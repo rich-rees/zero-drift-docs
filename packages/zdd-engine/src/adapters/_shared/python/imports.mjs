@@ -4,7 +4,7 @@
 // configured adapters for their readers, walks the source once and inverts
 // the answer.
 //
-// Read on the masked text (adapters/python), logical lines joined, so an
+// Read on the masked text (./source.mjs), logical lines joined, so an
 // import in a comment or a string is not one: `import a.b [as c], d` and
 // `from [.]*a.b import x, (y, z)`, also after a `;` and in a one-line suite
 // (`if TYPE_CHECKING: import c`). Resolution, as the interpreter runs it:

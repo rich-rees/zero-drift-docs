@@ -3,7 +3,7 @@
 // else a bucket), `.rpc('x')` (a database function), and Realtime
 // subscriptions — the client's own `.on("postgres_changes", { table })` and
 // any helper named in `subscribeCalls` — in JS and TS source. One
-// `data-access` record per code unit that makes such a call (adapters/js:
+// `data-access` record per code unit that makes such a call (_shared/js:
 // a top-level declaration by its local name, the module's own top-level
 // code as `<module>`), keyed by file + unit, so a route or screen adapter's
 // `?code:<file>#<name>` names the same text. A unit's calls are its own and

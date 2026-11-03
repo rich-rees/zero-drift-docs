@@ -39,7 +39,7 @@
 // `api.get("/users")`, `fetch("/v1/x")`, any receiver — textual on purpose)
 // are emitted UNRESOLVED (`?route:/users`) for the deriver to resolve against
 // whichever extractor owns the API. The code a screen runs is named the same
-// way, `?code:<file>#<unit>` (decision 0037; adapters/js names the units):
+// way, `?code:<file>#<unit>` (decision 0037; _shared/js names the units):
 // the element file whole (`#*`), and in each one-hop module the units the
 // import reaches — how that code reaches the database is a data-access
 // adapter's (supabase-js) to say, and the core folds it in. A
@@ -402,7 +402,7 @@ export function derive({ options, io }) {
   // A one-hop module, memoised: its whole-file refs, its statement model and
   // each statement's refs, scanned ONCE — a narrowed import is then a union
   // of precomputed sets, never a rescan of the module (1.3.0 CR-022). A
-  // statement's refs include the code unit it belongs to (adapters/js).
+  // statement's refs include the code unit it belongs to (_shared/js).
   const modules = new Map();
   const moduleOf = (rel) => {
     if (!modules.has(rel)) {

@@ -113,16 +113,23 @@ function checkAdapter(name, D) {
   if (!Number.isFinite(D.order)) broken(name, "has no detection order");
 }
 
+// The one scan every detecting adapter in `modules` is handed: the walk
+// skips the union of their skipDirs. detectRepo builds it here, and so does
+// an adapter's own test, so a test sees what detection sees (CR-286).
+export function detectScan(repoRoot, modules, caps = {}) {
+  const ignored = gitIgnoredPredicate(repoRoot);
+  if (ignored.error) throw new Error(ignored.error);
+  const io = makeExtractorIo(repoRoot, "detect", { ignored, maxDepth: DETECT_DEPTH, ...caps });
+  const skipDirs = new Set(modules.filter(({ mod }) => mod.DETECTION).flatMap(({ mod }) => mod.DETECTION.skipDirs ?? []));
+  return makeScan(io, skipDirs);
+}
+
 // modules: [{ name, mod }] in name order (derive.mjs catalogueModules).
 // `caps` lowers the io's limits, for the tests that reach them.
 export function detectRepo(repoRoot, modules, caps = {}) {
   const adapters = modules.filter(({ mod }) => mod.DETECTION);
   for (const { name, mod } of adapters) checkAdapter(name, mod.DETECTION);
-  const ignored = gitIgnoredPredicate(repoRoot);
-  if (ignored.error) throw new Error(ignored.error);
-  const io = makeExtractorIo(repoRoot, "detect", { ignored, maxDepth: DETECT_DEPTH, ...caps });
-  const skipDirs = new Set(adapters.flatMap(({ mod }) => mod.DETECTION.skipDirs ?? []));
-  const scan = makeScan(io, skipDirs);
+  const scan = detectScan(repoRoot, adapters, caps);
 
   const sourceRes = adapters.map(({ mod }) => mod.DETECTION.sourceFile).filter(Boolean);
   const sourceFiles = scan.files.filter((f) => sourceRes.some((re) => re.test(f.name))).length;
