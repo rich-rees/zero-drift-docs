@@ -36,7 +36,8 @@ const ADAPTERS = ["supabase", "sqlalchemy"];
 const walk = (dir) => readdirSync(dir).sort().flatMap((n) => (statSync(join(dir, n)).isDirectory() ? walk(join(dir, n)) : [join(dir, n)]));
 const tree = (dir) => new Map(existsSync(dir) ? walk(dir).map((p) => [relative(dir, p).split(sep).join("/"), readFileSync(p, "utf8")]) : []);
 
-// Every file of the baseline and its SHA-256, line endings as LF. Made from
+// Every file of the baseline and the SHA-256 of its bytes as checked out
+// (.gitattributes makes every text file LF on every machine). Made from
 // `git show 419293d:packages/zdd-engine/…` with only these edits: an import
 // of `../../core/lib/paths.mjs` or `data-access.mjs` reads `../_shared/…`,
 // `../python/` reads `../_shared/python/`, one comment's path likewise; in
@@ -65,7 +66,7 @@ const PINNED = {
 };
 
 test("the baseline's every file is pinned to its bytes: nothing added, dropped or edited (CR-282)", () => {
-  const got = Object.fromEntries(walk(BASE).map((p) => [relative(BASE, p).split(sep).join("/"), createHash("sha256").update(readFileSync(p, "utf8").replace(/\r\n/g, "\n")).digest("hex")]));
+  const got = Object.fromEntries(walk(BASE).map((p) => [relative(BASE, p).split(sep).join("/"), createHash("sha256").update(readFileSync(p)).digest("hex")]));
   assert.deepEqual(got, PINNED);
 });
 

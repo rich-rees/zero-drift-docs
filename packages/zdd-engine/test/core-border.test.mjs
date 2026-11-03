@@ -35,7 +35,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { catalogue, readCatalogue, splitBundleOptions } from "../src/core/lib/catalogue.mjs";
-import { lexJs, moduleReach } from "../src/core/lib/suite.mjs";
+import { importSpecs, ioProblems, lexJs, moduleReach } from "../src/core/lib/suite.mjs";
 import { makeExtractorIo } from "../src/core/lib/extractor-io.mjs";
 import { WORD_RE as WORD_RE_OF } from "./stack-words.mjs";
 
@@ -150,12 +150,10 @@ const mjs = (dir) => files(dir).filter((p) => p.endsWith(".mjs"));
 // require from the view with strings blanked too, so one is caught however
 // its argument is spelt. A bare package is a problem: a copied adapter runs
 // under npx with no packages of its own (check 5 says the same).
-const STATIC_IMPORT = /^\s*(?:import|export)\b[^;"'`]*?\bfrom\s*["']([^"']+)["']|^\s*import\s*["']([^"']+)["']/gm;
 export function adapterImportProblems(path, text) {
   const problems = [];
-  const { code, mask } = lexJs(text);
-  for (const m of code.matchAll(STATIC_IMPORT)) {
-    const spec = m[1] ?? m[2];
+  const { mask } = lexJs(text);
+  for (const spec of importSpecs(text)) {
     if (spec.startsWith("node:")) continue;
     if (!spec.startsWith(".")) problems.push(`${path}: imports '${spec}', not a relative file`);
     else if (inside(resolve(dirname(join(PKG, path)), spec), CORE)) problems.push(`${path}: imports ${spec}, inside src/core`);
@@ -182,6 +180,7 @@ test("the adapter-side guard catches core imports in every spelling", () => {
   assert.ok(caught(`import("../../" + "core");`), "computed");
   assert.ok(caught(`import { a } from "../_shared/../../core/lib/paths.mjs";`), "through _shared");
   assert.ok(caught(`import { a } from "some-lib";`), "a package");
+  assert.ok(caught(`import { "odd-name" as a } from "../../core/lib/paths.mjs";`), "a quoted name before from (CR-289)");
   assert.ok(!caught(`import { a } from "../_shared/paths.mjs";\n// import x from "../../core/derive.mjs";\nimport { join } from "node:path";`), "the allowed forms pass, a comment is not an import");
 });
 
@@ -221,14 +220,17 @@ test("reach resolves an import as Node does: a query, a fragment and an escaped 
   try {
     mkdirSync(join(dir, "a"));
     mkdirSync(join(dir, "_shared"));
-    writeFileSync(join(dir, "a", "index.mjs"), `import { x } from "../_shared/x.mjs?v=1";\nimport { y } from "../_shared/y.mjs#part";\nimport { z } from "../_shared/a%20b.mjs";\nexport const hint = 'from "./never.mjs"';\nexport const all = x + y + z;\n`);
+    writeFileSync(join(dir, "a", "index.mjs"), `import { x } from "../_shared/x.mjs?v=1";\nimport { y } from "../_shared/y.mjs#part";\nimport { z } from "../_shared/a%20b.mjs";\nimport { "odd-name" as o } from "../_shared/odd.mjs";\nexport const hint = 'from "./never.mjs"';\nexport const all = x + y + z + o;\n`);
+    writeFileSync(join(dir, "_shared", "odd.mjs"), `const o = 4;\nexport { o as "odd-name" };\n`);
     writeFileSync(join(dir, "_shared", "x.mjs"), `export const x = 1;\n`);
     writeFileSync(join(dir, "_shared", "y.mjs"), `export const y = 2;\n`);
     writeFileSync(join(dir, "_shared", "a b.mjs"), `export const z = 3;\n`);
     const r = moduleReach(join(dir, "a", "index.mjs"), dir);
-    assert.deepEqual(r.files.map((f) => relative(dir, f).split(sep).join("/")), ["_shared/a b.mjs", "_shared/x.mjs", "_shared/y.mjs", "a/index.mjs"]);
-    assert.deepEqual([r.outside, r.missing, r.limit], [[], [], null], "a string holding `from \"./x\"` is not an import");
-    assert.equal((await import(pathToFileURL(join(dir, "a", "index.mjs")).href)).all, 6, "Node loads the same files");
+    assert.deepEqual(r.files.map((f) => relative(dir, f).split(sep).join("/")), ["_shared/a b.mjs", "_shared/odd.mjs", "_shared/x.mjs", "_shared/y.mjs", "a/index.mjs"]);
+    assert.deepEqual([r.outside, r.missing, r.limit], [[], [], null], "a string holding `from \"./x\"` is not an import; a quoted name before `from` is (CR-289)");
+    assert.equal((await import(pathToFileURL(join(dir, "a", "index.mjs")).href)).all, 10, "Node loads the same files");
+    writeFileSync(join(dir, "a", "fs.mjs"), `import { "readFileSync" as r } from "node:fs";\nexport const x = r;\n`);
+    assert.deepEqual(ioProblems(join(dir, "a", "fs.mjs"), dir), ["a/fs.mjs imports node:fs"], "check 5 reads the same imports");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -321,10 +323,7 @@ test("an adapter's travelling tests reach ZDD only through adapter-kit.mjs", () 
   const problems = [];
   const TEST = join(PKG, "test");
   for (const [file, name] of Object.entries(TRAVELLING_TESTS)) {
-    const text = readFileSync(join(TEST, file), "utf8");
-    const { code } = lexJs(text);
-    for (const m of code.matchAll(STATIC_IMPORT)) {
-      const spec = m[1] ?? m[2];
+    for (const spec of importSpecs(readFileSync(join(TEST, file), "utf8"))) {
       if (spec.startsWith("node:") || spec === "./adapter-kit.mjs") continue;
       const target = resolve(TEST, spec);
       if (!spec.startsWith(".") || !(inside(target, join(ADAPTERS, name)) || inside(target, SHARED))) problems.push(`test/${file}: imports ${spec}`);

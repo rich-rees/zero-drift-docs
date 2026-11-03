@@ -194,8 +194,7 @@ export function moduleReach(entry, within) {
     bytes += Buffer.byteLength(text);
     if (bytes > MAX_TOTAL) limit = `more than ${MAX_TOTAL} bytes reached`;
     else if (seen.size > MAX_ENTRIES) limit = `more than ${MAX_ENTRIES} files reached`;
-    for (const m of lexJs(text).code.matchAll(IMPORT_RE)) {
-      const spec = m[1] ?? m[2];
+    for (const spec of importSpecs(text)) {
       if (!spec.startsWith(".")) continue;
       let target;
       try {
@@ -327,9 +326,24 @@ const BANNED_CALLS = [
   [/\bprocess\s*\.\s*env\b/, "reads process.env"],
   [call("fetch"), "calls fetch"],
 ];
-// The clause before `from` holds no quote: `export const s = 'from "./x"'`
-// is a string, not an import (CR-284).
-const IMPORT_RE = /^\s*(?:import|export)\b[^;"'`]*?\bfrom\s*["']([^"']+)["']|^\s*import\s*["']([^"']+)["']/gm;
+const IMPORT_RE = /^\s*(?:import|export)\b[^;]*?\bfrom\s*["']([^"']+)["']|^\s*import\s*["']([^"']+)["']/gm;
+
+// The specifiers a file's static imports and re-exports name. A statement is
+// found in the view with strings blanked, so `export const s = 'from "./x"'`
+// is a string, not an import, while `import { "odd" as x } from "./y"` is one
+// (CR-284, CR-289); the specifier is read from the code view at the same
+// place, where strings are kept.
+const STATEMENT_RE = /^\s*(?:import|export)\b[^;]*?\bfrom\s*(["'])|^\s*import\s*(["'])/gm;
+export function importSpecs(text) {
+  const { code, mask } = lexJs(text);
+  const specs = [];
+  for (const m of mask.matchAll(STATEMENT_RE)) {
+    const at = m.index + m[0].length;
+    const end = code.indexOf(m[1] ?? m[2], at);
+    if (end > at) specs.push(code.slice(at, end));
+  }
+  return specs;
+}
 
 // The adapter's own source, two views at the same offsets (CR-121, CR-122):
 // `code` has comments, regex literal bodies and template text blanked —
@@ -488,9 +502,8 @@ export function ioProblems(entry, within) {
       problems.push(`${rel} cannot be read`);
       return;
     }
-    const { code, mask } = lexJs(text);
-    for (const m of code.matchAll(IMPORT_RE)) {
-      const spec = m[1] ?? m[2];
+    const { mask } = lexJs(text);
+    for (const spec of importSpecs(text)) {
       if (BANNED_MODULES.test(spec)) problems.push(`${rel} imports ${spec}`);
       else if (spec.startsWith(".")) {
         const target = resolve(dirname(abs), spec);
