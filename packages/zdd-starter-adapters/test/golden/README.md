@@ -67,6 +67,12 @@ ZDD-11 slice 1 (decision 0048) regenerated the full-page human-index golden
 alone: every changed line is a line of viz.js or viz.css (the Unread peek); the
 header button is written only when an adapter reported something, so the page
 carries no new markup. No graph, metadata, agent-index or BUNDLE byte moved.
+ZDD-11 slice 6 (decision 0049) regenerated the full-page human-index golden
+alone, the same way: every changed line is a line of viz.js (the Known gaps
+peek and its button's handler). The button and `docs.gaps` are written only
+when a gap is answered as known, and the fixture answers none, so the page
+carries no new markup, the agent index gains no section, and no graph,
+metadata, agent-index or BUNDLE byte moved.
 
 ## Regenerating
 
