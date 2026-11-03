@@ -27,7 +27,9 @@ test("every starter declares this engine's CONTRACT, a COMMENT, and a SUITE with
     assert.equal(judged.warning, null, name);
     assert.ok(mod.COMMENT && typeof mod.COMMENT === "object", `${name} exports COMMENT`);
     assert.ok(mod.SUITE && typeof mod.SUITE.options === "object", `${name} exports SUITE`);
-    assert.ok(existsSync(join(ADAPTERS, name, "fixture")), `${name} carries its fixture/`);
+    // A file in it, not just the folder: git keeps no empty folder, so a
+    // clone (CI, an app's copy) would have none.
+    assert.ok(existsSync(join(ADAPTERS, name, "fixture")) && readdirSync(join(ADAPTERS, name, "fixture")).length > 0, `${name} carries its fixture/, with a file in it`);
     for (const c of Object.keys(mod.SUITE.companions ?? {})) assert.ok(starterNames.includes(c) && c !== name, `${name}: companion ${c} is another starter`);
   }
 });
