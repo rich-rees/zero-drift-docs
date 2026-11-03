@@ -38,8 +38,14 @@ if (!/^v\d+\.\d+\.\d+$/.test(tag ?? "")) {
   console.error("usage: pre-tag.mjs vX.Y.Z [--split] <adopter checkout> …");
   process.exit(2);
 }
+// Every step runs this checkout's engine, never the one an adopter's pin
+// names: the dry run comes before the tag, so that version is not on npm
+// yet. A repo's own scaffolded adapter test runs the engine at its pin
+// through npx unless ZDD_ENGINE_BIN names one, and `starters --move` runs
+// those tests: without it, every adopter holding such an adapter fails here.
+const ENV = { ...process.env, ZDD_ENGINE_BIN: ENGINE };
 const run = (label, cmd, args, cwd) => {
-  const r = spawnSync(cmd, args, { cwd, encoding: "utf8", shell: process.platform === "win32" && /\.cmd$|^npx$|^npm$/.test(cmd) });
+  const r = spawnSync(cmd, args, { cwd, encoding: "utf8", env: ENV, shell: process.platform === "win32" && /\.cmd$|^npx$|^npm$/.test(cmd) });
   const ok = r.status === 0;
   console.log(`${ok ? "ok     " : "FAILED "} ${label}`);
   if (!ok) {
@@ -71,7 +77,7 @@ for (const adopter of adopters) {
     writeFileSync(join(copy, ".gitignore"), (existsSync(join(copy, ".gitignore")) ? "" : "") + "\n.claude/worktrees/\n", { flag: "a" });
     const label = basename(src);
     let ok = run(`${label}: upgrade --plan`, process.execPath, [PLUGIN, "upgrade", "--plan", `--root=${copy}`], copy);
-    const plan = JSON.parse(spawnSync(process.execPath, [PLUGIN, "upgrade", "--plan", `--root=${copy}`, "--json"], { cwd: copy, encoding: "utf8" }).stdout || "{}");
+    const plan = JSON.parse(spawnSync(process.execPath, [PLUGIN, "upgrade", "--plan", `--root=${copy}`, "--json"], { cwd: copy, encoding: "utf8", env: ENV }).stdout || "{}");
     const moves = plan.blessingMoves?.proposals ?? [];
     const moving = moves.length ? [`--move-blessings=${plan.blessingMoves.token}`] : [];
     ok = run(`${label}: upgrade${moves.length ? ` (moving ${moves.filter((p) => !p.problem).length} of ${moves.length} blessings; ${moves.filter((p) => p.problem).length} stay, named)` : ""}`, process.execPath, [PLUGIN, "upgrade", ...moving, `--root=${copy}`], copy) && ok;
@@ -81,7 +87,7 @@ for (const adopter of adopters) {
     // the fixes, as the adopter's run takes them on a yes — the copies move,
     // their tests run, derive, the map is repointed, lint.
     // A status that fails is a failed adopter, never "nothing to prove" (CR-326).
-    const st = spawnSync(process.execPath, [PLUGIN, "starters", `--root=${copy}`, "--json"], { cwd: copy, encoding: "utf8" });
+    const st = spawnSync(process.execPath, [PLUGIN, "starters", `--root=${copy}`, "--json"], { cwd: copy, encoding: "utf8", env: ENV });
     let status = null;
     try {
       status = st.status === 0 ? JSON.parse(st.stdout) : null;
@@ -96,7 +102,7 @@ for (const adopter of adopters) {
     if (status.copies.length) {
       ok = run(`${label}: starters --prove (${status.copies.length} adapters copied in; the records unchanged)`, process.execPath, [PLUGIN, "starters", "--prove", `--root=${copy}`], copy) && ok;
       if (status.behind?.length) {
-        const m = spawnSync(process.execPath, [PLUGIN, "starters", "--move", `--root=${copy}`, "--json"], { cwd: copy, encoding: "utf8" });
+        const m = spawnSync(process.execPath, [PLUGIN, "starters", "--move", `--root=${copy}`, "--json"], { cwd: copy, encoding: "utf8", env: ENV });
         let moved = null;
         try {
           moved = JSON.parse(m.stdout);
@@ -111,7 +117,7 @@ for (const adopter of adopters) {
       }
     }
     if (split) {
-      const sp = JSON.parse(spawnSync(process.execPath, [PLUGIN, "split-adrs", "--plan", `--root=${copy}`, "--json"], { cwd: copy, encoding: "utf8" }).stdout || "{}");
+      const sp = JSON.parse(spawnSync(process.execPath, [PLUGIN, "split-adrs", "--plan", `--root=${copy}`, "--json"], { cwd: copy, encoding: "utf8", env: ENV }).stdout || "{}");
       const untagged = (sp.proposals ?? []).filter((p) => !p.tag).map((p) => p.num);
       const tagged = (sp.proposals ?? []).filter((p) => p.tag === "harness").length;
       ok = run(`${label}: split-adrs (${tagged} to harness by their tag, ${untagged.length} untagged kept in the application set)`, process.execPath, [PLUGIN, "split-adrs", `--token=${sp.token}`, `--application=${untagged.join(",")}`, `--root=${copy}`], copy) && ok;
@@ -119,13 +125,32 @@ for (const adopter of adopters) {
     ok = run(`${label}: derive`, process.execPath, [ENGINE, "derive", `--root=${copy}`], copy) && ok;
     ok = run(`${label}: render`, process.execPath, [ENGINE, "render", `--root=${copy}`], copy) && ok;
     ok = run(`${label}: lint`, process.execPath, [ENGINE, "lint", `--root=${copy}`], copy) && ok;
+    // What the upgrade asks the developer to answer (decisions 0048 and
+    // 0049): its steps 4c and 4d, counted, so the adopter's task can say how
+    // many to expect. A list that cannot be read fails the adopter.
+    for (const which of ["unread", "gaps"]) {
+      const r = spawnSync(process.execPath, [PLUGIN, which, `--root=${copy}`, "--json"], { cwd: copy, encoding: "utf8", env: ENV, maxBuffer: 256 * 1024 * 1024 });
+      let list = null;
+      try {
+        list = r.status === 0 ? JSON.parse(r.stdout) : null;
+      } catch {
+        list = null;
+      }
+      if (!Array.isArray(list?.open)) {
+        console.log(`FAILED  ${label}: ${which} (the list to answer) — exit ${r.status}\n${(r.stdout + r.stderr).split("\n").slice(-20).join("\n")}`);
+        ok = false;
+        continue;
+      }
+      const kinds = Object.entries(list.open.reduce((m, x) => ((m[x.kind ?? x.adapter ?? "?"] = (m[x.kind ?? x.adapter ?? "?"] ?? 0) + 1), m), {})).map(([k, n]) => `${n} ${k}`).join(", ");
+      console.log(`        ${label}: ${list.open.length} ${which === "gaps" ? "gaps" : "unread items"} to answer${kinds ? ` (${kinds})` : ""}`);
+    }
     // --untracked: a record the derive just minted is not yet in the index (CR-515).
-    const leaked = spawnSync("git", ["grep", "-l", "--untracked", "planted.ts", "--", "zdd"], { cwd: copy, encoding: "utf8" });
+    const leaked = spawnSync("git", ["grep", "-l", "--untracked", "planted.ts", "--", "zdd"], { cwd: copy, encoding: "utf8", env: ENV });
     if (leaked.status === 0) {
       console.log(`FAILED  ${label}: the planted worktree file reached a generated artifact:\n${leaked.stdout}`);
       ok = false;
     } else console.log(`ok      ${label}: nothing from .claude/worktrees/ reached the artifacts`);
-    const diff = spawnSync("git", ["status", "--short"], { cwd: copy, encoding: "utf8" }).stdout.trim().split("\n").filter(Boolean);
+    const diff = spawnSync("git", ["status", "--short"], { cwd: copy, encoding: "utf8", env: ENV }).stdout.trim().split("\n").filter(Boolean);
     console.log(`        ${label}: ${diff.length} files would move in the upgrade PR${diff.length ? ":\n" + diff.map((l) => "          " + l).join("\n") : ""}`);
     allOk = ok && allOk;
   } finally {
