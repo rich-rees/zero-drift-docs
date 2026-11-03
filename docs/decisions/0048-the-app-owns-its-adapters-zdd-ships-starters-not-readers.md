@@ -485,6 +485,19 @@ export. A hand-written local adapter is the only route that works today.
 - **The suite logic.** A copy no one has changed passes the suite as the
   library proved, so the upgrade raises `suiteChecks` when every adapter is
   one; an adapter the repo wrote or changed keeps the interview.
+- **Hardened by the slice's campaign** (CR-315 to CR-353). "Changed" means
+  anything a copy's code reaches now, shared code and companions included,
+  that is not as ZDD copied it; `copy-set --files-only` reads that reach
+  without running the repo's code. Only a file the copy created is
+  recorded: one the repo had stays the repo's, even when identical, and the
+  copy that reaches it counts as changed. The record is untrusted input:
+  every path must lie under a recorded adapter or `_shared/`, under a size
+  bound. `--move` runs `derive --check` and every other check before its
+  first write, keeps the shared code any adapter that stays reaches
+  (recorded or not), and puts every file back when a write, the tests or
+  derive fail. `localExtractorDir` may not overlap an artifact. Declined
+  fixes stay listed, and a move says it applies them. The library route
+  trusts the package as the engine's npx route does (CR-318, accepted).
 - **Detection's greenfield list** is now `starters` in detect's output (it
   was `catalogue`, which also named the release check's marketplace copy).
 - **Proved on the two adopters**, read-only `git archive` copies: the
@@ -492,7 +505,8 @@ export. A hand-written local adapter is the only route that works today.
   records, byte for byte as committed; `--move` gave 255 and 327, equal to
   slice 4's 0.2.0 run, with four table ids moved and one map page
   repointed on the first, five records changed on the second, and lint,
-  the adapters' tests and the suite green on both.
+  the adapters' tests and the suite green on both. Re-run on the code after
+  the campaign, with the same numbers.
 
 ## Rejected
 
