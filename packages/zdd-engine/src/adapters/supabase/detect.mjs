@@ -62,9 +62,9 @@ function judge(dir, names, scan) {
   if (replay.undone.length) reasons.push(`\`${dir}\`: files undo themselves, so they hold undo steps a replay would apply (${quote(replay.undone)})`);
   if (replay.created && !replay.tables.size) reasons.push(`\`${dir}\`: files create tables and end with none`);
   // Each kind has a folder of its own, so a table and a function may share a name.
-  for (const names of [replay.tables.keys(), replay.functions.keys()]) {
+  for (const held of [replay.tables, replay.functions]) {
     const files = new Map();
-    for (const name of names) {
+    for (const { name } of held.values()) {
       const file = fileNamed("", name).toLowerCase();
       if (files.has(file)) reasons.push(`\`${dir}\`: \`${files.get(file)}\` and \`${name}\` would be one record file, differing at most by case`);
       files.set(file, name);

@@ -459,6 +459,18 @@ test("CR-013: a schema, routes that name their code, and no data-access adapter 
   assert.ok(!/no data-access adapter/.test(run.stderr), "the FastAPI fixture lists supabase-py: no warning");
 });
 
+test("sqlalchemy: `public.jobs` in SQL reaches a table the migrations left bare, and one they qualified, and says each once", async (t) => {
+  const { derive } = await import("../src/adapters/sqlalchemy/index.mjs");
+  const root = mkdtempSync(join(tmpdir(), "zdd-public-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, "app"));
+  writeFileSync(join(root, "app", "db.py"), 'from sqlalchemy import text\n\ndef both(s):\n    s.execute(text("select * from public.jobs j join jobs k on k.id = j.id join public.offers o on o.id = j.id"))\n');
+  const out = derive({ repoRoot: root, options: { roots: ["app"] }, io: makeExtractorIo(root, "sqlalchemy") });
+  const [found] = out.records;
+  assert.deepEqual(found.refs, ["?table:jobs", "?table:offers"], "the bare name, which the core finds in either spelling");
+  assert.deepEqual(found.facts.edges.reads, ["?table:jobs", "?table:offers"]);
+});
+
 // ---- end to end ----
 
 test("fixture-sqlalchemy: every route reaches the tables its repository SQL names, through the code it runs", () => {

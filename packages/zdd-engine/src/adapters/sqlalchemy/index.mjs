@@ -215,10 +215,12 @@ export function derive({ options, io }) {
       if (!tagged.length) continue;
       const reads = tagged.filter((t) => t.startsWith("r:")).map((t) => t.slice(2)).sort();
       const writes = tagged.filter((t) => t.startsWith("w:")).map((t) => t.slice(2)).sort();
-      const ref = (n) => `?table:${n}`;
+      // By the bare name: `public.jobs` and `jobs` are one table however the
+      // migrations spelled it, and the core finds either record by that.
+      const ref = (n) => `?table:${n.startsWith("public.") ? n.slice("public.".length) : n}`;
       const edges = {};
-      if (reads.length) edges.reads = [...new Set(reads)].map(ref);
-      if (writes.length) edges.writes = [...new Set(writes)].map(ref);
+      if (reads.length) edges.reads = [...new Set(reads.map(ref))];
+      if (writes.length) edges.writes = [...new Set(writes.map(ref))];
       records.push(dataAccessRecord("sqlalchemy", rel, fn, new Set([...reads, ...writes].map(ref)), edges));
     }
   }

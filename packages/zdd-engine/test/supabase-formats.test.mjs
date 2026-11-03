@@ -276,6 +276,19 @@ test("CR-252: a decline over a function says so, not a table", (t) => {
   declined(t, { "migrations/001.sql": "create table a (id int);\nalter function ghost() rename to spirit;\n" }, /a table or function they never create/);
 });
 
+test("the record: a key added by ALTER is an edge, a function in two spellings is one record with its trigger", (t) => {
+  const root = repo(t, { "migrations/001.sql": "create table a (id int);\ncreate table b (a_id int);\nalter table b add foreign key (a_id) references a(id);\ncreate function public.f() returns trigger language plpgsql as $$ begin return new; end; $$;\ncreate trigger tr before update on a for each row execute function f();\n" });
+  const { records } = derive({ repoRoot: root, options: { migrationNamespaces: [{ name: "db", dir: "migrations" }] }, io: makeExtractorIo(root, "supabase") });
+  assert.deepEqual(records.find((r) => r.id === "table:db/b").refs, ["table:db/a"]);
+  assert.deepEqual(records.find((r) => r.id === "function:db/public.f").refs, ["table:db/a"]);
+  assert.equal(records.filter((r) => r.kind === "function").length, 1);
+});
+
+test("Prisma's own foreign keys are read, in a folder of files", (t) => {
+  const tables = read(t, { "db/migrations/001.sql": 'CREATE TABLE "public"."User" ("id" SERIAL NOT NULL, CONSTRAINT "User_pkey" PRIMARY KEY ("id"));\nCREATE TABLE "public"."Post" ("id" SERIAL NOT NULL, "authorId" INTEGER NOT NULL);\nALTER TABLE "public"."Post" ADD CONSTRAINT "Post_authorId_fkey" FOREIGN KEY ("authorId") REFERENCES "public"."User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;\n' });
+  assert.deepEqual(tables, { "public.Post": ["id", "authorId"], "public.User": ["id"] });
+});
+
 test("CR-253: a renamed function's record carries its new id and its history, after what was there", (t) => {
   const root = repo(t, { "migrations/001.sql": "create table a (id int);\ncreate function f() returns trigger language plpgsql as $$ begin return new; end; $$;\ncreate trigger tr before update on a for each row execute function f();\n", "migrations/002.sql": "alter function f() rename to g;\n" });
   const { records } = derive({ repoRoot: root, options: { migrationNamespaces: [{ name: "db", dir: "migrations" }] }, io: makeExtractorIo(root, "supabase") });

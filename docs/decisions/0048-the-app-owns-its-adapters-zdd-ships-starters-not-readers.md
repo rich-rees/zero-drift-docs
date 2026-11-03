@@ -209,11 +209,36 @@ export. A hand-written local adapter is the only route that works today.
   Prisma is declined: a lone file under a versioned folder name is one
   migration, and the replay reads the files of one folder. Goose and dbmate,
   MySQL backticks and its own statements, and SQL Server are declined.
-- **What this slice leaves alone,** because each would move adopters' records:
-  a renamed `public` table loses `public.`; foreign keys added by `ALTER` are
-  not read; `UNIQUE(a, b)` with no space reads as a column; a type changed
-  `USING` something keeps a garbled type; `f` and `public.f` are two function
-  records; `UPDATE storage.buckets` is not followed.
+- **A clean starter, and a baseline to prove the move against** (Rich's call,
+  after the slice first left these for later). The first commits of the slice
+  moved no adopter's records. The fixes after them do, and the starter ships
+  with them, because a new adopter must never receive a known bug:
+  - a foreign key added by `ALTER`, at table level, with no column list, or
+    in a guarded `DO` block is read; `DROP CONSTRAINT` takes one away, by the
+    name given or the name Postgres gave it, through renames;
+  - a renamed table keeps the schema it was written with, `public` too, and
+    `sqlalchemy` refs a table by its bare name, so `public.x` in code reaches
+    the table in either spelling. Together these were not cosmetic: code that
+    qualified a renamed table lost its data-access records with no warning;
+  - `f` and `public.f` are one function, in every statement that names it;
+  - `UPDATE` and `DELETE` on `storage.buckets` apply, or report when they
+    are wider than one bucket; an `INSERT` of several makes them all;
+  - `UNIQUE(a, b)` with no space is no column; a type changed `USING`
+    something is the type; a `CREATE TABLE` over a table that is there
+    reports.
+  This narrows point 8, it does not break it. Commit `419293d` is the baseline:
+  the reader as it reproduces adopters' records. The core did not move
+  with these fixes (the alias they first needed went into `sqlalchemy`, so the
+  baseline on 0.14 reproduces the records), and that must stay so.
+- **The upgrade's route to the fixes** (slice 4 and 5 build it). The library's
+  first version is the baseline; its next carries the fixes and the note
+  point 7 describes. New adopters get the latest. "Upgrade ZDD" copies the
+  baseline, proves the records byte-identical, then in the same upgrade
+  offers the note and, on a yes, moves the copy to the fixed version, runs the
+  adapter's tests, and derives. It reads the changed records against the note,
+  and repoints every map link and blessing at an id that moved, by the table's
+  `renamedFrom`, before `lint`. Two proofs, in order, so what the move did and
+  what the fixes did are never mixed. On a no, the note stands as point 7 says.
 
 ## Rejected
 

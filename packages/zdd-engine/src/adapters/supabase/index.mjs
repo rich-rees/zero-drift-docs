@@ -129,8 +129,8 @@ export function derive({ repoRoot, options, io }) {
         filename: fileNamed(ns, name),
       });
     }
-    for (const name of [...functions.keys()].sort()) {
-      const f = functions.get(name);
+    for (const f of [...functions.values()].sort((a, b) => (a.name < b.name ? -1 : 1))) {
+      const name = f.name;
       // Function -> table edges: known table names appearing as whole words in
       // the (last) definition body. Textual, therefore honest. Trigger
       // functions never name their tables (`NEW.updated_at = now()`), so
@@ -144,7 +144,7 @@ export function derive({ repoRoot, options, io }) {
         const word = key.includes(".") ? `\\b${escapeRegex(key)}\\b` : `(?:\\bpublic\\.|(?<![\\w$.]))${escapeRegex(key)}\\b`;
         if (tNs === ns && new RegExp(word).test(f.body)) refs.add(tableId(key));
       }
-      const attached = triggers.filter((t) => t.fn === name && tableId(t.table));
+      const attached = triggers.filter((t) => tableKey(t.fn) === tableKey(name) && tableId(t.table));
       const facts = { namespace: ns, signature: f.signature, returns: f.returns, language: f.language };
       if (attached.length) {
         for (const t of attached) refs.add(tableId(t.table));
