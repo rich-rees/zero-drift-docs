@@ -92,11 +92,37 @@ already holds, so a red suite names what was forgotten.
 - [ ] Each adopter's lock moves to `v0.9.0` by hand (README, "Upgrading"):
       an old-line release's check never offers a lower number.
 
+**Once, for 0.14.0** (the starter library's first release, decision 0048)
+
+- [ ] `@rich-rees/zdd-starter-adapters@0.1.0` (the baseline) is published by
+      hand, from a fresh stage (`node packages/zdd-starter-adapters/scripts/stage.mjs
+      0.1.0 <empty dir>`, then `npm publish --access public` in it): npm's trusted
+      publishing needs the package to exist, and a new package's first publish
+      is staged by npm (a `0.0.0-stage` placeholder; check the registry, not the
+      website).
+- [ ] Its trusted publisher (GitHub Actions, `rich-rees/zero-drift-docs`,
+      `release-starter-adapters.yml`) is created on npmjs.com, then 0.2.0 is
+      published through it by its tag (step 1b) within two days: a pending
+      publisher expires unless a publish through it succeeds.
+
 **Release order** (since 2.3.0 the tag does the publishing —
 `.github/workflows/release.yml`; before it, the engine was published by hand
 first, which that workflow now refuses)
 
 1. Merge the PR (merge commit).
+1b. **The starter library first, when the plugin's pin moved**
+   (`plugins/zdd/starter-adapters.json`; decision 0048). The library is a
+   second package on its own version line, `@rich-rees/zdd-starter-adapters`,
+   and an installed plugin fetches the version it pins from npm (bootstrap,
+   the upgrade, preflight), so that version is on npm **before** the ZDD tag.
+   Tag the merge commit `starter-adapters-vX.Y.Z` and push it:
+   `.github/workflows/release-starter-adapters.yml` refuses a tag not on
+   `main`, proves every suite and the staged version's own tests in a
+   read-only job, then stages it fresh, publishes it by trusted publishing,
+   waits until it is fetchable and makes a GitHub release never marked
+   Latest. Check `npm view @rich-rees/zdd-starter-adapters@X.Y.Z version`
+   from outside the repo before step 2. A library-only fix (a starter
+   changed, the plugin's pin not) is this step alone, with no ZDD release.
 2. On `main` at the merge commit, `node scripts/pre-tag.mjs vX.Y.Z [adopter
    checkouts…]`: the pins, both suites, and a dry run of the upgrade on each
    real adopter given (a throwaway copy; never pushed).
@@ -104,7 +130,8 @@ first, which that workflow now refuses)
    that is not on `main`, proves the pins, runs both suites, publishes the
    engine (no secret: npm trusts this workflow by name, set up once on the
    package's npmjs.com settings — `@rich-rees/zdd` needs it set up before its
-   first tag, decision 0042), waits until the version is fetchable, and
+   first tag, decision 0042; the library's trusted publisher names
+   `release-starter-adapters.yml`), waits until the version is fetchable, and
    creates the GitHub release marked **Latest** with the Versioning entry as
    its notes. A failed run after the publish is rerun as it is: a version
    already on npm from this commit is resumed, not refused.

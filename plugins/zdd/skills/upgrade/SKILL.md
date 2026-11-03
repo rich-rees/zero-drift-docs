@@ -401,9 +401,9 @@ node "$PLUGIN/scripts/bootstrap.mjs" preflight
 Then, with the engine this plugin pins:
 
 ```
-npx -y @rich-rees/zdd@0.13.0 derive
-npx -y @rich-rees/zdd@0.13.0 render
-npx -y @rich-rees/zdd@0.13.0 lint
+npx -y @rich-rees/zdd@0.14.0 derive
+npx -y @rich-rees/zdd@0.14.0 render
+npx -y @rich-rees/zdd@0.14.0 lint
 ```
 
 Show what moved in the generated artifacts and say why, from the notes (a
@@ -501,7 +501,7 @@ category: https://github.com/rich-rees/zero-drift-docs/discussions (decision 004
   record:` it replaces is still read, as the blessings section. A squash
   merge loses the record unless the merger keeps the message; a merge
   commit keeps it.
-- **The tally.** `npx -y @rich-rees/zdd@0.13.0 tally [--since <ref|date>] [--json]` counts,
+- **The tally.** `npx -y @rich-rees/zdd@0.14.0 tally [--since <ref|date>] [--json]` counts,
   per section, how often an artifact turned, confirmed, was reused or
   stored, then names the ADRs, glossary terms and blessings in the stores
   that no record ever named.
@@ -620,6 +620,50 @@ category: https://github.com/rich-rees/zero-drift-docs/discussions (decision 004
   `render --check` moves `human-index.html` only (with another viewer,
   possibly nothing); `derive --check`, `graph.json`, the agent index and the blessing
   index keep their bytes. Commit it in the same PR.
+
+## Upgrading to 0.14 (the app owns its adapters; every update checks the map's gaps)
+
+- **The adapters come into the repo** (decision 0048, step 3b). The
+  engine ships no adapter from 0.14, so the run copies each one the config
+  names into `zdd/extractors/` from the starter library (npm
+  `@rich-rees/zdd-starter-adapters`), with its tests, its suite fixture and
+  the `_shared/` code it reaches, and records each copy's version and files
+  in `zdd/extractors/starters.json`. A repo from before 0.14 gets the
+  library's baseline, 0.1.0: the adapters exactly as the old engine ran
+  them. Configs still naming the 2.3 alias, `jobs` or the pre-1.0 `adapter`
+  key are rewritten first, as before; the engine now refuses them.
+- **A companion may come too.** A query reader's suite fixture gives
+  nothing without the route reader beside it, so that reader is copied as
+  well, into the folder but not into `extractors`: derive never runs it,
+  and `starters.json` marks it `companionOf`. Say so plainly: it is code the
+  app does not run, kept so the suite passes, until the fixture is rewritten
+  in the app's own stack.
+- **Two proofs, in order.** `starters --prove` first: every record byte for
+  byte as committed. Then `starters` lists the fixes the library's 0.2.0
+  notes, and one question answers them: `starters --move` on a yes (the
+  copies move, their tests run, derive, every map link and blessing at a
+  moved id is repointed, lint), `starters --decline` on a no, kept.
+- **The suite.** A copy no one has changed passes the suite as the library
+  proved it, so when every adapter is one the run raises `suiteChecks`;
+  step 4b still interviews an adapter the repo wrote or changed.
+- **What the adapters could not read** (step 4c: `unread`, then `unread
+  --raise`) **and the map's gaps** (decision 0049, step 4d beside it:
+  `gaps`, then `gaps --raise`). A gap is a route, screen or background task
+  that reaches nothing, or a table nothing reaches; each is fixed through
+  the **extractor** skill, or answered once, `--fine` or `--known`, with a
+  reason. Until each is raised, lint warns with every item and every gap
+  and never fails; from then a new one fails CI.
+- **Every update from now on** asks the starter library whether a starter
+  now fits (`bootstrap.mjs library`), and the session start says one line
+  when the library notes fixes for a copy not yet taken or declined.
+- **What moves on the bump**: `zdd/extractors/` arrives (the copies, their
+  tests and fixtures, `_shared/`, `starters.json`) and `zdd/config.json`
+  gains `localExtractorDir` (and `suiteChecks`, `unread`, `gaps` as
+  answered). `derive --check` keeps every record's bytes at the first
+  proof; on a yes to the fixes the records they correct move, in this PR.
+  `render --check` moves `human-index.html` (its Unread and Known gaps
+  peeks); the agent index and `graph.json` move only with the fixes or once
+  a gap is answered known. The pins move to 0.14.0.
 
 ## Upgrading to 0.13 (a store header says each key once)
 

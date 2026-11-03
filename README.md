@@ -4,7 +4,7 @@ A documentation architecture for repos built by **human + agent pairs**. ZDD kee
 eight documentation artifacts *at most one unit of work behind the code* — and, with
 CI, makes drift in the machine-generated ones **un-mergeable**.
 
-> **Status: 0.13.0.** The plugin installs in Claude Code
+> **Status: 0.14.0.** The plugin installs in Claude Code
 > and in Codex from this one repo; `bootstrap` detects your stack (or grills
 > for it on a greenfield repo), proposes extractors with evidence, and *writes*
 > the opt-ins; the engine (`packages/zdd-engine`, npm `@rich-rees/zdd`) is a
@@ -328,7 +328,7 @@ reviewable file, never one question per item.
 from [the releases page](https://github.com/rich-rees/zero-drift-docs/releases)):
 
 ```
-claude plugin marketplace add rich-rees/zero-drift-docs@v0.13.0 --scope project
+claude plugin marketplace add rich-rees/zero-drift-docs@v0.14.0 --scope project
 claude plugin install zdd@zero-drift-docs --scope project
 ```
 
@@ -454,12 +454,12 @@ all. Either way, from the repo's folder, in a terminal:
    `$CLAUDE_CONFIG_DIR` when you set it) mention `zero-drift-docs`, run
    `claude plugin marketplace remove zero-drift-docs --scope user` first (a
    plain `marketplace add` once left it there, and it holds the catalogue).
-2. `claude plugin marketplace add rich-rees/zero-drift-docs@v0.13.0 --scope project`
+2. `claude plugin marketplace add rich-rees/zero-drift-docs@v0.14.0 --scope project`
    — this moves the catalogue on this machine **and** the lock in
    `.claude/settings.json`. It also rewrites that file in its own key order
    and drops `"autoUpdate": false`; step 4 puts `autoUpdate` back. To keep
    the committed key order instead, `git restore .claude/settings.json` and
-   set `extraKnownMarketplaces["zero-drift-docs"].source.ref` to `"v0.13.0"`
+   set `extraKnownMarketplaces["zero-drift-docs"].source.ref` to `"v0.14.0"`
    by hand: the catalogue on this machine has moved either way.
 3. `claude plugin update zdd@zero-drift-docs --scope project` and
    `claude plugin update mattpocock-skills@zero-drift-docs --scope project`.
@@ -546,6 +546,13 @@ as a yes/no, so saying no to one is a visible choice, not a fork.
 
 - [ ] Next: a second viewer; Vue / Svelte / Angular extractors on their first
       real adoption.
+- [x] **0.14.0** — the app owns its adapters: the engine ships none, a
+      starter library (`@rich-rees/zdd-starter-adapters`) is an offer an
+      app copies from and then owns, "upgrade ZDD" copies each adapter in
+      and proves the records unchanged, then offers the library's fixes;
+      an adapter reports what it could not read, and every update checks
+      the map for routes, screens and tasks that reach nothing and tables
+      nothing reaches *(ZDD-11; decisions 0048, 0049)*.
 - [x] **0.13.0** — a store header says each key once: lint fails a
       blessing or map page whose header repeats a key or mismatches a
       value's quotes *(ZDD-9; decision 0047)*.
@@ -596,6 +603,39 @@ A repo still on the old line moves its lock by hand once, then says "upgrade
 ZDD" (see Upgrading). Before 1.0 the adapter contract stays at 1 and may
 still change; 1.0.0 freezes it.
 
+- **`0.14.0` — the app owns its adapters; every update checks the map's
+  gaps.** The engine runs only the repo's own adapters and ships none
+  (decision 0048). The readers it carried are a starter library, a second
+  package on its own version line, `@rich-rees/zdd-starter-adapters`
+  (0.1.0, the readers as the engine ran them; 0.2.0, with the known reader
+  bugs fixed). Bootstrap asks the library which starters fit, offers them
+  in plain words, and on a yes copies them into `zdd/extractors/` with
+  their tests, fixtures and the shared code they reach; on a no it builds
+  from the contract. Either way the repo owns the code, so an adapter fix
+  never waits on a ZDD release. An adapter now reports what it saw and
+  could not read, shown on every derive and in the human index's Unread
+  peek, answered once. Every "update ZDD" and CI check the map's gaps
+  (decision 0049): a route, screen or background task that reaches
+  nothing, or a table nothing reaches, is fixed, marked fine, or marked a
+  known gap that stays visible in both indexes; the update cannot finish
+  while one is open. Each update also asks the library whether a starter
+  now fits. **The upgrade** copies the baseline in (a query reader's route
+  reader comes with it as a suite companion, never run by derive), proves
+  every record byte for byte (`starters --prove`), then offers the fixes as
+  one question (`starters --move` on a yes, `--decline` on a no), and
+  answers the unread items (`unread`, `unread --raise`) and the gaps
+  (`gaps`, `gaps --raise`). It fetches the library from npm. **What moves
+  on the bump**: `zdd/extractors/` arrives and `zdd/config.json` gains
+  `localExtractorDir`; `derive --check` keeps every record's bytes until
+  the fixes are taken, and then only the records they correct move (with
+  any map link at a moved id repointed); `render --check` moves the human
+  index (its Unread and Known gaps peeks); the agent index and
+  `graph.json` move only with the fixes or once a gap is answered known.
+  `lint` warns with every gap and every unread item until each is raised,
+  and never fails on them before (measured on two real adopters: 27 and
+  26 gaps). A config that still names the 2.3 alias, `jobs` or the pre-1.0
+  `adapter` key is refused by derive until the upgrade rewrites it. A fresh
+  install is strict on both from the start.
 - **`0.13.0` — a store header says each key once.** `lint` fails a
   blessing or a semantic-map page whose header writes a key twice (ZDD
   read only the last one) or opens a value with a quote and does not close

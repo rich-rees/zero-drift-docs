@@ -15,13 +15,13 @@ verbs carry it, and all work with any coding agent:
   from one and why, none applies, or a new pattern to bless. (Skill: `patterns`.)
 - **"update ZDD"** — before finishing a unit of work. Curate the artifacts the
   change touched (glossary / ADRs / comments / map / blessings); reconcile the pattern
-  plan (mint the blessings that survived, record the rest in the commit
-  message, delete the plan); regenerate the generated ones; write the ZDD
-  record (below) into the commit's message; commit them with the code. Run it
+  plan (mint the blessings that survived, record the rest in the commit message, delete the plan);
+  regenerate the generated ones; answer every gap the map check names; write the
+  ZDD record (below) into the commit's message; commit them with the code. Run it
   in the working session — never hand it to a subagent. (Skill: `update`.)
 - **"upgrade ZDD"** — to move this repo to a newer ZDD release: it shows every
   change before writing it. (Skill: `upgrade`. First-time setup or repair:
-  `bootstrap`; a stack ZDD does not read yet: `extractor`.)
+  `bootstrap`; a stack ZDD does not read yet, or a fix to an adapter: `extractor`.)
 
 **Say it when ZDD changes a decision.** A use is the moment an artifact *turned* a
 decision (you were about to do one thing; it sent you another way), *confirmed* one,
@@ -65,6 +65,6 @@ Optional: `grill` runs a design interview that writes glossary terms and ADRs in
 work decisions out in plan mode and let "update ZDD" capture them). Matt Pocock's
 skills read a root `GLOSSARY.md` and `docs/adr/` by default; this repo's are under `<BUNDLE_DIR>/`. See `docs/agents/domain.md`.
 
-**A ZDD defect** — something ZDD itself got wrong, not something wrong in this repo — is
-explained to the developer first, in plain words, then offered as a ready-written report for
-ZDD's Discussions, "Bug reports": https://github.com/rich-rees/zero-drift-docs/discussions (no Issues).
+**A ZDD defect** — what ZDD itself got wrong, never this repo (its adapters, in `localExtractorDir`,
+are its own code: fixed through `extractor`) — is explained to the developer first, in plain words,
+then offered as a ready-written report for ZDD's Discussions, "Bug reports": https://github.com/rich-rees/zero-drift-docs/discussions (no Issues).

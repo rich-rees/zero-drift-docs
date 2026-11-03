@@ -47,13 +47,13 @@ Run this as the definition of done for every unit of work — the spoken form is
    for a new pattern or a copied precedent worth a blessing.
 3. **Run the deriver.** Regenerates the codebase metadata from source:
    ```
-   npx -y @rich-rees/zdd@0.13.0 derive
+   npx -y @rich-rees/zdd@0.14.0 derive
    ```
 4. **Run the renderer.** Rebuilds the graph artifact (`zdd/graph.json`), the
    agent index, the ADR index (and the harness ADR index, when the repo has
    one), the blessing index, and the human index:
    ```
-   npx -y @rich-rees/zdd@0.13.0 render
+   npx -y @rich-rees/zdd@0.14.0 render
    ```
 5. **Lint the stores.** Supersession symmetry, blessing citations, every
    blessing's trigger question, and every blessing and map-page header (a
@@ -104,7 +104,7 @@ Run this as the definition of done for every unit of work — the spoken form is
      the reason (`bootstrap.mjs unread --mark=<id> --why="…"`). Never mark
      one without asking the developer.
    ```
-   npx -y @rich-rees/zdd@0.13.0 lint
+   npx -y @rich-rees/zdd@0.14.0 lint
    ```
 6. **The map's gaps — this update does not finish while one is open**
    (decision 0049). Over the whole repo, every run, never only the diff:
