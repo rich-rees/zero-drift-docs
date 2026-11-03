@@ -254,6 +254,10 @@ export function runEngine(args) {
   return execFileSync(command.cmd, engineArgv(command, args), { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 * 1024 * 1024, timeout: 300_000, shell: command.shell });
 }
 
+// A proposal on offer covers a part (decision 0048 point 6); the adapter
+// that reads nothing covers none.
+const coversAPart = (p) => Array.isArray(p.parts) && p.parts.length > 0;
+
 export function detect(root) {
   let d;
   let lib = null;
@@ -264,8 +268,10 @@ export function detect(root) {
     throw new Error(`detection could not run — ${lib ? `the engine said: ${String(e.stderr || e.message).trim().split(/\r?\n/).slice(-3).join(" ")}` : e.message}`);
   }
   // Every proposal is a starter the library holds: the offer (decision 0048
-  // point 3) is to bring those across, and never a requirement.
-  return { ...d, host: repoHost(root), library: { package: STARTERS.package, version: lib.version, offer: (d.proposals ?? []).map((p) => p.name) } };
+  // point 3) is to bring those across, and never a requirement. One that
+  // covers no part (the adapter that reads nothing, proposed so derive runs
+  // where no starter fits) is no offer.
+  return { ...d, host: repoHost(root), library: { package: STARTERS.package, version: lib.version, offer: (d.proposals ?? []).filter(coversAPart).map((p) => p.name) } };
 }
 
 // Where the repo is hosted (2.3.0, C6): the shipped CI workflow runs only on
@@ -3575,7 +3581,7 @@ export function library(root, { decline = null } = {}) {
     }
     const listed = new Set(Array.isArray(config.extractors) ? config.extractors : []);
     const declined = new Set(record.declinedOffers ?? []);
-    const offers = (d.proposals ?? []).filter((p) => !listed.has(p.name) && !declined.has(p.name)).map((p) => ({ name: p.name, parts: p.parts, evidence: p.evidence, options: p.options, held: adapterHeld(ledger, dir, p.name) }));
+    const offers = (d.proposals ?? []).filter((p) => coversAPart(p) && !listed.has(p.name) && !declined.has(p.name)).map((p) => ({ name: p.name, parts: p.parts, evidence: p.evidence, options: p.options, held: adapterHeld(ledger, dir, p.name) }));
     return { ...base, skipped: null, offers, declinedOffers: [...declined].sort() };
   };
   if (decline === null || decline === false) return ask();

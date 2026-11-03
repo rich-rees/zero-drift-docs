@@ -177,6 +177,34 @@ test("library: what fits now and is not an adapter of the repo's is offered, wit
   assert.match(skipped.stdout, /The starter library was declined for this repo \(zdd\/extractors\/starters\.json\), so it was not asked this time\./);
 });
 
+// Found building a schema adapter from nothing (ZDD-11 slice 7): on a repo
+// no starter fits, detection proposes the adapter that reads nothing, so
+// derive can run. That is no offer: bootstrap named it as a starter for the
+// stack, and once the repo's own adapter replaced it every update offered it
+// back. A proposal that covers no part is never offered.
+test("a proposal that covers no part is never on offer: not at bootstrap, not at an update once the repo's own adapter replaced it", (t) => {
+  const root = tmp(t);
+  const repo = join(root, "app");
+  mkdirSync(join(repo, "src"), { recursive: true });
+  mkdirSync(join(root, "home"), { recursive: true });
+  writeFileSync(join(repo, "src", "main.rb"), "puts 'a stack no starter reads'\n");
+  git(repo, "init", "-q", "-b", "main");
+  const d = json(repo, ["detect"]);
+  assert.ok(d.proposals.length && d.proposals.every((p) => !p.parts?.length), "the scenario: only the reads-nothing proposal");
+  assert.deepEqual(d.library.offer, []);
+  assert.doesNotMatch(run(repo, ["detect"]).stdout, /has adapters for/);
+  const r = run(repo, ["apply", `--answers=${answersFile(t, { name: "Mine" })}`]);
+  assert.equal(r.status, 0, r.stderr);
+  // The repo's own adapter in its place.
+  const c = config(repo);
+  mkdirSync(join(repo, "zdd", "extractors", "mine"), { recursive: true });
+  writeFileSync(join(repo, "zdd", "extractors", "mine", "index.mjs"), "export const CONTRACT = 1;\nexport function derive() { return { records: [], diagnostics: [] }; }\n");
+  writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify({ ...c, extractors: ["mine"], extractorOptions: { mine: {} } }, null, 2) + "\n");
+  const lib = json(repo, ["library"]);
+  assert.equal(lib.skipped, null);
+  assert.deepEqual(lib.offers, []);
+});
+
 test("writer to reader: a no at bootstrap is the library declined, and every update says so in one line", (t) => {
   const repo = installed(t, { starters: false });
   assert.equal(record(repo).library, "declined");
