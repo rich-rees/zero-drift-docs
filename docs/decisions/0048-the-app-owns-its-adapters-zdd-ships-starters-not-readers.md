@@ -429,6 +429,71 @@ export. A hand-written local adapter is the only route that works today.
   adapters, copied into `zdd/extractors`, give `419293d`'s records byte for
   byte (242 and 327), and 0.2.0 gives the slice 3 tip's (255 and 327).
 
+## As built (ZDD-11 slice 5)
+
+- **Where the plugin finds the library.** The plugin pins one version, and
+  the baseline, in `plugins/zdd/starter-adapters.json` (a test holds them
+  to the library's `package.json`, `notes.json` and stager). A version is
+  found, in order: `ZDD_STARTER_ADAPTERS_DIR`, now a folder of staged
+  versions, `<dir>/<X.Y.Z>/` (a test, or a dry run against a build not yet
+  published); the library beside the plugin in this repository, staged
+  fresh by its own stager; else npm, installed with no scripts into a
+  private temporary folder, with npm's integrity check and its cache. Each
+  route is held to the package name and the exact version. The preflight
+  checks the pinned version is on the registry.
+- **The copy set comes from the engine** (the slice's call). The plugin
+  carries no engine and cannot import one, so a new engine command,
+  `copy-set --adapters=<dir>`, names each adapter's files by the slice 3
+  rule (its folder without `example/`, and the `_shared/` files its code
+  and tests reach) and its `SUITE`. It writes nothing; bootstrap writes the
+  copy, never over a file the repo has. A library test holds the command
+  to the rule.
+- **A companion comes too** (the slice's call). Dropping a companion the
+  app does not take was the plan; tried, it fails the suite, because a
+  query reader's fixture gives nothing without a route reader beside it.
+  So the companion is copied as an adapter in the folder that `extractors`
+  does not list: derive never runs it, the suite reads the starter beside
+  it exactly as the library does, and the record marks it `companionOf`.
+  The cost is code the app does not run, until its fixture is rewritten in
+  the app's own stack. One of the two adopters measured takes one.
+- **The record** is `<localExtractorDir>/starters.json`: the version each
+  copy came from, a `declined` version once the developer says no, and the
+  SHA-256 of every file copied, line endings aside. A move to a fixed
+  version touches only files still as they were copied, and refuses,
+  writing nothing, when any changed. A file the app had before is never
+  replaced and never recorded. The engine ignores the file.
+- **Bootstrap's offer.** Detection reads the pinned library and names the
+  starters that fit; the skill asks once, in plain words. `"starters":
+  true` (the default) copies them, sets `localExtractorDir`, and a repair
+  apply that adds an adapter copies it too. On a no, nothing is copied but
+  `generic`, the adapter that reads nothing, so derive runs until the
+  developer's own are built; the config cannot be empty, and `generic`
+  names no stack.
+- **The upgrade.** After the config rewrites (the legacy `adapter` key,
+  the renamed and split extractors, the added data-access readers), every
+  name the folder does not hold is copied: the baseline from a release
+  before 0.14, else the pinned version. The plan computes the same copy and
+  writes nothing. Then `bootstrap.mjs starters --prove` is the first proof
+  (`derive --check` with the copies in place), `starters` lists the fixes
+  from the notes, and `--move` or `--decline` answers the one question.
+  `--move` derives first, so it compares against what the copies make; it
+  moves the copies, runs their tests (a failure puts every file back), runs
+  derive, repoints every map link and blessing at a moved id, and
+  `claims.allowUnclaimed`, then lints. An id moved when it is gone and one
+  record of its kind and namespace has the same name past its schema: the
+  two moves the notes name. Anything else gone is named for a hand fix.
+- **The suite logic.** A copy no one has changed passes the suite as the
+  library proved, so the upgrade raises `suiteChecks` when every adapter is
+  one; an adapter the repo wrote or changed keeps the interview.
+- **Detection's greenfield list** is now `starters` in detect's output (it
+  was `catalogue`, which also named the release check's marketplace copy).
+- **Proved on the two adopters**, read-only `git archive` copies: the
+  upgrade copied the baseline and `--prove` passed with 242 and 327
+  records, byte for byte as committed; `--move` gave 255 and 327, equal to
+  slice 4's 0.2.0 run, with four table ids moved and one map page
+  repointed on the first, five records changed on the second, and lint,
+  the adapters' tests and the suite green on both.
+
 ## Rejected
 
 - **Built in until it needs changing, then ejected.** Quicker to install and
