@@ -78,3 +78,17 @@ test("CR-381: pre-tag counts what the upgrade asks by kind or adapter, fails a l
   assert.equal(withEnv + gitSetup, spawns, "a step without this checkout's engine");
   assert.match(src, /const ENV = dryRunEnv\(ENGINE\);/);
 });
+
+// CR-385 (verify pass 1): the upgrade's note tells an old-line repo to
+// derive 0.9's own changes before proof 1, and the dry run must do the same.
+test("CR-385: pre-tag derives before proof 1 for a copy pinned on the old line, and only then", async () => {
+  const { pinnedOnOldLine } = await import(new URL("../../../scripts/lib/pre-tag-report.mjs", import.meta.url).href);
+  assert.equal(pinnedOnOldLine(JSON.stringify({ engine: "2.4.1", extractors: ["supabase"] })), true);
+  for (const c of [{ release: "0.13.0" }, { release: "0.13.0", engine: "2.4.1" }, {}, null]) assert.equal(pinnedOnOldLine(JSON.stringify(c)), false, JSON.stringify(c));
+  assert.equal(pinnedOnOldLine("not json"), false);
+  const src = readFileSync(join(ROOT, "scripts", "pre-tag.mjs"), "utf8");
+  const derive = src.indexOf("if (oldLine) ok = run(");
+  const prove = src.indexOf('[PLUGIN, "starters", "--prove"');
+  assert.ok(derive > 0 && prove > derive, "the old line's derive comes before proof 1");
+  assert.ok(src.indexOf("pinnedOnOldLine(readFileSync(") < src.indexOf('[PLUGIN, "upgrade", ...moving'), "the pin is read before the upgrade rewrites it");
+});

@@ -9,6 +9,20 @@
 // those tests: without it, every adopter holding such an adapter fails.
 export const dryRunEnv = (engine, env = process.env) => ({ ...env, ZDD_ENGINE_BIN: engine });
 
+// A copy pinned on the old line (zdd/config.json's `engine`, no `release`,
+// decision 0042): its upgrade also crosses 0.9, whose own changes move
+// records, so the dry run derives them before proof 1, as the upgrade's
+// note tells the developer to (CR-371, CR-385). A config that cannot be
+// read is not the old line: the upgrade itself says what is wrong.
+export function pinnedOnOldLine(configText) {
+  try {
+    const c = JSON.parse(configText);
+    return Boolean(c) && typeof c === "object" && c.release === undefined && typeof c.engine === "string";
+  } catch {
+    return false;
+  }
+}
+
 // What `bootstrap.mjs unread --json` or `gaps --json` said, as one line:
 // how many the upgrade's steps 4c and 4d will ask about, by kind (a gap)
 // or adapter (an unread item). A list that cannot be read is a failure,

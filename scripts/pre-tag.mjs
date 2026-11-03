@@ -23,11 +23,11 @@
 // the mechanics only; which set an untagged ADR belongs in is the team's
 // call, never the dry run's.
 import { execFileSync, spawnSync } from "node:child_process";
-import { cpSync, mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { cpSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { join, dirname, resolve, basename } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { dryRunEnv, answerCounts } from "./lib/pre-tag-report.mjs";
+import { dryRunEnv, answerCounts, pinnedOnOldLine } from "./lib/pre-tag-report.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const PLUGIN = join(ROOT, "plugins", "zdd", "scripts", "bootstrap.mjs");
@@ -73,6 +73,7 @@ for (const adopter of adopters) {
     writeFileSync(join(copy, ".claude", "worktrees", "pretag", "src", "planted.ts"), "process.env.STRIPE_SECRET; // must never reach a record\n");
     writeFileSync(join(copy, ".gitignore"), (existsSync(join(copy, ".gitignore")) ? "" : "") + "\n.claude/worktrees/\n", { flag: "a" });
     const label = basename(src);
+    const oldLine = pinnedOnOldLine(readFileSync(join(copy, "zdd", "config.json"), "utf8"));
     let ok = run(`${label}: upgrade --plan`, process.execPath, [PLUGIN, "upgrade", "--plan", `--root=${copy}`], copy);
     const plan = JSON.parse(spawnSync(process.execPath, [PLUGIN, "upgrade", "--plan", `--root=${copy}`, "--json"], { cwd: copy, encoding: "utf8", env: ENV }).stdout || "{}");
     const moves = plan.blessingMoves?.proposals ?? [];
@@ -97,6 +98,9 @@ for (const adopter of adopters) {
       status = { copies: [], behind: [] };
     }
     if (status.copies.length) {
+      // From the old line, 0.9's own changes move records: derive them
+      // first, as the upgrade's note says, then prove (CR-371, CR-385).
+      if (oldLine) ok = run(`${label}: derive 0.9's own changes first (the repo was on the old line)`, process.execPath, [ENGINE, "derive", `--root=${copy}`], copy) && ok;
       ok = run(`${label}: starters --prove (${status.copies.length} adapters copied in; the records unchanged)`, process.execPath, [PLUGIN, "starters", "--prove", `--root=${copy}`], copy) && ok;
       if (status.behind?.length) {
         const m = spawnSync(process.execPath, [PLUGIN, "starters", "--move", `--root=${copy}`, "--json"], { cwd: copy, encoding: "utf8", env: ENV });
