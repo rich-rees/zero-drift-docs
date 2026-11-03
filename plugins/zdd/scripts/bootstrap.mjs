@@ -46,6 +46,17 @@
 //       takes a mark away; `--raise` writes `unread.strict` once every item
 //       has an answer — from then on an unanswered item fails lint.
 //
+//   bootstrap.mjs starters [--prove | --move | --decline] [--root=<dir>] [--json]
+//       The adapters this repo copied from the starter library (decision
+//       0048): the version each came from, what changed since, and the fixes
+//       a later version notes for them. `--prove` runs derive --check with
+//       the copies in place (the upgrade's first proof: no record moves);
+//       `--move`, on the developer's yes, moves every untouched copy to the
+//       version this release pins, runs the adapters' tests (putting the
+//       copies back if they fail), derives, repoints every map link and
+//       blessing at a record id that moved, and lints; `--decline` keeps a
+//       no in the record, so the same fixes are not offered again.
+//
 //   bootstrap.mjs upgrade [--plan] [--lock] [--drop=<ids>]
 //                         [--move-blessings=<token> [--kinds=<name>:<copy|extend>,…]]
 //                         [--to=vX.Y.Z] [--root=<dir>] [--json]
@@ -75,6 +86,7 @@
 //     "stack": ["<a framework>", "<a database>", "<an app>"],   // greenfield answers; strings or {name, path}, matched by the adapters' rules
 //     "apps": ["Web", "Mobile"],                       // map skeleton (Application concepts); else from `stack` / detection
 //     "optIns": { "autoLoad": true, "fence": true, "stop": true, "ci": true, "prePush": true },   // defaults: all on (repair: current state)
+//     "starters": true,                                // the starter library's offer: copy the adapters in (default); false copies none, and runs generic until the repo's own are built
 //     "codex": false,                                  // also write AGENTS.md
 //     "seedAdr": true                                  // ADR-0001 "Adopt Zero-Drift Docs"
 //   }
@@ -82,6 +94,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, lstatSync, chmodSync, openSync, writeSync, closeSync, rmSync, opendirSync } from "node:fs";
 import { findMapBlessings, proposeMove, blessingSlug, blessingFileText, removeMoved } from "./lib/blessing-move.mjs";
 import { scopeTag, repointLinks, linksToMoved } from "./lib/adr-split.mjs";
+import { STARTERS, RECORD, DEFAULT_DIR, starterLibrary, fileHash, emptyRecord, parseRecord, fixesFor, movedIds, cmpVersions } from "./lib/starters.mjs";
 import { join, dirname, basename, relative, resolve, posix } from "node:path";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -224,26 +237,18 @@ export function runEngine(args) {
   return execFileSync(command.cmd, engineArgv(command, args), { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 * 1024 * 1024, timeout: 300_000, shell: command.shell });
 }
 
-// The starter library's adapters folder, which detection and the preview
-// ask (decision 0048 point 3): ZDD_STARTER_ADAPTERS_DIR, when set, names one; else
-// the library beside this plugin (this repository's checkout). ZDD-11 slice
-// 5 fetches the published library where neither is there, and copies what
-// the developer takes into the repo.
-const SIBLING_STARTERS = join(PLUGIN_ROOT, "..", "..", "packages", "zdd-starter-adapters", "adapters");
-export function starterAdapters({ env = process.env, sibling = SIBLING_STARTERS } = {}) {
-  if (env.ZDD_STARTER_ADAPTERS_DIR) return resolve(env.ZDD_STARTER_ADAPTERS_DIR);
-  if (existsSync(sibling)) return sibling;
-  throw new Error("the starter library is not on this machine — set ZDD_STARTER_ADAPTERS_DIR to its adapters/ folder (npm @rich-rees/zdd-starter-adapters)");
-}
-
 export function detect(root) {
   let d;
+  let lib = null;
   try {
-    d = JSON.parse(runEngine(["detect", `--adapters=${starterAdapters()}`, `--root=${root}`]));
+    lib = starterLibrary();
+    d = JSON.parse(runEngine(["detect", `--adapters=${lib.adapters}`, `--root=${root}`]));
   } catch (e) {
-    throw new Error(`detection could not run — the engine said: ${String(e.stderr || e.message).trim().split(/\r?\n/).slice(-3).join(" ")}`);
+    throw new Error(`detection could not run — ${lib ? `the engine said: ${String(e.stderr || e.message).trim().split(/\r?\n/).slice(-3).join(" ")}` : e.message}`);
   }
-  return { ...d, host: repoHost(root) };
+  // Every proposal is a starter the library holds: the offer (decision 0048
+  // point 3) is to bring those across, and never a requirement.
+  return { ...d, host: repoHost(root), library: { package: STARTERS.package, version: lib.version, offer: (d.proposals ?? []).map((p) => p.name) } };
 }
 
 // Where the repo is hosted (2.3.0, C6): the shipped CI workflow runs only on
@@ -463,7 +468,7 @@ export function validateAnswers(a, adapters = {}) {
       if (typeof v !== "boolean") fail(`optIns.${k} must be true or false`);
     }
   }
-  for (const k of ["codex", "seedAdr"]) if (a[k] !== undefined && typeof a[k] !== "boolean") fail(`${k} must be true or false`);
+  for (const k of ["codex", "seedAdr", "starters"]) if (a[k] !== undefined && typeof a[k] !== "boolean") fail(`${k} must be true or false`);
   return a;
 }
 
@@ -1160,6 +1165,8 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
 
   // --- config.json -------------------------------------------------------
   let config = existingConfig;
+  let brought = null;
+  let declinedStarters = [];
   const stack = fromStack(answers.stack, detection);
   if (!config) {
     let extractors = answers.extractors;
@@ -1170,6 +1177,14 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
       extractorOptions = Object.fromEntries(detection.proposals.map((p) => [p.name, p.options]));
     }
     if (!extractors?.length) extractors = ["generic"];
+    // A no to the starter library's offer (decision 0048 point 3): nothing
+    // is copied but the one adapter that reads nothing, so derive runs until
+    // the developer's own adapters are built with the extractor skill.
+    if (answers.starters === false) {
+      declinedStarters = extractors.filter((n) => n !== "generic");
+      extractors = ["generic"];
+      extractorOptions = { generic: {} };
+    }
     if (!extractorOptions) {
       extractorOptions = {};
       for (const name of extractors) {
@@ -1204,6 +1219,7 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
     migrateRenames(config, []);
     migrateJobs(config, [], root);
     finalOptions(config.extractorOptions, detection.adapters);
+    brought = bringStarters(ledger, config, { version: STARTERS.version });
     ledger.create("zdd/config.json", JSON.stringify(config, null, 2) + "\n");
   } else {
     // Repair: only an explicit answer changes the config. A pre-1.0 config's
@@ -1254,11 +1270,17 @@ export function apply(root, rawAnswers, { date = today(), home } = {}) {
         repairNotes.push(`zdd/config.json: extractorOptions updated for ${moved.join(", ")}`);
       }
     }
+    // An adapter the config now names that the repo does not hold comes from
+    // the starter library, unless the developer said no to it.
+    if (answers.starters !== false) brought = bringStarters(ledger, existingConfig, { version: STARTERS.version, changes: repairNotes });
     if (JSON.stringify(existingConfig) !== before) {
       ledger.overwrite("zdd/config.json", JSON.stringify(existingConfig, null, 2) + "\n");
-      ledger.notes.push(...repairNotes);
+      ledger.notes.push(...repairNotes.map((n) => (n.startsWith("zdd/config.json") ? n : `zdd/config.json: ${n}`)));
     } else ledger.kept.push("zdd/config.json");
   }
+
+  if (brought) ledger.notes.push(...starterNotes(brought));
+  if (declinedStarters.length) ledger.notes.push(`the starter library was declined: nothing was copied for ${declinedStarters.join(", ")}, and "extractors" runs generic (an adapter that reads nothing, copied so derive runs) until your own adapters are built with the extractor skill — then list them in place of generic`);
 
   // --- curated skeleton (empty templates; never overwritten) ---------------
   ledger.create(paths.glossary, "# Glossary\n\n<!-- One paragraph per term: **Term**: definition. Canonical, not descriptive. -->\n");
@@ -1712,13 +1734,24 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
     config.release = version;
   }
   ledger.notes.push(...migrateDataAccess(config, changes, root, fromEngine));
-  // The standard suite (decision 0040): with no adapter of the repo's own,
-  // every check blocks at once — there is nothing a new check could turn
-  // red. With some, the number stays where it is (absent: every check
-  // warns) until `bootstrap.mjs adapters --raise`, after the interview.
-  const own = ownAdapters(root, config);
-  if (!own.length && config.suiteChecks !== SUITE_CHECK_COUNT) {
-    changes.push(`suiteChecks ${config.suiteChecks ?? "(none)"} → ${SUITE_CHECK_COUNT}: no adapter of this repo's own, so every check of the standard suite blocks (decision 0040)`);
+  // Every adapter the repo runs comes into it (decision 0048 point 8), after
+  // the rewrites above have named them as this release does. From a release
+  // before the app owned its adapters, the library's baseline: what that
+  // engine ran, so the records can be proved unchanged before any fix is
+  // offered. Otherwise the version this release pins.
+  const fromBefore = !fromRelease || compareReleases(fromRelease, STARTERS.ownedSince) < 0;
+  const brought = bringStarters(ledger, config, { version: fromBefore ? STARTERS.baseline : STARTERS.version, changes });
+  // The standard suite (decision 0040): a copy no one has changed passes it
+  // as the library proved, so with no other adapter of the repo's own every
+  // check blocks at once. With one the repo wrote or changed, the number
+  // stays where it is (absent: every check warns) until `bootstrap.mjs
+  // adapters --raise`, after the interview.
+  const own = (Array.isArray(config.extractors) ? config.extractors : []).filter((n) => typeof n === "string" && /^[a-z][a-z0-9-]*$/.test(n) && typeof config.localExtractorDir === "string" && adapterHeld(ledger, copyDir(config), n));
+  const record = own.length ? readRecordAt(ledger, copyDir(config)) : emptyRecord();
+  const untouched = (n) => Object.hasOwn(record.adapters, n) && Object.entries(record.files).filter(([f]) => f.startsWith(`${n}/`)).every(([f, h]) => ledger.exists(`${copyDir(config)}/${f}`) && fileHash(bytesAt(ledger, `${copyDir(config)}/${f}`)) === h);
+  const written = own.filter((n) => !untouched(n));
+  if (!written.length && config.suiteChecks !== SUITE_CHECK_COUNT) {
+    changes.push(`suiteChecks ${config.suiteChecks ?? "(none)"} → ${SUITE_CHECK_COUNT}: ${own.length ? "every adapter here is a starter copy no one has changed, which passes" : "no adapter of this repo's own, so"} every check of the standard suite ${own.length ? "" : "blocks "}(decision 0040)`);
     config.suiteChecks = SUITE_CHECK_COUNT;
   }
   // The Stop hook (plugin 1.1, decision 0008) is a new opt-in; upgrade names
@@ -1855,13 +1888,23 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
     }
   }
   ledger.notes.push(...offerOptIns(root, config));
-  if (own.length) ledger.notes.push(`this repo's own adapters (${own.join(", ")}): run \`bootstrap.mjs adapters\` — the standard suite on each one's fixture, and the steps of the adapter contract each is behind on (decision 0040); fix what it names through the extractor skill, then \`bootstrap.mjs adapters --raise\` (suiteChecks stays at ${config.suiteChecks ?? "0, every check warning,"} until then)`);
+  ledger.notes.push(...starterNotes(brought, { upgrade: true }));
+  if (brought.copied.length && brought.version !== STARTERS.version) {
+    const pinned = starterLibrary(STARTERS.version);
+    const fixed = [...brought.copied, ...brought.companions].filter((n) => fixesFor(pinned.notes, n, brought.version, STARTERS.version).length);
+    ledger.notes.push(
+      fixed.length
+        ? `then the fixes (decision 0048 point 7): the starter library's ${STARTERS.version} fixes known bugs in ${fixed.join(", ")} — once the records are proved, \`bootstrap.mjs starters\` lists each fix with who it affects and how record ids move; read them against this repo and ask once: on a yes \`starters --move\` (the copies move to ${STARTERS.version}, their tests run, derive, every map link and blessing at a moved id is repointed, then lint), on a no \`starters --decline\``
+        : `then \`bootstrap.mjs starters --move\`: the starter library's ${STARTERS.version} changes nothing these copies read (no fix is noted for them), and brings them level`,
+    );
+  }
+  if (written.length) ledger.notes.push(`this repo's own adapters (${written.join(", ")}): run \`bootstrap.mjs adapters\` — the standard suite on each one's fixture, and the steps of the adapter contract each is behind on (decision 0040); fix what it names through the extractor skill, then \`bootstrap.mjs adapters --raise\` (suiteChecks stays at ${config.suiteChecks ?? "0, every check warning,"} until then)`);
   // New checks start as warnings (decision 0040 point 7): `strict` waits for
   // every item to be answered, and the upgrade never writes it itself.
   if (config.unread?.strict !== true) ledger.notes.push("what the adapters could not read (decision 0048): after `derive`, run `bootstrap.mjs unread` — each item is fixed in the adapter or marked fine once (`--mark=<id> --why=…`); then `bootstrap.mjs unread --raise`. lint only warns until then");
   ledger.notes.push("curated artifacts (glossary, ADRs, map pages, metadata) untouched — upgrade never writes them, save two mechanical moves named above: a map link to a record whose kind a release renamed, and blessings moved out of the map on --move-blessings");
   ledger.notes.push("if the engine pin moved: run `derive` and `render`, then `lint`, and commit the regenerated artifacts in the same PR");
-  return { version, plan, ...ledgerOut(ledger), duplicates, blessingMoves };
+  return { version, plan, ...ledgerOut(ledger), duplicates, blessingMoves, starters: brought };
 }
 
 // Every file in the adopter's repo, once per run: git's list when there is
@@ -3015,20 +3058,353 @@ function moveLockOnly(root, version, to, { plan = false, lock = false, remote, h
 // running the engine, held equal to the engine's SUITE_CHECK_COUNT by a test.
 export const SUITE_CHECK_COUNT = 5;
 
-// The adapters config selects that the repo wrote itself: a name with a
-// module in localExtractorDir (`<name>.mjs` or `<name>/index.mjs`). The
-// engine refuses a local name that shadows a catalogue one, so a module
-// there is the repo's own.
-export function ownAdapters(root, config) {
-  const dir = typeof config.localExtractorDir === "string" ? config.localExtractorDir : null;
-  if (!dir || !Array.isArray(config.extractors)) return [];
-  let abs;
+// ---------------------------------------------------------------------------
+// The starters an app takes (decision 0048 points 3, 4, 7 and 8). Bootstrap
+// copies each one the developer takes into localExtractorDir, and the
+// upgrade copies every adapter an older release ran for the repo; from then
+// the copy is the app's own. A copy is what the engine's `copy-set` names:
+// the starter's folder (its code, its tests, its suite fixture) and the
+// `_shared/` files its modules reach, kept once beside the adapters. A
+// starter's SUITE names the companions its fixture is read beside; each
+// comes too, as an adapter in the folder that config does not run, so the
+// app's suite checks the copy exactly as the library's does. The record
+// (RECORD in the folder) keeps the version each came from and the hash of
+// every file copied: a later move to a fixed version touches only files
+// still as they were copied, and a file the app already has is never
+// replaced.
+// ---------------------------------------------------------------------------
+const adapterHeld = (ledger, dir, n) => ledger.exists(`${dir}/${n}/index.mjs`) || ledger.exists(`${dir}/${n}.mjs`);
+function readRecordAt(ledger, dir) {
+  const rel = `${dir}/${RECORD}`;
+  return ledger.exists(rel) ? parseRecord(ledger.read(rel), rel) : emptyRecord();
+}
+function bytesAt(ledger, rel) {
+  if (ledger.pending.has(rel)) return Buffer.from(ledger.pending.get(rel));
+  return readFileSync(ledger.abs(rel));
+}
+// Text when the bytes are UTF-8, so a plan's later read sees a string.
+const asText = (bytes) => {
+  const s = bytes.toString("utf8");
+  return Buffer.from(s, "utf8").equals(bytes) ? s : bytes;
+};
+function copySetOf(lib) {
+  let set;
   try {
-    abs = resolveInside(root, dir, `localExtractorDir ${dir}`);
-  } catch {
-    return [];
+    set = JSON.parse(runEngine(["copy-set", `--adapters=${lib.adapters}`]));
+  } catch (e) {
+    throw new Error(`the starter library ${lib.version} could not be read — the engine said: ${String(e.stderr || e.message).trim().split(/\r?\n/).slice(-3).join(" ")}`);
   }
-  return config.extractors.filter((n) => typeof n === "string" && /^[a-z][a-z0-9-]*$/.test(n) && (existsSync(join(abs, `${n}.mjs`)) || existsSync(join(abs, n, "index.mjs"))));
+  for (const [n, a] of Object.entries(set.adapters ?? {})) {
+    if (!/^[a-z][a-z0-9-]*$/.test(n) || !Array.isArray(a.files) || a.files.some((f) => typeof f !== "string" || !/^[^/]/.test(f) || f.split("/").some((s) => s === ".." || s === "." || !s))) throw new Error(`the starter library ${lib.version}: the engine's copy set for ${JSON.stringify(n)} is not a list of paths inside the folder`);
+  }
+  return set.adapters ?? {};
+}
+// The folder a copy goes to: the config's localExtractorDir, else the
+// default, checked as the engine checks it (never the repo itself).
+function copyDir(config) {
+  if (config.localExtractorDir === undefined) return DEFAULT_DIR;
+  const dir = typeof config.localExtractorDir === "string" ? config.localExtractorDir : null;
+  if (!dir || dir === "." || !/^[A-Za-z0-9_-][A-Za-z0-9._-]*(?:\/[A-Za-z0-9_-][A-Za-z0-9._-]*)*$/.test(dir) || dir.split("/").includes("..")) throw new Error(`zdd/config.json's localExtractorDir ${JSON.stringify(config.localExtractorDir)} is not a folder inside the repo the engine reads adapters from — fix it by hand, then run this again; nothing was written`);
+  return dir.replace(/\/+$/, "");
+}
+
+// Copies every adapter `names` lists (default: config's extractors) that the
+// folder does not hold and the library at `version` does. Sets
+// localExtractorDir when the config has none and something was copied.
+export function bringStarters(ledger, config, { version, changes = [], names = null } = {}) {
+  const isAdapterName = (n) => typeof n === "string" && /^[a-z][a-z0-9-]*$/.test(n);
+  const listed = (names ?? (Array.isArray(config.extractors) ? config.extractors : [])).filter(isAdapterName);
+  const dir = copyDir(config);
+  const out = { version, dir, copied: [], companions: [], missing: [], kept: [] };
+  const wanted = listed.filter((n) => !adapterHeld(ledger, dir, n));
+  if (!wanted.length) return out;
+  const lib = starterLibrary(version);
+  const set = copySetOf(lib);
+  const take = wanted.filter((n) => Object.hasOwn(set, n));
+  out.missing = wanted.filter((n) => !Object.hasOwn(set, n));
+  if (!take.length) return out;
+  const companionOf = new Map();
+  const queue = [...take];
+  for (let i = 0; i < queue.length; i++) {
+    for (const c of Object.keys(set[queue[i]].suite?.companions ?? {})) {
+      if (!Object.hasOwn(set, c) || take.includes(c) || listed.includes(c) || adapterHeld(ledger, dir, c)) continue;
+      if (!companionOf.has(c)) {
+        companionOf.set(c, new Set());
+        queue.push(c);
+      }
+      companionOf.get(c).add(queue[i]);
+    }
+  }
+  const record = readRecordAt(ledger, dir);
+  for (const n of [...take, ...companionOf.keys()]) {
+    for (const f of set[n].files) {
+      const rel = `${dir}/${f}`;
+      const bytes = readFileSync(join(lib.adapters, ...f.split("/")));
+      const hash = fileHash(bytes);
+      if (ledger.exists(rel)) {
+        // A shared file another copy brought, or one of the app's own.
+        if (fileHash(bytesAt(ledger, rel)) === hash) record.files[f] ??= hash;
+        else if (!out.kept.includes(f)) out.kept.push(f);
+        continue;
+      }
+      ledger.create(rel, asText(bytes));
+      record.files[f] = hash;
+    }
+    record.adapters[n] = { version: lib.version, ...(companionOf.has(n) ? { companionOf: [...companionOf.get(n)].sort() } : {}) };
+  }
+  record.adapters = Object.fromEntries(Object.entries(record.adapters).sort(([a], [b]) => (a < b ? -1 : 1)));
+  record.files = Object.fromEntries(Object.entries(record.files).sort(([a], [b]) => (a < b ? -1 : 1)));
+  ledger.overwrite(`${dir}/${RECORD}`, JSON.stringify(record, null, 2) + "\n");
+  if (config.localExtractorDir === undefined) {
+    config.localExtractorDir = dir;
+    changes.push(`localExtractorDir → ${dir}: the folder that holds this repo's adapters (decision 0048)`);
+  }
+  out.copied = take;
+  out.companions = [...companionOf.keys()];
+  return out;
+}
+// What bringStarters did, as ledger notes.
+function starterNotes(b, { upgrade = false } = {}) {
+  const notes = [];
+  if (b.copied.length) {
+    notes.push(`${b.dir}/: ${b.copied.join(", ")} copied from the starter library (${STARTERS.package} ${b.version}), each with its tests and its suite fixture, and the shared code they reach in ${b.dir}/_shared/ — the adapters are this repo's own from now on: change, fix or delete them without a ZDD release (decision 0048). ${RECORD} beside them records the version each came from`);
+    if (upgrade) notes.push(`the records must not move: after this write, run \`bootstrap.mjs starters --prove\` — derive --check with the copies in place, before anything else changes (decision 0048 point 8)`);
+  }
+  if (b.companions.length) notes.push(`${b.dir}/: ${b.companions.join(", ")} copied too, only as the companion${b.companions.length === 1 ? "" : "s"} another starter's suite fixture is read beside (not listed in "extractors", so derive never runs ${b.companions.length === 1 ? "it" : "them"}); delete one once the adapter that needs it has a fixture of your own stack`);
+  for (const f of b.kept) notes.push(`${b.dir}/${f}: kept as it is — it differs from the starter library's (${b.version}); the copied adapters were written against the library's, so compare the two`);
+  for (const n of b.missing) notes.push(`extractor "${n}" is not in this repo's ${b.dir}/ and the starter library has no adapter of that name: build it with the extractor skill, or take it out of "extractors" — derive stops until then`);
+  return notes;
+}
+
+// The repo's copies, what a fix would move, and the steps that prove a
+// copy: `starters` (status), `--prove` (derive --check, nothing written but
+// what derive checks), `--move` (on a yes to the fixes: the copies move to
+// the pinned version, their tests run, derive, every map link and blessing
+// at an id that moved is repointed, then lint), `--decline` (a no, kept in
+// the record so the same fixes are not offered again).
+function snapshotRecords(root, metadataDir) {
+  const out = new Map();
+  const base = join(root, ...metadataDir.split("/"));
+  if (!existsSync(base)) return out;
+  const walk = (d) => {
+    for (const n of readdirSync(d).sort()) {
+      const p = join(d, n);
+      const st = lstatSync(p);
+      if (st.isSymbolicLink()) continue;
+      if (st.isDirectory()) walk(p);
+      else if (n.endsWith(".json") && st.size <= MAX_SCAN_BYTES) {
+        try {
+          const r = JSON.parse(readFileSync(p, "utf8"));
+          if (typeof r?.id === "string" && r.kind !== "unread") out.set(r.id, { file: posixify(relative(root, p)), hash: fileHash(readFileSync(p)) });
+        } catch {
+          /* not a record */
+        }
+      }
+    }
+  };
+  walk(base);
+  return out;
+}
+const engineTail = (e) => String(e.stdout || "") + String(e.stderr || e.message || "");
+function engineStep(args, root) {
+  try {
+    return { ok: true, output: runEngine([...args, `--root=${root}`]) };
+  } catch (e) {
+    return { ok: false, output: engineTail(e) };
+  }
+}
+const tail = (text, n = 12) => String(text).trim().split(/\r?\n/).slice(-n);
+
+export function starters(root, { prove = false, move = null, decline = false } = {}) {
+  if ([prove, move !== null && move !== false, decline].filter(Boolean).length > 1) throw new Error("starters takes one of --prove, --move, --decline at a time");
+  const cfg = readConfig(root);
+  if (cfg.state !== "valid") throw new Error(cfg.state === "invalid" ? `${cfg.error} — fix it first` : "no zdd/config.json here — bootstrap first");
+  const config = cfg.config;
+  const dir = typeof config.localExtractorDir === "string" ? copyDir(config) : null;
+  const ledger = new Ledger(root);
+  const record = dir ? readRecordAt(ledger, dir) : emptyRecord();
+  const pin = STARTERS.version;
+  const listed = new Set(Array.isArray(config.extractors) ? config.extractors : []);
+  const changedFiles = (name) =>
+    Object.keys(record.files)
+      .filter((f) => f.startsWith(`${name}/`))
+      .filter((f) => !ledger.exists(`${dir}/${f}`) || fileHash(bytesAt(ledger, `${dir}/${f}`)) !== record.files[f]);
+  const copies = Object.entries(record.adapters).map(([name, a]) => ({ name, version: a.version, companionOf: a.companionOf ?? null, listed: listed.has(name), declined: a.declined ?? null, changed: changedFiles(name) }));
+  const behind = copies.filter((c) => cmpVersions(c.version, pin) < 0);
+  const lib = behind.length ? starterLibrary(pin) : null;
+  const offers = [];
+  for (const c of behind) {
+    for (const v of fixesFor(lib.notes, c.name, c.version, pin, c.declined)) {
+      let o = offers.find((x) => x.version === v.version);
+      if (!o) offers.push((o = { version: v.version, summary: v.summary, starters: {} }));
+      o.starters[c.name] = v.fixes;
+    }
+  }
+  offers.sort((a, b) => cmpVersions(a.version, b.version));
+  const status = { version: pin, package: STARTERS.package, dir, copies, behind: behind.map((c) => c.name), offers };
+  if (prove) {
+    const r = engineStep(["derive", "--check"], root);
+    return { ...status, proved: r.ok, output: tail(r.output, 40) };
+  }
+  if (decline) {
+    if (!offers.length) throw new Error("no fixes are on offer to decline — `starters` lists what is");
+    for (const o of offers) for (const n of Object.keys(o.starters)) record.adapters[n].declined = pin;
+    ledger.overwrite(`${dir}/${RECORD}`, JSON.stringify(record, null, 2) + "\n");
+    ledger.notes.push(`${dir}/${RECORD}: the fixes up to ${pin} were declined for ${[...new Set(offers.flatMap((o) => Object.keys(o.starters)))].join(", ")} — kept in the record, so they are not offered again; the adapters stay as they are (decision 0048 point 7)`);
+    return { ...status, declined: true, ...ledgerOut(ledger) };
+  }
+  if (move === null || move === false) return status;
+  const to = move === true ? pin : String(move);
+  if (to !== pin) throw new Error(`--move takes ${pin}, the starter library version this ZDD release pins — got ${to}`);
+  if (!behind.length) throw new Error(`every copy is already at ${pin}: nothing to move`);
+  const edited = behind.filter((c) => c.changed.length);
+  if (edited.length) throw new Error(`${edited.map((c) => `${c.name} (${c.changed.slice(0, 3).join(", ")}${c.changed.length > 3 ? ", …" : ""})`).join("; ")} changed since ${edited.length === 1 ? "it was" : "they were"} copied — a move would overwrite your changes, so nothing was written. Apply the fixes the notes describe by hand, through the extractor skill (its tests red, then green), or put the files back as copied`);
+  const paths = artifactPaths(config, { lenient: true });
+  // Before: the records as the copies derive them now.
+  const first = engineStep(["derive"], root);
+  if (!first.ok) throw new Error(`derive does not run with the copies as they are, so there is nothing to compare the move against — fix that first:\n${tail(first.output).join("\n")}`);
+  const before = snapshotRecords(root, paths.metadataDir);
+  const set = copySetOf(lib);
+  const moving = behind.map((c) => c.name).filter((n) => Object.hasOwn(set, n));
+  const stay = Object.keys(record.adapters).filter((n) => !moving.includes(n) && adapterHeld(ledger, dir, n));
+  // The shared files the copies that stay reach, as they are in the repo.
+  let keepShared = new Set();
+  if (stay.length) {
+    let own;
+    try {
+      own = JSON.parse(runEngine(["copy-set", `--adapters=${ledger.abs(dir)}`, `--extractors=${stay.join(",")}`]));
+    } catch (e) {
+      throw new Error(`the copies that stay (${stay.join(", ")}) could not be read, so ZDD cannot tell which shared files they need — the engine said: ${tail(engineTail(e), 3).join(" ")}`);
+    }
+    keepShared = new Set(Object.values(own.adapters ?? {}).flatMap((a) => (a.files ?? []).filter((f) => f.startsWith("_shared/"))));
+  }
+  // What every touched file held, so a failing test puts the copies back.
+  const undo = new Map();
+  const save = (rel) => {
+    if (!undo.has(rel)) undo.set(rel, ledger.exists(rel) ? bytesAt(ledger, rel) : null);
+  };
+  const oldFiles = new Set(Object.keys(record.files).filter((f) => moving.some((n) => f.startsWith(`${n}/`))));
+  const newFiles = new Set(moving.flatMap((n) => set[n].files));
+  const sharedHeld = Object.keys(record.files).filter((f) => f.startsWith("_shared/"));
+  const sharedEdited = sharedHeld.filter((f) => newFiles.has(f) && (!ledger.exists(`${dir}/${f}`) || fileHash(bytesAt(ledger, `${dir}/${f}`)) !== record.files[f]));
+  if (sharedEdited.length) throw new Error(`${sharedEdited.map((f) => `${dir}/${f}`).join(", ")} changed since copied — a move would overwrite your changes, so nothing was written`);
+  for (const f of newFiles) {
+    const rel = `${dir}/${f}`;
+    const bytes = readFileSync(join(lib.adapters, ...f.split("/")));
+    const own = ledger.exists(rel) && !Object.hasOwn(record.files, f);
+    if (own) {
+      if (fileHash(bytesAt(ledger, rel)) !== fileHash(bytes)) ledger.notes.push(`${rel}: kept as it is — it is not a file ZDD copied, and the library's ${pin} differs; compare the two`);
+      continue;
+    }
+    if (ledger.exists(rel) && fileHash(bytesAt(ledger, rel)) === fileHash(bytes)) {
+      record.files[f] = fileHash(bytes);
+      continue;
+    }
+    save(rel);
+    ledger.overwrite(rel, asText(bytes));
+    record.files[f] = fileHash(bytes);
+  }
+  for (const f of oldFiles) {
+    if (newFiles.has(f)) continue;
+    save(`${dir}/${f}`);
+    if (ledger.exists(`${dir}/${f}`)) ledger.remove(`${dir}/${f}`);
+    delete record.files[f];
+  }
+  // A shared file no moved copy reaches any more, and no other copy holds.
+  const reached = new Set([...newFiles].filter((f) => f.startsWith("_shared/")));
+  for (const f of sharedHeld) {
+    if (reached.has(f) || keepShared.has(f)) continue;
+    if (ledger.exists(`${dir}/${f}`) && fileHash(bytesAt(ledger, `${dir}/${f}`)) !== record.files[f]) {
+      ledger.notes.push(`${dir}/${f}: no copy reaches it at ${pin}, but it changed since copied, so it was kept — delete it if nothing of yours needs it`);
+      continue;
+    }
+    save(`${dir}/${f}`);
+    if (ledger.exists(`${dir}/${f}`)) ledger.remove(`${dir}/${f}`);
+    delete record.files[f];
+  }
+  for (const n of moving) {
+    const { declined, ...rest } = record.adapters[n];
+    record.adapters[n] = { ...rest, version: pin };
+  }
+  record.files = Object.fromEntries(Object.entries(record.files).sort(([a], [b]) => (a < b ? -1 : 1)));
+  const recordRel = `${dir}/${RECORD}`;
+  save(recordRel);
+  ledger.overwrite(recordRel, JSON.stringify(record, null, 2) + "\n");
+  const tests = engineStep(["test"], root);
+  if (!tests.ok) {
+    for (const [rel, bytes] of undo) {
+      if (bytes === null) {
+        if (ledger.exists(rel)) rmSync(ledger.abs(rel));
+      } else {
+        mkdirSync(dirname(ledger.abs(rel)), { recursive: true });
+        writeFileSync(ledger.abs(rel), bytes);
+      }
+    }
+    throw new Error(`the adapters' own tests fail at ${pin}, so every copy was put back as it was (nothing else changed):\n${tail(tests.output, 30).join("\n")}`);
+  }
+  const derived = engineStep(["derive"], root);
+  if (!derived.ok) throw new Error(`the copies moved to ${pin} and their tests pass, but derive stops — fix what it names, then run derive and lint:\n${tail(derived.output).join("\n")}`);
+  const after = snapshotRecords(root, paths.metadataDir);
+  const files = (m) => new Map([...m].map(([id, v]) => [id, v.file]));
+  const { moves, unmatched } = movedIds(files(before), files(after));
+  // Repoint every map link and blessing at a record whose id moved.
+  const movedFiles = new Map(moves.map((m) => [m.fromFile, m.toFile]));
+  const repointed = [];
+  if (movedFiles.size) {
+    for (const where of [paths.mapDir, paths.blessingsDir]) {
+      for (const rel of listMapPages(ledger, where).files) {
+        const text = ledger.read(rel);
+        const next = outsideFences(text, (chunk) => repointLinks(chunk, { oldRel: rel, newRel: rel, moved: movedFiles, bundleDir: paths.bundleDir }));
+        if (next !== text) {
+          ledger.overwrite(rel, next);
+          repointed.push(rel);
+        }
+      }
+    }
+  }
+  const idMap = new Map(moves.map((m) => [m.from, m.to]));
+  if (idMap.size && Array.isArray(config.claims?.allowUnclaimed) && config.claims.allowUnclaimed.some((id) => idMap.has(id))) {
+    config.claims.allowUnclaimed = config.claims.allowUnclaimed.map((id) => idMap.get(id) ?? id);
+    ledger.overwrite("zdd/config.json", JSON.stringify(config, null, 2) + "\n");
+    repointed.push("zdd/config.json (claims.allowUnclaimed)");
+  }
+  const changed = [...after.keys()].filter((id) => before.has(id) && before.get(id).hash !== after.get(id).hash);
+  const added = [...after.keys()].filter((id) => !before.has(id) && !moves.some((m) => m.to === id));
+  const lint = engineStep(["lint"], root);
+  ledger.notes.push(`${moving.join(", ")}: moved to the starter library's ${pin}; their tests pass; derive ran`);
+  return { ...status, moved: moving, to: pin, records: { before: before.size, after: after.size, changed, added }, moves, unmatched, repointed, lint: { ok: lint.ok, output: tail(lint.output, 30) }, ...ledgerOut(ledger) };
+}
+
+export function narrateStarters(r) {
+  const out = [];
+  if (!r.dir) return printable("No localExtractorDir: no adapter has been copied into this repo from the starter library.");
+  out.push(`Adapters copied from the starter library (${r.package}), in ${r.dir}/ — this ZDD release offers ${r.version}:`);
+  for (const c of r.copies) {
+    const was = c.companionOf ? ` (only as ${c.companionOf.join(", ")}'s suite companion)` : c.listed ? "" : " (not in extractors)";
+    out.push(`  ${c.name}: ${c.version}${was}${c.changed.length ? `, changed since copied: ${c.changed.slice(0, 5).join(", ")}${c.changed.length > 5 ? ", …" : ""}` : ""}${c.declined ? `, fixes up to ${c.declined} declined` : ""}`);
+  }
+  if (r.proved !== undefined) {
+    out.push("", r.proved ? "Proved: with the copies in place, derive --check finds every record byte for byte as committed." : "NOT proved: derive --check finds records that differ from those committed:", ...(r.proved ? [] : r.output.map((l) => `  ${l}`)));
+  }
+  if (r.moved) {
+    out.push("", `Moved ${r.moved.join(", ")} to ${r.to}; their tests pass; derive ran (${r.records.before} records before, ${r.records.after} after).`);
+    for (const m of r.moves) out.push(`  ${m.from} → ${m.to}`);
+    const ids = (list) => (list.length <= 20 ? `: ${list.join(", ")}` : "");
+    if (r.records.changed.length) out.push(`  ${r.records.changed.length} record${r.records.changed.length === 1 ? "" : "s"} changed${ids(r.records.changed)}`);
+    if (r.records.added.length) out.push(`  ${r.records.added.length} new record${r.records.added.length === 1 ? "" : "s"}${ids(r.records.added)}`);
+    for (const id of r.unmatched) out.push(`  ${id} is gone, and no record took its place: a link to it is a broken link lint names — fix it by hand`);
+    for (const f of r.repointed) out.push(`  repointed links in ${f}`);
+    out.push(r.lint.ok ? "lint passes." : "lint FAILS:", ...(r.lint.ok ? [] : r.lint.output.map((l) => `  ${l}`)));
+  } else if (r.offers.length && !r.declined) {
+    out.push("", "Fixes on offer (read each against this repo, then ask once: on a yes `starters --move`, on a no `starters --decline`):");
+    for (const o of r.offers) {
+      out.push(`  ${o.version}: ${o.summary}`);
+      for (const [name, fixes] of Object.entries(o.starters)) for (const f of fixes) out.push(`    ${name}: ${f.what}`, `      who: ${f.who}`, `      ids: ${f.moves}`);
+    }
+  } else if (r.behind.length && !r.declined) out.push("", `${r.behind.join(", ")} ${r.behind.length === 1 ? "is" : "are"} behind ${r.version} with no fix noted for ${r.behind.length === 1 ? "it" : "them"}: \`starters --move\` brings them level, and changes no record.`);
+  if (r.declined) out.push("", "Declined: kept in the record; the adapters stay as they are.");
+  for (const n of r.notes ?? []) out.push(`note: ${n}`);
+  return out.map(printable).join("\n");
 }
 
 // The interview's material: the engine's suite report, turned into what to
@@ -3271,7 +3647,7 @@ export function preview(root, names) {
   if (!names.length) throw new Error("preview needs --extractors=<a,b,…>");
   for (const n of names) if (!/^[a-z][a-z0-9-]*$/.test(n)) throw new Error(`preview: '${n}' is not an adapter name`);
   try {
-    return JSON.parse(runEngine(["preview", `--adapters=${starterAdapters()}`, `--extractors=${names.join(",")}`, `--root=${root}`, "--json"]));
+    return JSON.parse(runEngine(["preview", `--adapters=${starterLibrary().adapters}`, `--extractors=${names.join(",")}`, `--root=${root}`, "--json"]));
   } catch (e) {
     throw new Error(`the preview could not run — the engine said: ${String(e.stderr || e.message).trim().split(/\r?\n/).slice(-3).join(" ")}`);
   }
@@ -3307,6 +3683,8 @@ export function narrateDetect(d, pocock) {
       out.push(`      options:  ${JSON.stringify(p.options)}`);
     }
     for (const a of d.apps) out.push(`  - map only: ${a.name} — ${a.evidence}; extractor ${a.extractor}`);
+    // The offer (decision 0048 point 3): the developer may take it or leave it.
+    if (d.library?.offer?.length) out.push(`Starter library (${d.library.package} ${d.library.version}) has adapters for: ${d.library.offer.join(", ")} — offer to bring them across: they are copied in with their tests and become this repo's own. On a no ("starters": false) nothing is copied and each adapter is built with the extractor skill.`);
     for (const q of d.questions ?? []) out.push(`  ask: ${q.ask} (recorded under ${q.records})`);
     // Part by part (decision 0039): what an adapter covers, and what nothing does.
     if (d.coverage) {
@@ -3321,11 +3699,11 @@ export function narrateDetect(d, pocock) {
     if (d.limits?.walkTruncated) out.push(`  (detection reads ${d.limits.depth} folders deep, within one walk budget: code deeper than that was not seen)`);
     if (d.limits?.readBudgetSpent) out.push("  (detection's read budget ran out: some source was not read — confirm the proposals by hand)");
     if (d.limits?.refused) out.push(`  (${d.limits.refused} file${d.limits.refused === 1 ? "" : "s"} could not be read — over 1 MiB, unreadable or a link: ${d.limits.refusedFirst.map((f) => `\`${f}\``).join(", ")}${d.limits.refused > d.limits.refusedFirst.length ? ", …" : ""} — evidence in ${d.limits.refused === 1 ? "it" : "them"} was not seen)`);
-  } else if (d.catalogue) {
+  } else if (d.starters) {
     // A greenfield repo with no stack chosen (0039 point 6): the stacks with
     // ready-made adapters, by part, and no recommendation.
     out.push("Ready-made adapters, by part (no recommendation — any stack works; an uncovered one gets an adapter built with the `extractor` skill):");
-    for (const c of d.catalogue) if (c.adapters.length) out.push(`  ${c.part}: ${c.adapters.join(", ")}`);
+    for (const c of d.starters) if (c.adapters.length) out.push(`  ${c.part}: ${c.adapters.join(", ")}`);
   }
   out.push(narratePocock(pocock));
   return out.map(printable).join("\n");
@@ -3368,8 +3746,28 @@ function narratePocock(p) {
   );
 }
 
+// The files a starter copy wrote, one line per adapter folder (and one for
+// the shared code) rather than one per file: a copy is many small files.
+export function collapseCopies(list, dir) {
+  if (!dir) return list;
+  const out = [];
+  const counts = new Map();
+  for (const f of list) {
+    const m = f.startsWith(`${dir}/`) ? /^([^/]+)\/./.exec(f.slice(dir.length + 1)) : null;
+    if (!m) {
+      out.push(f);
+      continue;
+    }
+    const key = `${dir}/${m[1]}/`;
+    if (!counts.has(key)) out.push(key);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return out.map((f) => (counts.has(f) ? `${f} (${counts.get(f)} file${counts.get(f) === 1 ? "" : "s"})` : f));
+}
+
 export function narrateApply(r) {
   const out = [`Bootstrap (${r.mode}) — plugin ${r.version}, ${r.date}`];
+  r = { ...r, wrote: collapseCopies(r.wrote, typeof r.config?.localExtractorDir === "string" ? r.config.localExtractorDir : null) };
   // Each file with its plain-words card (pick 2): what it is, why it
   // exists, who writes it, whether it is ever hand-edited.
   const card = (f) => {
@@ -3428,6 +3826,9 @@ export const ARTIFACT_EXPLANATIONS = [
   { match: /(^|\/)map\/(features|apps|external-services)\/\.gitkeep$|(^|\/)map\/?$/, what: "the semantic map: short pages grouping the code into features, apps and the third-party systems it depends on, and the links the code cannot show", why: "grouping is a thing the code cannot say about itself", who: "you and the AI, one mapping session at install and then as each piece of work touches a feature", handEdited: "yes — yours; the links inside it are kept in step with the code by the drift check" },
   { match: /(^|\/)blessings\/(\.gitkeep|[^/]+\.md)?$/, what: "the blessings: one short file per kind of work done more than once (\"Adding an upload?\"), naming the existing code to copy or extend (where:), the trap to refuse, and why", why: "the most common pattern in a codebase is often the deprecated one; a blessing is how the AI copies the right code, and reuses a helper instead of writing a second one", who: "you and the AI: \"choose patterns\" proposes one, \"update ZDD\" mints it once the code exists", handEdited: "yes — yours; lint fails one whose where: names no file" },
   { match: /(^|\/)metadata\/?$/, what: "the inventory of the code (routes, tables, screens, background tasks, components, external services), one small JSON file each", why: "a mechanical, always-correct map of what exists, so the AI finds its way without grepping", who: "the engine (derive) — regenerated by \"update ZDD\"", handEdited: "never — the drift check fails if it is" },
+  { match: /(^|\/)extractors\/starters\.json$/, what: "a record of the adapters copied from ZDD's starter library: the version each came from, and a fingerprint of every file copied", why: "so a later fix to a starter can be offered, and applied only to files you have not changed", who: "ZDD writes it when it copies a starter, and when you take a fix", handEdited: "never needed — delete an adapter's entry if you rewrite it from scratch" },
+  { match: /(^|\/)extractors\/_shared\/?$/, what: "code several of your adapters share (reading imports, paths, names), kept once beside them", why: "a fix to it is made once, not in every adapter that uses it", who: "ZDD copies it in with the first starter that needs it; it is yours from then on", handEdited: "yes — yours; run the adapters' tests after a change" },
+  { match: /(^|\/)extractors\/[a-z][a-z0-9-]*\/?$/, what: "one adapter: the code that reads one convention of your code (your migrations, your routes) into records, with its tests and a small sample repo its suite runs on", why: "ZDD's engine runs only the adapters your repo holds, so what they read is yours to fix or change, with no ZDD release", who: "copied from ZDD's starter library (or built with the extractor skill); yours from then on", handEdited: "yes — yours; change it through the extractor skill, tests first" },
   { match: /(^|\/)graph\.json$/, what: "the whole generated picture in one machine-readable file: every record and every link", why: "the human index is rendered from it, and other tools can read it", who: "the engine (render)", handEdited: "never" },
   { match: /(^|\/)agent-index\.md$/, what: "the short index the AI reads at the start of every session: each feature with pointers to its code", why: "orientation in one screen, so each session starts knowing where things are", who: "the engine (render)", handEdited: "never" },
   { match: /(^|\/)adr-index\.md$/, what: "one line per decision record, with what supersedes what", why: "the AI reads the whole list before work, then only the decisions its task cites", who: "the engine (render)", handEdited: "never" },
@@ -3465,6 +3866,7 @@ const USES = {
   github: "ZDD and Matt Pocock's skills are installed from public GitHub repositories, and the release check reads the list of releases there",
   registry: "ZDD's engine, @rich-rees/zdd, is downloaded from the public npm registry by npx; no npm account is needed, the package is public",
   engine: "the exact engine version this ZDD release pins must be there to download",
+  starters: "ZDD's starter library: the ready-made adapters ZDD offers to copy into the repo at install, and copies in when an upgrade moves a repo onto its own adapters",
 };
 function head(url, timeoutMs = 5000) {
   return new Promise((ok) => {
@@ -3525,6 +3927,14 @@ export async function preflight(root, { registry = REGISTRY_DEFAULT, github = GI
     const there = eng.reachable && eng.status >= 200 && eng.status < 300;
     add("engine", there, there ? `${ENGINE_PACKAGE}@${version} on the registry` : null, there ? `the engine, ${ENGINE_PACKAGE}@${version} — there to download` : `the engine, ${ENGINE_PACKAGE}@${version} — the npm registry answered but does not have this version (${eng.status ?? eng.reason}); a release of ZDD is published before its tag, so this is a ZDD defect — report it in ZDD's Discussions, under Bug reports: https://github.com/${MARKETPLACE_REPO}/discussions`);
   } else add("engine", false, null, `the engine, ${ENGINE_PACKAGE}@${version} — not checked: the registry could not be reached`);
+  // The starter library this release offers (decision 0048 point 3): read
+  // by detection at install, and by the upgrade that copies adapters in.
+  const lib = `${STARTERS.package}@${STARTERS.version}`;
+  if (reg.reachable) {
+    const st = await head(`${registry.replace(/\/$/, "")}/${STARTERS.package.replace("/", "%2f")}/${STARTERS.version}`);
+    const there = st.reachable && st.status >= 200 && st.status < 300;
+    add("starters", there, there ? `${lib} on the registry` : null, there ? `the starter library, ${lib} — there to download` : `the starter library, ${lib} — the npm registry answered but does not have this version (${st.status ?? st.reason}); a release of ZDD is published after its starter library, so this is a ZDD defect — report it in ZDD's Discussions, under Bug reports: https://github.com/${MARKETPLACE_REPO}/discussions`);
+  } else add("starters", false, null, `the starter library, ${lib} — not checked: the registry could not be reached`);
   return { ok: checks.every((c) => c.ok), version, checks };
 }
 export function narratePreflight(p) {
@@ -3597,6 +4007,7 @@ export function narrateEstimate(e) {
 export function narrateUpgrade(r) {
   const title = r.to ? `Lock move to ${r.to}` : `Upgrade to plugin ${r.version}`;
   const out = [r.plan ? `${r.to ? `Lock move plan to ${r.to}` : `Upgrade plan for plugin ${r.version}`} — nothing written yet` : title];
+  r = { ...r, wrote: collapseCopies(r.wrote, r.starters?.dir ?? null) };
   const verb = r.plan ? "would change" : "changed";
   if (!r.wrote.length) out.push("  nothing to change — every plugin-owned file is already at this version");
   // The plain-words card under each file (pick 2), as the apply ledger has.
@@ -3684,6 +4095,10 @@ if (process.argv[1] && posixify(process.argv[1]).endsWith("/scripts/bootstrap.mj
     } else if (cmd === "unread") {
       const r = unreadItems(root, { mark: flags.mark === undefined ? null : flags.mark, why: flags.why ?? null, forget: flags.forget === undefined ? null : flags.forget, raise: flags.raise === true });
       process.stdout.write(flags.json ? JSON.stringify(r, null, 2) + "\n" : narrateUnread(r) + "\n");
+    } else if (cmd === "starters") {
+      const r = starters(root, { prove: flags.prove === true, move: flags.move === undefined ? null : flags.move === true ? true : String(flags.move), decline: flags.decline === true });
+      process.stdout.write(flags.json ? JSON.stringify(r, null, 2) + "\n" : narrateStarters(r) + "\n");
+      if (r.proved === false || (r.lint && !r.lint.ok)) process.exit(1);
     } else if (cmd === "preview") {
       const r = preview(root, String(flags.extractors ?? "").split(",").map((s) => s.trim()).filter(Boolean));
       process.stdout.write(flags.json ? JSON.stringify(r, null, 2) + "\n" : narratePreview(r) + "\n");
@@ -3694,7 +4109,7 @@ if (process.argv[1] && posixify(process.argv[1]).endsWith("/scripts/bootstrap.mj
       const s = releaseStatus(root, typeof flags.remote === "string" ? flags.remote : undefined, flags.home);
       process.stdout.write(flags.json ? JSON.stringify(s) + "\n" : printable(narrateReleaseStatus(s)) + "\n");
     } else {
-      process.stderr.write("Usage: bootstrap.mjs <preflight [--registry=<url>] [--github=<url>]|detect|estimate|apply --answers=<file>|check [--status|--done]|adapters [--raise]|unread [--mark=<ids> --why=<reason>] [--forget=<ids>] [--raise]|preview --extractors=<a,b>|upgrade [--plan] [--lock] [--drop=<ids>] [--move-blessings=<token> [--kinds=<name>:<copy|extend>,…]] [--to=vX.Y.Z]|split-adrs [--plan] [--token=<token> --harness=<nums> --application=<nums>] [--dir=<rel> --index=<rel>]|release-status [--remote=<url>]> [--root=<dir>] [--date=YYYY-MM-DD] [--home=<dir>] [--json]\n");
+      process.stderr.write("Usage: bootstrap.mjs <preflight [--registry=<url>] [--github=<url>]|detect|estimate|apply --answers=<file>|check [--status|--done]|adapters [--raise]|unread [--mark=<ids> --why=<reason>] [--forget=<ids>] [--raise]|starters [--prove|--move|--decline]|preview --extractors=<a,b>|upgrade [--plan] [--lock] [--drop=<ids>] [--move-blessings=<token> [--kinds=<name>:<copy|extend>,…]] [--to=vX.Y.Z]|split-adrs [--plan] [--token=<token> --harness=<nums> --application=<nums>] [--dir=<rel> --index=<rel>]|release-status [--remote=<url>]> [--root=<dir>] [--date=YYYY-MM-DD] [--home=<dir>] [--json]\n");
       process.exit(2);
     }
   } catch (e) {

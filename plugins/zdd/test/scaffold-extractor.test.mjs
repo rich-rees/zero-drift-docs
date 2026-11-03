@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { BUILT_INS, IO_SINCE } from "../scripts/scaffold-extractor.mjs";
-import { ensureStarters } from "../../../packages/zdd-starter-adapters/test/starters.mjs";
+import { placeStarters } from "../../../packages/zdd-starter-adapters/test/starters.mjs";
 
 const PLUGIN = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SCRIPT = join(PLUGIN, "scripts", "scaffold-extractor.mjs");
@@ -46,6 +46,8 @@ function adopted(t, pin = IO_SINCE) {
   // the starters' suite copies them); a derive copies in what the config names.
   const { localExtractorDir: _, ...config } = JSON.parse(readFileSync(configPath, "utf8"));
   writeFileSync(configPath, JSON.stringify({ ...config, engine: pin }, null, 2) + "\n");
+  // The adapters the config names, where the scaffold points localExtractorDir.
+  placeStarters(repo);
   return repo;
 }
 function scaffold(repo, answers, extra = []) {
@@ -114,7 +116,6 @@ test("a second run keeps every file and the config — nothing is overwritten", 
 test("the untouched scaffold loads in the engine: derive runs, finds nothing, and says why", (t) => {
   const repo = adopted(t);
   scaffoldJson(repo, CSHARP);
-  ensureStarters(repo);
   const r = spawnSync(process.execPath, [ENGINE_BIN, "derive", "--verbose", `--root=${repo}`], { encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stderr, /\[aspnet-routes\] src\/Api is missing — nothing to inventory/);

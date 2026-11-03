@@ -18,7 +18,6 @@ import { readFileSync, writeFileSync, existsSync, rmSync, mkdtempSync, mkdirSync
 import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { ensureStarters } from "../../../packages/zdd-starter-adapters/test/starters.mjs";
 
 const PLUGIN = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SCRIPT = join(PLUGIN, "scripts", "bootstrap.mjs");
@@ -42,7 +41,7 @@ const commit = (cwd, msg) => {
 };
 const bootstrap = (root, args) => execFileSync(process.execPath, [SCRIPT, ...args, `--root=${root}`, `--home=${home}`, "--date=2026-10-09"], { encoding: "utf8" });
 const bootstrapJson = (root, args) => JSON.parse(bootstrap(root, [...args, "--json"]));
-const engine = (root, args) => (ensureStarters(root), spawnSync)(process.execPath, [ENGINE, ...args, `--root=${root}`], { encoding: "utf8" });
+const engine = (root, args) => spawnSync(process.execPath, [ENGINE, ...args, `--root=${root}`], { encoding: "utf8" });
 const answers = (name, a) => {
   const p = join(scratch, `${name}.json`);
   writeFileSync(p, JSON.stringify(a));
@@ -244,7 +243,8 @@ test("hosted off GitHub: no workflow is written, the four commands are printed, 
 
 test("the preflight's messages: a dead registry, a dead GitHub, no repository — each named in plain words; all present passes", async () => {
   const ok = await new Promise((r) => {
-    const s = createServer((req, res) => res.writeHead(req.url === `/@rich-rees%2fzdd/${VERSION}` ? 200 : req.url === "/" ? 200 : 404).end("{}"));
+    const lib = JSON.parse(readFileSync(join(PLUGIN, "starter-adapters.json"), "utf8"));
+    const s = createServer((req, res) => res.writeHead(req.url === `/@rich-rees%2fzdd/${VERSION}` || req.url === `/@rich-rees%2fzdd-starter-adapters/${lib.version}` ? 200 : req.url === "/" ? 200 : 404).end("{}"));
     s.listen(0, "127.0.0.1", () => r({ url: `http://127.0.0.1:${s.address().port}`, close: () => s.close() }));
   });
   try {

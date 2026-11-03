@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { UPGRADE_NOTES, newestTag, INSTRUCTION_RULES, compareVersions, ruleChangedSince, mergeGate, IMPORT_COMMENT, RETIRED_NAMES, OLD_LINE_TAGS } from "../scripts/bootstrap.mjs";
 import { oldLine } from "../scripts/lib/repo.mjs";
-import { copyFixture } from "../../../packages/zdd-starter-adapters/test/starters.mjs";
+import { copyFixture, placeStarters } from "../../../packages/zdd-starter-adapters/test/starters.mjs";
 
 const PLUGIN = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SCRIPT = join(PLUGIN, "scripts", "bootstrap.mjs");
@@ -590,6 +590,8 @@ test("CR-150: a prerelease sorts before its release — an upgrade from 0.9.0-rc
 
 test("CR-156: detection that cannot run never stops the 0.9 upgrade — the pin still moves, nothing is added, and the hand route is named", () => {
   const repo = adopted("no-detect", { extractors: ["supabase", "nextjs"], engine: "2.5.0", settings: { extraKnownMarketplaces: LOCK("v2.5.0") } });
+  // Its adapters already in place, so the step that copies them needs no engine (that step stops, with nothing written, when the engine cannot run).
+  placeStarters(repo, { configure: true });
   const r = spawnSync(process.execPath, [SCRIPT, "upgrade", "--json", `--root=${repo}`, `--home=${home}`], { encoding: "utf8", env: { ...process.env, ZDD_ENGINE_BIN: join(repo, "missing.mjs") } });
   assert.equal(r.status, 0, r.stderr);
   const json = JSON.parse(r.stdout);

@@ -19,6 +19,7 @@ import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { explain, ARTIFACT_EXPLANATIONS, hostOf } from "../scripts/bootstrap.mjs";
+import { STARTERS } from "../scripts/lib/starters.mjs";
 
 const PLUGIN = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SCRIPT = join(PLUGIN, "scripts", "bootstrap.mjs");
@@ -72,7 +73,7 @@ const serve = (handler) =>
 
 test("preflight: every requirement checked, each said in plain words with what ZDD uses it for; all present → exit 0 and one line per check", async (t) => {
   const registry = await serve((req, res) => {
-    if (req.url === `/@rich-rees%2fzdd/${VERSION}`) res.writeHead(200).end("{}");
+    if (req.url === `/@rich-rees%2fzdd/${VERSION}` || req.url === `/@rich-rees%2fzdd-starter-adapters/${STARTERS.version}`) res.writeHead(200).end("{}");
     else res.writeHead(404).end("{}");
   });
   const github = await serve((_req, res) => res.writeHead(200).end("ok"));
@@ -85,7 +86,7 @@ test("preflight: every requirement checked, each said in plain words with what Z
   const first = await runAsync(repo, ["preflight", `--registry=${registry.url}`, `--github=${github.url}`, "--json"]);
   assert.equal(first.status, 0, first.stdout + first.stderr);
   const json = JSON.parse(first.stdout);
-  assert.deepEqual(json.checks.map((c) => [c.name, c.ok]), [["node", true], ["npx", true], ["git", true], ["repo", true], ["github", true], ["registry", true], ["engine", true]]);
+  assert.deepEqual(json.checks.map((c) => [c.name, c.ok]), [["node", true], ["npx", true], ["git", true], ["repo", true], ["github", true], ["registry", true], ["engine", true], ["starters", true]]);
   assert.equal(json.ok, true);
   for (const c of json.checks) assert.ok(/ZDD/.test(c.uses), `${c.name}: says what ZDD uses it for — ${c.uses}`);
   const text = (await runAsync(repo, ["preflight", `--registry=${registry.url}`, `--github=${github.url}`])).stdout;
@@ -108,12 +109,14 @@ test("preflight: an unreachable registry, a GitHub stand-in that is down, a miss
   assert.match(out, /^  MISSING +a git repository — this folder is not one\. ZDD reads the repo's history for freshness and locks a release by a git tag; run `git init`/m, out);
   assert.match(out, /^  MISSING +github\.com — could not be reached .* ZDD and Matt Pocock's skills are installed from public GitHub repositories/m, out);
   assert.match(out, /^  MISSING +the engine, @rich-rees\/zdd@[\d.]+ — the npm registry answered but does not have this version/m, out);
+  assert.match(out, /^  MISSING +the starter library, @rich-rees\/zdd-starter-adapters@[\d.]+ — the npm registry answered but does not have this version/m, out);
   assert.match(out, /Nothing was written\. Fix what is missing and run bootstrap again\./, out);
   const json = JSON.parse((await runAsync(repo, ["preflight", `--registry=${dead}`, `--github=${dead}`, "--json"])).stdout);
   assert.equal(json.ok, false);
   assert.match(json.checks.find((c) => c.name === "registry").says, /could not be reached/);
   assert.equal(json.checks.find((c) => c.name === "engine").ok, false, "with no registry the engine check cannot pass");
   assert.match(json.checks.find((c) => c.name === "engine").says, /not checked: the registry could not be reached/);
+  assert.match(json.checks.find((c) => c.name === "starters").says, /not checked: the registry could not be reached/);
 });
 
 // --- C6: where the repo is hosted decides the CI offer ------------------------------

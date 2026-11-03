@@ -55,43 +55,10 @@ export function copyFixture(from, to) {
   return to;
 }
 
-// For the plugin's suite until bootstrap copies starters (ZDD-11 slice 5):
-// what that copy will leave, so a repo bootstrap configured derives. Every
-// adapter the config names that its localExtractorDir does not hold and the
-// library does is copied in, with the `_shared/` files its modules reach
-// (the reach rule a copy keeps, decision 0048 As built slice 3), and a config with no
-// localExtractorDir gains this one. A repo with nothing to copy is left
-// byte for byte as it is.
-export function ensureStarters(repo) {
-  const p = join(repo, "zdd", "config.json");
-  let config;
-  try {
-    config = JSON.parse(readFileSync(p, "utf8"));
-  } catch {
-    return;
-  }
-  if (!config || !Array.isArray(config.extractors)) return;
-  const dir = typeof config.localExtractorDir === "string" ? config.localExtractorDir : LOCAL;
-  // A path the engine would refuse is the test's to see refused, never a place to write.
-  if (!/^[A-Za-z0-9_-][A-Za-z0-9._-]*(?:\/[A-Za-z0-9_-][A-Za-z0-9._-]*)*$/.test(dir) || dir.split("/").includes("..")) return;
-  const to = join(repo, ...dir.split("/"));
-  const wanted = config.extractors.filter((n) => typeof n === "string" && /^[a-z][a-z0-9-]*$/.test(n) && !existsSync(join(to, n)) && !existsSync(join(to, `${n}.mjs`)) && existsSync(join(ADAPTERS, n, "index.mjs")));
-  if (!wanted.length) return;
-  mkdirSync(to, { recursive: true });
-  for (const n of wanted) {
-    copyStarter(n, to);
-    for (const f of reachedShared(n)) {
-      const dest = join(to, relative(ADAPTERS, f));
-      mkdirSync(dirname(dest), { recursive: true });
-      cpSync(f, dest, { force: false });
-    }
-  }
-  if (config.localExtractorDir === undefined) writeFileSync(p, JSON.stringify({ ...config, localExtractorDir: LOCAL }, null, 2) + "\n");
-}
-
 // The `_shared/` files one starter's code and its own tests reach by their
 // imports (the tests travel with it); never its fixture's or example's,
-// which are sample repos, not code.
+// which are sample repos, not code. The engine's `copy-set` is held to this
+// (copy-set.test.mjs): it is what bootstrap copies into an app.
 export function reachedShared(name) {
   const own = join(ADAPTERS, name);
   const code = [];

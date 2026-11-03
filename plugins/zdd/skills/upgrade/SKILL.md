@@ -195,6 +195,66 @@ A name already taken in the store, a wrong `--kinds` name or a `paths` value
 the engine would refuse also stops the run before its first write. Relay the ledger in plain words, as in step 2. Its
 notes match the plan's.
 
+## Step 3b — the adapters come into the repo (decision 0048)
+
+Skip this step when the ledger names no adapter copied from the starter
+library. From 0.14 a repo owns every adapter it runs: the engine ships
+none, so this run copied each one the config names into `zdd/extractors/`,
+with its tests and its suite fixture (and `starters.json`, the record of
+the version each came from). Say so in plain words: "ZDD used to carry the
+code that reads your stack; from now on that code lives in your repo, so
+you can fix it yourself without waiting for a ZDD release." A repo coming
+from before 0.14 gets the starter library's **baseline**: the adapters
+exactly as the old engine ran them. Two proofs follow, in order, so what
+the move did and what the fixes do are never mixed:
+
+**First proof — nothing moved.**
+
+```
+node "$PLUGIN/scripts/bootstrap.mjs" starters --prove
+```
+
+It runs `derive --check` with the copies in place: every record must be
+byte for byte what the repo committed. Say "Proved: your records are
+exactly as before." If it is NOT proved, stop and show what it printed:
+that is a ZDD defect (the baseline exists to reproduce them), reported in
+ZDD's Discussions as step 5 says.
+
+**The fixes, one question.**
+
+```
+node "$PLUGIN/scripts/bootstrap.mjs" starters
+```
+
+It lists the fixes the starter library's later version notes for these
+adapters: what changed, who it affects, and how record ids move. Read each
+`who` against this repo (its migrations, its code) and say which apply
+here and what the person will see — records gaining links, a table's id
+gaining its schema. Then ask **"Take these fixes now?"** Recommended yes:
+they are known bugs, fixed and tested; cost: the generated records that
+the fixes correct change in this PR, and a map link at an id that moved is
+repointed for them; saying no keeps the adapters exactly as they are, and
+the no is kept, so the same fixes are not offered again.
+
+- On **yes**:
+
+  ```
+  node "$PLUGIN/scripts/bootstrap.mjs" starters --move
+  ```
+
+  The copies move to the version this release pins, their own tests run
+  (a failing test puts every copy back and stops), `derive` runs, every map
+  link and blessing at a record whose id moved is repointed, and `lint`
+  runs. Relay the result: how many records changed, which ids moved and
+  where links were repointed, and lint's verdict. A red lint is fixed with
+  the person in this PR. A copy changed since it was copied is never moved:
+  the run says so and writes nothing.
+- On **no**:
+
+  ```
+  node "$PLUGIN/scripts/bootstrap.mjs" starters --decline
+  ```
+
 ## Step 4 — the questions the notes raise, one at a time
 
 Work through every note that asks something, one question at a time, each

@@ -10,7 +10,8 @@
 // For each adopter: a throwaway copy (no node_modules, no .git history
 // beyond a fresh init), a fake `.claude/worktrees/` folder planted, then
 // this checkout's plugin runs `upgrade --plan` and this checkout's engine
-// runs derive, render and lint — exactly what the adopter's upgrade PR will
+// runs derive, render and lint (after `starters --prove` and, as on a yes
+// to the fixes, `starters --move`) — exactly what the adopter's upgrade PR will
 // do. Any failure names the adopter and the step. The repo's own pins are
 // checked first (scripts/release-check.mjs), then both suites.
 //
@@ -75,6 +76,28 @@ for (const adopter of adopters) {
     const moving = moves.length ? [`--move-blessings=${plan.blessingMoves.token}`] : [];
     ok = run(`${label}: upgrade${moves.length ? ` (moving ${moves.filter((p) => !p.problem).length} of ${moves.length} blessings; ${moves.filter((p) => p.problem).length} stay, named)` : ""}`, process.execPath, [PLUGIN, "upgrade", ...moving, `--root=${copy}`], copy) && ok;
     for (const p of moves.filter((m) => m.problem)) console.log(`        ${label}: ${p.from} stays on the map — ${p.problem}`);
+    // Since 0.14 the upgrade copies every adapter in (decision 0048 point
+    // 8): first proof, the records unchanged with the copies in place; then
+    // the fixes, as the adopter's run takes them on a yes — the copies move,
+    // their tests run, derive, the map is repointed, lint.
+    const status = JSON.parse(spawnSync(process.execPath, [PLUGIN, "starters", `--root=${copy}`, "--json"], { cwd: copy, encoding: "utf8" }).stdout || "{}");
+    if (status.copies?.length) {
+      ok = run(`${label}: starters --prove (${status.copies.length} adapters copied in; the records unchanged)`, process.execPath, [PLUGIN, "starters", "--prove", `--root=${copy}`], copy) && ok;
+      if (status.behind?.length) {
+        const m = spawnSync(process.execPath, [PLUGIN, "starters", "--move", `--root=${copy}`, "--json"], { cwd: copy, encoding: "utf8" });
+        let moved = null;
+        try {
+          moved = JSON.parse(m.stdout);
+        } catch {
+          moved = null;
+        }
+        const good = m.status === 0 && moved?.lint?.ok;
+        console.log(`${good ? "ok     " : "FAILED "} ${label}: starters --move (${status.behind.length} copies to ${status.version}${moved ? `; records ${moved.records.before} → ${moved.records.after}, ${moved.records.changed.length} changed, ${moved.records.added.length} new, ${moved.moves.length} ids moved, ${moved.repointed.length} files repointed` : ""})`);
+        if (!good) console.log((m.stdout + m.stderr).split("\n").slice(-40).join("\n"));
+        for (const x of moved?.moves ?? []) console.log(`        ${label}: ${x.from} → ${x.to}`);
+        ok = good && ok;
+      }
+    }
     if (split) {
       const sp = JSON.parse(spawnSync(process.execPath, [PLUGIN, "split-adrs", "--plan", `--root=${copy}`, "--json"], { cwd: copy, encoding: "utf8" }).stdout || "{}");
       const untagged = (sp.proposals ?? []).filter((p) => !p.tag).map((p) => p.num);

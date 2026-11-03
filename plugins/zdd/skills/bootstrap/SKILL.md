@@ -114,9 +114,11 @@ node "$PLUGIN/scripts/bootstrap.mjs" detect
 
 It prints the mode, where the repo is hosted (that decides the CI offer in
 step 3), and whether Matt Pocock's skills are installed (used in step 7).
-The detection is the adapters' own (decision 0039): each one in the engine's
-catalogue says whether it fits, with its evidence, and the engine runs them
-(bootstrap runs the engine of its own release; detection writes nothing):
+The detection is the adapters' own (decision 0039): each starter in ZDD's
+starter library (`@rich-rees/zdd-starter-adapters`, fetched at the version
+this release pins) says whether it fits, with its evidence, and the engine
+runs them (bootstrap runs the engine of its own release; detection writes
+nothing):
 
 - **EXISTING codebase** — a proposed extractor set, and for each one the
   **evidence** it found ("SQL migrations under `supabase/migrations`",
@@ -154,6 +156,19 @@ catalogue says whether it fits, with its evidence, and the engine runs them
      Say the limit as the evidence does: a service's "used by" is the files
      carrying its marker, never those that reach the provider through a
      settings object.
+
+  Then **the offer** (decision 0048 point 3), one question: the
+  **Starter library** line names the starters that fit. Say in plain words
+  what you recognised and what bringing them across saves, for example: "I
+  recognise your stack is Supabase with SQLAlchemy. I already have adapters
+  for that in my starter library. Would you like me to bring them across to
+  save you time and tokens?" Recommended yes; cost: their code, tests and a
+  small sample repo each land in `zdd/extractors/`, and are the repo's own
+  from then on — yours to change, fix or delete, with no ZDD release; saying
+  no means every adapter is built from nothing with the `extractor` skill
+  after bootstrap (longer, and tested with fixtures), and derive runs an
+  adapter that reads nothing until then. The library is an offer, never a
+  requirement: a no is a fine answer. Record it as `"starters": false`.
 
   Then ask every **`ask:`** line detection printed, one at a time — today,
   when Supabase sits beside a web app, whether the app subscribes to
@@ -276,7 +291,7 @@ omitted keys take the detection / the defaults):
   "stack": ["FastAPI", { "name": "Supabase", "path": "db/migrations" }, "React web", "Expo"],
   "apps": ["Web (React)", "Mobile (Expo)"],
   "optIns": { "autoLoad": true, "fence": true, "stop": true, "ci": true, "prePush": true },
-  "codex": false, "seedAdr": true
+  "starters": true, "codex": false, "seedAdr": true
 }
 ```
 
@@ -319,6 +334,13 @@ apply"):
 5. the semantic map and its example feature — theirs; the example shows how
    a feature claims its code by linking it;
 6. the codebase metadata — the inventory, generated, never hand-edited;
+   and, when the starters were taken, **the adapters** in `zdd/extractors/`
+   (one line per adapter, with its card): the code that reads the stack
+   into that inventory, copied from the starter library with its tests and
+   a small sample repo each, the shared code they use in `_shared/`, any
+   companion one's sample needs, and `starters.json`, which records the
+   version each came from so a later fix can be offered. They are the
+   repo's own: changed, fixed or deleted without a ZDD release;
 7. the agent index, the human index, the ADR index (and the harness ADR
    index, if that set was opened) and the blessing index —
    generated at step 5 by `render`, never hand-edited (the cards for these

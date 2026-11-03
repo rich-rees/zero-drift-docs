@@ -11,7 +11,7 @@ import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:f
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { copyFixture, ensureStarters } from "../../../packages/zdd-starter-adapters/test/starters.mjs";
+import { copyFixture } from "../../../packages/zdd-starter-adapters/test/starters.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SCRIPT = resolve(HERE, "..", "scripts", "bootstrap.mjs");
@@ -26,7 +26,7 @@ const tmp = (t, prefix) => {
   return dir;
 };
 const run = (repo, args) => spawnSync(process.execPath, [SCRIPT, ...args, `--root=${repo}`], { encoding: "utf8", env });
-const engine = (repo, ...args) => (ensureStarters(repo), spawnSync)(process.execPath, [BIN, ...args, `--root=${repo}`], { encoding: "utf8" });
+const engine = (repo, ...args) => spawnSync(process.execPath, [BIN, ...args, `--root=${repo}`], { encoding: "utf8" });
 const config = (repo) => JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8"));
 const writeConfig = (repo, c) => writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify(c, null, 2) + "\n");
 

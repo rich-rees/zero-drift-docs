@@ -14,7 +14,7 @@ import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { scopeTag, repointLinks, linksToMoved } from "../scripts/lib/adr-split.mjs";
-import { copyFixture, ensureStarters } from "../../../packages/zdd-starter-adapters/test/starters.mjs";
+import { copyFixture } from "../../../packages/zdd-starter-adapters/test/starters.mjs";
 
 const PLUGIN = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SCRIPT = join(PLUGIN, "scripts", "bootstrap.mjs");
@@ -32,7 +32,7 @@ const ok = (repo, args) => {
   assert.equal(r.status, 0, r.stderr);
   return JSON.parse(r.stdout);
 };
-const engine = (repo, args) => (ensureStarters(repo), spawnSync)(process.execPath, [ENGINE_BIN, ...args, `--root=${repo}`], { encoding: "utf8" });
+const engine = (repo, args) => spawnSync(process.execPath, [ENGINE_BIN, ...args, `--root=${repo}`], { encoding: "utf8" });
 const tree = (dir) => {
   const out = {};
   const walk = (d, rel = "") => {

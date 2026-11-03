@@ -12,7 +12,7 @@ import { readFileSync, writeFileSync, rmSync, mkdtempSync, mkdirSync } from "nod
 import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { ensureStarters } from "../../../packages/zdd-starter-adapters/test/starters.mjs";
+import { placeStarters } from "../../../packages/zdd-starter-adapters/test/starters.mjs";
 
 const PLUGIN = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const ENGINE_BIN = resolve(PLUGIN, "..", "..", "packages", "zdd-engine", "bin", "zdd-engine.mjs");
@@ -67,8 +67,10 @@ function engineRejects(config, command = "derive") {
   const repo = mkdtempSync(join(tmpdir(), "zdd-schema-"));
   try {
     mkdirSync(join(repo, "zdd"));
-    writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify(config));
-    ensureStarters(repo);
+    // Its adapters in place, as an app holds them: the engine runs only those (decision 0048).
+    const held = config && typeof config === "object" && !Array.isArray(config) && config.localExtractorDir === undefined && Array.isArray(config.extractors) ? { ...config, localExtractorDir: "zdd/extractors" } : config;
+    if (held !== config) placeStarters(repo);
+    writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify(held));
     const r = spawnSync(process.execPath, [ENGINE_BIN, command, "--check", `--root=${repo}`], { encoding: "utf8" });
     return r.status === 0 ? null : (r.stderr + r.stdout).trim();
   } finally {

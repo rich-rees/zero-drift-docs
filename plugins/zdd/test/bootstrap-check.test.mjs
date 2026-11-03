@@ -13,7 +13,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, 
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { copyFixture, ensureStarters } from "../../../packages/zdd-starter-adapters/test/starters.mjs";
+import { copyFixture } from "../../../packages/zdd-starter-adapters/test/starters.mjs";
 
 const PLUGIN = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const ENGINE = resolve(PLUGIN, "..", "..", "packages", "zdd-engine");
@@ -27,7 +27,7 @@ const tmp = (t, prefix) => {
   return d;
 };
 const run = (repo, args, env = process.env) => execFileSync(process.execPath, [BOOTSTRAP, ...args, `--root=${repo}`], { encoding: "utf8", env });
-const engine = (repo, args) => (ensureStarters(repo), execFileSync)(process.execPath, [ENGINE_BIN, ...args, `--root=${repo}`], { encoding: "utf8" });
+const engine = (repo, args) => execFileSync(process.execPath, [ENGINE_BIN, ...args, `--root=${repo}`], { encoding: "utf8" });
 const applyDefaults = (t, repo) => {
   const answers = join(tmp(t, "zdd-ans-"), "a.json");
   writeFileSync(answers, JSON.stringify({ name: "Check" }));
@@ -141,7 +141,7 @@ test("preview: the examples render outside the repo, and nothing is written into
   // A well-formed name the starter library does not hold is refused, not "no example" (CR-115).
   const typo = spawnSync(process.execPath, [BOOTSTRAP, "preview", "--extractors=fastapy", `--root=${repo}`], { encoding: "utf8" });
   assert.equal(typo.status, 1);
-  assert.match(typo.stderr, /fastapy is not an adapter in .*zdd-starter-adapters.adapters \(it holds: /);
+  assert.match(typo.stderr, /fastapy is not an adapter in .*adapters \(it holds: /);
   assert.deepEqual(readdirSync(repo), []);
 });
 
@@ -189,26 +189,4 @@ test("outside this checkout: npx on POSIX, npm's npx-cli.js with node on Windows
   const shell = { cmd: "npx.cmd", pre: ["-y", pkg], shell: true };
   assert.deepEqual(engineArgv(shell, ["detect", "--root=C:\\my repo"]), [`"-y"`, `"${pkg}"`, `"detect"`, `"--root=C:\\my repo"`]);
   for (const bad of ['C:\\x"&whoami&rem "', "C:\\work\\%TEMP%\\repo", "C:\\a^b", "C:\\a&b", "C:\\a!b"]) assert.throws(() => engineArgv(shell, [`--root=${bad}`]), /cannot run the engine through cmd\.exe/, bad);
-});
-
-// Where detection and the preview find the starters (decision 0048 point 3):
-// ZDD_STARTER_ADAPTERS_DIR first, then the library beside this plugin in a
-// checkout, and with neither a plain refusal; slice 5 adds the published
-// library (CR-308).
-test("starterAdapters: the env folder first, else the sibling library, else a plain refusal; detect and preview pass the folder found", async (t) => {
-  const { starterAdapters } = await import(pathToFileURL(BOOTSTRAP).href);
-  const sibling = join(STARTERS, "adapters");
-  assert.equal(starterAdapters({ env: {} }), sibling);
-  const other = tmp(t, "zdd-starters-env-");
-  assert.equal(starterAdapters({ env: { ZDD_STARTER_ADAPTERS_DIR: other } }), resolve(other), "the env wins over the sibling");
-  assert.throws(() => starterAdapters({ env: {}, sibling: join(other, "none") }), /the starter library is not on this machine — set ZDD_STARTER_ADAPTERS_DIR to its adapters\/ folder/);
-  // Through the CLI: the env folder is the one detection reads.
-  cpSync(join(ENGINE, "test", "adapters"), join(other, "a"), { recursive: true });
-  const repo = tmp(t, "zdd-starters-env-repo-");
-  writeFileSync(join(repo, "x.note"), "GET /x\n");
-  const env = { ...process.env, ZDD_STARTER_ADAPTERS_DIR: join(other, "a") };
-  const d = JSON.parse(run(repo, ["detect", "--json"], env));
-  assert.deepEqual(d.proposals.map((p) => p.name), ["notes"], "the test-only adapters, not the library's");
-  const p = JSON.parse(run(repo, ["preview", "--extractors=notes", "--json"], env));
-  assert.deepEqual(p.used, ["notes"]);
 });

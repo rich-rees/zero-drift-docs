@@ -12,7 +12,7 @@ import { createHash } from "node:crypto";
 import { dirname, resolve, join, relative } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { ensureStarters } from "../../../packages/zdd-starter-adapters/test/starters.mjs";
+import { copyFixture } from "../../../packages/zdd-starter-adapters/test/starters.mjs";
 
 const PLUGIN = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SCRIPT = join(PLUGIN, "scripts", "bootstrap.mjs");
@@ -40,7 +40,6 @@ const bootstrapFails = (root, args) => {
 };
 // stdout AND stderr: the engine's deprecation notes go to stderr (CR-112).
 const engine = (root, args) => {
-  ensureStarters(root);
   const r = spawnSync(process.execPath, [ENGINE_BIN, ...args, `--root=${root}`], { encoding: "utf8" });
   assert.equal(r.status, 0, `engine ${args.join(" ")} failed: ${r.stderr}${r.stdout}`);
   return r.stdout + r.stderr;
@@ -54,7 +53,7 @@ function answersFile(name, answers) {
 const applyJson = (repo, name, answers) => JSON.parse(bootstrap(repo, ["apply", `--answers=${answersFile(name, answers)}`, "--json"]));
 function fresh(name, from) {
   const dir = join(scratch, name);
-  if (from) cpSync(from, dir, { recursive: true });
+  if (from) copyFixture(from, dir); // its starters placed, as an app holds them
   else mkdirSync(dir, { recursive: true });
   return dir;
 }
