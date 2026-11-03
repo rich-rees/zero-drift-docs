@@ -322,6 +322,95 @@ export. A hand-written local adapter is the only route that works today.
   the repo, on both adopters, it reproduces `419293d`'s engine record for
   record.
 
+## As built (ZDD-11 slice 4)
+
+- **The library.** `packages/zdd-starter-adapters`, npm
+  `@rich-rees/zdd-starter-adapters` (Rich's name: it says what it holds), on
+  a version line of its own from 0.1.0. It holds `adapters/<name>/` for every
+  starter and `adapters/_shared/`, laid out as an app's `localExtractorDir`
+  is, plus `notes.json` and a README. The engine package holds no adapter,
+  and its published files hold none (a test).
+- **Two versions from one tree** (the slice's call). The tree is 0.2.0,
+  today's starters with the fixes. 0.1.0, the baseline, is the tree with
+  `baseline/adapters/` laid over it: the `419293d` `supabase` and
+  `sqlalchemy` whole, and the `_shared/` files they reach. Every other
+  starter is the same in both. `scripts/stage.mjs <version> <dir>` writes a
+  version's published files into a folder; it stages the baseline and the
+  tree's own version and refuses any other, because a later version is
+  staged from the tree at its own commit. The overlay is kept, unpublished,
+  so slice 5's upgrade tests can stage both versions and prove the move
+  against the first.
+- **The fix note** (the slice's call; slice 5 reads it). `notes.json` lists
+  every version, oldest first: `{ "notes": 1, "versions": [{ version,
+  summary, starters: { <name>: { fixes: [{ what, who, moves }] } } }] }`.
+  `what` says what changed, `who` which repos it affects, in words a session
+  can test against a repo, and `moves` how record ids move, so the upgrade
+  knows what to repoint. 0.1.0 has an empty `starters`. A staged version
+  carries only the notes up to it.
+- **Release.** A tag `starter-adapters-vX.Y.Z` on `main` runs
+  `release-starter-adapters.yml`: stage, both suites, the staged version's
+  own tests, publish the staged folder by trusted publishing, wait until it
+  can be fetched, and make a GitHub release that is never marked Latest. The
+  stage folder sits inside the checkout, so npm records the commit and a
+  rerun resumes. Nothing is published yet: the package's first publish and
+  its trusted publisher are Rich's release-time steps.
+- **The core runs only the repo's own adapters.** `catalogue.json`,
+  `lib/catalogue.mjs`, the aliases, the retired names and the bundles are
+  gone. A name `localExtractorDir` does not hold stops derive with one plain
+  message naming the starter library and "upgrade ZDD". It is generic,
+  because the core cannot tell a former catalogue name from a typo without
+  naming stacks. The pre-1.0 `adapter` key is refused with the same route.
+  0036 point 5 goes: a copy keeps its name, so config names and record ids
+  stay as they are. Without aliases an options key names exactly one
+  adapter; one under a name no listed adapter has is said on every derive
+  and never fails (CR-424).
+- **A folder of adapters** (`lib/adapter-folder.mjs`) is the core's one way
+  to read many adapters: `<name>/index.mjs`, a selectable name, never
+  through a link. `detect --adapters=<dir>` and `preview --adapters=<dir>`
+  read the folder they are given (bootstrap passes the library's), so
+  detection reads the library without the core knowing a stack. With no
+  `--adapters`, detect asks the repo's own `localExtractorDir`. The preview
+  copies each chosen adapter, with what it reaches, into its throwaway
+  repo's `zdd/extractors`.
+- **The adapter folder is never source** (found by this slice's tests).
+  Every adapter, with its tests and its suite fixture, now lives in the
+  app, so an adapter that walks the whole repo read the fixtures as the
+  app's code. The io takes `notSource`, and derive and detect pass the
+  repo's `localExtractorDir`: a walk never enters it, and a read refuses it
+  as absent, with its own reason.
+- **The suite.** A companion is another adapter in the same folder, copied
+  into the scratch repos with the adapter. Nothing is skipped as ZDD's own.
+  `SUITE` gains an optional `allowEmpty: true`, for an adapter that emits
+  nothing by design (`generic`). **Every starter now carries its own
+  `fixture/` and `SUITE`** (the baseline's two as well; derive never reads
+  either), so a copy passes the app's `zdd-engine suite`, which a fresh
+  install holds to every check. The library's suite runs each starter
+  exactly as an app's suite does.
+- **The kit, Rich's call A.** The engine package's public entry,
+  `@rich-rees/zdd`, is the kit and nothing else: `ioFor(root, name)`,
+  `scanFor(root, adapters)` and `trialRead(mod, root, adapters)`. Both
+  scan calls are async and take the folder of the app's adapters; the scan
+  skips what every adapter in it names. A travelling test finds that
+  folder as `new URL("../../", import.meta.url)`, which is right in the
+  library and in an app. `zdd-engine test [--adapters=<dir>]` runs
+  `<name>/test/*.test.mjs` with `@rich-rees/zdd` resolved to the running
+  engine by a module hook, so an app with no `node_modules` runs them. It
+  freezes with the contract at 1.0.
+- **Tests.** The engine keeps the tests of the core alone, a small
+  stack-free fixture for its store lints, and two test-only adapters in
+  `test/adapters/` (`notes`, `lists`, with a `_shared/`). They name no
+  stack, and the border test checks that. Every golden, every stack
+  fixture and every test that needs a real starter moved to the library's
+  `test/`, unchanged except for paths. That suite may reach the engine's
+  source, since it tests the core with the starters. Each starter's
+  travelling tests are in `adapters/<name>/test/`; they import only node
+  built-ins, their own files, `_shared/` and the kit, and a test holds that.
+  A fixture is copied with every starter in its `zdd/extractors`, which is
+  how an app holds them after the upgrade. No golden was regenerated.
+- **Proved on the two adopters**, read-only copies: the library's 0.1.0
+  adapters, copied into `zdd/extractors`, give `419293d`'s records byte for
+  byte (242 and 327), and 0.2.0 gives the slice 3 tip's (255 and 327).
+
 ## Rejected
 
 - **Built in until it needs changing, then ejected.** Quicker to install and

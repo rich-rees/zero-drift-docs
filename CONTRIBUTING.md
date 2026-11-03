@@ -95,14 +95,14 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
   `?route:<url>` (`*` = one segment the scan could not read; it matches a
   route parameter only, never a fixed word, and a template hole typed as a
   union of literals is expanded before emission — [decision 0019](docs/decisions/0019-a-variable-segment-matches-a-parameter-never-a-fixed-word.md),
-  `src/adapters/_shared/template-paths.mjs`), and `?code:<file>#<function>` — the
+  `adapters/_shared/template-paths.mjs` in the starter library), and `?code:<file>#<function>` — the
   code a route or screen runs, which a data-access adapter's `data-access`
   records answer ([decision 0037](docs/decisions/0037-routes-reach-tables-through-a-data-access-record-joined-on-file-and-function.md):
   the referrer takes their tables; one in the referrer's own file is
   absorbed; a miss is silent). `?code:<file>#*` is every data-access record
   in the file, for a referrer whose unit is the whole file. A JS unit is a
   top-level declaration by its local name, or `<module>` for the module's
-  own top-level code (`src/adapters/_shared/js/source.mjs`). Put the `?code:` ref
+  own top-level code (the starters' `adapters/_shared/js/source.mjs`). Put the `?code:` ref
   under a verb (`edges.reads`) and the tables the data-access record leaves
   untyped take that verb. The deriver resolves them after the
   merge, drops misses with a diagnostic, and drops a record flagged
@@ -142,12 +142,14 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
   out. No LLM, no timestamps, no environment-dependent values — the blocking CI
   check depends on this. Anything needing judgment is *not* metadata; it belongs in
   the semantic map, which links down to your records.
-- It's selected by **name** from config, never by path — from the engine's
-  catalogue (`src/adapters/<name>/`), or from the adopter's declared `localExtractorDir`
-  (`<name>.mjs` or `<name>/index.mjs`, the one place config may point at code;
-  local names may not shadow built-ins). Try a convention there first, with the
-  skill's scaffold; propose it for the catalogue once it has run against a real
-  repo.
+- It's selected by **name** from config, never by path, from the adopter's
+  declared `localExtractorDir` (`<name>.mjs` or `<name>/index.mjs`, the one
+  place config may point at code). Since 0.14 the engine runs no adapter of
+  its own ([decision 0048](docs/decisions/0048-the-app-owns-its-adapters-zdd-ships-starters-not-readers.md)):
+  the starters live in `packages/zdd-starter-adapters/adapters/<name>/`, and a
+  repo copies the ones it uses, keeping their names. Try a convention in a
+  repo first, with the skill's scaffold; propose it as a starter once it has
+  run against a real repo.
 - **It is self-contained** ([decision 0048](docs/decisions/0048-the-app-owns-its-adapters-zdd-ships-starters-not-readers.md)
   point 4). Its one link to ZDD is the contract: the `io` it is handed and what
   it returns. It imports nothing from the core. Code several adapters share
@@ -169,10 +171,12 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
   record, and every read through `io` (a text scan for the honest mistake —
   `node:fs`, a process or network module, `require`, `process.env` — not a
   sandbox: a local adapter is the repo's own code, trusted like its tests,
-  decision 0010). A catalogue adapter is listed, with
-  its fixture and options, in `packages/zdd-engine/test/standard-suite.test.mjs`
-  — a new one cannot ship without passing; a local one keeps its `fixture/`
-  beside it and `export const SUITE = { options }`. A check added in a
+  decision 0010). Every adapter keeps its `fixture/` beside it and
+  `export const SUITE = { options }` (with `companions` that run beside it,
+  and `allowEmpty: true` for one that emits nothing by design). The starter
+  library's suite (`packages/zdd-starter-adapters/test/standard-suite.test.mjs`)
+  runs every starter exactly as an app's suite will run its copy, so a new
+  starter cannot ship without passing. A check added in a
   release goes at the end of the list and warns for adopters until "upgrade
   ZDD" has their adapters pass it (`suiteChecks`).
 
@@ -183,14 +187,14 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
   | `io` | 1 | yes | every read and listing through the `io` the engine hands in, never `node:fs`, the environment or the network; a gitignored path is never read |
   | missing source | 1 | yes | a configured root that does not exist is nothing to inventory: no records and a diagnostic, never an error |
   | `COMMENT` | 1 | yes | `{ ".ext": "<line comment mark>" }` for every kind of file the adapter reads (`null` for one that takes no line comment, such as JSON), so the suite can comment out the fixture |
-  | `SUITE` | 1 | yes (an adopter's own) | a `fixture/` folder beside the adapter and `export const SUITE = { options, companions? }`; a catalogue adapter's fixture lives in ZDD's tests |
+  | `SUITE` | 1 | yes | a `fixture/` folder beside the adapter and `export const SUITE = { options, companions?, allowEmpty? }`; every starter carries its own |
   | `FACTS_KEY_ORDER` | 1 | no | facts in a stable order, per kind |
   | unresolved refs | 1 | no | `?table:<name>`, `?route:<url>`, … for another adapter's records; the core resolves them |
   | data access | 1 | no | `?code:<file>#<function>` refs, and `data-access` records naming the tables a function reaches, joined on `resource[0]` and `facts.function` (decision 0037) |
   | typed edges | 1 | no | `facts.edges`, a verb for a ref (decision 0016) |
   | `warnings` | 1 | no | a list printed on every derive |
   | `unread` | 1 | no | a list of `{ file, what }`, what it saw and could not read (decision 0048) |
-  | detection | 1 | no | `DETECTION` and `detect({ scan, proposed })` (decision 0039; every catalogue adapter has it) |
+  | detection | 1 | no | `DETECTION` and `detect({ scan, proposed })` (decision 0039; every starter has it) |
   | import reader | 1 | no | `IMPORTS`: `{ label, extensions, skipDirs, isTest(rel), resolver(io, files) }`, the repo files one file imports, read at render for an `extend` blessing's users (decision 0046; the JavaScript and Python adapters share `adapters/_shared/js/imports.mjs` and `adapters/_shared/python/imports.mjs`) |
 
   Before 1.0 the contract is open (it stays at 1 and may change without
@@ -198,7 +202,7 @@ An extractor is a good contribution when it's **mechanical and deterministic**:
   `CONTRACT` raised to match (a test holds them together), its interview
   question in `ask` (`src/core/lib/contract.mjs`); a new **required** step
   is a major release.
-- **A catalogue adapter carries its own detection**
+- **A starter carries its own detection**
   ([decision 0039](docs/decisions/0039-detection-lives-in-each-adapter-bootstrap-builds-the-gaps-and-checks-together.md)):
   bootstrap asks every adapter whether it fits a repo, and is never edited to
   learn a stack. It exports `DETECTION` — `parts` (from
@@ -316,11 +320,12 @@ A change to the reference viewer's behaviour adds or changes a flow there.
   serve the ritual (not project-specific workflow — ZDD ships mechanism, not
   opinions about how *your* team plans work).
 - **Engine** — determinism fixes, better ref resolution, the renderer, the checks.
-- **Detection** — a catalogue adapter's own `DETECTION` and `detect()`
+- **Detection** — a starter's own `DETECTION` and `detect()`
   (above; decision 0039): what evidence says it fits, what options that
   implies. Bootstrap is never edited to learn a stack. Prove it in the
-  engine's suite (`packages/zdd-engine/test/detect.test.mjs`); the plugin's
-  tests drive bootstrap against what the engine answers.
+  starter library's suite (`packages/zdd-starter-adapters/test/detect.test.mjs`);
+  the plugin's tests drive bootstrap against what the engine answers over
+  the library's adapters.
 - **Docs** — clearer setup, worked examples, fixing anything that misled you.
 
 ## What ZDD deliberately does *not* want

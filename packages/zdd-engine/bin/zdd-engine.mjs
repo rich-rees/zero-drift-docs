@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // ZDD engine CLI — one bin, twelve subcommands. Every command but detect,
-// preview, test and contract reads the adopter repo's zdd/config.json (located by walking up from cwd; override with
+// preview, test and contract reads the adopter repo's zdd/config.json (detect and test read only its
+// localExtractorDir; located by walking up from cwd; override with
 // --root=<dir> and/or --config=<file>) and runs deterministically: same source
 // bytes in, byte-identical artifacts out. No LLM anywhere — the agent-side
 // ritual lives in the zdd plugin's skills; this is the mechanical half.

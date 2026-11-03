@@ -23,7 +23,10 @@ Supersession points both ways; never edit an accepted decision into a new truth.
 - **Branch off `main`**, never commit on it. Conventional commits (`feat:`,
   `fix:`, `docs:`, `test:`, `chore:`), one logical change each. One PR per change,
   merged with a merge commit.
-- **Tests are the contract.** Engine: `cd packages/zdd-engine && node --test "test/*.test.mjs"`.
+- **Tests are the contract.** Engine (the core alone): `cd packages/zdd-engine && node --test "test/*.test.mjs"`.
+  Starter library (every golden, the core with the starters, and each
+  starter's own tests as an app runs them, decision 0048):
+  `cd packages/zdd-starter-adapters && node --test "test/*.test.mjs" && node ../zdd-engine/bin/zdd-engine.mjs test --adapters=adapters`.
   Plugin (the runbook and hooks at the file/process seam):
   `node --test "plugins/zdd/test/*.test.mjs"`. The human index, clicked
   (`test/browser/`, its own Playwright, outside the published package —

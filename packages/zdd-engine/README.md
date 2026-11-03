@@ -10,8 +10,13 @@ disagree about what "fresh" means.
 
 From 0.9.0 the engine is this package, on a new version line; before it was
 `@rich-rees/zdd-engine`, 0.2.0 to 2.5.0 (decision 0042). The command line is
-its whole contract: an `exports` map opens `package.json` and no source
-file.
+its contract, with one entry beside it: the adapter test kit (below). The
+`exports` map opens `package.json` and the kit, and no other source file.
+
+Since 0.14 the engine ships no adapter (decision 0048). A repo owns every
+adapter it runs, in its `localExtractorDir`; the starters it can copy from
+are a package of their own, `@rich-rees/zdd-starter-adapters`, which the
+engine depends on nothing in.
 
 ## Commands
 
@@ -21,11 +26,12 @@ npx @rich-rees/zdd render [--check]
 npx @rich-rees/zdd lint [--merge] [--tempstate]
 npx @rich-rees/zdd freshness [--base <ref>]
 npx @rich-rees/zdd tally [--since <ref|date>] [--json]
-npx @rich-rees/zdd detect [--root=<dir>]
+npx @rich-rees/zdd detect --adapters=<dir> [--root=<dir>]
 npx @rich-rees/zdd coverage [--json]
 npx @rich-rees/zdd unread [--json]
-npx @rich-rees/zdd preview --extractors=<a,b,…> [--out=<empty dir>] [--json]
+npx @rich-rees/zdd preview --adapters=<dir> --extractors=<a,b,…> [--out=<empty dir>] [--json]
 npx @rich-rees/zdd suite [--extractors=<a,b>] [--json]
+npx @rich-rees/zdd test [--adapters=<dir>]
 npx @rich-rees/zdd contract [--json]
 ```
 
@@ -92,12 +98,20 @@ npx @rich-rees/zdd contract [--json]
   refused. `--json` prints the same as one object, for a host harness to
   copy. Deterministic: same history, stores and arguments in, same bytes
   out; no dates of its own, no judgment.
-- **detect** — which catalogue adapters fit a repo (decision 0039), as one
+- **detect** — which adapters in a folder fit a repo (decision 0039), as one
   JSON object: each proposal with its plain-words evidence, options and the
   parts of the app it covers; coverage part by part and the parts nothing
   covers; the greenfield stack rules and the ready-made adapters by part.
-  Each adapter answers for itself over one shared walk of the repo. Reads no
-  config and writes nothing; bootstrap asks it.
+  Each adapter answers for itself over one shared walk of the repo.
+  `--adapters` is the folder (bootstrap passes the starter library's
+  `adapters/`); without it, the repo's own `localExtractorDir`. It reads only
+  that key of the config, never walks the adapter folder as source, and
+  writes nothing.
+- **test** — runs the tests that travel with a folder's adapters,
+  `<name>/test/*.test.mjs` (the repo's `localExtractorDir` by default), with
+  `@rich-rees/zdd` resolved to this engine's test kit, so a repo with no
+  `node_modules` runs them. Exits with the runner's status; a folder with no
+  test to run fails.
 - **coverage** — the automated half of the first map check: derives in
   memory (writes nothing) and prints, per record kind, the count, what its
   records link to, and by name the ones that link to nothing and the ones
@@ -171,7 +185,7 @@ git history only. `test/determinism.test.mjs` is the guard; the blocking
 
 An extractor is one module implementing `derive({ repoRoot, options, io })` →
 `{ records, diagnostics, warnings?, unread? }` plus a `FACTS_KEY_ORDER` map, keyed to **one
-convention** (see `src/adapters/`). A record's `refs` may carry verbs
+convention** (the starter library's `adapters/` has one per stack it knows). A record's `refs` may carry verbs
 through `facts.edges` (`uses`, `usedBy`, `calls`, `subscribes`, `reads`,
 `writes`, `dependsOn`, `belongsTo` — decision 0016), which the graph keeps as
 `verb` on the edge. `io` (since 1.3.0) is the engine's safe
@@ -185,9 +199,20 @@ emits `?from:<name>` / `?function:<name>` / `?route:<url>` / `?surface:<file>` /
 into ids after the merge (a `*` in a url matches a route parameter only,
 never a fixed word — decision 0019). Missing
 source roots are "nothing to inventory", so a greenfield repo derives clean.
-Extractors are selected by name from the catalogue of adapter folders in `src/adapters/` or
-from the declared `localExtractorDir` — never by path. The plugin's `extractor`
-skill scaffolds a local one. To contribute one, see the
+Extractors are selected by name from the declared `localExtractorDir` —
+never by path. A name it does not hold stops derive with the route across:
+the starter library, and "upgrade ZDD", which copies an older release's
+adapters in. The repo's adapter folder is never read as source. The plugin's
+`extractor` skill scaffolds a new one.
+
+### The adapter test kit
+
+`import { ioFor, scanFor, trialRead } from "@rich-rees/zdd"` is all an
+adapter's own tests import of ZDD (decision 0048): `ioFor(root, name)` is the
+io derive hands an adapter; `await scanFor(root, adapters)` the scan
+detection hands every adapter, skipping what each adapter in the folder
+`adapters` names; `await trialRead(mod, root, adapters)` the adapter's own
+answer to detect on it. It freezes with the contract at 1.0. To contribute one, see the
 repo's [CONTRIBUTING.md](https://github.com/rich-rees/zero-drift-docs/blob/main/CONTRIBUTING.md).
 
 ### The adapter contract
@@ -209,14 +234,14 @@ own adapters are behind on.
 | `io` | 1 | yes | every read and listing through the `io` the engine hands in, never `node:fs`, the environment or the network; a gitignored path is never read |
 | missing source | 1 | yes | a configured root that does not exist is nothing to inventory: no records and a diagnostic, never an error |
 | `COMMENT` | 1 | yes | `{ ".ext": "<line comment mark>" }` for every kind of file the adapter reads (`null` for one that takes no line comment, such as JSON), so the suite can comment out the fixture |
-| `SUITE` | 1 | yes (an adopter's own) | a `fixture/` folder beside the adapter and `export const SUITE = { options, companions? }`; a catalogue adapter's fixture lives in ZDD's tests |
+| `SUITE` | 1 | yes | a `fixture/` folder beside the adapter and `export const SUITE = { options, companions?, allowEmpty? }`; every starter carries its own |
 | `FACTS_KEY_ORDER` | 1 | no | facts in a stable order, per kind |
 | unresolved refs | 1 | no | `?table:<name>`, `?route:<url>`, … for another adapter's records; the core resolves them |
 | data access | 1 | no | `?code:<file>#<function>` refs, and `data-access` records naming the tables a function reaches, joined on `resource[0]` and `facts.function` (decision 0037) |
 | typed edges | 1 | no | `facts.edges`, a verb for a ref (decision 0016) |
 | `warnings` | 1 | no | a list printed on every derive |
 | `unread` | 1 | no | a list of `{ file, what }`, what it saw and could not read (decision 0048) |
-| detection | 1 | no | `DETECTION` and `detect({ scan, proposed })` (decision 0039; every catalogue adapter has it) |
+| detection | 1 | no | `DETECTION` and `detect({ scan, proposed })` (decision 0039; every starter has it) |
 
 ## Viewers
 

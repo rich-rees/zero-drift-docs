@@ -494,13 +494,17 @@ plugins/zdd/
     extractor/                      # the scaffold: module, test file, one comment/string mask per syntax
     adr-0001-adopt-zero-drift-docs.md   # seeded as the adopter's first ADR
   test/                             # seam 2: the runbook and hooks observed as files + processes
-packages/zdd-engine/                # the engine, published as @rich-rees/zdd: deriver / renderer / checks + extractors + viewers
-  bin/zdd-engine.mjs                # the CLI (derive / render / lint / freshness / tally / detect / coverage / preview)
-  src/core/                         # the stack-free core: derive, render, lint, the stores, the viewers
+packages/zdd-engine/                # the engine, published as @rich-rees/zdd: deriver / renderer / checks + viewers, no adapter (decision 0048)
+  bin/zdd-engine.mjs                # the CLI (derive / render / lint / freshness / tally / detect / coverage / preview / suite / test)
+  src/core/                         # the stack-free core: derive, render, lint, the stores, the viewers, the adapter test kit
   src/core/viewers/{cytoscape,minimal}/  # output end: human-index viewers over graph.json
-  src/adapters/{supabase,nextjs,fastapi,react-router,components,expo-router,background-*,external-services,supabase-js,supabase-py,sqlalchemy,generic}/   # input end: one adapter per convention
-  src/adapters/{js,python,background}/  # helpers adapters share (no index.mjs: not adapters)
-  test/fixture*/                    # the miniature proving repos
+  test/adapters/                    # test-only adapters that name no stack, for the core's own suite
+packages/zdd-starter-adapters/      # the starter library, @rich-rees/zdd-starter-adapters: copied into an app, which then owns them
+  adapters/<name>/                  # input end: one starter per convention, with its tests, fixture and preview example
+  adapters/_shared/                 # code starters share, copied with the ones that reach it
+  notes.json                        # what each version changed, who it affects, how ids move
+  baseline/  scripts/stage.mjs      # 0.1.0, the baseline, laid over the tree when it is staged
+  test/fixture*/  test/golden/      # the miniature proving repos and the goldens, with the core-with-starters suite
 docs/patterns.md                    # blessings and "choose patterns", the whole system
 docs/decisions/                     # this repo's own decision record (ADR format)
 LICENSE   CONTRIBUTING.md   README.md
