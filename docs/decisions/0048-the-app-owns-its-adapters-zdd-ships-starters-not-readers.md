@@ -245,6 +245,73 @@ export. A hand-written local adapter is the only route that works today.
   `public.f` became one. Two proofs, in order, so what the move did and
   what the fixes did are never mixed. On a no, the note stands as point 7 says.
 
+## As built (ZDD-11 slice 3)
+
+- **Self-contained, in place.** Every bundled adapter now imports nothing
+  of the core, while it still sits in `src/adapters/`. The records and the
+  goldens did not move: on the two adopters measured, every record is the
+  same bytes as before the slice.
+- **The shared folder** (the slice's call; slices 4 and 5 copy it as it
+  is). It is `_shared/`, beside the adapters. In an app that is
+  `<localExtractorDir>/_shared/`, next to `<localExtractorDir>/<name>/`. It
+  holds `js/`, `python/` and `background/`, where `background/shared.mjs`
+  is now `tasks.mjs`, plus four small helpers at its top: `paths.mjs`,
+  `slug.mjs`, `data-access.mjs` and `template-paths.mjs`. The name starts
+  with `_`, and derive selects only a name that starts with a letter, so the
+  folder can never be an adapter, shadow one, or take a name an adopter
+  might want.
+- **What the core gave up.** `data-access.mjs`, `slug.mjs` and
+  `template-paths.mjs` moved out of `core/lib/`, since no core file used
+  them. `repoRelative` is the one rule kept twice: the core's checks config
+  paths, and `_shared/paths.mjs` checks an adapter's own option paths. A
+  test holds the two to the same answers. `fastapi` no longer makes its own
+  `io` when none is handed in: derive always hands one in, and that is the
+  contract.
+- **The contract, said where the core reads it.** The core joins a
+  `data-access` record on `resource[0]` and `facts.function`, and drops one
+  marked `requireRefs` that nothing reaches. The contract table and
+  CONTRIBUTING now say so. `dataAccessRecord` is only one way to build that
+  shape, so it is shared code. The same goes for a background task's
+  transient keys (`runs`, `processKeys`, `deploys`, `unresolved`): the
+  core's merge reads them, and the adapters' comments now name that merge
+  rather than a core file.
+- **The copy set comes from the imports.** `moduleReach(entry, within)` in
+  `core/lib/suite.mjs` returns every file that one module's static relative
+  imports reach inside a folder, sorted, and it names any import that leaves
+  the folder or finds no file. Copying an adapter brings its folder (not its
+  `example/`) and each `_shared/` file that any of its modules reach. That
+  is what the starter library and the upgrade will copy. The standard suite
+  now copies a local adapter's reached files into its scratch repos too.
+  Before this, a local adapter that imported a helper beside it failed the
+  suite's derive.
+- **The tests that pin it.** In the border test: no file under
+  `src/adapters/` imports `src/core/`, a package, or anything dynamically.
+  Every adapter's files reach only their own folder and `_shared/`, and
+  `_shared/` reaches only itself. Each catalogue adapter, copied alone with
+  its reach into an empty folder, loads and derives. Each guard was shown red
+  with a mutant. Check 5 of the standard suite still passes for every
+  adapter.
+- **Adapter tests reach ZDD through one file**, `test/adapter-kit.mjs`. It
+  exports `ioFor`, `scanFor` and `trialRead`: the `io` and the detection
+  `scan` the contract hands an adapter, and the adapter's own answer to
+  detect. A test that travels with its adapter imports node built-ins, its
+  adapter, `_shared/` and the kit, and nothing else, and the border test
+  holds that for `sql-replay`, `supabase-formats`, `supabase`, `fastapi`
+  and `wrapper-resolution`. What the core does with the answers (coverage,
+  and what a decline leaves uncovered) moved to `schema-coverage.test.mjs`,
+  because that test is the core's. An app needs its own kit with the same
+  three exports, and slice 4 decides where it comes from.
+- **The baseline, self-contained** (for slices 4 and 5). It is at
+  `packages/zdd-engine/test/starters-baseline/`, laid out as an app holds
+  it: `supabase/` and `sqlalchemy/` as they were at `419293d`, with only
+  their imports rewired; `_shared/`, holding exactly the files those two
+  reach; and `tests/`, their own tests at `419293d`, now going through the
+  kit. The catalogue never runs it. A test builds an engine with the
+  baseline in place of today's two adapters and derives every engine
+  fixture to the same bytes; the baseline's own tests pass on it. Outside
+  the repo, on both adopters, it reproduces `419293d`'s engine record for
+  record.
+
 ## Rejected
 
 - **Built in until it needs changing, then ejected.** Quicker to install and
