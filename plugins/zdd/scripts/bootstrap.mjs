@@ -1752,7 +1752,7 @@ export function upgrade(root, { lock = false, plan = false, drop = null, to = nu
   const ownDir = typeof config.localExtractorDir === "string" ? copyDir(config) : null;
   const own = ownDir ? (Array.isArray(config.extractors) ? config.extractors : []).filter((n) => typeof n === "string" && /^[a-z][a-z0-9-]*$/.test(n) && adapterHeld(ledger, ownDir, n)) : [];
   const record = own.length ? readRecordAt(ledger, ownDir) : emptyRecord();
-  const fresh = new Set(brought.kept.length ? [] : [...brought.copied, ...brought.companions]);
+  const fresh = new Set(brought.kept.length || brought.reused.length ? [] : [...brought.copied, ...brought.companions]);
   const drift = own.length ? copyChanges(ledger, ownDir, record, Object.keys(record.adapters).filter((n) => !fresh.has(n))) : new Map();
   const changedCopy = (n) => (drift.get(n) ?? []).length > 0;
   const written = own.filter((n) => !Object.hasOwn(record.adapters, n) || changedCopy(n) || Object.entries(record.adapters).some(([c, a]) => (a.companionOf ?? []).includes(n) && changedCopy(c)));
@@ -3183,7 +3183,7 @@ export const starterVersionFor = (fromRelease) => (!fromRelease || compareReleas
 export function bringStarters(ledger, config, { version, changes = [], names = null } = {}) {
   const isAdapterName = (n) => typeof n === "string" && /^[a-z][a-z0-9-]*$/.test(n);
   const listed = (names ?? (Array.isArray(config.extractors) ? config.extractors : [])).filter(isAdapterName);
-  const out = { version, dir: null, copied: [], companions: [], missing: [], kept: [] };
+  const out = { version, dir: null, copied: [], companions: [], missing: [], kept: [], reused: [] };
   if (!listed.length) return out;
   const dir = copyDir(config);
   out.dir = dir;
@@ -3214,7 +3214,10 @@ export function bringStarters(ledger, config, { version, changes = [], names = n
     for (const { f, bytes } of plan) {
       const rel = `${dir}/${f}`;
       if (ledger.exists(rel)) {
-        if (fileHash(bytesAt(ledger, rel)) !== fileHash(bytes) && !out.kept.includes(f)) out.kept.push(f);
+        // The repo's own file: kept when it differs, reused when it is the same; never recorded.
+        if (fileHash(bytesAt(ledger, rel)) !== fileHash(bytes)) {
+          if (!out.kept.includes(f)) out.kept.push(f);
+        } else if (!Object.hasOwn(record.files, f) && !out.reused.includes(f)) out.reused.push(f);
         continue;
       }
       if (ledger.create(rel, asText(bytes))) {
@@ -3222,14 +3225,14 @@ export function bringStarters(ledger, config, { version, changes = [], names = n
         record.files[f] = fileHash(bytes);
       } else if (!out.kept.includes(f)) out.kept.push(f);
     }
+    for (const n of [...take, ...companionOf.keys()]) record.adapters[n] = { version: lib.version, ...(companionOf.has(n) ? { companionOf: [...companionOf.get(n)].sort() } : {}) };
+    record.adapters = Object.fromEntries(Object.entries(record.adapters).sort(([a], [b]) => (a < b ? -1 : 1)));
+    record.files = Object.fromEntries(Object.entries(record.files).sort(([a], [b]) => (a < b ? -1 : 1)));
+    ledger.overwrite(`${dir}/${RECORD}`, JSON.stringify(record, null, 2) + "\n");
   } catch (e) {
     if (!ledger.dryRun) for (const rel of created) rmSync(ledger.abs(rel), { force: true });
     throw new Error(`copying the starters into ${dir}/ failed (${e.message}); every file this run had copied was removed, and nothing else was written — fix that, then run this again`);
   }
-  for (const n of [...take, ...companionOf.keys()]) record.adapters[n] = { version: lib.version, ...(companionOf.has(n) ? { companionOf: [...companionOf.get(n)].sort() } : {}) };
-  record.adapters = Object.fromEntries(Object.entries(record.adapters).sort(([a], [b]) => (a < b ? -1 : 1)));
-  record.files = Object.fromEntries(Object.entries(record.files).sort(([a], [b]) => (a < b ? -1 : 1)));
-  ledger.overwrite(`${dir}/${RECORD}`, JSON.stringify(record, null, 2) + "\n");
   if (config.localExtractorDir === undefined) {
     config.localExtractorDir = dir;
     changes.push(`localExtractorDir → ${dir}: the folder that holds this repo's adapters (decision 0048)`);
@@ -3373,9 +3376,11 @@ export function starters(root, { prove = false, move = null, decline = false } =
   };
   const oldFiles = Object.keys(record.files).filter((f) => moving.some((n) => f.startsWith(`${n}/`)));
   const sharedHeld = Object.keys(record.files).filter((f) => f.startsWith("_shared/"));
+  const sources = new Map([...newFiles].map((f) => [f, readFileSync(join(lib.adapters, ...f.split("/")))]));
+  try {
   for (const f of newFiles) {
     const rel = `${dir}/${f}`;
-    const bytes = readFileSync(join(lib.adapters, ...f.split("/")));
+    const bytes = sources.get(f);
     if (ledger.exists(rel) && !Object.hasOwn(record.files, f)) {
       if (fileHash(bytesAt(ledger, rel)) !== fileHash(bytes)) ledger.notes.push(`${rel}: kept as it is — it is not a file ZDD copied, and the library's ${pin} differs; compare the two`);
       continue;
@@ -3410,6 +3415,10 @@ export function starters(root, { prove = false, move = null, decline = false } =
   const recordRel = `${dir}/${RECORD}`;
   save(recordRel);
   ledger.overwrite(recordRel, JSON.stringify(record, null, 2) + "\n");
+  } catch (e) {
+    restore();
+    throw new Error(`moving the copies to ${pin} failed part-way (${e.message}), so every copy was put back as it was — fix that, then run this again`);
+  }
   const tests = engineStep(["test"], root);
   if (!tests.ok) {
     restore();

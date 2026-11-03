@@ -284,3 +284,19 @@ test("CR-325, CR-327: a copy that fails part-way removes what it wrote; a localE
   assert.match(o.stderr, /localExtractorDir 'zdd\/map\/x' overlaps paths\.mapDir/);
   assert.ok(!existsSync(join(over, "zdd", "map", "x")));
 });
+
+test("CR-353: a shared file the repo already had, byte for byte the library's, is reused and not recorded, so the upgrade raises no gate on the copy that reaches it", (t) => {
+  const probe = oldApp(t);
+  json(probe, ["upgrade"]);
+  const shared = Object.keys(record(probe).files).find((f) => f.startsWith("_shared/"));
+  const repo = oldApp(t);
+  const c = JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8"));
+  delete c.suiteChecks;
+  writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify(c, null, 2) + "\n");
+  mkdirSync(dirname(EXT(repo, ...shared.split("/"))), { recursive: true });
+  cpSync(EXT(probe, ...shared.split("/")), EXT(repo, ...shared.split("/")));
+  const up = json(repo, ["upgrade"]);
+  assert.deepEqual(up.starters.reused, [shared]);
+  assert.equal(record(repo).files[shared], undefined);
+  assert.equal(JSON.parse(readFileSync(join(repo, "zdd", "config.json"), "utf8")).suiteChecks, undefined);
+});
