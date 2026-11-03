@@ -53,6 +53,94 @@ Measured read-only on two adopters, the coverage report finds about 130 and
 - A route that keeps one link and quietly loses another is caught only by
   point 4 or by the session's own judgement, not by the gap list.
 
+## As built (ZDD-11 slice 6)
+
+- **The gap list** is `lib/gaps.mjs`, and the engine's `gaps` command
+  reports it (derived in memory, writing nothing). What counts as a link is
+  the coverage report's own rule, now one function both share: a ref or a
+  typed edge to a record that exists and is not itself. The core's kinds
+  are `route`, `surface` and `background-task` that reach nothing, and
+  `table` that nothing reaches. On the two adopters measured, after the
+  0048 upgrade, that is 27 (2 tasks, 17 routes, 8 screens) and 26 (1 task,
+  8 routes, 17 screens), and no table: the decision's counts. Unread
+  records are never gaps.
+- **The contract step** is an optional row, `gaps`: an adapter may export
+  `GAPS = { reachNothing: [kinds], reachedByNothing: [kinds] }`, at most 50
+  kinds a direction, never `unread`. A kind is counted for every record of
+  it, whichever adapter minted it: the core keeps no owner per record (a
+  background task merges two readers' records). A malformed `GAPS` stops
+  derive, naming the adapter; lint and render read the same export without
+  running an adapter, and a module that will not load is a note, with the
+  core's kinds standing. No starter declares one yet.
+- **An id** is `gap:<kind>/<16 hex>`, a SHA-256 of the direction and the
+  record's id. A mark survives the record's title, file and description
+  changing, and lapses when the record is renamed. A kind in both
+  directions is two gaps.
+- **Where the answers live** (the slice's call). A block of its own beside
+  `unread`, `"gaps": { "strict", "fine": [{ id, what, why }], "known": [...] }`,
+  read by the same parser: `marksConfig` in `lib/unread.mjs` now reads both
+  blocks, so a misspelt key, an id of the wrong shape, a mark with no `why`
+  and an id in both lists are errors, never enforcement off. A block of its
+  own, because an upgraded repo raises the two checks at different times:
+  `unread.strict` may already be on when the gaps arrive. The writer is
+  shared too: `bootstrap.mjs gaps --fine=<ids> | --known=<ids> --why=…`,
+  `--forget`, `--raise` and `--check` run through the same function as
+  `unread --mark`, which keeps its own words. A gap answered `fine` that is
+  then answered `known` moves, one answer per id. Fixed is no mark: the gap
+  is gone, and a mark it leaves warns as stale, never fails.
+- **Known gaps in both indexes.** The agent index gains a `## Known gaps`
+  section after "Apps & packages", one line per gap with its record linked
+  and its reason; the cytoscape viewer a header button, "Known gaps: N",
+  and a filterable peek whose rows open the record's node with the way
+  back; `minimal` a list above the rest. Viewers get `docs.gaps`, ready-read.
+  All of it only when a gap is answered `known`, and render reads the
+  adapters' `GAPS` only then, so a repo with none renders the same bytes.
+  A `fine` mark changes neither index. The one golden that moved is the
+  full-page human index, by viz.js lines only (its README says so); no
+  graph, metadata, agent-index or BUNDLE byte moved.
+- **lint** reads the list from the records derive wrote, in the walk it
+  already makes for claims and unread items, so `derive --check` before it
+  keeps the list true. Under `gaps.strict` an open gap fails, and so does a
+  metadata file lint cannot read (what links there is unknown); off, the
+  gaps are one warning with the list. The route to an answer is said once,
+  above the failures. A fresh install writes `"gaps": { "strict": true,
+  "fine": [], "known": [] }`; an upgrade never does: its plan names the
+  step, and `gaps --raise` writes it once every gap has an answer and
+  refuses before (the upgrade skill's step 4d).
+- **The update's gate** is `bootstrap.mjs gaps --check`, which exits 1
+  while any gap is open, `strict` or not: point 1 binds the update, point 5
+  only CI. The update skill's step 6 takes the gaps one at a time and does
+  not go on until it exits 0.
+- **The library at every update** is `bootstrap.mjs library`: the pinned
+  version's starters asked by detection, and those that fit and are not
+  among the config's `extractors` offered with their evidence and options.
+  Taking one is a repair `apply` naming it, which copies it. A no is kept
+  in the record beside the copies, the one file the plugin keeps about
+  them: `declinedOffers` for named starters, `library: "declined"` for all
+  of it, which `apply` with `"starters": false` now writes too. Unreachable,
+  declined, or a detection that cannot run is one line, `skipped`, and never
+  a failure. The update skill's step 7 runs it, then judges the
+  dependencies the diff added against the adapters, in the session.
+- **The session-start notice of 0048 point 7** is `check-starters.mjs`,
+  printed by the SessionStart hook (whether or not the auto-load is on)
+  and run by `load`'s step 0. It reads `starters --json` and says one line
+  when the pinned library notes fixes for a copy not yet taken or declined.
+  It reads the library only offline (a local route, or npm's cache with
+  `--offline`, 15 seconds at most), so a session start never waits on the
+  network, and it is silent offline, after a no, and when every copy is
+  level. The hook imports it lazily, so nothing in it can cost the session
+  its agent index.
+- **Proved** on read-only `git archive` copies of the two adopters, after
+  the 0048 upgrade (copy, prove, move): the counts above; the notice named
+  the baseline copies' fixes before the move (6 and 5) and was silent
+  after; `gaps --check` exited 1; lint warned with the full count and
+  exited 0; `--raise` refused; with every gap answered (one known) the
+  check passed, `--raise` wrote strict, both indexes showed the known gap,
+  `render --check` and strict lint passed, and taking one answer away failed
+  lint. The library offered nothing new on either. A fresh install on a
+  throwaway repo wrote strict, failed lint on its three gaps, and passed
+  once they were answered.
+
 ## Rejected
 
 - **Report and let the update finish.** A warning is what went unread for
