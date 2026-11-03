@@ -185,6 +185,39 @@ test("the scaffolded test is red until EXPECTED_IDS and a fixture exist, and gre
   assert.equal(count("pass"), POSIX ? 10 : 9, green.stdout);
 });
 
+// Found building a schema adapter from nothing (ZDD-11 slice 7): the core
+// keeps each unread item as a record of kind `unread`, and the scaffolded
+// test counted those among the extractor's ids, so an adapter using the
+// unread step (the skill's Step 6 asks for it) could never go green. The
+// ids leave them out; EXPECTED_UNREAD checks them, empty by default.
+test("an extractor that reports unread items goes green: EXPECTED_IDS leaves the core's unread records out, EXPECTED_UNREAD holds what it reported", (t) => {
+  const repo = adopted(t);
+  scaffoldJson(repo, CSHARP);
+  const dir = join(repo, "zdd", "extractors", "aspnet-routes");
+  const testFile = "zdd/extractors/aspnet-routes/aspnet-routes.test.mjs";
+  writeFileSync(join(dir, "fixture", "src", "Api", "OrdersController.cs"), ['[Route("api/orders")]', "public class OrdersController {", "    [HttpGet]", "    public void List() {}", "    [HttpPatch]", "    public void Touch() {}", "}", ""].join("\n"));
+  const testPath = join(dir, "aspnet-routes.test.mjs");
+  const base = readFileSync(testPath, "utf8").replace("const EXPECTED_IDS = null;", 'const EXPECTED_IDS = ["route:/api/orders"];').replace("const CONVENTION_RECURSES = null;", "const CONVENTION_RECURSES = false;");
+  writeFileSync(testPath, base);
+  const modPath = join(dir, "index.mjs");
+  const logic = [
+    "  if (masked.includes(\"[Route(\")) out.push(record(\"route\", \"/api/orders\", rel, { methods: [\"GET\"] }));",
+    "  if (masked.includes(\"[HttpPatch]\")) unreadSeen.push({ file: rel, what: \"an [HttpPatch] action, which this adapter does not read\" });",
+  ].join("\n");
+  writeFileSync(
+    modPath,
+    readFileSync(modPath, "utf8")
+      .replace("function fromSource(rel, masked, text, diagnostics) {\n  const out = [];", (head) => `const unreadSeen = [];\n${head}\n${logic}`)
+      .replace("return { records: merge(records), diagnostics };", "return { records: merge(records), diagnostics, unread: unreadSeen.splice(0) };"),
+  );
+  const red = runTests(repo, testFile);
+  assert.notEqual(red.status, 0, "an item the test does not expect is red");
+  assert.match(red.stdout, /what derive reported unread differs from EXPECTED_UNREAD/);
+  writeFileSync(testPath, base.replace("const EXPECTED_UNREAD = [];", 'const EXPECTED_UNREAD = ["an [HttpPatch] action, which this adapter does not read"];'));
+  const green = runTests(repo, testFile);
+  assert.equal(green.status, 0, green.stdout + green.stderr);
+});
+
 test("refusals: every bad answer or repo state stops before the first write", (t) => {
   const cases = [
     [{ ...CSHARP, name: "Aspnet" }, /name must match/],

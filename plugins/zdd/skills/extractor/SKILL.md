@@ -194,7 +194,10 @@ like the roots. It must hold:
   derive must finish and say where it stopped. `false` otherwise.
 
 Fill `EXPECTED_IDS` in `<name>.test.mjs` by reading the fixture, before any
-logic exists. Run `node --test <test path>`: the expected-records test fails
+logic exists. When the fixture holds something the adapter will recognise
+and not read (it goes in derive's `unread` list, Step 6), put each item's
+`what` in `EXPECTED_UNREAD`; the ids leave out the records the core keeps
+for those. Run `node --test <test path>`: the expected-records test fails
 on a mismatch — **red**, for the right reason.
 
 Done when that test is red on the ids and not on "fill in EXPECTED_IDS".
