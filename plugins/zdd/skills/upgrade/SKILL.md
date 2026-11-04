@@ -17,8 +17,9 @@ JSON, no "repair apply". **One question at a time**, each with a recommended
 answer, its cost, and what saying no gives up; keep a running count; after a
 question, stop and wait. Explain a term the first time it comes up: the
 **lock** (one line in the repo's settings pinning it to one ZDD release), the
-**catalogue** (this machine's downloaded copy of ZDD's release list, which a
-restart moves to the lock), a **generated file** (written by ZDD from the
+**catalogue** (this machine's downloaded copy of ZDD's release list — one
+per machine, shared by every repo on it; a restart may leave it where
+another repo set it, so the route re-points it), a **generated file** (written by ZDD from the
 code, never hand-edited), an **extractor** (the part of ZDD that reads one
 convention of the code).
 
@@ -58,15 +59,16 @@ which of two routes applies. (It reads the marketplace's tags over the
 network; if that fails, say so and continue at step 2 with the running
 release.) Relay its line in plain words: the lock is what the repo asks
 every developer to run; the catalogue is this machine's downloaded copy of
-ZDD's release list, which a restart moves to the lock; the running release
+ZDD's release list, one per machine and shared by every repo on it (the
+route re-points it; decision 0050); the running release
 is what loaded when this session started.
 
 - **A newer release exists, in Claude Code** (question 1 of about 5): tell
   the user what it is, link its release notes as printed, and ask **"Move
   this repo to vX.Y.Z?"** — or, when the repo has **no lock**, **"Lock this
   repo and move it to vX.Y.Z?"** (decision 0021). Recommended: yes, the
-  notes say what it brings; cost: one PR and, for each teammate, two
-  restarts; saying no keeps the repo where it is, which is a fine choice.
+  notes say what it brings; cost: one PR and, for each teammate, one
+  command and a restart; saying no keeps the repo where it is, which is a fine choice.
   On yes:
 
   ```
@@ -77,11 +79,18 @@ is what loaded when this session started.
   note names the route for *this* machine:
   - **"no restart"** — this session already runs the target and the
     catalogue is there: carry **straight on to step 2** in this session.
-  - otherwise — relay it word for word: **restart Claude Code; the first
-    line of the next session names the commands that move this machine —
-    run them, restart again; then say "upgrade ZDD" again.** Claude Code
-    loads a new plugin version only at start, so the rest of the upgrade is
-    the new release's own run. **Stop here** — this run is complete when
+  - otherwise — relay it word for word: **from this repo's folder, the
+    command it names (`bootstrap.mjs move-machine`: the catalogue re-pointed
+    with a project-scope marketplace add, auto-update off put back, the
+    plugin updates — it stops at the first step that fails), then one
+    restart; then say "upgrade ZDD" again.** The note's last sentence is
+    the route for teammates whose plugin is older than 0.14.1 (their first
+    session after the merge runs their old plugin, whose line names the old
+    route): put it in the lock PR's description. The catalogue is one
+    per machine, shared by every repo on it, and a restart does not move it
+    once another repo has set it (decision 0050). Claude Code loads a new
+    plugin version only at start, so the rest of the upgrade is the new
+    release's own run. **Stop here** — this run is complete when
     the lock has moved and the user has the route.
 - **The lock trails and the line says "no restart"** (this session already
   runs the newest release and the catalogue is there): ask the same
@@ -227,7 +236,7 @@ reproduce them), reported in ZDD's Discussions as step 5 says.
 **From the old line** (a repo pinned before 0.9; the run's notes say so):
 this upgrade also crosses 0.9, whose own changes move records (the
 data-access readers it adds, background work read per platform file).
-Run `npx -y @rich-rees/zdd@0.14.0 derive` first and show what moved as a
+Run `npx -y @rich-rees/zdd@0.14.1 derive` first and show what moved as a
 release's own change; then the first proof holds against those records,
 and what the fixes move stays apart from what 0.9 moved.
 
@@ -410,9 +419,9 @@ node "$PLUGIN/scripts/bootstrap.mjs" preflight
 Then, with the engine this plugin pins:
 
 ```
-npx -y @rich-rees/zdd@0.14.0 derive
-npx -y @rich-rees/zdd@0.14.0 render
-npx -y @rich-rees/zdd@0.14.0 lint
+npx -y @rich-rees/zdd@0.14.1 derive
+npx -y @rich-rees/zdd@0.14.1 render
+npx -y @rich-rees/zdd@0.14.1 lint
 ```
 
 Show what moved in the generated artifacts and say why, from the notes (a
@@ -510,7 +519,7 @@ category: https://github.com/rich-rees/zero-drift-docs/discussions (decision 004
   record:` it replaces is still read, as the blessings section. A squash
   merge loses the record unless the merger keeps the message; a merge
   commit keeps it.
-- **The tally.** `npx -y @rich-rees/zdd@0.14.0 tally [--since <ref|date>] [--json]` counts,
+- **The tally.** `npx -y @rich-rees/zdd@0.14.1 tally [--since <ref|date>] [--json]` counts,
   per section, how often an artifact turned, confirmed, was reused or
   stored, then names the ADRs, glossary terms and blessings in the stores
   that no record ever named.
@@ -629,6 +638,48 @@ category: https://github.com/rich-rees/zero-drift-docs/discussions (decision 004
   `render --check` moves `human-index.html` only (with another viewer,
   possibly nothing); `derive --check`, `graph.json`, the agent index and the blessing
   index keep their bytes. Commit it in the same PR.
+
+## Upgrading to 0.14.1 (a Next.js screen reaches what its components call; the catalogue route)
+
+- **The starter library moves to 0.2.1** (npm `@rich-rees/zdd-starter-adapters`):
+  the `nextjs` starter gives a screen the calls of the local modules its
+  page or layout imports, one hop away, as `react-router` does. A repo that
+  copied `nextjs` at 0.1.0 or 0.2.0 is offered the fix at step 3b
+  (`starters`, then `starters --move` on a yes, `starters --decline` on a
+  no); a repo that changed its own copy keeps it, and the note says what to
+  compare. Nothing to do for a repo without `nextjs`.
+- **A gap can close.** A screen the map's gap check called "reaches
+  nothing" because its content lives in a component now reaches what the
+  component calls. Its `gaps.known` or `gaps.fine` mark in `zdd/config.json`
+  is then stale: lint warns, never fails, until it is removed —
+  `bootstrap.mjs gaps --forget=<id>`, in the same PR.
+- **The pin-move route re-points the catalogue** (decision 0050). The
+  catalogue is one per machine, shared by every repo on it, and a restart
+  does not move it once another repo has set it. The session-start line,
+  `release-status` and this skill's `next:` note now name one command,
+  `bootstrap.mjs move-machine`: it runs `claude plugin marketplace add
+  "rich-rees/zero-drift-docs#<tag>" --scope project`, then `relock` (that
+  add drops `"autoUpdate": false` from `.claude/settings.json`; relock puts
+  it back and changes nothing else), then the plugin updates, and stops at
+  the first step that fails; then one restart. A teammate with two ZDD
+  repos on different releases runs it each time they switch. A teammate
+  still on 0.14.0 sees 0.14.0's old route on their first session after the
+  lock PR merges: the `next:` note gives the route to put in the PR's
+  description for them.
+- **The retired-names sweep** no longer lists a line that names
+  `@rich-rees/zdd-engine` beside `@rich-rees/zdd`, or a line of the
+  extractor scaffold's own text in a local adapter.
+- **A test scaffolded from 0.14.1** writes the repo's own pin key
+  (`release`) into its scratch config again; one scaffolded at 0.14.0 keeps
+  `engine` there, which the engine reads only to word a message — nothing
+  to do.
+- No config-schema or metadata-contract change. The pins move to 0.14.1.
+- **What moves on the bump**: with `nextjs` and the fix taken,
+  `derive --check` moves the screen records that gain refs (no id moves),
+  and `render --check` moves `graph.json` and the human index with them;
+  where a closed gap was marked `known`, its Known gaps entry leaves the
+  agent index and the human index too. Without the fix, nothing but the
+  pins. Commit them in the same PR.
 
 ## Upgrading to 0.14 (the app owns its adapters; every update checks the map's gaps)
 

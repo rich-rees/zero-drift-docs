@@ -4,7 +4,7 @@ A documentation architecture for repos built by **human + agent pairs**. ZDD kee
 eight documentation artifacts *at most one unit of work behind the code* — and, with
 CI, makes drift in the machine-generated ones **un-mergeable**.
 
-> **Status: 0.14.0.** The plugin installs in Claude Code
+> **Status: 0.14.1.** The plugin installs in Claude Code
 > and in Codex from this one repo; `bootstrap` detects your stack (or grills
 > for it on a greenfield repo), proposes extractors with evidence, and *writes*
 > the opt-ins; the engine (`packages/zdd-engine`, npm `@rich-rees/zdd`) is a
@@ -328,7 +328,7 @@ reviewable file, never one question per item.
 from [the releases page](https://github.com/rich-rees/zero-drift-docs/releases)):
 
 ```
-claude plugin marketplace add rich-rees/zero-drift-docs@v0.14.0 --scope project
+claude plugin marketplace add rich-rees/zero-drift-docs@v0.14.1 --scope project
 claude plugin install zdd@zero-drift-docs --scope project
 ```
 
@@ -420,9 +420,11 @@ merge gate.
   shape to); BullMQ, Inngest, Trigger.dev and SQS are. Filed as a finding.
 - A Supabase Realtime subscription written as a direct
   `.on('postgres_changes')` inside a hook gives the hook's own module its
-  `subscribes` edge (0.9), not the Next.js page that uses the hook: Next.js
-  pages are read by folder, not by import. Name the hook in
-  `supabase-js.subscribeCalls` and the page's call to it carries the edge.
+  `subscribes` edge (0.9). From the starter library's 0.2.1 a Next.js page
+  or layout that imports the hook itself takes it too (one hop); a page that
+  reaches the hook through a component it renders does not (two hops). Name
+  the hook in `supabase-js.subscribeCalls` and the call to it carries the
+  edge wherever it is.
 - Something ZDD got wrong, as opposed to something wrong in your repo, goes
   to the repo's [Discussions](https://github.com/rich-rees/zero-drift-docs/discussions),
   in "Bug reports"; your agent explains it and offers a ready-written report
@@ -434,8 +436,18 @@ merge gate.
 
 Updating the plugin never touches your repo; moving the repo to a newer release
 is a choice you make. Say **"upgrade ZDD"**: it checks for a newer release and,
-on your yes, moves the repo's lock — then you restart, run the commands the
-session's first line names, restart again, and say "upgrade ZDD" once more.
+on your yes, moves the repo's lock and names the commands that move this
+machine — run them, restart once, and say "upgrade ZDD" once more. Claude
+Code keeps one catalogue per machine, shared by every repo on it, and a
+restart does not move it once another repo has set it: so one command,
+`bootstrap.mjs move-machine`, re-points it with `claude plugin marketplace
+add "rich-rees/zero-drift-docs#vX.Y.Z" --scope project`, puts back the
+`"autoUpdate": false` that drops from `.claude/settings.json`, updates the
+plugins, and stops at the first step that fails. A teammate still on an
+older plugin gets the route from the lock PR's description, which the
+upgrade gives you to paste. Two repos on different
+releases on one machine move it each time you switch between them; the
+session-start line names the route whenever it is elsewhere.
 That second run is the new release's own: it shows every file it will change
 (config, engine pins, `zdd/instructions.md`, the lock), names any paragraph
 in your `CLAUDE.md` / `AGENTS.md` that speaks to a rule ZDD's instructions now
@@ -454,12 +466,14 @@ all. Either way, from the repo's folder, in a terminal:
    `$CLAUDE_CONFIG_DIR` when you set it) mention `zero-drift-docs`, run
    `claude plugin marketplace remove zero-drift-docs --scope user` first (a
    plain `marketplace add` once left it there, and it holds the catalogue).
-2. `claude plugin marketplace add rich-rees/zero-drift-docs@v0.14.0 --scope project`
+2. `claude plugin marketplace add rich-rees/zero-drift-docs@v0.14.1 --scope project`
    — this moves the catalogue on this machine **and** the lock in
    `.claude/settings.json`. It also rewrites that file in its own key order
-   and drops `"autoUpdate": false`; step 4 puts `autoUpdate` back. To keep
+   and drops `"autoUpdate": false`: `git restore .claude/settings.json`
+   puts the committed file back once the PR that moves the lock has merged;
+   before that, the guided run in step 4 writes the lock with it. To keep
    the committed key order instead, `git restore .claude/settings.json` and
-   set `extraKnownMarketplaces["zero-drift-docs"].source.ref` to `"v0.14.0"`
+   set `extraKnownMarketplaces["zero-drift-docs"].source.ref` to `"v0.14.1"`
    by hand: the catalogue on this machine has moved either way.
 3. `claude plugin update zdd@zero-drift-docs --scope project` and
    `claude plugin update mattpocock-skills@zero-drift-docs --scope project`.
@@ -546,6 +560,9 @@ as a yes/no, so saying no to one is a visible choice, not a fork.
 
 - [ ] Next: a second viewer; Vue / Svelte / Angular extractors on their first
       real adoption.
+- [x] **0.14.1** — a Next.js screen reaches what its components call (starter
+      library 0.2.1); the pin-move route re-points the machine's one
+      catalogue and keeps auto-update off (decision 0050).
 - [x] **0.14.0** — the app owns its adapters: the engine ships none, a
       starter library (`@rich-rees/zdd-starter-adapters`) is an offer an
       app copies from and then owns, "upgrade ZDD" copies each adapter in
@@ -603,6 +620,30 @@ A repo still on the old line moves its lock by hand once, then says "upgrade
 ZDD" (see Upgrading). Before 1.0 the adapter contract stays at 1 and may
 still change; 1.0.0 freezes it.
 
+- **`0.14.1` — a Next.js screen reaches what its components call; the
+  catalogue route.** Four fixes from a repo's move to 0.14.0. The starter
+  library's `nextjs` gives a screen the calls of the local modules its page
+  or layout imports, one hop, as `react-router` does
+  (`@rich-rees/zdd-starter-adapters` 0.2.1; a patch: a fix to a starter it
+  has). The session-start line, `release-status` and the upgrade's `next:`
+  note name one command, `bootstrap.mjs move-machine`, that re-points the
+  machine's catalogue — one per machine, shared by every repo on it — with
+  `claude plugin marketplace add "rich-rees/zero-drift-docs#<tag>"
+  --scope project`, puts back with `relock` the `"autoUpdate": false` that add
+  drops, updates the plugins and stops at the first step that fails — a
+  restart does not move a catalogue another repo set (decision 0050,
+  superseding 0022's restart). Teammates still on 0.14.0 get the route from
+  the lock PR's description. The retired-names sweep leaves a line naming both
+  packages and the extractor scaffold's own text; the test scaffold writes
+  the `release` pin key into its scratch config again. No config-schema or
+  metadata-contract change. **Adopter impact:** "upgrade ZDD" offers the
+  `nextjs` fix where the repo copied it (`starters --move`); taken, a screen
+  whose content lives in a component gains refs, so `derive --check` moves
+  those screen records (no id moves) and `render --check` moves
+  `graph.json` and the human index; a `gaps.known` / `gaps.fine` mark for a
+  gap that closes goes stale and lint warns until it is removed
+  (`gaps --forget`), and a closed `known` gap leaves the agent index's and
+  the human index's Known gaps. Without `nextjs`, only the pins move.
 - **`0.14.0` — the app owns its adapters; every update checks the map's
   gaps.** The engine runs only the repo's own adapters and ships none
   (decision 0048). The readers it carried are a starter library, a second

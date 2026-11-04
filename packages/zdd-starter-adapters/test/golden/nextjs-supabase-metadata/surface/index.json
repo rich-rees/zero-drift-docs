@@ -7,7 +7,9 @@
     "src/components/HomePage.tsx",
     "src/app/page.tsx"
   ],
-  "refs": [],
+  "refs": [
+    "route:/api/things"
+  ],
   "facts": {
     "file": "page",
     "routeGroups": [],

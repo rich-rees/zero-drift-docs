@@ -63,31 +63,59 @@ test("the machine has an older zdd installed for this project: one line, expecte
   const out = run();
   assert.equal(out.trimEnd().split("\n").length, 1, out);
   assert.match(out, /^ZDD release mismatch: zdd@zero-drift-docs expected 2\.1\.0, found 2\.0\.0\./, out);
-  assert.match(out, /Fix, from this repo's folder: claude plugin update zdd@zero-drift-docs --scope project; then restart Claude Code\./, out);
+  assert.match(out, new RegExp(`Fix, from this repo's folder: ${CMD}updates ${esc("zdd@zero-drift-docs")}${END}`), out);
   assert.doesNotMatch(out, /marketplace|plugin install|restart Claude Code \(/, "the catalogue is right: no catalogue step, no first restart");
   assert.match(out, /Installed is not loaded/, "names the known limit");
 });
 
-test("the catalogue is at another tag: the pin-move route — restart (the catalogue follows the lock), update, restart again; no marketplace step on a machine with no stray declaration, never an add or update (2.1.1; decision 0022)", () => {
+// 0.14.1 (decision 0050): the catalogue is one per machine, and a restart
+// leaves one another repo set at a different tag where it is. The route re-points it with
+// `marketplace add` at the project scope, which rewrites the repo's
+// declaration without auto-update off, so `relock` puts that back; then the
+// updates, then one restart.
+const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+// CR-386/388/389: one command, single-quoted, that runs the plan and stops
+// at the first step that fails; the restart in words after it.
+const CMD = "node '[^']+bootstrap\\.mjs' move-machine \\(it ";
+const END = ", and stops at the first step that fails\\), then restart Claude Code\\.";
+const MOVE = (tag) => `re-points the catalogue to ${esc(tag)} with a project-scope marketplace add, puts auto-update off back on the lock, `;
+const UPDATES = `updates ${esc("zdd@zero-drift-docs")} and updates ${esc("mattpocock-skills@zero-drift-docs")}${END}`;
+const ONE_PER_MACHINE = /The catalogue is one per machine, shared by every repo on it: a restart does not move it once another repo has set it, so it is re-pointed here/;
+
+test("the catalogue is at another tag: re-point it with a project-scope marketplace add, relock, update, one restart — never a restart that would not move it (0.14.1; decision 0050)", () => {
   lock("v2.1.0");
   catalogue("v1.3.1", "1.3.1");
   installed("1.3.1", "1.3.1");
   const out = run();
+  assert.equal(out.trimEnd().split("\n").length, 1, out);
   assert.match(out, /the catalogue on this machine is at v1\.3\.1, this repo locks v2\.1\.0/, out);
-  assert.match(out, /Fix, from this repo's folder: restart Claude Code \(the catalogue follows this repo's lock on restart\); claude plugin update zdd@zero-drift-docs --scope project; claude plugin update mattpocock-skills@zero-drift-docs --scope project; then restart Claude Code again\./, out);
-  assert.doesNotMatch(out, /marketplace|plugin install/, out);
+  assert.match(out, new RegExp(`Fix, from this repo's folder: ${CMD}${MOVE("v2.1.0")}${UPDATES}`), out);
+  assert.match(out, ONE_PER_MACHINE, out);
+  assert.doesNotMatch(out, /removes the|installs|restart Claude Code again|follows this repo's lock/, out);
+  // The bootstrap it names is this plugin's, beside the check.
+  const named = /node '([^']+)' move-machine/.exec(out)[1];
+  assert.equal(resolve(named), resolve(PLUGIN, "scripts", "bootstrap.mjs"));
   // The Pocock expectation falls back to the running plugin's pin when the catalogue is not at the lock.
   const j = JSON.parse(run(CHECK, "--json"));
   assert.equal(j.expected.pocock, POCOCK.version);
 });
 
-test("only the catalogue is behind: restart, then update every installed plugin, then restart — the locked release may move Pocock, which a stale catalogue cannot show (2.1.1 CR-006, replacing the one-restart route)", () => {
+test("only the catalogue is behind: re-point it, then update every installed plugin, then restart — the locked release may move Pocock, which a stale catalogue cannot show (2.1.1 CR-006; 0.14.1)", () => {
   lock("v2.1.0");
   catalogue("v1.3.1", POCOCK.version);
   installed("2.1.0", POCOCK.version);
   const out = run();
-  assert.match(out, /Fix, from this repo's folder: restart Claude Code \(the catalogue follows this repo's lock on restart\); claude plugin update zdd@zero-drift-docs --scope project; claude plugin update mattpocock-skills@zero-drift-docs --scope project; then restart Claude Code again\./, out);
-  assert.doesNotMatch(out, /plugin install|marketplace/, out);
+  assert.match(out, new RegExp(`Fix, from this repo's folder: ${CMD}${MOVE("v2.1.0")}${UPDATES}`), out);
+  assert.doesNotMatch(out, /installs|removes/, out);
+});
+
+test("a machine that never fetched the catalogue gets the same route: the add declares it at the lock (0.14.1)", () => {
+  lock("v2.1.0");
+  catalogue(null);
+  installed(null, null);
+  const out = run();
+  assert.match(out, /the catalogue on this machine is at no recorded ref, this repo locks v2\.1\.0/, out);
+  assert.match(out, new RegExp(`Fix, from this repo's folder: ${CMD}${MOVE("v2.1.0")}installs ${esc("zdd@zero-drift-docs")} and installs ${esc("mattpocock-skills@zero-drift-docs")}${END}`), out);
 });
 
 test("neither plugin installed for this project (another project's install does not count): both named as not installed", () => {
@@ -97,7 +125,7 @@ test("neither plugin installed for this project (another project's install does 
   const out = run();
   assert.match(out, /zdd@zero-drift-docs expected 2\.1\.0, not installed for this project/, out);
   assert.match(out, /mattpocock-skills@zero-drift-docs expected 1\.3\.1, not installed for this project/, out);
-  assert.match(out, /Fix, from this repo's folder: claude plugin install zdd@zero-drift-docs --scope project; claude plugin install mattpocock-skills@zero-drift-docs --scope project; then restart Claude Code\./, out, "nothing to update: a missing install is installed");
+  assert.match(out, new RegExp(`Fix, from this repo's folder: ${CMD}installs ${esc("zdd@zero-drift-docs")} and installs ${esc("mattpocock-skills@zero-drift-docs")}${END}`), out, "nothing to update: a missing install is installed");
 });
 
 test("the Pocock expectation comes from the catalogue's marketplace.json when the catalogue is at the lock", () => {
@@ -107,7 +135,7 @@ test("the Pocock expectation comes from the catalogue's marketplace.json when th
   const out = run();
   assert.match(out, /mattpocock-skills@zero-drift-docs expected 1\.4\.0, found 1\.3\.1/, out);
   assert.doesNotMatch(out, /zdd@zero-drift-docs expected/, out);
-  assert.match(out, /Fix, from this repo's folder: claude plugin update mattpocock-skills@zero-drift-docs --scope project; then restart Claude Code\./, out);
+  assert.match(out, new RegExp(`Fix, from this repo's folder: ${CMD}updates ${esc("mattpocock-skills@zero-drift-docs")}${END}`), out);
 });
 
 test("silent when the repo locks nothing, when the lock is not a tag, when the home files are missing or malformed", () => {
@@ -163,8 +191,8 @@ test("a user-level declaration with the catalogue behind: remove it by scope fir
     const out = run();
     assert.equal(out.trimEnd().split("\n").length, 1, out);
     assert.match(out, /your user settings \(~\/\.claude\/settings\.json\) also declare zero-drift-docs at v1\.3\.1, which holds the catalogue there/, out);
-    assert.match(out, /Fix, from this repo's folder: claude plugin marketplace remove zero-drift-docs --scope user; restart Claude Code \(the catalogue follows this repo's lock on restart\); claude plugin update zdd@zero-drift-docs --scope project; claude plugin update mattpocock-skills@zero-drift-docs --scope project; then restart Claude Code again\./, out);
-    assert.doesNotMatch(out, /marketplace add|marketplace update|--scope local/, out);
+    assert.match(out, new RegExp(`Fix, from this repo's folder: ${CMD}removes the user declaration, ${MOVE("v2.1.0")}${UPDATES}`), out);
+    assert.doesNotMatch(out, /marketplace update|--scope local/, out);
     const j = JSON.parse(run(CHECK, "--json"));
     assert.deepEqual(j.strayDeclarations, [{ scope: "user", ref: "v1.3.1", ours: true, source: "rich-rees/zero-drift-docs" }]);
   } finally {
@@ -180,7 +208,7 @@ test("a local declaration (any ref, or none) with the catalogue behind: removed 
   try {
     const out = run();
     assert.match(out, /this repo's local settings \(\.claude\/settings\.local\.json\) also declare zero-drift-docs at v2\.1\.0/, out);
-    assert.match(out, /Fix, from this repo's folder: claude plugin marketplace remove zero-drift-docs --scope local; restart Claude Code/, out);
+    assert.match(out, new RegExp(`Fix, from this repo's folder: ${CMD}removes the local declaration, ${MOVE("v2.1.0")}`), out);
   } finally {
     localDecl(null);
   }
@@ -205,7 +233,7 @@ test("a malformed or oversized user settings file is no declaration", () => {
   writeFileSync(join(home, ".claude", "settings.json"), "{ nope");
   try {
     const out = run();
-    assert.doesNotMatch(out, /marketplace remove/, out);
+    assert.doesNotMatch(out, /removes the/, out);
     assert.match(out, /^ZDD release mismatch: the catalogue on this machine is at v1\.3\.1/, out);
   } finally {
     userDecl(null);
@@ -229,8 +257,9 @@ test("a stray declaration from a fork or mirror is named, never removed by the r
   try {
     const out = run();
     assert.match(out, /your user settings \(~\/\.claude\/settings\.json\) declare zero-drift-docs from me\/zdd-fork, not rich-rees\/zero-drift-docs — yours to resolve by hand before the rest/, out);
-    assert.doesNotMatch(out, /marketplace remove/, out);
-    assert.match(out, /restart Claude Code \(the catalogue follows this repo's lock on restart\)/, out);
+    assert.doesNotMatch(out, /removes the/, out);
+    assert.match(out, new RegExp(`${CMD}${MOVE("v2.1.0")}`), out);
+    assert.doesNotMatch(out, /removes the/, "a fork's declaration is never removed by the command");
   } finally {
     userDecl(null);
   }
@@ -244,14 +273,14 @@ test("a local declaration with no ref is still stray; an oversized user settings
   try {
     const out = run();
     assert.match(out, /this repo's local settings \(\.claude\/settings\.local\.json\) also declare zero-drift-docs, which holds the catalogue there/, out);
-    assert.match(out, /claude plugin marketplace remove zero-drift-docs --scope local/, out);
+    assert.match(out, /removes the local declaration/, out);
   } finally {
     localDecl(null);
   }
   const huge = { extraKnownMarketplaces: { "zero-drift-docs": { source: { source: "github", repo: "rich-rees/zero-drift-docs", ref: "v1.3.1" } } }, pad: "x".repeat(2 * 1024 * 1024) };
   writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify(huge));
   try {
-    assert.doesNotMatch(run(), /marketplace remove/, "over the size cap: not read");
+    assert.doesNotMatch(run(), /removes the/, "over the size cap: not read");
   } finally {
     userDecl(null);
   }
@@ -280,7 +309,7 @@ test("CLAUDE_CONFIG_DIR is where the check reads the catalogue, the installs and
   catalogue("v1.3.1", "1.3.1");
   userDecl("v1.3.1");
   try {
-    assert.match(runBare(CHECK, { CLAUDE_CONFIG_DIR: profile }), /claude plugin marketplace remove zero-drift-docs --scope user/);
+    assert.match(runBare(CHECK, { CLAUDE_CONFIG_DIR: profile }), /removes the user declaration/);
   } finally {
     userDecl(null);
   }
@@ -330,4 +359,25 @@ test("under a custom profile the stray declaration is named by the file actually
   } finally {
     userDecl(null);
   }
+});
+
+// CR-399: release-status's not-ready text names move-machine and one restart,
+// never the restart that "follows the lock". CR-401: inspect's lock override
+// takes a release tag only; anything else falls back to the repo's lock.
+// CR-389: a path holding a single quote has no literal spelling in every shell.
+test("release-status names move-machine; inspect's override takes a tag only; shellArg refuses a quote", async () => {
+  const { narrateReleaseStatus } = await import(new URL("../scripts/bootstrap.mjs", import.meta.url).href);
+  const { inspect, shellArg } = await import(new URL("../scripts/check-release.mjs", import.meta.url).href);
+  const line = narrateReleaseStatus({ newest: "v9.0.0", newer: false, running: "9.0.0", lock: "v8.0.0", lockBehind: true, ready: false, catalogue: "v8.0.0" });
+  assert.match(line, /`upgrade --to=v9\.0\.0` writes it and names `bootstrap\.mjs move-machine`.*project-scope marketplace add.*auto-update off put back.*then one restart/, line);
+  assert.doesNotMatch(line, /follows the lock|second restart/, line);
+  lock("v2.1.0");
+  catalogue("v2.1.0", "1.3.1");
+  installed("2.1.0", "1.3.1");
+  for (const bad of ["v2.1", "main", "v2.1.0; rm -rf ~", ""]) assert.equal(inspect(repo, home, { lock: bad, host: true }).lock, "v2.1.0", bad);
+  assert.equal(inspect(repo, home, { lock: "v3.0.0", host: true }).lock, "v3.0.0");
+  assert.equal(shellArg("C:/Users/a b/$x/`y`/bootstrap.mjs"), "'C:/Users/a b/$x/`y`/bootstrap.mjs'");
+  // A single quote: double quotes, when nothing in the path expands inside them (verify pass 1).
+  assert.equal(shellArg("/home/o'brien/bootstrap.mjs"), `"/home/o'brien/bootstrap.mjs"`);
+  for (const p of ["/home/o'brien/$x/bootstrap.mjs", "/home/o'brien/`x`/bootstrap.mjs", `/home/o'b"x/bootstrap.mjs`, "C:\\o'b\\bootstrap.mjs"]) assert.equal(shellArg(p), null, p);
 });

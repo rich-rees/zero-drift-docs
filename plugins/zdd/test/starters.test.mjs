@@ -13,6 +13,9 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { STARTERS, RECORD, starterLibrary, fixesFor, movedIds, parseRecord, fileHash } from "../scripts/lib/starters.mjs";
 
+// The library version whose notes fix supabase (the pin may be later).
+const SUPABASE_FIXED = "0.2.0";
+
 const PLUGIN = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const LIBRARY = resolve(PLUGIN, "..", "..", "packages", "zdd-starter-adapters");
 const STAGE = join(LIBRARY, "scripts", "stage.mjs");
@@ -89,9 +92,12 @@ test("starterLibrary: a folder of staged versions first, refused when it lacks t
 test("the fix notes and the id moves the upgrade reads: fixes after the copy's version and up to the pin, none at or before a declined one; an id gone and one of its kind and namespace with the same name past its schema", () => {
   const notes = JSON.parse(readFileSync(join(LIBRARY, "notes.json"), "utf8"));
   const offered = fixesFor(notes, "supabase", STARTERS.baseline, STARTERS.version);
-  assert.deepEqual(offered.map((v) => v.version), [STARTERS.version]);
+  assert.deepEqual(offered.map((v) => v.version), [SUPABASE_FIXED]);
   assert.ok(offered[0].fixes.every((f) => f.what && f.who && f.moves));
   assert.deepEqual(fixesFor(notes, "supabase", STARTERS.baseline, STARTERS.version, STARTERS.version), []);
+  assert.deepEqual(fixesFor(notes, "supabase", SUPABASE_FIXED, STARTERS.version), [], "a copy of the fixed version is offered nothing for supabase");
+  // nextjs's one-hop fix (0.2.1): offered to a 0.1.0 copy and to a 0.2.0 one alike.
+  for (const from of [STARTERS.baseline, SUPABASE_FIXED]) assert.deepEqual(fixesFor(notes, "nextjs", from, STARTERS.version).map((v) => v.version), ["0.2.1"], from);
   assert.deepEqual(fixesFor(notes, "generic", STARTERS.baseline, STARTERS.version), []);
   const before = new Map([["table:db/booking", "a.json"], ["function:db/f", "f.json"], ["function:db/public.f", "pf.json"], ["table:db/gone", "g.json"], ["route:/x", "r.json"]]);
   const after = new Map([["table:db/public.booking", "pb.json"], ["function:db/f", "f.json"], ["route:/x", "r.json"]]);
@@ -170,7 +176,7 @@ test("upgrade from before the app owned its adapters: the baseline comes in, the
   // The offer.
   const s = json(repo, ["starters"]);
   assert.deepEqual(s.behind, ["supabase"]);
-  assert.deepEqual(s.offers.map((o) => [o.version, Object.keys(o.starters)]), [[STARTERS.version, ["supabase"]]]);
+  assert.deepEqual(s.offers.map((o) => [o.version, Object.keys(o.starters)]), [[SUPABASE_FIXED, ["supabase"]]]);
   assert.match(run(repo, ["starters"]).stdout, /Fixes on offer .*on a yes `starters --move`, on a no `starters --decline`/s);
 
   // Proof 2, on a yes.

@@ -73,6 +73,15 @@ peek and its button's handler). The button and `docs.gaps` are written only
 when a gap is answered as known, and the fixture answers none, so the page
 carries no new markup, the agent index gains no section, and no graph,
 metadata, agent-index or BUNDLE byte moved.
+ZDD-12 (starter library 0.2.1) regenerated the Next.js fixture's goldens for
+the screen's one hop: the home page renders HomePage from src/components,
+which fetches /api/things, so `surface/index.json` gains that ref, the BUNDLE
+literal gains the one edge and the home screen's References list, and the
+full page moves by that BUNDLE line. No other record, agent-index or
+blessing-index byte moved; the FastAPI goldens did not move. Run from
+`packages/zdd-starter-adapters` with the starters placed in a scratch copy
+as `copyFixture` places them (`test/starters.mjs`), the engine's bin at
+`../zdd-engine/bin/zdd-engine.mjs`.
 
 ## Regenerating
 

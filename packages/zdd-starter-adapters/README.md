@@ -48,6 +48,13 @@ the note against a repo that copied an earlier version and recommend.
   "Upgrade ZDD" copies these in first and proves the records unchanged.
 - **0.2.0**: `supabase` and `sqlalchemy` with every bug known when the library
   began fixed.
+- **0.2.1**: `nextjs`: a screen takes the calls of the components and modules
+  its page and layout import, one hop, as a `react-router` screen does.
+
+A patch fixes starters the library already has; a minor adds a starter or a
+new kind of record; a major changes what an app's copy must hold to keep
+working. A starter a version changes keeps its 0.1.0 copy in
+`baseline/adapters/`, so 0.1.0 still stages byte for byte.
 
 0.1.0 is frozen: every file it stages is pinned by
 `baseline/manifest-0.1.0.json`. Released from this repo by a tag
