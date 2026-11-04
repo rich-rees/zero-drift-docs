@@ -75,7 +75,7 @@ bootstrap script beside this one (`$PLUGIN/scripts/bootstrap.mjs`). It
 copies the starter, the shared code it reaches into
 `localExtractorDir/_shared/`, and any companion its suite fixture needs, and
 records the version in `localExtractorDir/starters.json`. Run its tests
-(`npx -y @rich-rees/zdd@0.14.0 test`) and `derive`; then, when it only
+(`npx -y @rich-rees/zdd@0.14.1 test`) and `derive`; then, when it only
 almost fits, change it through Step 4 (a fixture case for what it gets
 wrong, red) and Step 5 (green). A changed copy is never overwritten by a
 later fix: `bootstrap.mjs starters` shows it as changed, and a fix the
@@ -256,9 +256,9 @@ Done when the tests are green and every checklist item holds.
 ## Step 6 — the real repo
 
 ```
-npx -y @rich-rees/zdd@0.14.0 derive --verbose
-npx -y @rich-rees/zdd@0.14.0 render
-npx -y @rich-rees/zdd@0.14.0 lint
+npx -y @rich-rees/zdd@0.14.1 derive --verbose
+npx -y @rich-rees/zdd@0.14.1 render
+npx -y @rich-rees/zdd@0.14.1 lint
 ```
 
 Read every `[<name>]` diagnostic and account for each: a real gap goes back

@@ -2642,6 +2642,11 @@ export const UPGRADE_NOTES = {
       ? ["0.14: a local extractor scaffolded before 0.14 keeps its old test, which counts the core's unread records among its ids — scaffold the test again before the adapter returns `unread` (the extractor skill, Step 4, says how)"]
       : []),
   ],
+  "0.14.1": () => [
+    `0.14.1 takes the starter library to ${STARTERS.version} (npm ${STARTERS.package}): the nextjs starter gives a screen the calls of the local modules its page or layout imports, one hop, as react-router does. Where this repo copied nextjs, \`starters\` offers the fix (\`starters --move\` on a yes, \`starters --decline\` on a no); taken, screens whose content lives in a component gain refs, so derive --check moves those records (no id moves) and render --check moves graph.json and the human index. A gap that closes leaves its gaps.known or gaps.fine mark stale: lint warns, never fails, until \`gaps --forget=<id>\` removes it in the same PR`,
+    "0.14.1 re-points this machine's catalogue in the pin-move route (decision 0050): the catalogue is one per machine, shared by every repo on it, and a restart does not move it once another repo has set it. The session-start line, release-status and the lock move's next: note name `claude plugin marketplace add \"rich-rees/zero-drift-docs#<tag>\" --scope project`, then `bootstrap.mjs relock` (that add drops \"autoUpdate\": false; relock puts it back and changes nothing else), the plugin updates, one restart",
+    "0.14.1: the retired-names sweep no longer lists a line naming @rich-rees/zdd-engine beside @rich-rees/zdd, or the extractor scaffold's own text in a local adapter; a test scaffolded from now on writes the release pin key into its scratch config",
+  ],
 };
 // border: end
 

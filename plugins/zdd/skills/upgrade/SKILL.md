@@ -230,7 +230,7 @@ reproduce them), reported in ZDD's Discussions as step 5 says.
 **From the old line** (a repo pinned before 0.9; the run's notes say so):
 this upgrade also crosses 0.9, whose own changes move records (the
 data-access readers it adds, background work read per platform file).
-Run `npx -y @rich-rees/zdd@0.14.0 derive` first and show what moved as a
+Run `npx -y @rich-rees/zdd@0.14.1 derive` first and show what moved as a
 release's own change; then the first proof holds against those records,
 and what the fixes move stays apart from what 0.9 moved.
 
@@ -413,9 +413,9 @@ node "$PLUGIN/scripts/bootstrap.mjs" preflight
 Then, with the engine this plugin pins:
 
 ```
-npx -y @rich-rees/zdd@0.14.0 derive
-npx -y @rich-rees/zdd@0.14.0 render
-npx -y @rich-rees/zdd@0.14.0 lint
+npx -y @rich-rees/zdd@0.14.1 derive
+npx -y @rich-rees/zdd@0.14.1 render
+npx -y @rich-rees/zdd@0.14.1 lint
 ```
 
 Show what moved in the generated artifacts and say why, from the notes (a
@@ -513,7 +513,7 @@ category: https://github.com/rich-rees/zero-drift-docs/discussions (decision 004
   record:` it replaces is still read, as the blessings section. A squash
   merge loses the record unless the merger keeps the message; a merge
   commit keeps it.
-- **The tally.** `npx -y @rich-rees/zdd@0.14.0 tally [--since <ref|date>] [--json]` counts,
+- **The tally.** `npx -y @rich-rees/zdd@0.14.1 tally [--since <ref|date>] [--json]` counts,
   per section, how often an artifact turned, confirmed, was reused or
   stored, then names the ADRs, glossary terms and blessings in the stores
   that no record ever named.
@@ -632,6 +632,43 @@ category: https://github.com/rich-rees/zero-drift-docs/discussions (decision 004
   `render --check` moves `human-index.html` only (with another viewer,
   possibly nothing); `derive --check`, `graph.json`, the agent index and the blessing
   index keep their bytes. Commit it in the same PR.
+
+## Upgrading to 0.14.1 (a Next.js screen reaches what its components call; the catalogue route)
+
+- **The starter library moves to 0.2.1** (npm `@rich-rees/zdd-starter-adapters`):
+  the `nextjs` starter gives a screen the calls of the local modules its
+  page or layout imports, one hop away, as `react-router` does. A repo that
+  copied `nextjs` at 0.1.0 or 0.2.0 is offered the fix at step 3b
+  (`starters`, then `starters --move` on a yes, `starters --decline` on a
+  no); a repo that changed its own copy keeps it, and the note says what to
+  compare. Nothing to do for a repo without `nextjs`.
+- **A gap can close.** A screen the map's gap check called "reaches
+  nothing" because its content lives in a component now reaches what the
+  component calls. Its `gaps.known` or `gaps.fine` mark in `zdd/config.json`
+  is then stale: lint warns, never fails, until it is removed —
+  `bootstrap.mjs gaps --forget=<id>`, in the same PR.
+- **The pin-move route re-points the catalogue** (decision 0050). The
+  catalogue is one per machine, shared by every repo on it, and a restart
+  does not move it once another repo has set it. The session-start line,
+  `release-status` and this skill's `next:` note now name `claude plugin
+  marketplace add "rich-rees/zero-drift-docs#<tag>" --scope project`, then
+  `bootstrap.mjs relock` (that add drops `"autoUpdate": false` from
+  `.claude/settings.json`; relock puts it back and changes nothing else),
+  the plugin updates, one restart. A teammate with two ZDD repos on
+  different releases runs it each time they switch.
+- **The retired-names sweep** no longer lists a line that names
+  `@rich-rees/zdd-engine` beside `@rich-rees/zdd`, or a line of the
+  extractor scaffold's own text in a local adapter.
+- **A test scaffolded from 0.14.1** writes the repo's own pin key
+  (`release`) into its scratch config again; one scaffolded at 0.14.0 keeps
+  `engine` there, which the engine reads only to word a message — nothing
+  to do.
+- No config-schema or metadata-contract change. The pins move to 0.14.1.
+- **What moves on the bump**: with `nextjs` and the fix taken,
+  `derive --check` moves the screen records that gain refs (no id moves),
+  and `render --check` moves `graph.json` and the human index with them
+  (the agent index where it lists those links); without it, nothing but
+  the pins. Commit them in the same PR.
 
 ## Upgrading to 0.14 (the app owns its adapters; every update checks the map's gaps)
 
