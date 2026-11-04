@@ -17,7 +17,8 @@
 // read; the deriver resolves and folds both after the merge
 // (the core's ref resolution). A screen also takes the refs of the local
 // modules its page or layout file imports, one hop, narrowed to what a named
-// import reaches (as react-router's screens do). A missing appDir or middleware
+// import reaches (as react-router's screens do); a file in the screen's own
+// folder counts for it whole, as before. A missing appDir or middleware
 // file is "nothing to inventory" (greenfield), never an error.
 
 import { join, posix } from "node:path";
@@ -296,7 +297,9 @@ export function derive({ options, io }) {
   // import takes it whole, with a diagnostic. Only a scanned file is a module
   // here — the refs walk already left out tests, ignored files and links —
   // and the module's own imports are not followed. The module keeps its own
-  // record and refs.
+  // record and refs. One hop only adds: a file in the screen's folder already
+  // counts for it whole (the attribution above, erring toward "might touch",
+  // decision 0011), and a narrowed import of it takes nothing away.
   const modules = new Map(); // rel -> { whole, model, stmtRefs, narrowed }
   const moduleOf = (rel) => {
     if (!modules.has(rel)) {

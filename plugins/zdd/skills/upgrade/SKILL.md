@@ -17,8 +17,9 @@ JSON, no "repair apply". **One question at a time**, each with a recommended
 answer, its cost, and what saying no gives up; keep a running count; after a
 question, stop and wait. Explain a term the first time it comes up: the
 **lock** (one line in the repo's settings pinning it to one ZDD release), the
-**catalogue** (this machine's downloaded copy of ZDD's release list, which a
-restart moves to the lock), a **generated file** (written by ZDD from the
+**catalogue** (this machine's downloaded copy of ZDD's release list — one
+per machine, shared by every repo on it; a restart may leave it where
+another repo set it, so the route re-points it), a **generated file** (written by ZDD from the
 code, never hand-edited), an **extractor** (the part of ZDD that reads one
 convention of the code).
 
@@ -58,15 +59,16 @@ which of two routes applies. (It reads the marketplace's tags over the
 network; if that fails, say so and continue at step 2 with the running
 release.) Relay its line in plain words: the lock is what the repo asks
 every developer to run; the catalogue is this machine's downloaded copy of
-ZDD's release list, which a restart moves to the lock; the running release
+ZDD's release list, one per machine and shared by every repo on it (the
+route re-points it; decision 0050); the running release
 is what loaded when this session started.
 
 - **A newer release exists, in Claude Code** (question 1 of about 5): tell
   the user what it is, link its release notes as printed, and ask **"Move
   this repo to vX.Y.Z?"** — or, when the repo has **no lock**, **"Lock this
   repo and move it to vX.Y.Z?"** (decision 0021). Recommended: yes, the
-  notes say what it brings; cost: one PR and, for each teammate, two
-  restarts; saying no keeps the repo where it is, which is a fine choice.
+  notes say what it brings; cost: one PR and, for each teammate, one
+  command and a restart; saying no keeps the repo where it is, which is a fine choice.
   On yes:
 
   ```
@@ -78,9 +80,13 @@ is what loaded when this session started.
   - **"no restart"** — this session already runs the target and the
     catalogue is there: carry **straight on to step 2** in this session.
   - otherwise — relay it word for word: **from this repo's folder, the
-    commands it names (the catalogue re-pointed with `claude plugin
-    marketplace add … --scope project`, `relock`, the plugin updates),
-    then one restart; then say "upgrade ZDD" again.** The catalogue is one
+    command it names (`bootstrap.mjs move-machine`: the catalogue re-pointed
+    with a project-scope marketplace add, auto-update off put back, the
+    plugin updates — it stops at the first step that fails), then one
+    restart; then say "upgrade ZDD" again.** The note's last sentence is
+    the route for teammates whose plugin is older than 0.14.1 (their first
+    session after the merge runs their old plugin, whose line names the old
+    route): put it in the lock PR's description. The catalogue is one
     per machine, shared by every repo on it, and a restart does not move it
     once another repo has set it (decision 0050). Claude Code loads a new
     plugin version only at start, so the rest of the upgrade is the new
@@ -650,12 +656,16 @@ category: https://github.com/rich-rees/zero-drift-docs/discussions (decision 004
 - **The pin-move route re-points the catalogue** (decision 0050). The
   catalogue is one per machine, shared by every repo on it, and a restart
   does not move it once another repo has set it. The session-start line,
-  `release-status` and this skill's `next:` note now name `claude plugin
-  marketplace add "rich-rees/zero-drift-docs#<tag>" --scope project`, then
-  `bootstrap.mjs relock` (that add drops `"autoUpdate": false` from
-  `.claude/settings.json`; relock puts it back and changes nothing else),
-  the plugin updates, one restart. A teammate with two ZDD repos on
-  different releases runs it each time they switch.
+  `release-status` and this skill's `next:` note now name one command,
+  `bootstrap.mjs move-machine`: it runs `claude plugin marketplace add
+  "rich-rees/zero-drift-docs#<tag>" --scope project`, then `relock` (that
+  add drops `"autoUpdate": false` from `.claude/settings.json`; relock puts
+  it back and changes nothing else), then the plugin updates, and stops at
+  the first step that fails; then one restart. A teammate with two ZDD
+  repos on different releases runs it each time they switch. A teammate
+  still on 0.14.0 sees 0.14.0's old route on their first session after the
+  lock PR merges: the `next:` note gives the route to put in the PR's
+  description for them.
 - **The retired-names sweep** no longer lists a line that names
   `@rich-rees/zdd-engine` beside `@rich-rees/zdd`, or a line of the
   extractor scaffold's own text in a local adapter.
@@ -666,9 +676,10 @@ category: https://github.com/rich-rees/zero-drift-docs/discussions (decision 004
 - No config-schema or metadata-contract change. The pins move to 0.14.1.
 - **What moves on the bump**: with `nextjs` and the fix taken,
   `derive --check` moves the screen records that gain refs (no id moves),
-  and `render --check` moves `graph.json` and the human index with them
-  (the agent index where it lists those links); without it, nothing but
-  the pins. Commit them in the same PR.
+  and `render --check` moves `graph.json` and the human index with them;
+  where a closed gap was marked `known`, its Known gaps entry leaves the
+  agent index and the human index too. Without the fix, nothing but the
+  pins. Commit them in the same PR.
 
 ## Upgrading to 0.14 (the app owns its adapters; every update checks the map's gaps)
 

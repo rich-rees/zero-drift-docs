@@ -281,15 +281,20 @@ test("CR-314: upgrade --to on a machine that already runs the target with the ca
     if (!host.CLAUDECODE) delete env.CLAUDECODE;
     return JSON.parse(execFileSync(process.execPath, [SCRIPT, "upgrade", `--to=v${VERSION}`, `--remote=${remote}`, ...extra, `--root=${repo}`, `--home=${join(scratch, "home-empty-2")}`, "--date=2026-10-09", "--json"], { encoding: "utf8", env }));
   };
-  const route = new RegExp(`^next: from this repo's folder, claude plugin marketplace add "rich-rees/zero-drift-docs#v${VERSION.replace(/\./g, "\\.")}" --scope project; node "[^"]+bootstrap\\.mjs" relock; claude plugin install zdd@zero-drift-docs --scope project; claude plugin install mattpocock-skills@zero-drift-docs --scope project; then restart Claude Code\\. The catalogue is one per machine`);
+  const tag = `v${VERSION}`.replace(/\./g, "\\.");
+  const route = new RegExp(`^next: from this repo's folder, node '[^']+bootstrap\\.mjs' move-machine \\(it re-points the catalogue to ${tag} with a project-scope marketplace add, puts auto-update off back on the lock, installs zdd@zero-drift-docs and installs mattpocock-skills@zero-drift-docs, and stops at the first step that fails\\), then restart Claude Code\\. The catalogue is one per machine`);
+  // CR-387: a teammate's first session after the lock PR merges runs their
+  // old plugin, so the note gives the upgrader the route for the PR's
+  // description — the add at the tag, the committed file restored, the updates.
+  const teammates = new RegExp(`For teammates whose plugin is older than 0\\.14\\.1, put this in the lock PR's description: .*claude plugin marketplace add "rich-rees/zero-drift-docs#${tag}" --scope project.*git restore \\.claude/settings\\.json.*claude plugin update zdd@zero-drift-docs --scope project.*restart Claude Code`);
   for (const plan of [["--plan"], []]) {
     const repo2 = adopted(`to-not-ready${plan.length ? "-plan" : ""}`, { settings: { extraKnownMarketplaces: LOCK("v2.1.0") } });
     const j2 = upgradeTo(repo2, { CLAUDECODE: "1" }, plan);
     assert.equal(j2.ready, false);
-    assert.ok(j2.notes.some((n) => route.test(n)), j2.notes.join("\n"));
+    assert.ok(j2.notes.some((n) => route.test(n) && teammates.test(n)), j2.notes.join("\n"));
   }
   const codex = upgradeTo(adopted("to-not-ready-codex", { settings: { extraKnownMarketplaces: LOCK("v2.1.0") } }), {});
-  assert.ok(codex.notes.some((n) => /^next: restart Claude Code; the first line of the new session names the commands/.test(n)), codex.notes.join("\n"));
+  assert.ok(codex.notes.some((n) => /^next: restart Claude Code; the first line of the new session names the commands/.test(n) && teammates.test(n)), codex.notes.join("\n"));
 });
 
 test("CR-315/318: the pinned copy is found in a cache larger than the walk bound; a malformed settings file makes enablement unknown and is said; a symlinked cache entry is no install", (t) => {

@@ -227,12 +227,14 @@ test("the baseline's own tests pass on 0.1.0, run as an app runs them (zdd-engin
   // in data-access.test.mjs, which reads the core's resolution, and stay in
   // this suite.
   assert.deepEqual(readdirSync(join(lib, "adapters", "supabase", "test")).sort(), ["sql-replay.test.mjs", "supabase-formats.test.mjs", "supabase.test.mjs"]);
+  // nextjs's (0.2.1 froze it, CR-403) beside them.
+  assert.deepEqual(readdirSync(join(lib, "adapters", "nextjs", "test")).sort(), ["wrapper-resolution.test.mjs"]);
   const only = scratch(t, "zdd-v-base-only-");
-  cpSync(join(lib, "adapters", "supabase"), join(only, "supabase"), { recursive: true });
-  cpSync(join(lib, "adapters", "_shared"), join(only, "_shared"), { recursive: true });
+  for (const name of ["supabase", "nextjs", "_shared"]) cpSync(join(lib, "adapters", name), join(only, name), { recursive: true });
   const r = spawnSync(process.execPath, [ENGINE_BIN, "test", `--adapters=${only}`], { encoding: "utf8" });
   assert.equal(r.status, 0, (r.stdout + r.stderr).split("\n").filter((l) => /^not ok|Error/.test(l)).join("\n"));
   assert.match(r.stdout, /^# fail 0$/m);
+  assert.match(r.stdout, /resolveWrapperTarget/, "the frozen nextjs's own tests ran");
 });
 
 // The one rule `_shared/` holds a copy of rather than importing: an

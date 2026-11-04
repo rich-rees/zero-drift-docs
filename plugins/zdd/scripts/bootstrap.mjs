@@ -110,10 +110,10 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, lstatSync, chmodSync, openSync, writeSync, closeSync, rmSync, opendirSync } from "node:fs";
 import { findMapBlessings, proposeMove, blessingSlug, blessingFileText, removeMoved } from "./lib/blessing-move.mjs";
 import { scopeTag, repointLinks, linksToMoved } from "./lib/adr-split.mjs";
-import { inspect as inspectRelease, routeSteps } from "./check-release.mjs";
+import { inspect as inspectRelease, routePlan, moveCommand } from "./check-release.mjs";
 import { STARTERS, RECORD, DEFAULT_DIR, MAX_RECORD_BYTES, starterLibrary, fileHash, emptyRecord, parseRecord, isRecordPath, fixesFor, movedIds, cmpVersions } from "./lib/starters.mjs";
 import { join, dirname, basename, relative, resolve, posix } from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
@@ -901,11 +901,81 @@ function mergeLock(obj, version, mode, lock) {
     next = { ...next, source: { ...next.source, ref: tag } };
     notes.push(
       `${SETTINGS_FILE}: lock moved ${shown} → ${tag}. After this PR merges, each developer's next session prints the route ` +
-        `that moves their machine (the catalogue re-pointed by a project-scope marketplace add, relock, the plugin updates, one restart)`,
+        `that moves their machine — or, on a plugin before 0.14.1, the route the lock PR's description names (the catalogue re-pointed by a project-scope marketplace add, auto-update off put back, the plugin updates, one restart)`,
     );
   }
   if (next !== declared) obj.extraKnownMarketplaces = { ...ekm, [MARKETPLACE]: next };
   return notes;
+}
+
+// A JSON text read with each value's offsets (CR-390): an object is
+// { start, end, entries: [{ key, value }] }, any other value { start, end }.
+// Throws on text that is not JSON; the caller has parsed it already.
+function jsonSpans(text) {
+  let i = 0;
+  const ws = () => {
+    while (i < text.length && /\s/.test(text[i])) i++;
+  };
+  const str = () => {
+    const start = i++;
+    while (text[i] !== '"') i += text[i] === "\\" ? 2 : 1;
+    i++;
+    return { start, end: i, key: JSON.parse(text.slice(start, i)) };
+  };
+  const value = () => {
+    ws();
+    const start = i;
+    if (text[i] === "{") {
+      i++;
+      const entries = [];
+      ws();
+      while (text[i] !== "}") {
+        const k = str();
+        ws();
+        i++; // :
+        entries.push({ key: k.key, value: value() });
+        ws();
+        if (text[i] === ",") i++;
+        ws();
+      }
+      i++;
+      return { start, end: i, entries };
+    }
+    if (text[i] === "[") {
+      i++;
+      ws();
+      while (text[i] !== "]") {
+        value();
+        ws();
+        if (text[i] === ",") i++;
+        ws();
+      }
+      i++;
+      return { start, end: i };
+    }
+    if (text[i] === '"') return str();
+    while (i < text.length && !/[\s,}\]]/.test(text[i])) i++;
+    return { start, end: i };
+  };
+  return value();
+}
+
+// The settings text with "autoUpdate": false on our declaration and every
+// other byte as it was: the value replaced where the key is there, else the
+// key added after the declaration's last entry, on its own line at that
+// entry's indent when the object spans lines. null if it cannot be found.
+function setAutoUpdateOff(text) {
+  const at = (node, key) => node?.entries?.findLast((e) => e.key === key)?.value;
+  const decl = at(at(jsonSpans(text), "extraKnownMarketplaces"), MARKETPLACE);
+  if (!decl?.entries) return null;
+  const has = at(decl, "autoUpdate");
+  if (has) return text.slice(0, has.start) + "false" + text.slice(has.end);
+  const last = decl.entries.at(-1);
+  if (!last) return text.slice(0, decl.start + 1) + ' "autoUpdate": false ' + text.slice(decl.start + 1);
+  const between = text.slice(decl.start, last.value.start);
+  const line = /(\r?\n)([ \t]*)"[^"\n]*"\s*:\s*$/.exec(between);
+  const add = line ? `,${line[1]}${line[2]}"autoUpdate": false` : `, "autoUpdate": false`;
+  return text.slice(0, last.value.end) + add + text.slice(last.value.end);
 }
 
 // `relock` (0.14.1, decision 0050): the lock put back as ZDD writes it. The
@@ -936,11 +1006,73 @@ export function relock(root) {
     ledger.kept.push(SETTINGS_FILE);
     return done(`${SETTINGS_FILE}: auto-update is already off on the lock (${ref}) — nothing to do`);
   }
-  obj.extraKnownMarketplaces = { ...ekm, [MARKETPLACE]: { ...d, autoUpdate: false } };
-  let text = JSON.stringify(obj, null, 2) + "\n";
-  if (/\r\n/.test(existing)) text = text.replace(/\n/g, "\r\n");
+  const text = setAutoUpdateOff(existing);
+  if (text === null) return done(`${SETTINGS_FILE}: the ${MARKETPLACE} declaration could not be found in the text to edit in place — left untouched; set "autoUpdate": false on it by hand`);
   ledger.overwrite(SETTINGS_FILE, text);
   return done(`${SETTINGS_FILE}: auto-update switched off on the ${MARKETPLACE} declaration again (a project-scope marketplace add drops it), ${ref} kept — a locked release moves only by a PR`);
+}
+
+// For a teammate whose plugin predates move-machine (CR-387): their first
+// session after the lock PR merges runs the old plugin, whose line names the
+// old route, so the PR's description carries this one. Their pulled settings
+// file already keeps auto-update off, so `git restore` puts it back after
+// the add rewrites it.
+export function teammateNote(to) {
+  return `For teammates whose plugin is older than 0.14.1, put this in the lock PR's description: "After this merges and you pull, from the repo's folder: 1. \`claude plugin marketplace add "${MARKETPLACE_REPO}#${to}" --scope project\` (the catalogue is one per machine, and a restart may not move it); 2. \`git restore .claude/settings.json\` (that add drops auto-update off; the committed file keeps it); 3. \`claude plugin update ${ZDD_PLUGIN_ID} --scope project\` and \`claude plugin update mattpocock-skills@${MARKETPLACE} --scope project\` (\`install\` for one not installed); 4. restart Claude Code."`;
+}
+
+// How move-machine calls claude: ZDD_CLAUDE_BIN (a node script, for tests),
+// else `claude` on the PATH (Claude Code's native install is claude.exe on
+// Windows); on Windows a claude.cmd (an npm install) runs through cmd.exe,
+// whose arguments here are only the plan's, checked to a plain charset.
+function runClaude(argv) {
+  if (process.env.ZDD_CLAUDE_BIN) return spawnSync(process.execPath, [process.env.ZDD_CLAUDE_BIN, ...argv], { stdio: "inherit" });
+  const r = spawnSync("claude", argv, { stdio: "inherit" });
+  if (r.error?.code !== "ENOENT" || process.platform !== "win32") return r;
+  if (!argv.every((a) => /^[A-Za-z0-9@._#\/:-]+$/.test(a))) return r;
+  return spawnSync(process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", ["claude", ...argv].join(" ")], { stdio: "inherit", windowsVerbatimArguments: true });
+}
+
+// `move-machine` (0.14.1, decision 0050; CR-386, CR-388): the pin-move route
+// as one command. It runs routePlan's steps in order and stops at the first
+// that fails, exit 1, naming it; after the add it checks the catalogue is at
+// the lock, and after relock that the lock is ours, at that ref, with
+// auto-update off — before any plugin is updated. Run from the repo's folder
+// in a terminal or by the session; the restart is the developer's.
+export function moveMachine(root, { home } = {}) {
+  const r = inspectRelease(root, home, { host: true });
+  if (!r.lock) return { ok: false, lines: [`no lock of ours in ${SETTINGS_FILE} — nothing to move this machine to (\`upgrade --lock\` locks a repo, on the user's word)`] };
+  const plan = routePlan(r);
+  if (!plan.length) return { ok: true, lines: [`this machine is at ${r.lock} for this repo — nothing to move`] };
+  const lines = [];
+  const stop = (why) => ({ ok: false, lines: [...lines, `stopped: ${why} — nothing after it ran; fix that and run move-machine again`] });
+  for (const step of plan) {
+    if (step.relock) {
+      lines.push(...relock(root).notes);
+      let d;
+      try {
+        d = JSON.parse(readFileSync(join(root, SETTINGS_FILE), "utf8"))?.extraKnownMarketplaces?.[MARKETPLACE];
+      } catch {
+        d = undefined;
+      }
+      if (!isOurDeclaration(d) || d.source.ref !== r.lock || d.autoUpdate !== false) return stop(`${SETTINGS_FILE} does not lock ${r.lock} with auto-update off after relock`);
+      continue;
+    }
+    lines.push(`claude ${step.argv.join(" ")}`);
+    const res = runClaude(step.argv);
+    if (res.error || res.status !== 0) return stop(`\`claude ${step.argv.join(" ")}\` failed (${res.error ? res.error.code : `exit ${res.status}`})`);
+    if (step.moves) {
+      let ref = null;
+      try {
+        ref = JSON.parse(readFileSync(join(pluginsDir(home), "known_marketplaces.json"), "utf8"))?.[MARKETPLACE]?.source?.ref ?? null;
+      } catch {
+        /* named below */
+      }
+      if (ref !== step.moves) return stop(`the catalogue on this machine is at ${printable(String(ref))} after the add, not ${step.moves}`);
+    }
+  }
+  lines.push(`this machine is moved to ${r.lock} for this repo: restart Claude Code (installed is not loaded until a new session)`);
+  return { ok: true, lines };
 }
 
 // The repo's lock ref when the declaration is ours, else null.
@@ -2643,8 +2775,8 @@ export const UPGRADE_NOTES = {
       : []),
   ],
   "0.14.1": () => [
-    `0.14.1 takes the starter library to ${STARTERS.version} (npm ${STARTERS.package}): the nextjs starter gives a screen the calls of the local modules its page or layout imports, one hop, as react-router does. Where this repo copied nextjs, \`starters\` offers the fix (\`starters --move\` on a yes, \`starters --decline\` on a no); taken, screens whose content lives in a component gain refs, so derive --check moves those records (no id moves) and render --check moves graph.json and the human index. A gap that closes leaves its gaps.known or gaps.fine mark stale: lint warns, never fails, until \`gaps --forget=<id>\` removes it in the same PR`,
-    "0.14.1 re-points this machine's catalogue in the pin-move route (decision 0050): the catalogue is one per machine, shared by every repo on it, and a restart does not move it once another repo has set it. The session-start line, release-status and the lock move's next: note name `claude plugin marketplace add \"rich-rees/zero-drift-docs#<tag>\" --scope project`, then `bootstrap.mjs relock` (that add drops \"autoUpdate\": false; relock puts it back and changes nothing else), the plugin updates, one restart",
+    `0.14.1 takes the starter library to ${STARTERS.version} (npm ${STARTERS.package}): the nextjs starter gives a screen the calls of the local modules its page or layout imports, one hop, as react-router does. Where this repo copied nextjs, \`starters\` offers the fix (\`starters --move\` on a yes, \`starters --decline\` on a no); taken, screens whose content lives in a component gain refs, so derive --check moves those records (no id moves) and render --check moves graph.json and the human index. A gap that closes leaves its gaps.known or gaps.fine mark stale: lint warns, never fails, until \`gaps --forget=<id>\` removes it in the same PR; a closed known gap also leaves the agent index's and the human index's Known gaps`,
+    "0.14.1 re-points this machine's catalogue in the pin-move route (decision 0050): the catalogue is one per machine, shared by every repo on it, and a restart does not move it once another repo has set it. The session-start line, release-status and the lock move's next: note name one command, `bootstrap.mjs move-machine`: `claude plugin marketplace add \"rich-rees/zero-drift-docs#<tag>\" --scope project`, then relock (that add drops \"autoUpdate\": false; relock puts it back and changes nothing else), then the plugin updates, stopping at the first step that fails; then one restart. A teammate still on 0.14.0 sees its old route after the lock PR merges: the next: note gives the route to put in the PR's description",
     "0.14.1: the retired-names sweep no longer lists a line naming @rich-rees/zdd-engine beside @rich-rees/zdd, or the extractor scaffold's own text in a local adapter; a test scaffolded from now on writes the release pin key into its scratch config",
   ],
 };
@@ -3164,16 +3296,19 @@ function moveLockOnly(root, version, to, { plan = false, lock = false, remote, h
     /* no catalogue */
   }
   const ready = to === `v${version}` && catalogue === to;
-  // Not ready (0.14.1, decision 0050): the route the release check would
-  // print for `to`, named now rather than after a restart that would not
+  // Not ready (0.14.1, decision 0050): the command the release check would
+  // name for `to`, named now rather than after a restart that would not
   // move the catalogue. Outside Claude Code there is no catalogue to name.
-  const route = ready ? [] : routeSteps(inspectRelease(root, home, { lock: to }));
+  // Teammates whose plugin predates move-machine get theirs from the lock
+  // PR's description (CR-387).
+  const checked = ready ? null : inspectRelease(root, home, { lock: to });
+  const route = checked && routePlan(checked).length ? moveCommand(checked) : null;
   ledger.notes.push(
     ready
       ? `next: this session already runs ${to} and the catalogue on this machine is at ${to} — no restart: say "upgrade ZDD" again now (or carry straight on to its plan), and that run shows the rest of the changes before writing them`
-      : route.length
-        ? `next: from this repo's folder, ${route.join("; ")}. The catalogue is one per machine, shared by every repo on it, so this moves it for them too. Then say "upgrade ZDD" again: that run is ${to}'s own, and shows the rest of the changes before writing them`
-        : `next: restart Claude Code; the first line of the new session names the commands that move this machine to ${to} — run them and restart again; then say "upgrade ZDD" again: that run is ${to}'s own, and shows the rest of the changes before writing them`,
+      : route
+        ? `next: from this repo's folder, ${route}. The catalogue is one per machine, shared by every repo on it, so this moves it for them too. Then say "upgrade ZDD" again: that run is ${to}'s own, and shows the rest of the changes before writing them. ${teammateNote(to)}`
+        : `next: restart Claude Code; the first line of the new session names the commands that move this machine to ${to} — run them and restart again; then say "upgrade ZDD" again: that run is ${to}'s own, and shows the rest of the changes before writing them. ${teammateNote(to)}`,
   );
   return { version, plan, to, ready, ...ledgerOut(ledger), duplicates: [] };
 }
@@ -4446,7 +4581,7 @@ export function narrateReleaseStatus(s) {
   if (s.lockBehind || !s.lock) {
     line += s.ready
       ? ` this session already runs the newest release and the catalogue is there too: move the lock with \`upgrade --to=${s.newest}\` and go straight on to step 2 in this session — no restart`
-      : ` moving the lock: \`upgrade --to=${s.newest}\` writes it and names the route that moves this machine — the catalogue re-pointed by a project-scope marketplace add (it is one per machine, and a restart does not move it once another repo has set it), relock, the plugin updates, one restart`;
+      : ` moving the lock: \`upgrade --to=${s.newest}\` writes it and names \`bootstrap.mjs move-machine\`, which moves this machine — the catalogue re-pointed by a project-scope marketplace add (it is one per machine, and a restart does not move it once another repo has set it), auto-update off put back, the plugin updates — then one restart`;
   }
   return line;
 }
@@ -4511,6 +4646,10 @@ if (process.argv[1] && posixify(process.argv[1]).endsWith("/scripts/bootstrap.mj
     } else if (cmd === "estimate") {
       const e = estimate(root);
       process.stdout.write(flags.json ? JSON.stringify(e, null, 2) + "\n" : narrateEstimate(e) + "\n");
+    } else if (cmd === "move-machine") {
+      const r = moveMachine(root, { home: flags.home });
+      process.stdout.write(r.lines.map(printable).join("\n") + "\n");
+      if (!r.ok) process.exit(1);
     } else if (cmd === "relock") {
       const r = relock(root);
       process.stdout.write(flags.json ? JSON.stringify(r, null, 2) + "\n" : r.notes.map(printable).join("\n") + "\n");
@@ -4518,7 +4657,7 @@ if (process.argv[1] && posixify(process.argv[1]).endsWith("/scripts/bootstrap.mj
       const s = releaseStatus(root, typeof flags.remote === "string" ? flags.remote : undefined, flags.home);
       process.stdout.write(flags.json ? JSON.stringify(s) + "\n" : printable(narrateReleaseStatus(s)) + "\n");
     } else {
-      process.stderr.write("Usage: bootstrap.mjs <preflight [--registry=<url>] [--github=<url>]|detect|estimate|apply --answers=<file>|check [--status|--done]|adapters [--raise]|unread [--mark=<ids> --why=<reason>] [--forget=<ids>] [--raise]|gaps [--fine=<ids>|--known=<ids> --why=<reason>] [--forget=<ids>] [--raise] [--check]|library [--decline[=<names>]]|starters [--prove|--move|--decline]|preview --extractors=<a,b>|upgrade [--plan] [--lock] [--drop=<ids>] [--move-blessings=<token> [--kinds=<name>:<copy|extend>,…]] [--to=vX.Y.Z]|split-adrs [--plan] [--token=<token> --harness=<nums> --application=<nums>] [--dir=<rel> --index=<rel>]|relock|release-status [--remote=<url>]> [--root=<dir>] [--date=YYYY-MM-DD] [--home=<dir>] [--json]\n");
+      process.stderr.write("Usage: bootstrap.mjs <preflight [--registry=<url>] [--github=<url>]|detect|estimate|apply --answers=<file>|check [--status|--done]|adapters [--raise]|unread [--mark=<ids> --why=<reason>] [--forget=<ids>] [--raise]|gaps [--fine=<ids>|--known=<ids> --why=<reason>] [--forget=<ids>] [--raise] [--check]|library [--decline[=<names>]]|starters [--prove|--move|--decline]|preview --extractors=<a,b>|upgrade [--plan] [--lock] [--drop=<ids>] [--move-blessings=<token> [--kinds=<name>:<copy|extend>,…]] [--to=vX.Y.Z]|split-adrs [--plan] [--token=<token> --harness=<nums> --application=<nums>] [--dir=<rel> --index=<rel>]|relock|move-machine|release-status [--remote=<url>]> [--root=<dir>] [--date=YYYY-MM-DD] [--home=<dir>] [--json]\n");
       process.exit(2);
     }
   } catch (e) {

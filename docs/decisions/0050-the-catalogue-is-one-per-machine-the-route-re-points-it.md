@@ -35,19 +35,34 @@ a different tag stays where it is.
 2. **Whenever the catalogue is not at the lock, the route re-points it**:
    (remove a stray declaration by its scope, 0022) → `claude plugin
    marketplace add "rich-rees/zero-drift-docs#<lock>" --scope project` →
-   `node "<this plugin>/scripts/bootstrap.mjs" relock` → `claude plugin
-   update` (or `install`) each plugin `--scope project` → one restart.
-   The same route on a machine that never fetched the catalogue.
+   relock → `claude plugin update` (or `install`) each plugin `--scope
+   project` → one restart. The same route on a machine that never fetched
+   the catalogue. **The line names one command**, `node
+   '<this plugin>/scripts/bootstrap.mjs' move-machine` (single quotes, which
+   neither bash nor PowerShell expands inside), which runs those steps,
+   **stops at the first that fails**, and checks before any plugin step that
+   the catalogue is at the lock and the lock keeps auto-update off; the
+   restart is said in words after it (the campaign's CR-386, CR-388,
+   CR-389: a `;`-joined list ran on past a failed step, ended in prose, and
+   quoted the path only against spaces).
 3. **`bootstrap.mjs relock`** puts the lock back as ZDD writes it:
-   `"autoUpdate": false`, the ref and every other key as they are, CRLF
-   kept. It never locks a repo, moves a ref, or touches a declaration that
+   `"autoUpdate": false`, edited in place, every other byte of the file as
+   it was (CR-390: not reserialised). It never locks a repo, moves a ref, or touches a declaration that
    is not ours or a file it cannot read. It runs right after the add, from
    the bootstrap beside the running check, which the updates leave in
    place until the restart.
-4. **The upgrade's `next:` note names the route itself** for the tag it
+4. **The upgrade's `next:` note names the command itself** for the tag it
    moved to, in a plan too, instead of "restart and run what the next
    session's first line names, then restart again"; `release-status` says
    the same. Under Codex the note still says restart.
+5. **Teammates on an older plugin get the route from the lock PR**
+   (CR-387). Their first session after the lock PR merges runs the plugin
+   they have, whose line names that release's route — before 0.14.1, the
+   restart that leaves a catalogue another repo set where it is. The
+   `next:` note gives the upgrader the route to put in the PR's
+   description: the add at the tag, `git restore .claude/settings.json`
+   (their pulled file keeps auto-update off), the updates, a restart. From
+   0.14.1 on, a teammate's own line names `move-machine`.
 
 ## Why / rejected alternatives
 
@@ -64,7 +79,9 @@ a different tag stays where it is.
 
 ## Consequences
 
-- One restart in the route instead of two; the line is one step longer.
+- One restart in the route instead of two; one command in place of a list.
+- A teammate's first move to 0.14.1 depends on the PR description: a hook
+  that has already shipped cannot be taught a new route.
 - The add rewrites the tracked `.claude/settings.json`; `relock` returns
   it to ZDD's bytes when the add kept everything else (2.1.312 does).
 - A new subcommand, no config-schema or metadata-contract change: a patch.

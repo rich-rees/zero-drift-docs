@@ -144,6 +144,10 @@ test("upgrade moves our lock's ref to this release, keeps its other fields and e
   assert.equal(after.extraKnownMarketplaces["zero-drift-docs"].autoUpdate, false);
   assert.ok(json.notes.some((n) => n.includes(`lock moved v1.3.1 → v${PLUGIN_VERSION}.`)), json.notes.join("\n"));
   assert.ok(json.notes.some((n) => /after this PR merges.*next session/i.test(n)), json.notes.join("\n"));
+  // CR-400 (decision 0050): the route it names re-points the catalogue and keeps auto-update off, one restart.
+  const moved = json.notes.find((n) => n.includes("lock moved")) ?? "";
+  assert.match(moved, /a plugin before 0\.14\.1, the route the lock PR's description names \(the catalogue re-pointed by a project-scope marketplace add, auto-update off put back, the plugin updates, one restart\)/, moved);
+  assert.doesNotMatch(moved, /restart, claude plugin update, restart/, moved);
   const again = JSON.parse(bootstrap(repo, ["upgrade", "--json"]));
   assert.ok(!again.wrote.includes(".claude/settings.json"), "idempotent");
 });
@@ -215,7 +219,7 @@ test("apply keeps our own lock at another tag, and names it (CR-020: the case th
 // `relock` puts the lock back as ZDD writes it: auto-update off, the ref and
 // every other key as they are. It never locks a repo, moves a ref or touches
 // a declaration that is not ours.
-test("relock puts auto-update off back on the declaration a project-scope marketplace add rewrote, keeps every other byte, and is silent the second time", () => {
+test("relock puts auto-update off back on the declaration a project-scope marketplace add rewrote, keeps every other byte, and says so and writes nothing the second time", () => {
   const repo = join(scratch, "relock");
   mkdirSync(join(repo, ".claude"), { recursive: true });
   const added = { enabledPlugins: PLUGIN_SETTINGS, extraKnownMarketplaces: { "zero-drift-docs": { source: { source: "github", repo: "rich-rees/zero-drift-docs", ref: "v0.13.0" } } }, model: "x" };
@@ -254,4 +258,36 @@ test("relock never locks, moves or touches what is not ZDD's: no settings, no lo
     if (text === null) assert.ok(!existsSync(settingsPath(repo)), name);
     else assert.equal(readFileSync(settingsPath(repo), "utf8"), text, name);
   }
+});
+
+// CR-390, CR-398: relock edits the one value in place — every other byte of
+// the adopter's file as it was, whatever its formatting, key order or
+// extra keys beside and inside the declaration's source.
+test("relock changes only the autoUpdate value: compact, four-space, tab and CRLF files, number-like keys, extra keys beside and inside source", () => {
+  const decl = (extra = "") => `{ "source": { "source": "github", "repo": "rich-rees/zero-drift-docs", "ref": "v0.13.0", "mine": 1 }${extra} }`;
+  const cases = [
+    [`{"10":{"a":1},"2":true,"extraKnownMarketplaces":{"zero-drift-docs":${decl()}}}`, `{"10":{"a":1},"2":true,"extraKnownMarketplaces":{"zero-drift-docs":${decl(', "autoUpdate": false')}}}`],
+    [`{\n    "extraKnownMarketplaces": {\n        "zero-drift-docs": {\n            "source": { "source": "github", "repo": "rich-rees/zero-drift-docs", "ref": "v0.13.0" },\n            "note": "keep me"\n        }\n    }\n}\n`,
+     `{\n    "extraKnownMarketplaces": {\n        "zero-drift-docs": {\n            "source": { "source": "github", "repo": "rich-rees/zero-drift-docs", "ref": "v0.13.0" },\n            "note": "keep me",\n            "autoUpdate": false\n        }\n    }\n}\n`],
+    [`{\r\n\t"extraKnownMarketplaces": {\r\n\t\t"zero-drift-docs": {\r\n\t\t\t"source": { "source": "github", "repo": "rich-rees/zero-drift-docs", "ref": "v0.13.0" }\r\n\t\t}\r\n\t}\r\n}\r\n`,
+     `{\r\n\t"extraKnownMarketplaces": {\r\n\t\t"zero-drift-docs": {\r\n\t\t\t"source": { "source": "github", "repo": "rich-rees/zero-drift-docs", "ref": "v0.13.0" },\r\n\t\t\t"autoUpdate": false\r\n\t\t}\r\n\t}\r\n}\r\n`],
+    [`{ "extraKnownMarketplaces": { "zero-drift-docs": { "autoUpdate": true, "source": { "source": "github", "repo": "rich-rees/zero-drift-docs", "ref": "v0.13.0" } } } }`,
+     `{ "extraKnownMarketplaces": { "zero-drift-docs": { "autoUpdate": false, "source": { "source": "github", "repo": "rich-rees/zero-drift-docs", "ref": "v0.13.0" } } } }`],
+  ];
+  cases.forEach(([before, after], i) => {
+    const repo = join(scratch, `relock-bytes-${i}`);
+    mkdirSync(join(repo, ".claude"), { recursive: true });
+    writeFileSync(settingsPath(repo), before);
+    const r = JSON.parse(bootstrap(repo, ["relock", "--json"]));
+    assert.equal(readFileSync(settingsPath(repo), "utf8"), after, `case ${i}: ${r.notes.join(" ")}`);
+  });
+  // extraKnownMarketplaces that is not an object: named, nothing written.
+  const repo = join(scratch, "relock-ekm-array");
+  mkdirSync(join(repo, ".claude"), { recursive: true });
+  const text = `{ "extraKnownMarketplaces": [] }\n`;
+  writeFileSync(settingsPath(repo), text);
+  const r = JSON.parse(bootstrap(repo, ["relock", "--json"]));
+  assert.deepEqual(r.wrote, []);
+  assert.equal(readFileSync(settingsPath(repo), "utf8"), text);
+  assert.ok(r.notes.some((n) => /no lock/.test(n)), r.notes.join("\n"));
 });
