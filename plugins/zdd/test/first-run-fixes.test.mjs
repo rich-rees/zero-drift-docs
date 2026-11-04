@@ -272,10 +272,24 @@ test("CR-314: upgrade --to on a machine that already runs the target with the ca
   const j = runJson(repo, ["upgrade", `--to=v${VERSION}`, `--remote=${remote}`], h);
   assert.equal(j.ready, true);
   assert.ok(j.notes.some((n) => /^next: this session already runs v[\d.]+ and the catalogue on this machine is at v[\d.]+ — no restart: say "upgrade ZDD" again now/.test(n)), j.notes.join("\n"));
-  const repo2 = adopted("to-not-ready", { settings: { extraKnownMarketplaces: LOCK("v2.1.0") } });
-  const j2 = runJson(repo2, ["upgrade", `--to=v${VERSION}`, `--remote=${remote}`], join(scratch, "home-empty-2"));
-  assert.equal(j2.ready, false);
-  assert.ok(j2.notes.some((n) => /^next: restart Claude Code; the first line of the new session names the commands/.test(n)), j2.notes.join("\n"));
+  // Not ready, under Claude Code (0.14.1, decision 0050): the note names the
+  // route itself — the catalogue re-pointed at the new tag, relock, the
+  // installs, one restart — computed for the tag it moved to, in a plan too.
+  // Under Codex there is no catalogue to name: restart, as before.
+  const upgradeTo = (repo, host, extra = []) => {
+    const env = { ...process.env, ...host };
+    if (!host.CLAUDECODE) delete env.CLAUDECODE;
+    return JSON.parse(execFileSync(process.execPath, [SCRIPT, "upgrade", `--to=v${VERSION}`, `--remote=${remote}`, ...extra, `--root=${repo}`, `--home=${join(scratch, "home-empty-2")}`, "--date=2026-10-09", "--json"], { encoding: "utf8", env }));
+  };
+  const route = new RegExp(`^next: from this repo's folder, claude plugin marketplace add "rich-rees/zero-drift-docs#v${VERSION.replace(/\./g, "\\.")}" --scope project; node "[^"]+bootstrap\\.mjs" relock; claude plugin install zdd@zero-drift-docs --scope project; claude plugin install mattpocock-skills@zero-drift-docs --scope project; then restart Claude Code\\. The catalogue is one per machine`);
+  for (const plan of [["--plan"], []]) {
+    const repo2 = adopted(`to-not-ready${plan.length ? "-plan" : ""}`, { settings: { extraKnownMarketplaces: LOCK("v2.1.0") } });
+    const j2 = upgradeTo(repo2, { CLAUDECODE: "1" }, plan);
+    assert.equal(j2.ready, false);
+    assert.ok(j2.notes.some((n) => route.test(n)), j2.notes.join("\n"));
+  }
+  const codex = upgradeTo(adopted("to-not-ready-codex", { settings: { extraKnownMarketplaces: LOCK("v2.1.0") } }), {});
+  assert.ok(codex.notes.some((n) => /^next: restart Claude Code; the first line of the new session names the commands/.test(n)), codex.notes.join("\n"));
 });
 
 test("CR-315/318: the pinned copy is found in a cache larger than the walk bound; a malformed settings file makes enablement unknown and is said; a symlinked cache entry is no install", (t) => {

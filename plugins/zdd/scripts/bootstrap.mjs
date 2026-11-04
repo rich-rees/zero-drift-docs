@@ -110,6 +110,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, lstatSync, chmodSync, openSync, writeSync, closeSync, rmSync, opendirSync } from "node:fs";
 import { findMapBlessings, proposeMove, blessingSlug, blessingFileText, removeMoved } from "./lib/blessing-move.mjs";
 import { scopeTag, repointLinks, linksToMoved } from "./lib/adr-split.mjs";
+import { inspect as inspectRelease, routeSteps } from "./check-release.mjs";
 import { STARTERS, RECORD, DEFAULT_DIR, MAX_RECORD_BYTES, starterLibrary, fileHash, emptyRecord, parseRecord, isRecordPath, fixesFor, movedIds, cmpVersions } from "./lib/starters.mjs";
 import { join, dirname, basename, relative, resolve, posix } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -900,11 +901,46 @@ function mergeLock(obj, version, mode, lock) {
     next = { ...next, source: { ...next.source, ref: tag } };
     notes.push(
       `${SETTINGS_FILE}: lock moved ${shown} → ${tag}. After this PR merges, each developer's next session prints the route ` +
-        `that moves their machine (restart, claude plugin update, restart)`,
+        `that moves their machine (the catalogue re-pointed by a project-scope marketplace add, relock, the plugin updates, one restart)`,
     );
   }
   if (next !== declared) obj.extraKnownMarketplaces = { ...ekm, [MARKETPLACE]: next };
   return notes;
+}
+
+// `relock` (0.14.1, decision 0050): the lock put back as ZDD writes it. The
+// route that re-points this machine's catalogue runs `claude plugin
+// marketplace add "<repo>#<tag>" --scope project`, which rewrites this
+// repo's declaration without "autoUpdate": false (Claude Code 2.1.312).
+// relock switches it off again and changes nothing else: never a lock where
+// there is none (that is `upgrade --lock`), never a ref, never a declaration
+// that is not ours, never a file it cannot read.
+export function relock(root) {
+  const ledger = new Ledger(root);
+  const done = (note) => (ledger.notes.push(note), ledgerOut(ledger));
+  if (!ledger.exists(SETTINGS_FILE)) return done(`no ${SETTINGS_FILE} here — nothing to relock (relock never locks a repo: \`upgrade --lock\` does, on the user's word)`);
+  const existing = ledger.read(SETTINGS_FILE);
+  let obj = null;
+  try {
+    obj = JSON.parse(existing);
+  } catch {
+    /* named below */
+  }
+  if (!isPlainObject(obj)) return done(`${SETTINGS_FILE}: not valid JSON (an object) — left untouched; set "autoUpdate": false on the ${MARKETPLACE} declaration by hand`);
+  const ekm = obj.extraKnownMarketplaces;
+  const d = isPlainObject(ekm) ? ekm[MARKETPLACE] : undefined;
+  if (d === undefined) return done(`${SETTINGS_FILE}: no lock — nothing to relock (relock never locks a repo: \`upgrade --lock\` does, on the user's word)`);
+  if (!isOurDeclaration(d)) return done(`${SETTINGS_FILE}: declares ${MARKETPLACE} from ${describeSource(d)}, not this plugin's repository (${MARKETPLACE_REPO}) — yours, left as it is`);
+  const ref = typeof d.source.ref === "string" ? d.source.ref.slice(0, 40) : "(no ref)";
+  if (d.autoUpdate === false) {
+    ledger.kept.push(SETTINGS_FILE);
+    return done(`${SETTINGS_FILE}: auto-update is already off on the lock (${ref}) — nothing to do`);
+  }
+  obj.extraKnownMarketplaces = { ...ekm, [MARKETPLACE]: { ...d, autoUpdate: false } };
+  let text = JSON.stringify(obj, null, 2) + "\n";
+  if (/\r\n/.test(existing)) text = text.replace(/\n/g, "\r\n");
+  ledger.overwrite(SETTINGS_FILE, text);
+  return done(`${SETTINGS_FILE}: auto-update switched off on the ${MARKETPLACE} declaration again (a project-scope marketplace add drops it), ${ref} kept — a locked release moves only by a PR`);
 }
 
 // The repo's lock ref when the declaration is ours, else null.
@@ -3096,10 +3132,16 @@ function moveLockOnly(root, version, to, { plan = false, lock = false, remote, h
     /* no catalogue */
   }
   const ready = to === `v${version}` && catalogue === to;
+  // Not ready (0.14.1, decision 0050): the route the release check would
+  // print for `to`, named now rather than after a restart that would not
+  // move the catalogue. Outside Claude Code there is no catalogue to name.
+  const route = ready ? [] : routeSteps(inspectRelease(root, home, { lock: to }));
   ledger.notes.push(
     ready
       ? `next: this session already runs ${to} and the catalogue on this machine is at ${to} — no restart: say "upgrade ZDD" again now (or carry straight on to its plan), and that run shows the rest of the changes before writing them`
-      : `next: restart Claude Code; the first line of the new session names the commands that move this machine to ${to} — run them and restart again; then say "upgrade ZDD" again: that run is ${to}'s own, and shows the rest of the changes before writing them`,
+      : route.length
+        ? `next: from this repo's folder, ${route.join("; ")}. The catalogue is one per machine, shared by every repo on it, so this moves it for them too. Then say "upgrade ZDD" again: that run is ${to}'s own, and shows the rest of the changes before writing them`
+        : `next: restart Claude Code; the first line of the new session names the commands that move this machine to ${to} — run them and restart again; then say "upgrade ZDD" again: that run is ${to}'s own, and shows the rest of the changes before writing them`,
   );
   return { version, plan, to, ready, ...ledgerOut(ledger), duplicates: [] };
 }
@@ -4372,7 +4414,7 @@ export function narrateReleaseStatus(s) {
   if (s.lockBehind || !s.lock) {
     line += s.ready
       ? ` this session already runs the newest release and the catalogue is there too: move the lock with \`upgrade --to=${s.newest}\` and go straight on to step 2 in this session — no restart`
-      : ` moving the lock needs a restart afterwards: the catalogue follows the lock on restart, then the update commands the first line of the next session names, then a second restart`;
+      : ` moving the lock: \`upgrade --to=${s.newest}\` writes it and names the route that moves this machine — the catalogue re-pointed by a project-scope marketplace add (it is one per machine, and a restart does not move it once another repo has set it), relock, the plugin updates, one restart`;
   }
   return line;
 }
@@ -4437,11 +4479,14 @@ if (process.argv[1] && posixify(process.argv[1]).endsWith("/scripts/bootstrap.mj
     } else if (cmd === "estimate") {
       const e = estimate(root);
       process.stdout.write(flags.json ? JSON.stringify(e, null, 2) + "\n" : narrateEstimate(e) + "\n");
+    } else if (cmd === "relock") {
+      const r = relock(root);
+      process.stdout.write(flags.json ? JSON.stringify(r, null, 2) + "\n" : r.notes.map(printable).join("\n") + "\n");
     } else if (cmd === "release-status") {
       const s = releaseStatus(root, typeof flags.remote === "string" ? flags.remote : undefined, flags.home);
       process.stdout.write(flags.json ? JSON.stringify(s) + "\n" : printable(narrateReleaseStatus(s)) + "\n");
     } else {
-      process.stderr.write("Usage: bootstrap.mjs <preflight [--registry=<url>] [--github=<url>]|detect|estimate|apply --answers=<file>|check [--status|--done]|adapters [--raise]|unread [--mark=<ids> --why=<reason>] [--forget=<ids>] [--raise]|gaps [--fine=<ids>|--known=<ids> --why=<reason>] [--forget=<ids>] [--raise] [--check]|library [--decline[=<names>]]|starters [--prove|--move|--decline]|preview --extractors=<a,b>|upgrade [--plan] [--lock] [--drop=<ids>] [--move-blessings=<token> [--kinds=<name>:<copy|extend>,…]] [--to=vX.Y.Z]|split-adrs [--plan] [--token=<token> --harness=<nums> --application=<nums>] [--dir=<rel> --index=<rel>]|release-status [--remote=<url>]> [--root=<dir>] [--date=YYYY-MM-DD] [--home=<dir>] [--json]\n");
+      process.stderr.write("Usage: bootstrap.mjs <preflight [--registry=<url>] [--github=<url>]|detect|estimate|apply --answers=<file>|check [--status|--done]|adapters [--raise]|unread [--mark=<ids> --why=<reason>] [--forget=<ids>] [--raise]|gaps [--fine=<ids>|--known=<ids> --why=<reason>] [--forget=<ids>] [--raise] [--check]|library [--decline[=<names>]]|starters [--prove|--move|--decline]|preview --extractors=<a,b>|upgrade [--plan] [--lock] [--drop=<ids>] [--move-blessings=<token> [--kinds=<name>:<copy|extend>,…]] [--to=vX.Y.Z]|split-adrs [--plan] [--token=<token> --harness=<nums> --application=<nums>] [--dir=<rel> --index=<rel>]|relock|release-status [--remote=<url>]> [--root=<dir>] [--date=YYYY-MM-DD] [--home=<dir>] [--json]\n");
       process.exit(2);
     }
   } catch (e) {

@@ -434,8 +434,15 @@ merge gate.
 
 Updating the plugin never touches your repo; moving the repo to a newer release
 is a choice you make. Say **"upgrade ZDD"**: it checks for a newer release and,
-on your yes, moves the repo's lock — then you restart, run the commands the
-session's first line names, restart again, and say "upgrade ZDD" once more.
+on your yes, moves the repo's lock and names the commands that move this
+machine — run them, restart once, and say "upgrade ZDD" once more. Claude
+Code keeps one catalogue per machine, shared by every repo on it, and a
+restart does not move it once another repo has set it: so the commands re-point it with
+`claude plugin marketplace add "rich-rees/zero-drift-docs#vX.Y.Z" --scope
+project`, then `bootstrap.mjs relock` puts back the `"autoUpdate": false`
+that command drops from `.claude/settings.json`. Two repos on different
+releases on one machine move it each time you switch between them; the
+session-start line names the route whenever it is elsewhere.
 That second run is the new release's own: it shows every file it will change
 (config, engine pins, `zdd/instructions.md`, the lock), names any paragraph
 in your `CLAUDE.md` / `AGENTS.md` that speaks to a rule ZDD's instructions now

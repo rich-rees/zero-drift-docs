@@ -1,6 +1,6 @@
 # 0022 — The pin-move route removes a stray declaration first
 
-**Date:** 2026-10-08 · **Status:** accepted · **Origin:** 2.2.0, from 2.1.1. When a PR moves a repo's lock, every other developer runs the *pin-move route*. 2.1.0's release check printed a remove → add → install route; 2.1.1 replaced it with restart → `claude plugin update` → restart, observed working on another PC. On Rich's laptop the same restart route **failed**: coming from 1.3.1, the catalogue stayed at `v1.3.1` and `plugin update` said "already at the latest version". Only remove → `add …@<tag> --scope project` → install → restart worked.
+**Date:** 2026-10-08 · **Status:** accepted; the restart that moves the catalogue superseded by [0050](0050-the-catalogue-is-one-per-machine-the-route-re-points-it.md) (2026-11-04: a catalogue another repo set stays at its tag on a restart, so the route re-points it with a project-scope `marketplace add` and `relock`, one restart) — the stray-declaration step stands · **Origin:** 2.2.0, from 2.1.1. When a PR moves a repo's lock, every other developer runs the *pin-move route*. 2.1.0's release check printed a remove → add → install route; 2.1.1 replaced it with restart → `claude plugin update` → restart, observed working on another PC. On Rich's laptop the same restart route **failed**: coming from 1.3.1, the catalogue stayed at `v1.3.1` and `plugin update` said "already at the latest version". Only remove → `add …@<tag> --scope project` → install → restart worked.
 
 ## What the experiment established (2026-10-08, Claude Code 2.1.289 → 2.1.295)
 

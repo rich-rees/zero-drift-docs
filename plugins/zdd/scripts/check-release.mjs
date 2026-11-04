@@ -7,22 +7,26 @@
 // itself, so when a PR moves the lock every other developer's next session
 // runs the old release until they refresh — and the mismatch was silent.
 // This prints one loud line naming expected and found, then the pin-move
-// route: restart, `claude plugin update`, restart again — preceded, only on
-// a machine that has one, by removing a stray declaration (below). Advisory,
-// never blocking.
+// route: when the catalogue is elsewhere, `claude plugin marketplace add
+// "<repo>#<lock>" --scope project` and `bootstrap.mjs relock`; then
+// `claude plugin update` (or install) for each plugin; then one restart —
+// preceded, only on a machine that has one, by removing a stray declaration
+// (below). Advisory, never blocking.
 //
 // Three records are compared against the lock, all under Claude Code's
 // plugins folder (~/.claude/plugins, or CLAUDE_CONFIG_DIR's — 2.2.1):
 //   - the catalogue: known_marketplaces.json → zero-drift-docs.source.ref.
-//     One downloaded catalogue per machine, shared by every repo. It follows
-//     the repo's declared ref on a restart — unless the user's settings (or
-//     this repo's local settings) ALSO declare zero-drift-docs, which a plain
-//     `claude plugin marketplace add` does silently: that declaration holds
-//     the catalogue where it is (decision 0022, reproduced on clean profiles
-//     for 2.2.0). So the route first removes the stray declaration by its
-//     scope — the catalogue and installs survive while the repo declares the
-//     marketplace. `marketplace update` keeps the recorded ref (2.0.0), so
-//     it is never part of the route, and neither is an add.
+//     One downloaded catalogue per machine, shared by every repo on it.
+//     A restart moves it to a repo's lock only in some cases (0022's
+//     profile D); one another repo set at a different tag stays where it
+//     is (the 0.14.0 smoke run, twice on one machine; decision 0050,
+//     0.14.1, superseding 0022's restart), so the route
+//     re-points it with a project-scope add, which declares nothing at user
+//     scope but rewrites this repo's declaration without auto-update off —
+//     `relock` puts that back. A user (or this repo's local) declaration of
+//     zero-drift-docs also holds the catalogue (decision 0022), so the route
+//     first removes a stray one by its scope. `marketplace update` keeps the
+//     recorded ref (2.0.0), so it is never part of the route.
 //   - zdd@zero-drift-docs installed for THIS project path
 //     (installed_plugins.json, scope project, projectPath = the repo).
 //   - mattpocock-skills@zero-drift-docs installed for this project, against
@@ -39,10 +43,13 @@
 
 import { readFileSync, lstatSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { parseArgs, adopterRoot, pocockPin, ZDD_PLUGIN_ID, MAX_CONFIG_BYTES, MARKETPLACE, MARKETPLACE_REPO, isOurDeclaration, claudeDir, pluginsDir, userSettingsLabel } from "./lib/repo.mjs";
 
 export { MARKETPLACE };
 const POCOCK_ID = `mattpocock-skills@${MARKETPLACE}`;
+// The bootstrap beside this check, forward slashes so either shell reads it.
+const BOOTSTRAP = fileURLToPath(new URL("./bootstrap.mjs", import.meta.url)).replace(/\\/g, "/");
 const TAG = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?$/;
 const printable = (s) => String(s).replace(/[\x00-\x1f\x7f]/g, "?").slice(0, 120);
 const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
@@ -95,8 +102,10 @@ export function strayDeclarations(root, home) {
 // starts (verified on 2.1.295, even when the parent shell lacked it).
 const underClaudeCode = () => Boolean(process.env.CLAUDECODE);
 
-export function inspect(root, home) {
-  const lock = lockedRef(root);
+// `lock`: the tag to check against instead of the repo's (the upgrade's
+// `next:` note, for the tag it moves to — in a plan, before the write).
+export function inspect(root, home, { lock: wanted = null } = {}) {
+  const lock = wanted !== null && TAG.test(String(wanted)) ? String(wanted) : lockedRef(root);
   if (!lock || !underClaudeCode()) return { lock, mismatches: [] };
   const expectedZdd = lock.slice(1);
   const plugins = pluginsDir(home);
@@ -151,25 +160,36 @@ export function narrate(r) {
         : `; ${where[d.scope]} also declare ${MARKETPLACE}${d.ref ? ` at ${printable(d.ref)}` : ""}, which holds the catalogue there`,
     )
     .join("");
-  // The pin-move route (2.1.1; decision 0022): with no stray declaration, a restart
-  // moves the catalogue to the lock, `plugin update` moves this project's
-  // install to the release the catalogue holds, a second restart loads it.
-  // A plugin with no install for this project has nothing to update, so it
-  // is installed. `update` names the project scope, as the found
-  // install is this project's: the route PressPlay's crossing to 0.11.0
-  // proved (ZDD-10). While the catalogue is behind, the expected Pocock version
-  // is the running plugin's guess — the locked release may move it — so
-  // every installed plugin is updated, a no-op where it is current (CR-006).
+  const catalogueMoved = r.mismatches.some((m) => m.what === "catalogue");
+  const why = catalogueMoved ? ` The catalogue is one per machine, shared by every repo on it: a restart does not move it once another repo has set it, so it is re-pointed here — a repo on another release moves it again.` : "";
+  return [`ZDD release mismatch: ${said}${strayText}. Fix, from this repo's folder: ${routeSteps(r).join("; ")}.${why} (Installed is not loaded: this line clears on the next session.)`];
+}
+
+// The pin-move route as steps (0.14.1, decision 0050), for the line above
+// and for the upgrade's `next:` note after it moves the lock. A stray
+// declaration of ours is removed by its scope first (decision 0022). When
+// the catalogue is not at the lock, a project-scope add re-points it — a
+// restart would not — and `relock` puts back the auto-update off the add
+// drops, run from the bootstrap beside this check, which the updates leave
+// in place until the restart. Then each plugin: `update` names the project
+// scope, as the found install is this project's (the route PressPlay's
+// crossing to 0.11.0 proved, ZDD-10); one with no install for this project
+// is installed. While the catalogue is behind, the expected Pocock version
+// is the running plugin's guess — the locked release may move it — so every
+// installed plugin is updated, a no-op where it is current (CR-006). One
+// restart loads it all.
+export function routeSteps(r) {
   const catalogueMoved = r.mismatches.some((m) => m.what === "catalogue");
   const found = { [ZDD_PLUGIN_ID]: r.found?.zdd ?? null, [POCOCK_ID]: r.found?.pocock ?? null };
   const plugins = [ZDD_PLUGIN_ID, POCOCK_ID]
     .filter((id) => r.mismatches.some((m) => m.what === id) || (catalogueMoved && found[id] !== null))
     .map((id) => (found[id] === null ? `claude plugin install ${id} --scope project` : `claude plugin update ${id} --scope project`));
   const steps = [];
+  const strays = Array.isArray(r.strayDeclarations) ? r.strayDeclarations.filter((d) => d.scope === "user" || d.scope === "local") : [];
   for (const d of strays.filter((x) => x.ours !== false)) steps.push(`claude plugin marketplace remove ${MARKETPLACE} --scope ${d.scope}`);
-  if (catalogueMoved) steps.push(`restart Claude Code (the catalogue follows this repo's lock on restart)`);
-  if (plugins.length) steps.push(...plugins, catalogueMoved ? "then restart Claude Code again" : "then restart Claude Code");
-  return [`ZDD release mismatch: ${said}${strayText}. Fix, from this repo's folder: ${steps.join("; ")}. (Installed is not loaded: this line clears on the next session.)`];
+  if (catalogueMoved) steps.push(`claude plugin marketplace add "${MARKETPLACE_REPO}#${r.lock}" --scope project`, `node "${BOOTSTRAP}" relock`);
+  if (plugins.length || catalogueMoved) steps.push(...plugins, "then restart Claude Code");
+  return steps;
 }
 
 function main() {

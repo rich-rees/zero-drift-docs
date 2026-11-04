@@ -208,3 +208,50 @@ test("apply keeps our own lock at another tag, and names it (CR-020: the case th
   assert.deepEqual(readSettings(repo).extraKnownMarketplaces, older);
   assert.ok(json.notes.some((n) => /locked to v1\.3\.1 — kept; moving the lock is upgrade's job/.test(n)), json.notes.join("\n"));
 });
+
+// 0.14.1 (decision 0050): `claude plugin marketplace add "<repo>#<tag>"
+// --scope project` re-points the machine's catalogue, and rewrites this
+// repo's declaration without "autoUpdate": false (Claude Code 2.1.312).
+// `relock` puts the lock back as ZDD writes it: auto-update off, the ref and
+// every other key as they are. It never locks a repo, moves a ref or touches
+// a declaration that is not ours.
+test("relock puts auto-update off back on the declaration a project-scope marketplace add rewrote, keeps every other byte, and is silent the second time", () => {
+  const repo = join(scratch, "relock");
+  mkdirSync(join(repo, ".claude"), { recursive: true });
+  const added = { enabledPlugins: PLUGIN_SETTINGS, extraKnownMarketplaces: { "zero-drift-docs": { source: { source: "github", repo: "rich-rees/zero-drift-docs", ref: "v0.13.0" } } }, model: "x" };
+  writeFileSync(settingsPath(repo), JSON.stringify(added, null, 2) + "\n");
+  const r = JSON.parse(bootstrap(repo, ["relock", "--json"]));
+  const want = { ...added, extraKnownMarketplaces: { "zero-drift-docs": { ...added.extraKnownMarketplaces["zero-drift-docs"], autoUpdate: false } } };
+  assert.equal(readFileSync(settingsPath(repo), "utf8"), JSON.stringify(want, null, 2) + "\n");
+  assert.deepEqual(r.wrote, [".claude/settings.json"]);
+  assert.ok(r.notes.some((n) => /auto-update switched off .*v0\.13\.0 kept/.test(n)), r.notes.join("\n"));
+  const again = JSON.parse(bootstrap(repo, ["relock", "--json"]));
+  assert.deepEqual(again.wrote, []);
+  assert.ok(again.notes.some((n) => /already off/.test(n)), again.notes.join("\n"));
+  // CRLF stays CRLF.
+  writeFileSync(settingsPath(repo), (JSON.stringify(added, null, 2) + "\n").replace(/\n/g, "\r\n"));
+  bootstrap(repo, ["relock"]);
+  assert.equal(readFileSync(settingsPath(repo), "utf8"), (JSON.stringify(want, null, 2) + "\n").replace(/\n/g, "\r\n"));
+  // The release check reads what relock writes: the lock it leaves is the repo's lock.
+  assert.equal(JSON.parse(execFileSync(process.execPath, [CHECK_RELEASE, `--root=${repo}`, `--home=${fakeHome}`, "--json"], { encoding: "utf8", env: { ...process.env, CLAUDECODE: "1" } })).lock, "v0.13.0");
+});
+
+test("relock never locks, moves or touches what is not ZDD's: no settings, no lock, a fork's declaration, unreadable JSON — each named, nothing written", () => {
+  const cases = {
+    "relock-none": null,
+    "relock-nolock": JSON.stringify({ enabledPlugins: PLUGIN_SETTINGS }, null, 2) + "\n",
+    "relock-fork": JSON.stringify({ extraKnownMarketplaces: { "zero-drift-docs": { source: { source: "github", repo: "me/fork", ref: "v1.0.0" } } } }, null, 2) + "\n",
+    "relock-bad": "{ nope",
+  };
+  const said = { "relock-none": /no \.claude\/settings\.json/, "relock-nolock": /no lock/, "relock-fork": /not this plugin's repository/, "relock-bad": /not valid JSON/ };
+  for (const [name, text] of Object.entries(cases)) {
+    const repo = join(scratch, name);
+    mkdirSync(join(repo, ".claude"), { recursive: true });
+    if (text !== null) writeFileSync(settingsPath(repo), text);
+    const r = JSON.parse(bootstrap(repo, ["relock", "--json"]));
+    assert.deepEqual(r.wrote, [], name);
+    assert.ok(r.notes.some((n) => said[name].test(n)), `${name}: ${r.notes.join("\n")}`);
+    if (text === null) assert.ok(!existsSync(settingsPath(repo)), name);
+    else assert.equal(readFileSync(settingsPath(repo), "utf8"), text, name);
+  }
+});

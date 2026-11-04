@@ -55,8 +55,13 @@ itself: when a PR moves the lock, this machine keeps running the old release
 until the catalogue and the install are refreshed. This prints one line when
 the catalogue, `zdd@zero-drift-docs` or `mattpocock-skills@zero-drift-docs`
 installed for this project differs from the lock, naming expected and found
-and the route that moves the machine: restart Claude Code, `claude plugin
-update`, restart again — preceded, only where one exists, by removing a stray
+and the route that moves the machine: when the catalogue is elsewhere,
+`claude plugin marketplace add "rich-rees/zero-drift-docs#<lock>" --scope
+project` (the catalogue is one per machine, shared by every repo on it, and a
+restart does not move it once another repo has set it — decision 0050) and
+`bootstrap.mjs relock` (that add drops `"autoUpdate": false` from the
+repo's settings); then `claude plugin update` for each plugin; then one
+restart — preceded, only where one exists, by removing a stray
 declaration of the marketplace from the user's or local settings, which a
 plain `marketplace add` leaves and which holds the catalogue back (decision
 0022). **Relay it verbatim as the next line of your reply.** It reads Claude
