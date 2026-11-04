@@ -604,10 +604,34 @@ test("CR-158: on the new line the scaffold says nothing about io, and the scaffo
   assert.deepEqual(pick({ release: "0.9.0" }), { PIN_KEY: "release", PIN: "0.9.0", PACKAGE: "@rich-rees/zdd" });
   assert.deepEqual(pick({ engine: "2.5.0" }), { PIN_KEY: "engine", PIN: "2.5.0", PACKAGE: "@rich-rees/zdd-engine" });
   assert.match(text, /\[npxCli\(\), "-y", `\$\{PACKAGE\}@\$\{PIN\}`/, "the package and pin it picks are what npx runs");
+  // The scratch repo it derives in pins the same way (0.14.1): `release` on
+  // the new line, `engine` on the old — never the old key under the new package.
+  const scratchConfig = /const config = \{[^\n]*\};/.exec(text)?.[0] ?? "";
+  assert.match(scratchConfig, /\[PIN_KEY\]: PIN/, scratchConfig);
+  assert.doesNotMatch(scratchConfig, /\bengine: PIN\b/, scratchConfig);
 });
 
 test("CR-153: the extractor skill's precondition accepts any release pin, and asks only an old-line engine pin for 1.3.0", () => {
   const skill = readFileSync(join(PLUGIN, "skills", "extractor", "SKILL.md"), "utf8");
   assert.match(skill, /any `release`[^\n]*\n?[^\n]*does; an old-line `engine` pin must be \*\*1\.3\.0 or later\*\*/);
   assert.doesNotMatch(skill, /^- `engine` in that config is/m);
+});
+
+// 0.14.1: the retired-names sweep flagged the scaffold's own text — a local
+// adapter's index.mjs and test name @rich-rees/zdd-engine on purpose, for a
+// repo still on the old line. A line naming the new package beside the old,
+// and a line that is the scaffold's own, are not the team's to fix; a line
+// that only uses the old package still is.
+test("the retired-names sweep leaves the scaffold's own text and a line naming both packages, and still lists a real use of the old one", async (t) => {
+  const { findRetiredNames, Ledger } = await import(pathToFileURL(join(PLUGIN, "scripts", "bootstrap.mjs")).href);
+  const repo = onRelease(t, "0.14.0");
+  scaffoldJson(repo, CSHARP);
+  writeFileSync(join(repo, "SETUP.md"), [
+    "Run `npx -y @rich-rees/zdd@0.14.0 derive` (on the old line it was @rich-rees/zdd-engine).",
+    "Then `npx -y @rich-rees/zdd-engine@2.5.0 render`.",
+    "",
+  ].join("\n"));
+  const hits = findRetiredNames(new Ledger(repo));
+  assert.deepEqual(hits.filter((h) => h.includes("zdd/extractors/")), [], hits.join("\n"));
+  assert.deepEqual(hits.filter((h) => h.startsWith("SETUP.md")).map((h) => h.split(" ")[0]), ["SETUP.md:2"], hits.join("\n"));
 });

@@ -130,7 +130,7 @@ function scratchRepo(t, { withFixture = true, options = FIXTURE_OPTIONS, from = 
     mkdirSync(dirname(join(target, rel)), { recursive: true });
     writeFileSync(join(target, rel), readCapped(p, budget));
   });
-  const config = { name: "fixture", engine: PIN, extractors: [NAME], extractorOptions: { [NAME]: options }, localExtractorDir: "zdd/extractors", render: { storeChanges: false } };
+  const config = { name: "fixture", [PIN_KEY]: PIN, extractors: [NAME], extractorOptions: { [NAME]: options }, localExtractorDir: "zdd/extractors", render: { storeChanges: false } };
   mkdirSync(join(repo, "zdd"), { recursive: true });
   writeFileSync(join(repo, "zdd", "config.json"), JSON.stringify(config, null, 2) + "\n");
   return repo;

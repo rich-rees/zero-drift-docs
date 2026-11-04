@@ -2895,9 +2895,36 @@ export const RETIRED_NAMES = [
   // (an ORM's `db.engine`). A comparison and a destructuring are reads;
   // an assignment, and writing the key in a fixture, are not.
   { since: "0.9.0", find: /\.engine\b(?!\s*\()(?!\s*=(?!=))|\[\s*["']engine["']\s*\](?!\s*=(?!=))|\bget\(\s*["']engine["']|\{[^}]*\bengine\b[^}]*\}\s*=(?!=)/g, now: "the config's `release` (zdd/config.json's `engine` pin is `release` from 0.9, decision 0042) — read `.release`, else the check reads nothing and passes or fails silently", fileMust: /zdd[\\/]config\.json|["']zdd["']\s*,\s*["']config\.json["']/ },
-  { since: "0.9.0", find: /@rich-rees\/zdd-engine\b/g, now: "the engine's package from 0.9, `@rich-rees/zdd` (decision 0042: a new line, numbered from 0.9.0)", skip: [".github/workflows/zdd.yml", ".githooks/pre-push"] },
+  // A line naming the new package beside the old one says both on purpose,
+  // and a line of the extractor scaffold's own text is the template's
+  // (0.14.1: a local adapter's message and test name the old package for a
+  // repo still on the old line); a line that only uses the old one is listed.
+  { since: "0.9.0", find: /@rich-rees\/zdd-engine\b/g, now: "the engine's package from 0.9, `@rich-rees/zdd` (decision 0042: a new line, numbered from 0.9.0)", skip: [".github/workflows/zdd.yml", ".githooks/pre-push"], unless: /@rich-rees\/zdd(?![-\w])/, scaffold: true },
   { since: "0.9.0", find: /\bextractorOptions\.jobs\b|\bmetadata\/job\//g, now: "the background-* readers and `metadata/background-task/` (0.9, decision 0038)" },
 ];
+// The extractor scaffold's own lines, one pattern each, a placeholder
+// matching anything: what a `scaffold: true` rule never lists. Read once.
+let scaffoldLines = null;
+const isScaffoldLine = (line) => {
+  if (scaffoldLines === null) {
+    scaffoldLines = [];
+    const dir = join(TEMPLATES, "extractor");
+    try {
+      for (const name of readdirSync(dir).sort()) {
+        for (const l of readFileSync(join(dir, name), "utf8").split(/\r?\n/)) {
+          const text = l.trim();
+          if (!text.includes("@rich-rees/zdd-engine")) continue;
+          const re = text.split(/__[A-Z_]+__/).map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".+?");
+          scaffoldLines.push(new RegExp(`^${re}$`));
+        }
+      }
+    } catch {
+      /* no templates beside this script: nothing is the scaffold's */
+    }
+  }
+  const text = line.trim();
+  return scaffoldLines.some((re) => re.test(text));
+};
 const RETIRED_SCAN_EXT = /\.(md|ya?ml|json|mjs|cjs|js|ts|sh|ps1|toml|txt|py)$/i;
 const RETIRED_SKIP_FILES = /(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|CHANGELOG\.md)$/i;
 const MAX_RETIRED_FILES = 3000;
@@ -3013,7 +3040,7 @@ export function findRetiredNames(ledger, { oldEngine = null, oldLock = null, met
       lines.forEach((line, i) => {
         r.find.lastIndex = 0;
         const m = r.find.exec(line);
-        if (m && !r.unless?.test(line) && !(i > 0 && r.unlessAbove?.test(lines.slice(Math.max(0, i - 3), i).join(" ")))) hits.push(`${rel}:${i + 1} still says \`${m[0]}\` — since ${r.since} that is ${r.now}`);
+        if (m && !r.unless?.test(line) && !(r.scaffold && isScaffoldLine(line)) && !(i > 0 && r.unlessAbove?.test(lines.slice(Math.max(0, i - 3), i).join(" ")))) hits.push(`${rel}:${i + 1} still says \`${m[0]}\` — since ${r.since} that is ${r.now}`);
       });
     }
   }
