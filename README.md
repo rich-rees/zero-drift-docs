@@ -628,8 +628,8 @@ still change; 1.0.0 freezes it.
   has). The session-start line, `release-status` and the upgrade's `next:`
   note name one command, `bootstrap.mjs move-machine`, that re-points the
   machine's catalogue — one per machine, shared by every repo on it — with
-  `claude plugin marketplace add "rich-rees/zero-drift-docs#<tag>" --scope
-  project`, puts back with `relock` the `"autoUpdate": false` that add
+  `claude plugin marketplace add "rich-rees/zero-drift-docs#<tag>"
+  --scope project`, puts back with `relock` the `"autoUpdate": false` that add
   drops, updates the plugins and stops at the first step that fails — a
   restart does not move a catalogue another repo set (decision 0050,
   superseding 0022's restart). Teammates still on 0.14.0 get the route from
