@@ -90,7 +90,7 @@ is what loaded when this session started.
     per machine, shared by every repo on it, and a restart does not move it
     once another repo has set it (decision 0050). Claude Code loads a new
     plugin version only at start, so the rest of the upgrade is the new
-    release's own run. In Codex the note says restart instead. **Stop here** — this run is complete when
+    release's own run. **Stop here** — this run is complete when
     the lock has moved and the user has the route.
 - **The lock trails and the line says "no restart"** (this session already
   runs the newest release and the catalogue is there): ask the same

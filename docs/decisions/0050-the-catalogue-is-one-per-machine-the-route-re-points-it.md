@@ -54,7 +54,9 @@ a different tag stays where it is.
 4. **The upgrade's `next:` note names the command itself** for the tag it
    moved to, in a plan too, instead of "restart and run what the next
    session's first line names, then restart again"; `release-status` says
-   the same. Under Codex the note still says restart.
+   the same — from any terminal, inside a session or not (verify pass 1).
+   It ensures the lock keeps auto-update off before any plugin step even
+   when the catalogue needs no add (CR-405).
 5. **Teammates on an older plugin get the route from the lock PR**
    (CR-387). Their first session after the lock PR merges runs the plugin
    they have, whose line names that release's route — before 0.14.1, the

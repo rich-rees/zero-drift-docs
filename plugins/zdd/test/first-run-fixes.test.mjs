@@ -275,7 +275,7 @@ test("CR-314: upgrade --to on a machine that already runs the target with the ca
   // Not ready, under Claude Code (0.14.1, decision 0050): the note names the
   // route itself — the catalogue re-pointed at the new tag, relock, the
   // installs, one restart — computed for the tag it moved to, in a plan too.
-  // Under Codex there is no catalogue to name: restart, as before.
+  // Outside a session the same command (it runs from any terminal).
   const upgradeTo = (repo, host, extra = []) => {
     const env = { ...process.env, ...host };
     if (!host.CLAUDECODE) delete env.CLAUDECODE;
@@ -294,7 +294,9 @@ test("CR-314: upgrade --to on a machine that already runs the target with the ca
     assert.ok(j2.notes.some((n) => route.test(n) && teammates.test(n)), j2.notes.join("\n"));
   }
   const codex = upgradeTo(adopted("to-not-ready-codex", { settings: { extraKnownMarketplaces: LOCK("v2.1.0") } }), {});
-  assert.ok(codex.notes.some((n) => /^next: restart Claude Code; the first line of the new session names the commands/.test(n) && teammates.test(n)), codex.notes.join("\n"));
+  // Outside a Claude Code session too (CR-387, CR-392): move-machine runs from any terminal.
+  assert.ok(codex.notes.some((n) => route.test(n) && teammates.test(n)), codex.notes.join("\n"));
+  assert.ok(!codex.notes.some((n) => /first line of the new session|restart again/.test(n)), codex.notes.join("\n"));
 });
 
 test("CR-315/318: the pinned copy is found in a cache larger than the walk bound; a malformed settings file makes enablement unknown and is said; a symlinked cache entry is no install", (t) => {

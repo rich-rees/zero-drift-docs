@@ -203,10 +203,12 @@ export function describePlan(steps) {
 }
 
 // A path as one argument that bash, Git Bash and PowerShell all read
-// literally (CR-389): single quotes, which neither expands inside. A path
-// holding a single quote has no such spelling, and is said instead.
+// literally (CR-389): single quotes, which neither expands inside; for a
+// path holding a single quote, double quotes when nothing in it expands
+// there (`$`, a backtick, `"`, a backslash). Else null: said, not printed.
 export function shellArg(p) {
-  return p.includes("'") ? null : `'${p}'`;
+  if (!p.includes("'")) return `'${p}'`;
+  return /[$`"\\]/.test(p) ? null : `"${p}"`;
 }
 
 // The one command the line names, the plan it runs, and the restart after.

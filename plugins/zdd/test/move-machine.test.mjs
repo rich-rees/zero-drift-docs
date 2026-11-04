@@ -130,3 +130,19 @@ test("at the lock already: nothing runs, exit 0, and it says so", (t) => {
   assert.deepEqual(r.calls, []);
   assert.match(r.out, /nothing to move/);
 });
+
+// CR-405 (verify pass 1): with the catalogue already at the lock, the plan
+// has no add, and so no relock step; the lock is still put right and checked
+// before any plugin step — and when there is nothing to move at all.
+test("the lock keeps auto-update off even when only a plugin moves, and when nothing does (CR-405)", (t) => {
+  for (const [name, opts, calls] of [["update", { catalogueRef: "v2.1.0", zdd: "2.0.0" }, 1], ["none", { catalogueRef: "v2.1.0", zdd: "2.1.0", pocock: POCOCK.version }, 0]]) {
+    const m = machine(t, opts);
+    const s = m.settings();
+    delete s.extraKnownMarketplaces["zero-drift-docs"].autoUpdate;
+    writeFileSync(join(m.repo, ".claude", "settings.json"), JSON.stringify(s, null, 2) + "\n");
+    const r = m.run();
+    assert.equal(r.status, 0, `${name}: ${r.out}`);
+    assert.equal(r.calls.length, calls, `${name}: ${JSON.stringify(r.calls)}`);
+    assert.equal(m.settings().extraKnownMarketplaces["zero-drift-docs"].autoUpdate, false, name);
+  }
+});

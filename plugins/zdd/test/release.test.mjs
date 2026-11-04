@@ -377,5 +377,7 @@ test("release-status names move-machine; inspect's override takes a tag only; sh
   for (const bad of ["v2.1", "main", "v2.1.0; rm -rf ~", ""]) assert.equal(inspect(repo, home, { lock: bad, host: true }).lock, "v2.1.0", bad);
   assert.equal(inspect(repo, home, { lock: "v3.0.0", host: true }).lock, "v3.0.0");
   assert.equal(shellArg("C:/Users/a b/$x/`y`/bootstrap.mjs"), "'C:/Users/a b/$x/`y`/bootstrap.mjs'");
-  assert.equal(shellArg("/home/o'brien/bootstrap.mjs"), null);
+  // A single quote: double quotes, when nothing in the path expands inside them (verify pass 1).
+  assert.equal(shellArg("/home/o'brien/bootstrap.mjs"), `"/home/o'brien/bootstrap.mjs"`);
+  for (const p of ["/home/o'brien/$x/bootstrap.mjs", "/home/o'brien/`x`/bootstrap.mjs", `/home/o'b"x/bootstrap.mjs`, "C:\\o'b\\bootstrap.mjs"]) assert.equal(shellArg(p), null, p);
 });

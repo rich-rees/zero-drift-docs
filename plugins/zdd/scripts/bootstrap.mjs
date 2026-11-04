@@ -1043,20 +1043,29 @@ export function moveMachine(root, { home } = {}) {
   const r = inspectRelease(root, home, { host: true });
   if (!r.lock) return { ok: false, lines: [`no lock of ours in ${SETTINGS_FILE} — nothing to move this machine to (\`upgrade --lock\` locks a repo, on the user's word)`] };
   const plan = routePlan(r);
-  if (!plan.length) return { ok: true, lines: [`this machine is at ${r.lock} for this repo — nothing to move`] };
   const lines = [];
   const stop = (why) => ({ ok: false, lines: [...lines, `stopped: ${why} — nothing after it ran; fix that and run move-machine again`] });
+  // The lock is put right and checked once, before any plugin step and
+  // whether or not the plan re-points the catalogue (CR-405): a lock whose
+  // auto-update was on is no lock, with or without an add.
+  let locked = false;
+  const ensureLock = () => {
+    locked = true;
+    lines.push(...relock(root).notes);
+    let d;
+    try {
+      d = JSON.parse(readFileSync(join(root, SETTINGS_FILE), "utf8"))?.extraKnownMarketplaces?.[MARKETPLACE];
+    } catch {
+      d = undefined;
+    }
+    return !isOurDeclaration(d) || d.source.ref !== r.lock || d.autoUpdate !== false ? stop(`${SETTINGS_FILE} does not lock ${r.lock} with auto-update off after relock`) : null;
+  };
+  if (!plan.length) return ensureLock() ?? { ok: true, lines: [...lines, `this machine is at ${r.lock} for this repo — nothing to move`] };
   for (const step of plan) {
-    if (step.relock) {
-      lines.push(...relock(root).notes);
-      let d;
-      try {
-        d = JSON.parse(readFileSync(join(root, SETTINGS_FILE), "utf8"))?.extraKnownMarketplaces?.[MARKETPLACE];
-      } catch {
-        d = undefined;
-      }
-      if (!isOurDeclaration(d) || d.source.ref !== r.lock || d.autoUpdate !== false) return stop(`${SETTINGS_FILE} does not lock ${r.lock} with auto-update off after relock`);
-      continue;
+    if (step.relock || (!locked && (step.argv[1] === "update" || step.argv[1] === "install"))) {
+      const stopped = ensureLock();
+      if (stopped) return stopped;
+      if (step.relock) continue;
     }
     lines.push(`claude ${step.argv.join(" ")}`);
     const res = runClaude(step.argv);
@@ -1070,6 +1079,10 @@ export function moveMachine(root, { home } = {}) {
       }
       if (ref !== step.moves) return stop(`the catalogue on this machine is at ${printable(String(ref))} after the add, not ${step.moves}`);
     }
+  }
+  if (!locked) {
+    const stopped = ensureLock();
+    if (stopped) return stopped;
   }
   lines.push(`this machine is moved to ${r.lock} for this repo: restart Claude Code (installed is not loaded until a new session)`);
   return { ok: true, lines };
@@ -3298,17 +3311,18 @@ function moveLockOnly(root, version, to, { plan = false, lock = false, remote, h
   const ready = to === `v${version}` && catalogue === to;
   // Not ready (0.14.1, decision 0050): the command the release check would
   // name for `to`, named now rather than after a restart that would not
-  // move the catalogue. Outside Claude Code there is no catalogue to name.
+  // move the catalogue — from any terminal, so outside a session too
+  // (CR-387, CR-392: no restart-then-read-the-line route).
   // Teammates whose plugin predates move-machine get theirs from the lock
   // PR's description (CR-387).
-  const checked = ready ? null : inspectRelease(root, home, { lock: to });
+  const checked = ready ? null : inspectRelease(root, home, { lock: to, host: true });
   const route = checked && routePlan(checked).length ? moveCommand(checked) : null;
   ledger.notes.push(
     ready
       ? `next: this session already runs ${to} and the catalogue on this machine is at ${to} — no restart: say "upgrade ZDD" again now (or carry straight on to its plan), and that run shows the rest of the changes before writing them`
       : route
         ? `next: from this repo's folder, ${route}. The catalogue is one per machine, shared by every repo on it, so this moves it for them too. Then say "upgrade ZDD" again: that run is ${to}'s own, and shows the rest of the changes before writing them. ${teammateNote(to)}`
-        : `next: restart Claude Code; the first line of the new session names the commands that move this machine to ${to} — run them and restart again; then say "upgrade ZDD" again: that run is ${to}'s own, and shows the rest of the changes before writing them. ${teammateNote(to)}`,
+        : `next: this machine already has ${to} for this repo: restart Claude Code to load it, then say "upgrade ZDD" again: that run is ${to}'s own, and shows the rest of the changes before writing them. ${teammateNote(to)}`,
   );
   return { version, plan, to, ready, ...ledgerOut(ledger), duplicates: [] };
 }
