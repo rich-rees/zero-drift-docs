@@ -20,7 +20,9 @@
 // Copies the package's published files (package.json "files") into the out
 // dir; for the baseline, lays baseline/adapters/ over adapters/ (each
 // starter folder there replaces the tree's whole; each _shared/ file there
-// replaces the tree's one), writes the version into package.json, and keeps
+// replaces the tree's one) and baseline/README.md, when there, over the
+// README (0.2.1: the README lists each version, which 0.1.0's must not),
+// writes the version into package.json, and keeps
 // only the notes up to it. The baseline is frozen: every file it stages is
 // pinned by baseline/manifest-0.1.0.json, so a later change to any starter
 // makes staging 0.1.0 fail, never change what 0.1.0 is (CR-291). The notes
@@ -129,6 +131,7 @@ export function stage(version, out, { root = PKG, repin = false } = {}) {
       mkdirSync(dirname(to), { recursive: true });
       cpSync(f, to);
     }
+    if (existsSync(join(root, "baseline", "README.md"))) cpSync(join(root, "baseline", "README.md"), join(out, "README.md"));
   }
   writeFileSync(join(out, "package.json"), JSON.stringify({ ...pkg, version }, null, 2) + "\n");
   writeFileSync(join(out, "notes.json"), JSON.stringify({ ...notes, versions: notes.versions.filter((v) => cmp(v.version, version) <= 0) }, null, 2) + "\n");

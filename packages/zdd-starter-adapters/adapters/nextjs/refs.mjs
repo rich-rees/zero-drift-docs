@@ -2,10 +2,9 @@
 //
 // Finds outbound references in TS/TSX source: internal API calls
 // (`fetch('/api/...')`). Data access moved to supabase-js in 0.9 (decision
-// 0037). Purely textual — no import-graph resolution, no
-// type-checking. Wrapper libs (journey-api.ts etc.) keep their refs on their
-// own module record rather than propagating to callers: mechanically true,
-// boring, and honest about what a grep can know.
+// 0037). Purely textual — no type-checking. A module keeps its refs on its
+// own record; a screen also takes those of the local modules its page or
+// layout imports, one hop (index.mjs), and nothing propagates further.
 
 import { expandTemplatePath } from "../_shared/template-paths.mjs";
 import { lex } from "../_shared/js/source.mjs";
@@ -58,16 +57,21 @@ export function normalizeFetchUrl(raw) {
 // the merge. Its data access (`.from`, `.rpc`, Realtime) is a data-access
 // adapter's to read (decision 0037): the file is named by `?code:<file>#*`.
 export function scanFileText(text) {
-  const fetchUrls = new Set();
   // Comments blanked, strings kept: a commented-out call is not a call (the
-  // standard suite, decision 0040). A `${hole}` typed as a union of literals
-  // in this file expands to one url per literal; any other hole is `*`, a
-  // route parameter only (decision 0019).
-  const code = lex(text).code;
+  // standard suite, decision 0040).
+  return { fetchUrls: fetchUrlsIn(lex(text).code) };
+}
+
+// The API urls fetched in `code` (comments already blanked). A `${hole}`
+// typed as a union of literals in `context` expands to one url per literal;
+// any other hole is `*`, a route parameter only (decision 0019). `context`
+// is the whole module when `code` is one statement of it.
+export function fetchUrlsIn(code, context = code) {
+  const fetchUrls = new Set();
   for (const m of code.matchAll(/\bfetch\(\s*(['"`])(\/api\/[^'"`]*)\1/g)) {
-    for (const url of expandTemplatePath(m[2], code)) fetchUrls.add(normalizeFetchUrl(url));
+    for (const url of expandTemplatePath(m[2], context)) fetchUrls.add(normalizeFetchUrl(url));
   }
-  return { fetchUrls };
+  return fetchUrls;
 }
 
 // `texts` keeps each text read, so a file the records need again is not read

@@ -49,6 +49,21 @@
           ]
         }
       }
+    },
+    {
+      "version": "0.2.1",
+      "summary": "A Next.js screen takes the calls of the components and modules its page and layout import, as a React Router screen already did.",
+      "starters": {
+        "nextjs": {
+          "fixes": [
+            {
+              "what": "A surface takes the refs of the local modules its page or layout file imports, relative or @/, one hop away: their API calls, and the code it runs there, which a data-access adapter reads. A named import narrows the module to what the names reach; a default or namespace import takes it whole, with a note. Before, a page that rendered a component from outside appDir got none of its links, though its resource named the component.",
+              "who": "A Next.js repo whose pages or layouts render components, or call helpers, from outside appDir. Their surfaces gain links to routes and tables, so a screen the map's gap check called \"reaches nothing\" may now reach them: its gaps.known or gaps.fine mark goes stale and lint warns until it is removed.",
+              "moves": "No record id moves. Surface records gain refs, and the screens gain edges to what those modules reach."
+            }
+          ]
+        }
+      }
     }
   ]
 }

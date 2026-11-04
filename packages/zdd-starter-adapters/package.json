@@ -1,6 +1,6 @@
 {
   "name": "@rich-rees/zdd-starter-adapters",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Zero-Drift Docs starter adapters: readers for common stacks that ZDD copies into an app, which then owns them. An offer, never a requirement: the engine depends on nothing here, and a repo whose adapters are in place needs this package for nothing.",
   "type": "module",
   "exports": {

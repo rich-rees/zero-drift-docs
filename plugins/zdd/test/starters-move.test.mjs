@@ -261,7 +261,7 @@ test("CR-323: a declined fix stays listed apart, and the narration says a move w
   json(repo, ["starters", "--decline"]);
   const s = json(repo, ["starters"]);
   assert.deepEqual(s.offers, []);
-  assert.deepEqual(s.declinedFixes.map((o) => [o.version, Object.keys(o.starters)]), [[STARTERS.version, ["supabase"]]]);
+  assert.deepEqual(s.declinedFixes.map((o) => [o.version, Object.keys(o.starters)]), [["0.2.0", ["supabase"]]]); // the version whose notes fix supabase
   const text = run(repo, ["starters"]).stdout;
   assert.match(text, /Fixes declined before .*`starters --move` would apply them/s);
   assert.doesNotMatch(text, /changes no record/);

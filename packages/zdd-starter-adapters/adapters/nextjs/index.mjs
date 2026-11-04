@@ -15,14 +15,16 @@
 // and each scanned file's code as `?code:<file>#*` (decision 0037): its
 // `.from('x')` / `.rpc('x')` are a data-access adapter's (supabase-js) to
 // read; the deriver resolves and folds both after the merge
-// (the core's ref resolution). A missing appDir or middleware
+// (the core's ref resolution). A screen also takes the refs of the local
+// modules its page or layout file imports, one hop, narrowed to what a named
+// import reaches (as react-router's screens do). A missing appDir or middleware
 // file is "nothing to inventory" (greenfield), never an error.
 
-import { join } from "node:path";
-import { walkSourceFiles, scanFiles, DEFAULT_REFS } from "./refs.mjs";
+import { join, posix } from "node:path";
+import { walkSourceFiles, scanFiles, fetchUrlsIn, DEFAULT_REFS } from "./refs.mjs";
 import { slugify } from "../_shared/slug.mjs";
 import { repoRelative } from "../_shared/paths.mjs";
-import { leadingComment, lex } from "../_shared/js/source.mjs";
+import { RESOLVE_EXTS, codeUnits, leadingComment, lex, localImports, narrowModule, topLevel } from "../_shared/js/source.mjs";
 
 export { slugify };
 
@@ -287,6 +289,58 @@ export function derive({ options, io }) {
     moduleFiles.push({ rel, refs });
   }
 
+  // A screen's one hop (0.14.1): the local modules its page or layout file
+  // imports, relative or `@/`, give the screen their calls and name the code
+  // it runs there, as react-router's screens do. A named import narrows the
+  // module to what the names reach (decision 0011); a default or namespace
+  // import takes it whole, with a diagnostic. Only a scanned file is a module
+  // here — the refs walk already left out tests, ignored files and links —
+  // and the module's own imports are not followed. The module keeps its own
+  // record and refs.
+  const modules = new Map(); // rel -> { whole, model, stmtRefs, narrowed }
+  const moduleOf = (rel) => {
+    if (!modules.has(rel)) {
+      const body = texts.get(rel);
+      const code = lex(body).code;
+      const model = topLevel(body);
+      const unitOf = codeUnits(model);
+      const stmtRefs = model.statements.map((st, k) => {
+        const refs = new Set([...fetchUrlsIn(code.slice(st.start, st.end), code)].map((u) => `?route:${u}`));
+        if (unitOf[k] !== null) refs.add(`?code:${rel}#${unitOf[k]}`);
+        return refs;
+      });
+      modules.set(rel, { whole: unresolvedRefs(rel, scans.get(rel)), model, stmtRefs, narrowed: new Map() });
+    }
+    return modules.get(rel);
+  };
+  const resolveLocal = (fromRel, source) => {
+    const base = source.startsWith("@/") ? posix.join(srcAliasRoot, source.slice(2)) : posix.normalize(posix.join(posix.dirname(fromRel), source));
+    return ["", ...RESOLVE_EXTS].map((ext) => base + ext).find((p) => scans.has(p)) ?? null;
+  };
+  const oneHop = (rel, text) => {
+    const refs = new Set();
+    for (const [source, { names, how }] of localImports(text)) {
+      const target = resolveLocal(rel, source);
+      if (!target || target === rel) continue;
+      const mod = moduleOf(target);
+      let hit = mod.whole;
+      if (names === null) diagnostics.push(`${rel} imports ${target} ${how} — its calls are attributed whole`);
+      else {
+        const key = [...names].sort().join(",");
+        if (!mod.narrowed.has(key)) {
+          const cut = narrowModule(mod.model, names);
+          mod.narrowed.set(key, cut.whole ? cut : { refs: new Set([...cut.statements].flatMap((k) => [...mod.stmtRefs[k]])) });
+        }
+        const cut = mod.narrowed.get(key);
+        if (cut.whole === "missing") diagnostics.push(`${rel} imports '${cut.name}' from ${target}, which declares no such name — its calls are attributed whole`);
+        else if (cut.whole === "reexport") diagnostics.push(`${rel} imports '${cut.name}' from ${target}, which re-exports it from another module — not followed (one hop); its calls are attributed whole`);
+        else hit = cut.refs;
+      }
+      for (const r of hit) refs.add(r);
+    }
+    return refs;
+  };
+
   // ---- Assemble records ----
   const records = [];
   let matchers = [];
@@ -356,7 +410,7 @@ export function derive({ options, io }) {
       title: urlPath === "//" ? "/" : urlPath,
       description: leadingComment(text),
       resource,
-      refs: [...(surfaceRefs.get(s.rel) ?? [])],
+      refs: [...new Set([...(surfaceRefs.get(s.rel) ?? []), ...oneHop(s.rel, text)])],
       facts: {
         file: s.file,
         routeGroups: s.segs.filter((x) => /^\(.+\)$/.test(x)),
